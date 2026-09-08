@@ -1,0 +1,4 @@
+.situation-board/cache/
+.situation-board/logs/
+node_modules/
+*.log

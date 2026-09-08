@@ -1,0 +1,628 @@
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useApi } from '../hooks/useApi';
+import { SituationData } from '../types';
+import Avatar from '../components/common/Avatar';
+import Badge from '../components/common/Badge';
+import LoadingSpinner from '../components/common/LoadingSpinner';
+import EmptyState from '../components/common/EmptyState';
+import { formatDate, formatDueStatus, formatRelativeTime, formatStatusLabel } from '../utils/format';
+
+/* ---- Metric Card -------------------------------------------------- */
+function MetricCard({
+  label,
+  count,
+  color,
+  icon,
+}: {
+  label: string;
+  count: number;
+  color: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        flex: '1 1 0',
+        minWidth: 0,
+        padding: '18px 20px',
+        background: 'var(--color-surface)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 'var(--radius-md)',
+          background: `color-mix(in oklch, ${color} 12%, transparent)`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+      <div>
+        <div style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color, lineHeight: 1 }}>{count}</div>
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 3 }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Due date chip ------------------------------------------------- */
+function DueDateChip({ dueDate }: { dueDate?: string }) {
+  if (!dueDate) return null;
+  const status = formatDueStatus(dueDate);
+  const colorMap = {
+    overdue: 'var(--color-critical)',
+    'due-today': 'var(--color-warning)',
+    'due-soon': 'var(--color-warning)',
+    upcoming: 'var(--color-text-muted)',
+    none: 'var(--color-text-muted)',
+  };
+  const color = colorMap[status];
+  return (
+    <span
+      style={{
+        fontSize: 'var(--text-xs)',
+        color,
+        background: `color-mix(in oklch, ${color} 10%, transparent)`,
+        border: `1px solid color-mix(in oklch, ${color} 25%, transparent)`,
+        borderRadius: 'var(--radius-sm)',
+        padding: '1px 6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {formatDate(dueDate)}
+    </span>
+  );
+}
+
+/* ---- Stakeholder avatars ------------------------------------------ */
+function StakeholderAvatars({ names, max = 3 }: { names: string[]; max?: number }) {
+  if (!names.length) return null;
+  const visible = names.slice(0, max);
+  const overflow = names.length - max;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      {visible.map((name, i) => (
+        <div key={name} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: max - i }}>
+          <Avatar name={name} size="sm" />
+        </div>
+      ))}
+      {overflow > 0 && (
+        <span
+          style={{
+            marginLeft: -8,
+            width: 24,
+            height: 24,
+            borderRadius: '50%',
+            background: 'var(--color-surface-hover)',
+            border: '1px solid var(--color-border)',
+            fontSize: 'var(--text-xs)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--color-text-muted)',
+            zIndex: 0,
+          }}
+        >
+          +{overflow}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ---- Reason badge -------------------------------------------------- */
+function ReasonBadge({ reason }: { reason: string }) {
+  if (reason === 'overdue') {
+    return <Badge variant="error" size="sm">OVERDUE</Badge>;
+  }
+  if (reason === 'blocked') {
+    return <Badge variant="warning" size="sm">BLOCKED</Badge>;
+  }
+  return <Badge variant="info" size="sm">DUE SOON</Badge>;
+}
+
+/* ---- Status bar chart ---------------------------------------------- */
+function StatusBarChart({ byStatus }: { byStatus: Record<string, number> }) {
+  const statusOrder = ['backlog', 'ready', 'in_progress', 'blocked', 'review', 'done'];
+  const colorMap: Record<string, string> = {
+    backlog: 'var(--color-text-muted)',
+    ready: 'var(--color-info)',
+    in_progress: 'var(--color-accent)',
+    blocked: 'var(--color-critical)',
+    review: 'var(--color-warning)',
+    done: 'var(--color-success)',
+  };
+  const max = Math.max(...statusOrder.map((s) => byStatus[s] ?? 0), 1);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {statusOrder.map((s) => {
+        const count = byStatus[s] ?? 0;
+        const pct = (count / max) * 100;
+        return (
+          <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 72, fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', textAlign: 'right', flexShrink: 0 }}>
+              {formatStatusLabel(s)}
+            </div>
+            <div style={{ flex: 1, height: 18, background: 'var(--color-bg)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: colorMap[s], borderRadius: 3, minWidth: count > 0 ? 4 : 0 }} />
+            </div>
+            <div style={{ width: 24, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', textAlign: 'right', flexShrink: 0 }}>
+              {count}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---- Cycle time scatter plot --------------------------------------- */
+function CycleTimeScatter({ data }: { data: Array<{ title: string; days: number; priority?: string }> }) {
+  if (!data.length) return <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>No data</div>;
+  const max = Math.max(...data.map((d) => d.days), 1);
+  const w = 320;
+  const h = 100;
+  return (
+    <svg
+      width="100%"
+      viewBox={`0 0 ${w} ${h}`}
+      aria-label="Cycle time scatter plot"
+      style={{ overflow: 'visible' }}
+    >
+      {data.map((d, i) => {
+        const x = (i / Math.max(data.length - 1, 1)) * (w - 20) + 10;
+        const y = h - 10 - (d.days / max) * (h - 20);
+        return (
+          <circle key={`${d.title}-${i}`} cx={x} cy={y} r={5} fill="var(--color-accent)" opacity={0.65}>
+            <title>{d.title}: {d.days} days</title>
+          </circle>
+        );
+      })}
+      <line x1="0" y1={h - 10} x2={w} y2={h - 10} stroke="var(--color-border)" strokeWidth="1" />
+    </svg>
+  );
+}
+
+/* ---- Progress bar -------------------------------------------------- */
+function ProgressBar({ value }: { value: number }) {
+  const pct = Math.min(Math.max(value, 0), 100);
+  return (
+    <div style={{ height: 4, background: 'var(--color-bg)', borderRadius: 2, overflow: 'hidden' }}>
+      <div style={{ width: `${pct}%`, height: '100%', background: 'var(--color-accent)', borderRadius: 2 }} />
+    </div>
+  );
+}
+
+/* ---- Main View ----------------------------------------------------- */
+export default function SituationView() {
+  const { data, loading } = useApi<SituationData>('/api/situation');
+  const navigate = useNavigate();
+
+  if (loading) return <LoadingSpinner text="Loading situation..." />;
+  if (!data) {
+    return (
+      <EmptyState
+        title="No situation data"
+        description="Could not load the situation board. Check that the backend is running."
+      />
+    );
+  }
+
+  const today = new Date();
+  const in14 = new Date(today);
+  in14.setDate(today.getDate() + 14);
+
+  return (
+    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto' }}>
+      {/* Metric cards */}
+      <div style={{ display: 'flex', gap: 14 }} role="region" aria-label="Key metrics">
+        <MetricCard
+          label="Overdue"
+          count={data.overdue_count}
+          color="var(--color-critical)"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M10 6v4.5l3 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          }
+        />
+        <MetricCard
+          label="Due soon"
+          count={data.due_soon_count}
+          color="var(--color-warning)"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M10 3L18 17H2L10 3Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+              <path d="M10 9v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <circle cx="10" cy="14" r="0.75" fill="currentColor" />
+            </svg>
+          }
+        />
+        <MetricCard
+          label="Blocked"
+          count={data.blocked_count}
+          color="oklch(0.62 0.16 35)"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M4 4L16 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          }
+        />
+        <MetricCard
+          label="In progress"
+          count={data.in_progress_count}
+          color="var(--color-accent)"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M5 10l3.5 3.5L15 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          }
+        />
+      </div>
+
+      {/* Main 2-col grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20, alignItems: 'start' }}>
+        {/* Left column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Attention Queue */}
+          <section
+            aria-labelledby="attention-heading"
+            style={{
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 id="attention-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Needs attention</h2>
+              <Badge variant="error" size="sm">{data.attention_queue.length}</Badge>
+            </div>
+
+            {data.attention_queue.length === 0 ? (
+              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+                Nothing needs attention right now.
+              </div>
+            ) : (
+              <ul role="list" style={{ listStyle: 'none' }}>
+                {data.attention_queue.map((item, idx) => (
+                  <li
+                    key={item.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '11px 18px',
+                      borderBottom: idx < data.attention_queue.length - 1 ? '1px solid var(--color-border)' : 'none',
+                    }}
+                  >
+                    <ReasonBadge reason={item.reason} />
+                    <button
+                      onClick={() => navigate(`/board/task/${item.id}`)}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        background: 'transparent',
+                        border: 'none',
+                        padding: 0,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontSize: 'var(--text-sm)',
+                        fontWeight: 500,
+                        color: 'var(--color-text)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {item.title}
+                    </button>
+                    <DueDateChip dueDate={item.due_date} />
+                    <StakeholderAvatars names={item.stakeholders} />
+                    <button
+                      aria-label="Open task"
+                      onClick={() => navigate(`/board/task/${item.id}`)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 26,
+                        height: 26,
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--color-border)',
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        color: 'var(--color-text-muted)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <path d="M2.5 6H9.5M6.5 3L9.5 6L6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Upcoming commitments */}
+          <section
+            aria-labelledby="upcoming-heading"
+            style={{
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 id="upcoming-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Upcoming commitments</h2>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                next 14 days
+              </span>
+            </div>
+
+            {data.upcoming_commitments.length === 0 ? (
+              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+                No upcoming commitments.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table
+                  style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}
+                  aria-label="Upcoming commitments"
+                >
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                      {['Due date', 'Task', 'Stakeholders', 'Type'].map((h) => (
+                        <th
+                          key={h}
+                          scope="col"
+                          style={{
+                            padding: '8px 18px 8px',
+                            textAlign: 'left',
+                            fontSize: 'var(--text-xs)',
+                            fontWeight: 600,
+                            color: 'var(--color-text-muted)',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.upcoming_commitments.map((c, idx) => (
+                      <tr
+                        key={c.id}
+                        style={{
+                          borderBottom: idx < data.upcoming_commitments.length - 1 ? '1px solid var(--color-border)' : 'none',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => navigate(`/board/task/${c.id}`)}
+                      >
+                        <td style={{ padding: '10px 18px', whiteSpace: 'nowrap' }}>
+                          <DueDateChip dueDate={c.due_date} />
+                        </td>
+                        <td style={{ padding: '10px 18px', maxWidth: 280 }}>
+                          <span className="truncate" style={{ display: 'block', fontWeight: 500 }}>{c.title}</span>
+                        </td>
+                        <td style={{ padding: '10px 18px' }}>
+                          <StakeholderAvatars names={c.stakeholders} />
+                        </td>
+                        <td style={{ padding: '10px 18px' }}>
+                          <Badge size="sm">{c.task_type}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* Workflow snapshot */}
+          <section
+            aria-labelledby="workflow-heading"
+            style={{
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)' }}>
+              <h2 id="workflow-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Workflow snapshot</h2>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, padding: 18 }}>
+              <div>
+                <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                  Tasks by status
+                </div>
+                <StatusBarChart byStatus={data.workflow_snapshot.by_status} />
+              </div>
+              <div>
+                <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                  Cycle time (days)
+                </div>
+                {data.workflow_snapshot.cycle_time_data.length > 0 ? (
+                  <CycleTimeScatter data={data.workflow_snapshot.cycle_time_data} />
+                ) : (
+                  <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>Not enough data yet.</div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* Right column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Current focus */}
+          <section
+            aria-labelledby="focus-heading"
+            style={{
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <h2 id="focus-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Current focus</h2>
+              <Badge variant="accent" size="sm">{data.current_focus.length}</Badge>
+            </div>
+
+            {data.current_focus.length === 0 ? (
+              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+                No tasks in progress.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {data.current_focus.map((task, idx) => {
+                  const progress = task.progress ?? 0;
+                  return (
+                    <div
+                      key={task.id}
+                      style={{
+                        padding: '14px 18px',
+                        borderBottom: idx < data.current_focus.length - 1 ? '1px solid var(--color-border)' : 'none',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <button
+                            onClick={() => navigate(`/board/task/${task.id}`)}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              textAlign: 'left',
+                              background: 'transparent',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                              fontSize: 'var(--text-sm)',
+                              color: 'var(--color-text)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {task.title}
+                          </button>
+                        </div>
+                        <Badge
+                          variant={`priority-${task.priority}` as 'priority-critical'}
+                          size="sm"
+                        >
+                          {task.priority}
+                        </Badge>
+                      </div>
+                      <ProgressBar value={progress} />
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                        <StakeholderAvatars names={task.stakeholders} />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {task.deliverables.slice(0, 3).map((d, i) => (
+                            d.format && <Badge key={i} size="sm">{d.format}</Badge>
+                          ))}
+                          {task.due_date && <DueDateChip dueDate={task.due_date} />}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* Recent activity */}
+          <section
+            aria-labelledby="activity-heading"
+            style={{
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-lg)',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)' }}>
+              <h2 id="activity-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Recent activity</h2>
+            </div>
+            {data.recent_activity.length === 0 ? (
+              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+                No recent activity.
+              </div>
+            ) : (
+              <ul role="list" style={{ listStyle: 'none', padding: 0 }}>
+                {data.recent_activity.map((a, i) => (
+                  <li
+                    key={i}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      padding: '10px 18px',
+                      borderBottom: i < data.recent_activity.length - 1 ? '1px solid var(--color-border)' : 'none',
+                    }}
+                  >
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--color-bg)',
+                        border: '1px solid var(--color-border)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        color: 'var(--color-text-muted)',
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                        <path d="M7 1H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L7 1Z" stroke="currentColor" strokeWidth="1.2" />
+                        <path d="M7 1v4h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        className="truncate"
+                        style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text)', marginBottom: 2 }}
+                      >
+                        {a.filename}
+                      </div>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{a.event}</div>
+                    </div>
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {formatRelativeTime(a.timestamp)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}

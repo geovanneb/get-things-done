@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Task",
+  "type": "object",
+  "required": ["schema_version", "id", "type", "title", "status", "priority", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "id": {"type": "string", "pattern": "^TASK-\\d{4}-\\d{4}$"},
+    "type": {"type": "string", "enum": ["task"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "slug": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+    "status": {"type": "string", "enum": ["backlog", "ready", "in_progress", "blocked", "review", "in_review", "done", "archived"]},
+    "priority": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+    "task_type": {"type": "string", "enum": ["quarterly_report", "presentation", "memo", "decision_brief", "analysis", "strategy", "ad_hoc", "review", "communication"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "due_date": {"type": "string", "format": "date"},
+    "review_date": {"type": "string", "format": "date"},
+    "stakeholders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ref", "role"],
+        "properties": {
+          "ref": {"type": "string", "pattern": "^STK-\\d{4}$"},
+          "role": {"type": "string", "enum": ["approver", "reviewer", "audience", "sponsor", "executor", "informed"]},
+          "key": {"type": "boolean"}
+        }
+      }
+    },
+    "deliverables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "format"],
+        "properties": {
+          "id": {"type": "string"},
+          "template_ref": {"type": "string"},
+          "format": {"type": "string", "enum": ["pptx", "docx", "pdf", "md", "xlsx", "html", "txt"]},
+          "status": {"type": "string", "enum": ["pending", "in_progress", "complete", "cancelled"]},
+          "file_path": {"type": "string"}
+        }
+      }
+    },
+    "contexts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ref"],
+        "properties": {
+          "ref": {"type": "string"},
+          "relevance": {"type": "string", "enum": ["required", "recommended", "optional"]}
+        }
+      }
+    },
+    "preferred_agent": {"type": "string"},
+    "skills": {"type": "array", "items": {"type": "string"}},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "confidentiality": {"type": "string", "enum": ["public", "internal", "confidential", "restricted"]},
+    "estimated_hours": {"type": "number", "minimum": 0}
+  },
+  "additionalProperties": false
+}

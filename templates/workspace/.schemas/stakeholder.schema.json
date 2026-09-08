@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Stakeholder",
+  "type": "object",
+  "required": ["schema_version", "id", "type", "name", "influence"],
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "id": {"type": "string", "pattern": "^STK-\\d{4}$"},
+    "type": {"type": "string", "enum": ["stakeholder"]},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "role": {"type": "string"},
+    "organization": {"type": "string"},
+    "email": {"type": "string", "format": "email"},
+    "phone": {"type": "string"},
+    "influence": {
+      "type": "string",
+      "enum": ["decision_maker", "influencer", "informed", "executor", "sponsor"]
+    },
+    "decision_role": {"type": "string"},
+    "what_matters": {"type": "string"},
+    "communication_preferences": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

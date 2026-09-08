@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecutionManifest",
+  "type": "object",
+  "required": ["id", "task_id", "created_at", "files", "command"],
+  "properties": {
+    "id": {"type": "string"},
+    "task_id": {"type": "string", "pattern": "^TASK-\\d{4}-\\d{4}$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "command": {"type": "string"},
+    "agent_ref": {"type": "string"},
+    "skills": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "type", "size_bytes", "sha256"],
+        "properties": {
+          "path": {"type": "string"},
+          "type": {"type": "string"},
+          "size_bytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "total_size_bytes": {"type": "integer", "minimum": 0},
+    "estimated_tokens": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}

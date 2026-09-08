@@ -1,0 +1,91 @@
+{
+  "name": "getthingsdone",
+  "version": "0.1.0",
+  "description": "Get Things Done \u2014 a local GTD workspace for executives. Kanban dashboard over plain Markdown files, with AI agent integration.",
+  "keywords": [
+    "gtd",
+    "get-things-done",
+    "executive",
+    "productivity",
+    "kanban",
+    "workspace",
+    "markdown",
+    "claude",
+    "claude-code",
+    "copilot",
+    "ai-agents"
+  ],
+  "license": "MIT",
+  "bin": {
+    "gtd": "./bin/gtd.js",
+    "esb": "./bin/gtd.js"
+  },
+  "main": "dist/cli/index.js",
+  "files": [
+    "bin/",
+    "dist/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=ui\"",
+    "build:clean": "rm -rf dist",
+    "build:cli": "tsc -p tsconfig.json",
+    "build:server": "npm run build --workspace=server",
+    "build:ui": "npm run build --workspace=ui",
+    "build:copy-ui": "cp -r ui/dist dist/ui",
+    "build:copy-server": "cp -r server/dist dist/server",
+    "build": "npm run build:clean && npm run build:server && npm run build:ui && npm run build:cli && npm run build:copy-ui && npm run build:copy-server",
+    "start": "npm run start --workspace=server",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
+  },
+  "workspaces": [
+    "server",
+    "ui"
+  ],
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.0",
+    "ajv": "^8.12.0",
+    "ajv-formats": "^3.0.1",
+    "chalk": "^5.6.2",
+    "chokidar": "^3.6.0",
+    "commander": "^12.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.3",
+    "express-async-errors": "^3.1.1",
+    "gray-matter": "^4.0.3",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "open": "^10.2.0",
+    "ora": "^8.2.0",
+    "simple-git": "^3.22.0",
+    "uuid": "^11.1.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^9.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.4.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Geovanne Bertonha",
+  "homepage": "https://github.com/geovanneb/get-things-done#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/geovanneb/get-things-done.git"
+  },
+  "bugs": {
+    "url": "https://github.com/geovanneb/get-things-done/issues"
+  },
+  "overrides": {
+    "body-parser": "^1.20.6",
+    "qs": "^6.15.4"
+  }
+}

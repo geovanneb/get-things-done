@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Context",
+  "type": "object",
+  "required": ["schema_version", "id", "type", "title", "category", "created_at", "updated_at"],
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "id": {"type": "string", "pattern": "^CTX-[a-z0-9-]+$"},
+    "type": {"type": "string", "enum": ["context"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "category": {
+      "type": "string",
+      "enum": ["company", "organization", "strategy", "programs", "decisions", "risks", "glossary", "situation"]
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "relevance": {
+      "type": "string",
+      "enum": ["required", "recommended", "optional"]
+    },
+    "expiry_date": {"type": "string", "format": "date"},
+    "source": {"type": "string"},
+    "related_tasks": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^TASK-\\d{4}-\\d{4}$"}
+    }
+  },
+  "additionalProperties": false
+}

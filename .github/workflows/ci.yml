@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['18', '20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify the tarball contents
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e "
+            const files = require('./pack.json')[0].files.map(f => f.path);
+            const leaked = files.filter(f =>
+              f.startsWith('executive-workspace/') ||
+              f.includes('node_modules/') ||
+              f.endsWith('.DS_Store')
+            );
+            if (leaked.length) {
+              console.error('Files that must not ship:', leaked);
+              process.exit(1);
+            }
+            for (const required of ['bin/gtd.js', 'dist/cli/index.js', 'dist/server/index.js', 'dist/server/services/scaffold.js', 'dist/ui/index.html', 'templates/workspace/gitignore']) {
+              if (!files.includes(required)) {
+                console.error('Missing from tarball:', required);
+                process.exit(1);
+              }
+            }
+            console.log('Tarball OK:', files.length, 'files');
+          "

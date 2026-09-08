@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# Private workspace content — NEVER commit.
+#
+# A workspace holds real stakeholder names, influence assessments, political
+# notes, strategy documents, risk registers and finished deliverables. That is
+# exactly the material that must stay on your own machine.
+#
+# Patterns are anchored with a leading "/" so they match only at the repo root
+# and cannot accidentally swallow templates/workspace/, which must ship.
+# ---------------------------------------------------------------------------
+/executive-workspace/
+/workspace/
+/workspaces/
+/*-workspace/
+
+# Workspace runtime state, wherever a workspace is created inside the repo
+.situation-board/
+/.esb/
+/.gtd/
+
+# Deliverables and source documents — never part of the source tree
+*.pptx
+*.docx
+*.xlsx
+*.pdf
+
+# Dependencies
+node_modules/
+
+# Build output
+/dist/
+/server/dist/
+/ui/dist/
+
+# Logs and caches
+*.log
+npm-debug.log*
+.eslintcache
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# npm artifacts
+*.tgz

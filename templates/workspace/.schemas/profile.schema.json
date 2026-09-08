@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecutiveProfile",
+  "type": "object",
+  "required": ["schema_version", "type", "name", "role"],
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "type": {"type": "string", "enum": ["profile"]},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "role": {"type": "string"},
+    "organization": {"type": "string"},
+    "responsibilities": {"type": "string"},
+    "communication_style": {"type": "string"},
+    "decision_making": {"type": "string"},
+    "language_preferences": {"type": "string"},
+    "recurring_expectations": {"type": "string"},
+    "principles": {"type": "string"}
+  },
+  "additionalProperties": false
+}
