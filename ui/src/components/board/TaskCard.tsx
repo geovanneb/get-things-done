@@ -112,8 +112,8 @@ export default function TaskCard({ task, onClick }: TaskCardProps) {
         borderRadius: 'var(--radius-lg)',
         cursor: 'pointer',
         boxShadow: hovered
-          ? '0 4px 12px rgba(0,0,0,0.10)'
-          : '0 1px 2px rgba(0,0,0,0.04)',
+          ? 'var(--shadow-md)'
+          : 'var(--shadow-sm)',
         transition: 'box-shadow 0.15s ease, border-color 0.15s ease',
         borderColor: hovered ? 'var(--color-border-strong)' : 'var(--color-border)',
         outline: 'none',

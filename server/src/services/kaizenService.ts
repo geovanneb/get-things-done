@@ -17,8 +17,17 @@ export interface KaizenProposal {
   body: string;
 }
 
-function parseFrontmatter(raw: string): { meta: Record<string, unknown>; body: string } {
-  const match = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+function parseFrontmatter(raw: string, source?: string): { meta: Record<string, unknown>; body: string } {
+  let match: RegExpMatchArray | null = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+
+  // A file with an opening fence but no closing one would otherwise fail the match
+  // outright and render as a blank card. Parse what is there and say which file needs
+  // fixing, so a missing "---" degrades instead of disappearing.
+  if (!match && raw.startsWith('---\n')) {
+    console.warn(`[kaizen] ${source ?? 'file'}: frontmatter has no closing "---". Parsing what is there; add the closing fence.`);
+    match = [raw, raw.slice(4), ''] as unknown as RegExpMatchArray;
+  }
+
   if (!match) return { meta: {}, body: raw };
 
   const meta: Record<string, unknown> = {};
@@ -141,7 +150,7 @@ export class KaizenService {
 
     const updated = { ...proposal, ...patch };
     const raw = await fsp.readFile(file, 'utf-8');
-    const { body } = parseFrontmatter(raw);
+    const { body } = parseFrontmatter(raw, path.basename(file));
     await fsp.writeFile(file, serializeFrontmatter(updated, body), 'utf-8');
     return updated;
   }
@@ -149,7 +158,7 @@ export class KaizenService {
   private async readKaizenFile(file: string): Promise<KaizenProposal | null> {
     try {
       const raw = await fsp.readFile(file, 'utf-8');
-      const { meta, body } = parseFrontmatter(raw);
+      const { meta, body } = parseFrontmatter(raw, path.basename(file));
       return {
         id: String(meta['id'] ?? ''),
         title: String(meta['title'] ?? ''),

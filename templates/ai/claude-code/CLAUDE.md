@@ -69,26 +69,76 @@ Follow this status progression strictly:
 
 You must **never** set the status to `done`. Only the user moves tasks to Done manually after reviewing the output. There is no "Approved" step — the user goes directly from `in_review` to `done` on their own.
 
+### Rework: always move back to in_progress first
+
+The status must always reflect what is actually happening right now. A task you are
+editing is not waiting for review, it is in progress.
+
+Whenever you resume work on a task that is **not** already `in_progress`, your first
+action is to set the status back to `in_progress` and update `updated_at`. Do this
+before reading files, before editing the deliverable, and before replying to the user.
+
+Any request to change a deliverable triggers this: feedback on the output, a fix, a
+correction, a different tone, one more section, a reformat. It applies to every entry
+point, not just `/gtd-task`. Feedback given in plain conversation (for example "this
+section is too long" or "redo the summary in Japanese") counts as resuming work and
+triggers the same rule.
+
+Do not skip this because the change looks small. A one line edit is still rework.
+
+When the rework is finished and saved, set the status back to `in_review`, exactly as
+you would for a first pass.
+
+### Timestamps: set start_date on the first run
+
+The first time you move a task to `in_progress`, also set `start_date` to the current
+UTC timestamp if the field is not already present. Leave it alone on every later run —
+it marks when work first began, not when it last resumed.
+
+You never set `done_date`. The app writes that itself when the user moves the task to
+Done, and overwriting it would misreport when the work actually finished.
+
+These two fields are what the Insights screen measures turnaround from. Without
+`start_date` it has to guess from the execution logs.
+
 ## Fields you must never modify in task.md
 
 - `id`
 - `created_at`
+- `done_date` (the app sets this when the user moves the task to Done)
 - `schema_version`
 
 These are set at task creation and must not change.
 
 ## Output quality standards
 
+**The output template decides which sections exist. The standards below decide how each one is written.**
+
 - Follow the output template's `required_sections` list exactly - every section must be present
 - Apply the `style_guide` rules from the output template
+- When the output template's `required_sections` or `style_guide` specifies the document structure, that structure is authoritative. The rules below govern how a section is written, never which sections exist.
+- Do not add a top-level section the template does not define. This covers executive summaries, decision roll-ups, appendices, and anything else that looks helpful. If a section seems missing, say so in your reply and let the executive decide.
+- When the task folder contains a source draft, its section list is the intended shape of the deliverable. Reorganize within it as the task asks, but do not add top-level sections to it.
 - Adapt tone and detail level to match each stakeholder's influence level and communication preferences
 - Apply the executive's communication style from their profile
-- Lead every document with the key insight or decision - never with background
-- Always include a "Next steps" or "Decisions required" section
-- Executive summaries: 5 bullets maximum, each under 20 words
+- Unless the template already specifies the opening, lead every document with the key insight or decision - never with background
+- Unless the template already defines the closing sections, include a "Next steps" or "Decisions required" section
+- When you write an executive summary, keep it to 5 bullets maximum, each under 20 words. Do not add one the template does not ask for
 - All financial claims must reference a source context note or be explicitly flagged as estimates
 - Never fabricate figures. Use placeholders like: `[Q3 Revenue: INSERT FROM FINANCE - due 2026-09-05]`
 - When a deliverable reports on or summarizes other tasks' deliverables, always resolve each deliverable's `template_ref` to the output template's `name` field (from `outputs/templates/<slug>/output.md`) for any "output type" or "template" display column. Never substitute the raw file format or file extension for the template name.
+- When an output template folder ships a binary template document (`.pptx`, `.potx`, `.docx`, `.dotx`, `.xlsx`), the deliverable must be produced by editing a copy of that document. A from-scratch file that merely reuses the template's colors is not acceptable.
+
+## Verifying names and terminology
+
+A source draft in a task folder is an input to verify, not a source of truth to transcribe. Before saving a deliverable, check the proper nouns in it.
+
+1. Extract every person name and every system, product, or program name that appears in the deliverable content.
+2. Resolve each person name against `stakeholders/people/*.md` (the `name` field). Resolve each system, product, or program name against `context/glossary/` and the rest of the context library.
+3. Report every proper noun that does not resolve. List them in your reply as names you could not verify, naming the file each came from. Never silently correct one and never silently pass one through.
+4. Report near misses the same way. If a draft says "Jon Smyth" and the stakeholder file says "John Smith", say so and let the executive decide which is right. Either side could be the stale one, so do not auto-correct.
+
+This costs one pass over content that already exists, and it is the only thing standing between a wrong name in a draft and a wrong name in front of a stakeholder.
 
 ## Handling missing information
 

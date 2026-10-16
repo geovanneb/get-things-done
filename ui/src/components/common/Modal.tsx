@@ -55,7 +55,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
         style={{
           position: 'absolute',
           inset: 0,
-          background: 'oklch(0.1 0 0 / 0.5)',
+          background: 'var(--scrim)',
           backdropFilter: 'blur(2px)',
         }}
       />
@@ -72,7 +72,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
           background: 'var(--color-surface)',
           borderRadius: 'var(--radius-xl)',
           border: '1px solid var(--color-border)',
-          boxShadow: '0 20px 60px oklch(0.1 0 0 / 0.2)',
+          boxShadow: 'var(--shadow-lg)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',

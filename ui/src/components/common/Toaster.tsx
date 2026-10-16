@@ -35,7 +35,7 @@ function Toast({ id, type, message }: { id: string; type: string; message: strin
         border: '1px solid var(--color-border)',
         borderLeft: `3px solid ${ACCENT[type] ?? ACCENT['info']}`,
         borderRadius: 'var(--radius-md)',
-        boxShadow: '0 8px 24px oklch(0.1 0 0 / 0.18)',
+        boxShadow: 'var(--shadow-md)',
         pointerEvents: 'auto',
       }}
     >

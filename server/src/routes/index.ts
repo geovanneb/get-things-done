@@ -10,6 +10,7 @@ import searchRouter from './search';
 import situationRouter from './situation';
 import insightsRouter from './insights';
 import kaizenRouter from './kaizen';
+import agentActivityRouter from './agentActivity';
 
 export function registerRoutes(app: Express): void {
   app.use('/api/tasks', tasksRouter);
@@ -24,4 +25,5 @@ export function registerRoutes(app: Express): void {
   app.use('/api/situation', situationRouter);
   app.use('/api/insights', insightsRouter);
   app.use('/api/kaizen', kaizenRouter);
+  app.use('/api/agent-activity', agentActivityRouter);
 }

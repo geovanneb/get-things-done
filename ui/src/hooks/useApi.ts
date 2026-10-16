@@ -12,6 +12,9 @@ export function useApi<T>(url: string, deps: unknown[] = []): ApiResult<T> {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Once a url has loaded we refetch it quietly, so background refreshes
+  // (file watcher events, mutations) never blank the view with a spinner.
+  const loadedUrlRef = useRef<string | null>(null);
 
   const fetchData = useCallback(async () => {
     if (abortRef.current) {
@@ -20,7 +23,7 @@ export function useApi<T>(url: string, deps: unknown[] = []): ApiResult<T> {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    setLoading(true);
+    if (loadedUrlRef.current !== url) setLoading(true);
     setError(null);
 
     try {
@@ -31,6 +34,7 @@ export function useApi<T>(url: string, deps: unknown[] = []): ApiResult<T> {
       }
       const json = await res.json();
       setData(json);
+      loadedUrlRef.current = url;
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Unknown error');

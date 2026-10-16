@@ -84,7 +84,7 @@ export default function GitIndicator() {
             background: 'var(--color-surface)',
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-lg)',
-            boxShadow: '0 8px 32px oklch(0.1 0 0 / 0.12)',
+            boxShadow: 'var(--shadow-md)',
             zIndex: 500,
             overflow: 'hidden',
           }}

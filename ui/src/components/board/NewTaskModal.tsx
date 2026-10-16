@@ -167,7 +167,7 @@ export default function NewTaskModal({
     background: 'var(--color-surface)',
     borderRadius: 'var(--radius-xl)',
     border: '1px solid var(--color-border)',
-    boxShadow: '0 24px 64px oklch(0.1 0 0 / 0.25)',
+    boxShadow: 'var(--shadow-lg)',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -178,7 +178,7 @@ export default function NewTaskModal({
       <div
         aria-hidden="true"
         onClick={onClose}
-        style={{ position: 'absolute', inset: 0, background: 'oklch(0.1 0 0 / 0.5)', backdropFilter: 'blur(2px)' }}
+        style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }}
       />
 
       <div style={panelStyle}>

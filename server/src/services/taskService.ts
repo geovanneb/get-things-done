@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
+import { DONE_STATUSES } from './taskStatus';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 
@@ -13,6 +14,34 @@ interface TaskFilters {
   tags?: string[];
   stakeholder_ref?: string;
   search?: string;
+}
+
+/**
+ * Record when a task actually started and finished.
+ *
+ * Without these, everything downstream has to guess: Insights can only fall
+ * back to `updated_at`, which means "last edited", not "finished". This is the
+ * one choke point every status change from the UI passes through, so it is
+ * where the real timestamps get written.
+ *
+ * An agent editing `task.md` directly bypasses this, which is why the workspace
+ * rules also ask it to write `start_date` itself.
+ */
+function stampStatusDates(previousStatus: TaskStatus, updated: Task, now: string): void {
+  const wasDone = DONE_STATUSES.has(previousStatus);
+  const isNowDone = DONE_STATUSES.has(updated.status);
+
+  if (isNowDone && !updated.done_date) {
+    updated.done_date = now;
+  } else if (wasDone && !isNowDone && updated.status !== 'archived') {
+    // Genuinely reopened — the old completion date is no longer true.
+    // Archiving is filing, not undoing, so it keeps its completion date.
+    delete updated.done_date;
+  }
+
+  if (!updated.start_date && (updated.status === 'in_progress' || isNowDone)) {
+    updated.start_date = now;
+  }
 }
 
 export class TaskService {
@@ -137,7 +166,9 @@ Read and execute the task defined in: tasks/active/$ARGUMENTS/task.md
 
 Follow all instructions in CLAUDE.md. Load the task file first, then load all referenced stakeholder files, the output template, and context notes. Load any files attached directly to the task folder.
 
-Produce the deliverable as specified by the task's output template. When you start working, update the task status to \`in_progress\`. When complete, save the deliverable to the task's deliverables folder and update the task status to \`in_review\`. Never set the task status to \`done\` — only the user does that manually.
+Produce the deliverable as specified by the task's output template. When you start working, update the task status to \`in_progress\` and set \`preferred_agent\` to the agent doing the work, so the board can show who is on it. When complete, save the deliverable to the task's deliverables folder and update the task status to \`in_review\`. Never set the task status to \`done\` — only the user does that manually.
+
+If the executive comes back with feedback on a task that is already \`in_review\`, set the status back to \`in_progress\` as your very first action, before editing anything, then back to \`in_review\` once the fix is saved. This applies to every correction, however small.
 `;
     await fsp.writeFile(commandFile, content, 'utf-8');
   }
@@ -193,12 +224,15 @@ Produce the deliverable as specified by the task's output template. When you sta
     const taskFile = path.join(this.getActiveDir(), id, 'task.md');
     const { content: existingContent } = await fileService.readMarkdown<Task>(taskFile);
 
+    const now = new Date().toISOString();
     const updated: Task = {
       ...existing,
       ...data,
       id,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     };
+
+    stampStatusDates(existing.status, updated, now);
 
     // body is the markdown content — keep it out of frontmatter
     const { path: _path, body: newBody, ...frontmatter } = updated;

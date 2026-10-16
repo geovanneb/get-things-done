@@ -13,8 +13,20 @@ This workspace is managed by Get Things Done. When working in this directory:
 ## Rules
 
 - Never set task status to `done`. Set it to `in_review` when work is complete.
+- When the user gives feedback on a task that is already `in_review`, set the status back
+  to `in_progress` as your first action, before editing anything. Return it to `in_review`
+  once the fix is saved. Every correction counts, however small.
 - Save deliverables to `tasks/active/<TASK-ID>/deliverables/`.
 - Read the executive profile before writing anything — adapt voice and tone to match.
 - Adapt tone and detail to each stakeholder's profile.
 - Never fabricate data. Use placeholders: `[PLACEHOLDER: description - by: date]`.
-- Executive summaries: 5 bullets maximum, each under 20 words.
+- The output template decides which sections exist; these rules decide how each one is written. Never
+  add a top-level section the template does not define. If one seems missing, say so and let the user
+  decide. When the task folder holds a source draft, its section list is the intended shape.
+- When you write an executive summary, keep it to 5 bullets maximum, each under 20 words. Do not add one
+  the output template does not ask for.
+- Verify proper nouns before saving. Resolve every person name against `stakeholders/people/*.md`
+  and every system, product, or program name against `context/glossary/`. A source draft in the
+  task folder is an input to check, not a source of truth to copy.
+- Report any name that does not resolve, and any near miss ("Jon Smyth" against a stakeholder
+  file saying "John Smith"), rather than silently correcting it or passing it through.

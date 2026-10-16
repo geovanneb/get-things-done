@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import simpleGit, { SimpleGit } from 'simple-git';
 import { GitStatus, GitDiff } from '../types';
 import { WorkspaceService } from './workspace';
@@ -11,13 +13,8 @@ export class GitService {
   }
 
   async isGitRepo(): Promise<boolean> {
-    try {
-      const git = this.getGit();
-      await git.status();
-      return true;
-    } catch {
-      return false;
-    }
+    const workspacePath = workspaceService.getWorkspacePath();
+    return fs.existsSync(path.join(workspacePath, '.git'));
   }
 
   async getStatus(): Promise<GitStatus> {

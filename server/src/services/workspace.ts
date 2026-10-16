@@ -74,11 +74,24 @@ export class WorkspaceService {
       // Simple YAML parsing for known keys
       const lines = raw.split('\n');
       let inSchemaVersions = false;
+      let inSettings = false;
+      let inSettingsGit = false;
       for (const line of lines) {
         if (line.startsWith('name:')) {
           name = line.replace('name:', '').trim().replace(/^["']|["']$/g, '');
         } else if (line.startsWith('git_enabled:')) {
           git_enabled = line.includes('true');
+        } else if (line.startsWith('settings:')) {
+          inSettings = true;
+          inSettingsGit = false;
+        } else if (inSettings && line.match(/^\s+git:/)) {
+          inSettingsGit = true;
+        } else if (inSettingsGit && line.match(/^\s+enabled:/)) {
+          git_enabled = line.includes('true');
+          inSettingsGit = false;
+        } else if (inSettings && !line.startsWith(' ')) {
+          inSettings = false;
+          inSettingsGit = false;
         } else if (line.startsWith('schema_versions:')) {
           inSchemaVersions = true;
         } else if (inSchemaVersions && line.startsWith('  ')) {
@@ -93,6 +106,19 @@ export class WorkspaceService {
     }
 
     return { path: workspacePath, name, git_enabled, schema_versions };
+  }
+
+  updateWorkspaceName(newName: string): void {
+    const workspacePath = this.getWorkspacePath();
+    const workspaceYamlPath = path.join(workspacePath, 'workspace.yaml');
+
+    if (!fs.existsSync(workspaceYamlPath)) {
+      throw new Error('workspace.yaml not found in workspace directory.');
+    }
+
+    const raw = fs.readFileSync(workspaceYamlPath, 'utf-8');
+    const updated = raw.replace(/^name:\s*.+$/m, `name: "${newName}"`);
+    fs.writeFileSync(workspaceYamlPath, updated, 'utf-8');
   }
 
   async validateWorkspacePath(workspacePath: string): Promise<boolean> {

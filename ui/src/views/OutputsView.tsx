@@ -12,22 +12,34 @@ import type { OutputTemplate } from '@/types';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const FORMAT_COLORS: Record<string, { bg: string; color: string }> = {
-  PPTX:  { bg: '#fff3e0', color: '#e65100' },
-  DOCX:  { bg: '#e3f2fd', color: '#1565c0' },
-  PDF:   { bg: '#fce4ec', color: '#b71c1c' },
-  MD:    { bg: '#f5f5f5', color: '#424242' },
-  XLSX:  { bg: '#e8f5e9', color: '#1b5e20' },
-  HTML:  { bg: '#f3e5f5', color: '#6a1b9a' },
-  TXT:   { bg: '#e8eaf6', color: '#283593' },
+/**
+ * Each format keeps its own hue; the theme supplies the lightness and chroma via
+ * the --chip-* tokens, so the chips stay legible on a light or a dark surface.
+ * MD has no hue of its own and reads as plain grey.
+ */
+const FORMAT_HUE: Record<string, number> = {
+  PPTX: 55,
+  DOCX: 250,
+  PDF:  25,
+  MD:   258,
+  XLSX: 150,
+  HTML: 310,
+  TXT:  275,
 };
 
+const NEUTRAL_CHIP_HUE = 258;
+
 function formatBadgeStyle(format: string): React.CSSProperties {
-  const colors = FORMAT_COLORS[format.toUpperCase()] ?? { bg: '#f5f5f5', color: '#424242' };
+  const hue = FORMAT_HUE[format.toUpperCase()] ?? NEUTRAL_CHIP_HUE;
+  const neutral = hue === NEUTRAL_CHIP_HUE;
+  const bgChroma = neutral ? 'calc(var(--chip-bg-c) * 0.15)' : 'var(--chip-bg-c)';
+  const fgChroma = neutral ? 'calc(var(--chip-fg-c) * 0.10)' : 'var(--chip-fg-c)';
   return {
     display: 'inline-block', padding: '2px 8px', borderRadius: 'var(--radius-sm)',
     fontSize: 'var(--text-xs)', fontWeight: 600, letterSpacing: '0.04em',
-    backgroundColor: colors.bg, color: colors.color, lineHeight: 1.6, whiteSpace: 'nowrap' as const,
+    backgroundColor: `oklch(var(--chip-bg-l) ${bgChroma} ${hue})`,
+    color: `oklch(var(--chip-fg-l) ${fgChroma} ${hue})`,
+    lineHeight: 1.6, whiteSpace: 'nowrap' as const,
   };
 }
 
@@ -262,7 +274,7 @@ function TemplateCard({ template, onClick, onEdit, onDelete }: TemplateCardProps
 
   return (
     <div onClick={onClick} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{ position: 'relative', padding: 16, background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', cursor: 'pointer', boxShadow: hover ? '0 4px 16px rgba(0,0,0,0.10)' : '0 1px 3px rgba(0,0,0,0.04)', transition: 'box-shadow 0.15s', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      style={{ position: 'relative', padding: 16, background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', cursor: 'pointer', boxShadow: hover ? 'var(--shadow-md)' : 'var(--shadow-sm)', transition: 'box-shadow 0.15s', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ fontWeight: 600, fontSize: 'var(--text-md)', color: 'var(--color-text)', lineHeight: 1.3 }}>{template.name}</span>
         <span style={formatBadgeStyle(template.format)}>{template.format}</span>

@@ -100,6 +100,17 @@ function IconKaizen() {
   );
 }
 
+function IconArcade() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1.5" y="4.5" width="13" height="8" rx="2.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M4.5 7.2v2.6M3.2 8.5h2.6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <circle cx="10.6" cy="7.8" r="0.95" fill="currentColor" />
+      <circle cx="12.2" cy="9.6" r="0.95" fill="currentColor" />
+    </svg>
+  );
+}
+
 function IconGear() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -132,7 +143,7 @@ const NAV_WIDTH_EXPANDED = '242px';
 const NAV_WIDTH_COLLAPSED = '60px';
 
 export default function NavRail() {
-  const { workspace, validationCount } = useAppState();
+  const { workspace, validationCount, agenticVisualMode } = useAppState();
   const location = useLocation();
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
     try {
@@ -171,6 +182,11 @@ export default function NavRail() {
     { path: '/insights', label: 'Insights', icon: <IconChart /> },
     { path: '/kaizen', label: 'Kaizen', icon: <IconKaizen /> },
   ];
+
+  // Experimental view, shown only while the Settings switch is on.
+  if (agenticVisualMode) {
+    navItems.push({ path: '/agent-floor', label: 'Agent Floor', icon: <IconArcade /> });
+  }
 
   const bottomItems: NavItem[] = [
     { path: '/profile', label: 'Profile', icon: <IconPerson /> },

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:agent-floor": "tsx src/components/agentic/engine/simulation.test.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

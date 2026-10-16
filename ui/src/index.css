@@ -4,7 +4,39 @@
   padding: 0;
 }
 
+/* ---------------------------------------------------------------------------
+   Appearance
+   ---------------------------------------------------------------------------
+   Three preferences, each a data attribute on <html>, set by utils/theme.ts:
+
+     data-theme="light|dark"          surface and text tokens
+     data-accent="blue|violet|..."    accent hue and chroma
+     data-text-size="small|..."       --font-scale, which every --text-* uses
+
+   Accent tokens are derived from --accent-h / --accent-c inside each theme block
+   rather than listed per accent, so a new accent only needs a hue and a chroma.
+   --------------------------------------------------------------------------- */
+
 :root {
+  --accent-h: 255;
+  --accent-c: 0.11;
+  --font-scale: 1;
+}
+
+:root[data-accent="blue"]   { --accent-h: 255; --accent-c: 0.11; }
+:root[data-accent="violet"] { --accent-h: 295; --accent-c: 0.12; }
+:root[data-accent="teal"]   { --accent-h: 195; --accent-c: 0.10; }
+:root[data-accent="green"]  { --accent-h: 155; --accent-c: 0.12; }
+:root[data-accent="amber"]  { --accent-h: 70;  --accent-c: 0.13; }
+:root[data-accent="rose"]   { --accent-h: 15;  --accent-c: 0.14; }
+
+:root[data-text-size="small"]   { --font-scale: 0.92; }
+:root[data-text-size="default"] { --font-scale: 1; }
+:root[data-text-size="large"]   { --font-scale: 1.12; }
+
+:root {
+  color-scheme: light;
+
   /* Surfaces */
   --color-bg: oklch(0.97 0.005 258);
   --color-surface: oklch(1 0 0);
@@ -17,11 +49,11 @@
   --color-text-muted: oklch(0.68 0.010 258);
   --color-text-on-accent: oklch(1 0 0);
 
-  /* Accent (blue) */
-  --color-accent: oklch(0.45 0.11 255);
-  --color-accent-hover: oklch(0.40 0.13 255);
-  --color-accent-subtle: oklch(0.94 0.025 255);
-  --color-accent-subtle-hover: oklch(0.90 0.035 255);
+  /* Accent */
+  --color-accent: oklch(0.45 var(--accent-c) var(--accent-h));
+  --color-accent-hover: oklch(0.40 calc(var(--accent-c) * 1.18) var(--accent-h));
+  --color-accent-subtle: oklch(0.94 0.025 var(--accent-h));
+  --color-accent-subtle-hover: oklch(0.90 0.035 var(--accent-h));
 
   /* Status colors */
   --color-critical: oklch(0.52 0.18 25);
@@ -47,15 +79,36 @@
   --header-bg: oklch(1 0 0);
   --header-border: oklch(0.88 0.008 258);
 
+  /* Elevation — tuned per theme so shadows stay visible on dark surfaces */
+  --shadow-sm: 0 1px 2px oklch(0.1 0 0 / 0.05);
+  --shadow-md: 0 4px 12px oklch(0.1 0 0 / 0.10);
+  --shadow-lg: 0 20px 60px oklch(0.1 0 0 / 0.20);
+  --scrim: oklch(0.1 0 0 / 0.5);
+
+  /* Charts — validated pairs, see components/insights/palette.ts */
+  --chart-created: oklch(0.62 0.14 65);
+  --chart-completed: oklch(0.44 0.11 255);
+  --chart-ramp-1: oklch(0.74 0.06 255);
+  --chart-ramp-2: oklch(0.66 0.08 255);
+  --chart-ramp-3: oklch(0.58 0.10 255);
+  --chart-ramp-4: oklch(0.50 0.11 255);
+  --chart-ramp-5: oklch(0.42 0.12 255);
+
+  /* File-format chips — hue comes from the format, lightness from the theme */
+  --chip-bg-l: 0.94;
+  --chip-bg-c: 0.05;
+  --chip-fg-l: 0.42;
+  --chip-fg-c: 0.15;
+
   /* Typography */
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
-  --text-xs: 0.70rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.875rem;
-  --text-md: 1rem;
-  --text-lg: 1.125rem;
-  --text-xl: 1.375rem;
+  --text-xs: calc(0.70rem * var(--font-scale));
+  --text-sm: calc(0.8125rem * var(--font-scale));
+  --text-base: calc(0.875rem * var(--font-scale));
+  --text-md: calc(1rem * var(--font-scale));
+  --text-lg: calc(1.125rem * var(--font-scale));
+  --text-xl: calc(1.375rem * var(--font-scale));
 
   /* Priority colors */
   --priority-critical: oklch(0.52 0.18 25);
@@ -68,6 +121,78 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --color-bg: oklch(0.17 0.012 258);
+  --color-surface: oklch(0.21 0.014 258);
+  --color-surface-hover: oklch(0.25 0.016 258);
+  --color-surface-active: oklch(0.29 0.018 258);
+  --color-border: oklch(0.31 0.014 258);
+  --color-border-strong: oklch(0.43 0.018 258);
+  --color-text: oklch(0.94 0.006 258);
+  --color-text-secondary: oklch(0.76 0.012 258);
+  --color-text-muted: oklch(0.60 0.012 258);
+  /* Dark themes use light accents, so text sitting on one must be dark. */
+  --color-text-on-accent: oklch(0.17 0.012 258);
+
+  /* Accent */
+  --color-accent: oklch(0.74 var(--accent-c) var(--accent-h));
+  --color-accent-hover: oklch(0.82 calc(var(--accent-c) * 0.88) var(--accent-h));
+  --color-accent-subtle: oklch(0.29 calc(var(--accent-c) * 0.42) var(--accent-h));
+  --color-accent-subtle-hover: oklch(0.34 calc(var(--accent-c) * 0.52) var(--accent-h));
+
+  /* Status colors */
+  --color-critical: oklch(0.71 0.17 25);
+  --color-critical-subtle: oklch(0.30 0.06 25);
+  --color-warning: oklch(0.79 0.14 75);
+  --color-warning-subtle: oklch(0.31 0.05 75);
+  --color-success: oklch(0.74 0.14 155);
+  --color-success-subtle: oklch(0.29 0.05 155);
+  --color-info: oklch(0.74 0.11 240);
+  --color-info-subtle: oklch(0.30 0.05 240);
+
+  /* Nav — still the darkest plane, so it reads as a distinct layer */
+  --nav-bg: oklch(0.13 0.012 258);
+  --nav-text: oklch(0.70 0.012 258);
+  --nav-text-active: oklch(0.98 0 0);
+  --nav-hover-bg: oklch(0.19 0.014 258);
+  --nav-active-bg: oklch(0.24 0.018 258);
+  --nav-border: oklch(0.24 0.014 258);
+
+  /* Header */
+  --header-bg: oklch(0.21 0.014 258);
+  --header-border: oklch(0.31 0.014 258);
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
+  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.50);
+  --shadow-lg: 0 20px 60px oklch(0 0 0 / 0.60);
+  --scrim: oklch(0.05 0 0 / 0.65);
+
+  /* Charts — same hues, lightness flipped for a dark plot surface */
+  --chart-created: oklch(0.78 0.13 65);
+  --chart-completed: oklch(0.70 0.11 255);
+  --chart-ramp-1: oklch(0.40 0.05 255);
+  --chart-ramp-2: oklch(0.50 0.07 255);
+  --chart-ramp-3: oklch(0.60 0.09 255);
+  --chart-ramp-4: oklch(0.70 0.10 255);
+  --chart-ramp-5: oklch(0.82 0.11 255);
+
+  /* File-format chips */
+  --chip-bg-l: 0.30;
+  --chip-bg-c: 0.055;
+  --chip-fg-l: 0.81;
+  --chip-fg-c: 0.12;
+
+  /* Priority colors */
+  --priority-critical: oklch(0.71 0.17 25);
+  --priority-high: oklch(0.79 0.14 75);
+  --priority-medium: oklch(0.74 0.11 240);
+  --priority-low: oklch(0.60 0.012 258);
 }
 
 body {

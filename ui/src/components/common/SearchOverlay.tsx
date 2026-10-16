@@ -130,7 +130,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
       <div
         aria-hidden="true"
         onClick={onClose}
-        style={{ position: 'absolute', inset: 0, background: 'oklch(0.1 0 0 / 0.55)', backdropFilter: 'blur(3px)' }}
+        style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(3px)' }}
       />
       <div
         style={{
@@ -141,7 +141,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
           background: 'var(--color-surface)',
           borderRadius: 'var(--radius-xl)',
           border: '1px solid var(--color-border)',
-          boxShadow: '0 24px 80px oklch(0.1 0 0 / 0.25)',
+          boxShadow: 'var(--shadow-lg)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',

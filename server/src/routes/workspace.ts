@@ -63,6 +63,19 @@ async function openClaudeCode(workspacePath: string): Promise<void> {
 // GET /api/workspace
 router.get('/', async (req: Request, res: Response) => {
   const config = workspaceService.getWorkspaceConfig();
+  const git_enabled = await gitService.isGitRepo();
+  res.json({ ...config, git_enabled });
+});
+
+// PUT /api/workspace — update workspace name
+router.put('/', async (req: Request, res: Response) => {
+  const { name } = req.body;
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    res.status(400).json({ error: 'Bad Request', message: 'name is required' });
+    return;
+  }
+  workspaceService.updateWorkspaceName(name.trim());
+  const config = workspaceService.getWorkspaceConfig();
   res.json(config);
 });
 
@@ -85,6 +98,39 @@ router.post('/init', async (req: Request, res: Response) => {
   res.status(201).json({ message: 'Workspace initialized', config });
 });
 
+// POST /api/workspace/reinitialize — re-run scaffold on the current workspace
+router.post('/reinitialize', async (req: Request, res: Response) => {
+  const workspacePath = workspaceService.getWorkspacePath();
+
+  const isValid = await workspaceService.validateWorkspacePath(workspacePath);
+  if (!isValid) {
+    res.status(400).json({ error: 'Bad Request', message: `Workspace path is not accessible: ${workspacePath}` });
+    return;
+  }
+
+  await workspaceService.initWorkspace(workspacePath);
+  const config = workspaceService.getWorkspaceConfig();
+  res.json({ message: 'Workspace re-initialized', config });
+});
+
+// POST /api/workspace/open — open the workspace in Finder (macOS) or file manager
+router.post('/open', async (req: Request, res: Response) => {
+  const workspacePath = workspaceService.getWorkspacePath();
+  try {
+    if (process.platform === 'darwin') {
+      await execFileAsync('open', [workspacePath]);
+    } else if (process.platform === 'win32') {
+      await execFileAsync('explorer', [workspacePath]);
+    } else {
+      await execFileAsync('xdg-open', [workspacePath]);
+    }
+    res.json({ opened: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: 'Failed to open folder', message });
+  }
+});
+
 // POST /api/workspace/open-claude — open Claude Code in a terminal at the workspace
 router.post('/open-claude', async (req: Request, res: Response) => {
   const workspacePath = workspaceService.getWorkspacePath();
@@ -102,8 +148,7 @@ router.post('/open-claude', async (req: Request, res: Response) => {
 // GET /api/workspace/validate
 router.get('/validate', async (req: Request, res: Response) => {
   const results = await validationService.validateWorkspace();
-  const hasErrors = results.some((r) => r.level === 'error');
-  res.status(hasErrors ? 422 : 200).json({ results, is_valid: !hasErrors });
+  res.json(results);
 });
 
 // GET /api/workspace/validation/count

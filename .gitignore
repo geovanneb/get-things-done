@@ -36,6 +36,7 @@ node_modules/
 *.log
 npm-debug.log*
 .eslintcache
+node-compile-cache/
 
 # Editor / OS junk
 .DS_Store

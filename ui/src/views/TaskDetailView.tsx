@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
+import { useDataVersion } from '../store';
 import { Task, Stakeholder } from '../types';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
@@ -354,11 +355,16 @@ export default function TaskDetailView() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const { data: task, loading, refetch } = useApi<Task>(`/api/tasks/${id}`, [id]);
+  // Re-read the task when it changes on disk (agent updating status, deliverables)
+  const tasksVersion = useDataVersion('tasks');
+  const { data: task, loading, refetch } = useApi<Task>(`/api/tasks/${id}`, [id, tasksVersion]);
   const [localTask, setLocalTask] = useState<Task | null>(null);
+  // Set while the user has unsaved edits, so a background refresh never
+  // overwrites what they are typing.
+  const editingRef = useRef(false);
 
   useEffect(() => {
-    if (task) setLocalTask(task);
+    if (task && !editingRef.current) setLocalTask(task);
   }, [task]);
 
   const close = useCallback(() => navigate('/board'), [navigate]);
@@ -375,6 +381,7 @@ export default function TaskDetailView() {
   }, [close]);
 
   const handleFieldChange = useCallback((field: string, value: unknown) => {
+    editingRef.current = true;
     setLocalTask((prev) => {
       if (!prev) return prev;
       return { ...prev, [field]: value } as Task;
@@ -386,6 +393,7 @@ export default function TaskDetailView() {
     setSaving(true);
     try {
       await apiPut(`/api/tasks/${id}`, localTask);
+      editingRef.current = false;
       refetch();
       refetchTasks();
     } catch {
@@ -432,7 +440,7 @@ export default function TaskDetailView() {
     background: 'var(--color-surface)',
     borderRadius: 'var(--radius-xl)',
     border: '1px solid var(--color-border)',
-    boxShadow: '0 24px 64px oklch(0.1 0 0 / 0.25)',
+    boxShadow: 'var(--shadow-lg)',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -440,7 +448,7 @@ export default function TaskDetailView() {
 
   if (loading) return ReactDOM.createPortal(
     <div role="dialog" aria-modal="true" style={overlayStyle}>
-      <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'oklch(0.1 0 0 / 0.5)', backdropFilter: 'blur(2px)' }} />
+      <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }} />
       <div style={panelStyle}>
         <LoadingSpinner text="Loading task..." />
       </div>
@@ -450,7 +458,7 @@ export default function TaskDetailView() {
 
   if (!localTask) return ReactDOM.createPortal(
     <div role="dialog" aria-modal="true" style={overlayStyle}>
-      <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'oklch(0.1 0 0 / 0.5)', backdropFilter: 'blur(2px)' }} />
+      <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }} />
       <div style={panelStyle}>
         <div style={{ padding: 24, color: 'var(--color-text-muted)' }}>Task not found.</div>
       </div>
@@ -464,7 +472,7 @@ export default function TaskDetailView() {
       <div
         aria-hidden="true"
         onClick={close}
-        style={{ position: 'absolute', inset: 0, background: 'oklch(0.1 0 0 / 0.5)', backdropFilter: 'blur(2px)' }}
+        style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }}
       />
 
       {/* Panel */}

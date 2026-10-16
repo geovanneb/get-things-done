@@ -7,7 +7,7 @@ import Avatar from '../components/common/Avatar';
 import Input from '../components/common/Input';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
-import { useAppDispatch } from '../store';
+import { useAppDispatch, useDataVersion } from '../store';
 import { apiPut } from '../utils/api';
 import { formatDate, formatDueStatus, formatStatusLabel, formatPriorityLabel } from '../utils/format';
 
@@ -90,10 +90,52 @@ function AgeChip({ createdAt }: { createdAt: string }) {
   );
 }
 
-/* ---- Task card (Kanban) ------------------------------------------- */
+/* ---- Agent working indicator -------------------------------------- */
 function formatAgentName(agent: string): string {
   return agent.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
+
+/** Statuses that mean an agent is actively on the task. */
+const WORKING_STATUSES: Task['status'][] = ['in_progress', 'review'];
+
+function AgentWorkingIndicator({ task }: { task: Task }) {
+  if (!WORKING_STATUSES.includes(task.status)) return null;
+  // The agent name only exists once a task is routed to a specialist. Until
+  // then still show progress, so the card never looks idle while work is running.
+  const label = task.preferred_agent ? formatAgentName(task.preferred_agent) : 'Working';
+  return (
+    <div
+      title={task.preferred_agent ? `${label} is working on this task` : 'An agent is working on this task'}
+      style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
+    >
+      <svg
+        aria-hidden="true"
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        style={{ animation: 'esb-spin 0.75s linear infinite', flexShrink: 0 }}
+      >
+        <circle cx="12" cy="12" r="10" stroke="var(--color-border-strong)" strokeWidth="3" />
+        <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+      <span style={{
+        fontSize: 'var(--text-xs)',
+        color: 'var(--color-accent)',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+        maxWidth: 130,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      }}>
+        {label}
+      </span>
+      <style>{`@keyframes esb-spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+/* ---- Task card (Kanban) ------------------------------------------- */
 
 function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
   return (
@@ -116,7 +158,7 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
       }}
       onMouseEnter={(e) => {
         (e.currentTarget as HTMLElement).style.borderColor = 'var(--color-border-strong)';
-        (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 8px oklch(0.1 0 0 / 0.06)';
+        (e.currentTarget as HTMLElement).style.boxShadow = 'var(--shadow-sm)';
       }}
       onMouseLeave={(e) => {
         (e.currentTarget as HTMLElement).style.borderColor = 'var(--color-border)';
@@ -172,30 +214,7 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
       {/* Row: stakeholders + agent indicator */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <StakeholderAvatars refs={task.stakeholders ?? []} />
-        {task.status === 'in_progress' && task.preferred_agent && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-            <svg
-              aria-hidden="true"
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              style={{ animation: 'esb-spin 0.75s linear infinite', flexShrink: 0 }}
-            >
-              <circle cx="12" cy="12" r="10" stroke="var(--color-border-strong)" strokeWidth="3" />
-              <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" />
-            </svg>
-            <span style={{
-              fontSize: 'var(--text-xs)',
-              color: 'var(--color-accent)',
-              fontWeight: 500,
-              whiteSpace: 'nowrap',
-            }}>
-              {formatAgentName(task.preferred_agent)}
-            </span>
-            <style>{`@keyframes esb-spin { to { transform: rotate(360deg); } }`}</style>
-          </div>
-        )}
+        <AgentWorkingIndicator task={task} />
       </div>
     </button>
   );
@@ -419,7 +438,10 @@ export default function BoardView() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
 
-  const { data, loading, refetch } = useApi<Task[]>('/api/tasks', []);
+  // Refetch whenever tasks change anywhere: a new task from the modal, a drag
+  // between columns, or an agent editing task.md on disk.
+  const tasksVersion = useDataVersion('tasks');
+  const { data, loading, refetch } = useApi<Task[]>('/api/tasks', [tasksVersion]);
 
   const openNewTask = useCallback((defaultStatus: Task['status']) => {
     dispatch({ type: 'OPEN_NEW_TASK_MODAL', payload: defaultStatus });
@@ -439,11 +461,11 @@ export default function BoardView() {
   const handleDrop = useCallback(async (taskId: string, status: Task['status']) => {
     try {
       await apiPut(`/api/tasks/${taskId}`, { status });
-      refetch();
+      dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     } catch {
       // ignore
     }
-  }, [refetch]);
+  }, [dispatch]);
 
   const priorities: PriorityFilter[] = ['all', 'critical', 'high', 'medium', 'low'];
 

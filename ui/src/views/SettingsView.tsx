@@ -4,8 +4,12 @@ import Input from '@/components/common/Input';
 import Modal from '@/components/common/Modal';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Badge from '@/components/common/Badge';
+import Toggle from '@/components/common/Toggle';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatDate, formatRelativeDate } from '@/utils/format';
+import { useAppState, useAppDispatch } from '@/store';
+import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
+import type { ThemeMode, TextSize } from '@/utils/theme';
 import type { WorkspaceConfig, GitStatus, ValidationResult } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -124,6 +128,160 @@ function AboutRow({ label, value, mono }: { label: string; value: string; mono?:
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+interface SegmentOption<T extends string> {
+  value: T;
+  label: string;
+  icon?: React.ReactNode;
+}
+
+function SegmentedControl<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: T;
+  options: Array<SegmentOption<T>>;
+  onChange: (next: T) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      style={{
+        display: 'inline-flex',
+        gap: '2px',
+        padding: '2px',
+        background: 'var(--color-bg)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-md)',
+      }}
+    >
+      {options.map(option => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => onChange(option.value)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              height: '28px',
+              padding: '0 12px',
+              borderRadius: 'var(--radius-sm)',
+              background: selected ? 'var(--color-surface)' : 'transparent',
+              color: selected ? 'var(--color-text)' : 'var(--color-text-secondary)',
+              boxShadow: selected ? 'var(--shadow-sm)' : 'none',
+              fontSize: 'var(--text-sm)',
+              fontFamily: 'var(--font-sans)',
+              fontWeight: selected ? 600 : 500,
+              transition: 'background 0.12s, color 0.12s',
+            }}
+          >
+            {option.icon}
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const ICON_SUN = (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <circle cx="8" cy="8" r="3.1" stroke="currentColor" strokeWidth="1.3" />
+    <path
+      d="M8 1v1.6M8 13.4V15M15 8h-1.6M2.6 8H1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1M12.9 12.9l-1.1-1.1M4.2 4.2L3.1 3.1"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const ICON_MOON = (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path
+      d="M13.5 9.6A5.9 5.9 0 0 1 6.4 2.5a5.9 5.9 0 1 0 7.1 7.1Z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const ICON_MONITOR = (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <rect x="1.6" y="2.6" width="12.8" height="8.6" rx="1.2" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M5.6 14h4.8M8 11.2V14" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+  </svg>
+);
+
+const THEME_OPTIONS: Array<SegmentOption<ThemeMode>> = [
+  { value: 'light',  label: 'Light',  icon: ICON_SUN },
+  { value: 'dark',   label: 'Dark',   icon: ICON_MOON },
+  { value: 'system', label: 'System', icon: ICON_MONITOR },
+];
+
+const TEXT_SIZE_OPTIONS: Array<SegmentOption<TextSize>> = [
+  { value: 'small',   label: 'Small' },
+  { value: 'default', label: 'Default' },
+  { value: 'large',   label: 'Large' },
+];
+
+function AccentPicker({ value, onChange }: { value: string; onChange: (next: typeof ACCENTS[number]['name']) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Accent colour" style={{ display: 'flex', gap: '10px' }}>
+      {ACCENTS.map(accent => {
+        const selected = accent.name === value;
+        return (
+          <button
+            key={accent.name}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={accent.label}
+            title={accent.label}
+            onClick={() => onChange(accent.name)}
+            style={{
+              width: '26px',
+              height: '26px',
+              borderRadius: '50%',
+              background: accentSwatch(accent.name),
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              boxShadow: selected
+                ? '0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-text)'
+                : 'none',
+              transition: 'box-shadow 0.12s',
+            }}
+          >
+            {/* A check, so the selection does not read by colour alone. */}
+            {selected && (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path
+                  d="M2.5 6.3L4.8 8.6L9.5 3.9"
+                  stroke="oklch(1 0 0)"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -383,6 +541,9 @@ function GitStatusPanel({ status }: { status: GitStatus }) {
 // ---------------------------------------------------------------------------
 
 export default function SettingsView() {
+  const { agenticVisualMode, theme, accent, textSize } = useAppState();
+  const dispatch = useAppDispatch();
+
   const [config,            setConfig]            = useState<WorkspaceConfig | null>(null);
   const [loading,           setLoading]           = useState(true);
   const [error,             setError]             = useState<string | null>(null);
@@ -676,12 +837,101 @@ export default function SettingsView() {
 
       {/* Section 3: Appearance */}
       <SectionCard title="Appearance">
-        <p style={{ margin: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
-          Theme customization coming soon.
+        <FieldRow label="Theme">
+          <SegmentedControl
+            ariaLabel="Theme"
+            value={theme}
+            options={THEME_OPTIONS}
+            onChange={next => dispatch({ type: 'SET_THEME', payload: next })}
+          />
+          {theme === 'system' && (
+            <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
+              Following your OS setting ({resolveTheme('system')}).
+            </span>
+          )}
+        </FieldRow>
+
+        <FieldRow label="Accent Color">
+          <AccentPicker
+            value={accent}
+            onChange={next => dispatch({ type: 'SET_ACCENT', payload: next })}
+          />
+        </FieldRow>
+
+        <FieldRow label="Text Size">
+          <SegmentedControl
+            ariaLabel="Text size"
+            value={textSize}
+            options={TEXT_SIZE_OPTIONS}
+            onChange={next => dispatch({ type: 'SET_TEXT_SIZE', payload: next })}
+          />
+        </FieldRow>
+
+        <p
+          style={{
+            margin: '16px 0 0 0',
+            fontSize: 'var(--text-xs)',
+            fontFamily: 'var(--font-sans)',
+            color: 'var(--color-text-muted)',
+            lineHeight: 1.5,
+          }}
+        >
+          Appearance is stored in this browser, not in the workspace. Other people opening
+          the same workspace keep their own settings.
         </p>
       </SectionCard>
 
-      {/* Section 4: About */}
+      {/* Section 4: Experimental */}
+      <SectionCard title="Experimental">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '16px',
+            padding: '4px 0',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <label
+              htmlFor="agentic-visual-mode"
+              style={{
+                display: 'block',
+                fontSize: 'var(--text-sm)',
+                fontFamily: 'var(--font-sans)',
+                fontWeight: 600,
+                color: 'var(--color-text)',
+                cursor: 'pointer',
+              }}
+            >
+              Agentic Visual Mode
+            </label>
+            <p
+              style={{
+                margin: '4px 0 0 0',
+                fontSize: 'var(--text-sm)',
+                fontFamily: 'var(--font-sans)',
+                color: 'var(--color-text-secondary)',
+                lineHeight: 1.5,
+                maxWidth: '62ch',
+              }}
+            >
+              Adds an <strong style={{ fontWeight: 600 }}>Agent Floor</strong> item to the sidebar,
+              below Kaizen. It draws your workspace as a pixel-art office: the backlog is a stack of
+              paper on a desk, agents walk over to pick up a task, read it, research it at the
+              bookshelf and the terminal, then carry the finished sheet to the Done desk. Everything
+              on screen is driven by real task files and live file-change events.
+            </p>
+          </div>
+          <Toggle
+            id="agentic-visual-mode"
+            label="Agentic Visual Mode"
+            checked={agenticVisualMode}
+            onChange={(next) => dispatch({ type: 'SET_AGENTIC_VISUAL_MODE', payload: next })}
+          />
+        </div>
+      </SectionCard>
+
+      {/* Section 5: About */}
       <SectionCard title="About">
         <AboutRow label="Version"        value="1.0.0" />
         <AboutRow label="API"            value={window.location.host} mono />

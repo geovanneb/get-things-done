@@ -14,11 +14,16 @@ import InsightsView from './views/InsightsView';
 import ProfileView from './views/ProfileView';
 import SettingsView from './views/SettingsView';
 import KaizenView from './views/KaizenView';
+import AgentFloorView from './views/AgentFloorView';
+import { useLiveEvents } from './hooks/useLiveEvents';
 import { apiGet } from './utils/api';
 import { WorkspaceConfig, GitStatus } from './types';
 
 function AppInitializer() {
   const dispatch = useAppDispatch();
+
+  // Live workspace updates (file watcher -> SSE -> refetch)
+  useLiveEvents();
 
   useEffect(() => {
     // Fetch workspace config
@@ -58,6 +63,7 @@ function AppRoutes() {
           <Route path="agents" element={<AgentsView />} />
           <Route path="insights" element={<InsightsView />} />
           <Route path="kaizen" element={<KaizenView />} />
+          <Route path="agent-floor" element={<AgentFloorView />} />
           <Route path="profile" element={<ProfileView />} />
           <Route path="settings" element={<SettingsView />} />
           <Route path="*" element={<Navigate to="/situation" replace />} />

@@ -264,34 +264,81 @@ export interface SituationData {
   recent_activity: { filename: string; event: string; timestamp: string }[];
 }
 
+/** One row in a ranked horizontal-bar panel. */
+export interface InsightsBar {
+  /** Stable key — a stakeholder id, template id, task id or bucket label. */
+  key: string;
+  label: string;
+  /** Secondary line under the label (role, organization, format). */
+  sublabel?: string;
+  value: number;
+  /** Where clicking the row should go, when the row maps to a page. */
+  href?: string;
+}
+
+/** A task that wants the user's attention, and why. */
+export interface InsightsAttentionItem {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  priority: Priority;
+  due_date?: string;
+  /** Why this is on the list, most urgent reason first. */
+  reason: 'review' | 'overdue' | 'due_soon' | 'stalled';
+  /** Days since the task last moved. Drives the "waiting 3d" label. */
+  waiting_days: number;
+  /** Days until due; negative means overdue. Absent when there is no due date. */
+  days_to_due?: number;
+  /** Resolved stakeholder names, so the row reads without a second lookup. */
+  stakeholders: string[];
+}
+
 export interface InsightsData {
-  cumulative_flow: {
-    date: string;
-    backlog: number;
-    ready: number;
-    in_progress: number;
-    blocked: number;
-    review: number;
-    done: number;
-  }[];
-  cycle_time: {
-    title: string;
-    days: number;
-    priority: Priority;
-  }[];
-  due_date_risk: {
-    overdue: number;
-    due_3d: number;
-    due_7d: number;
-    due_14d: number;
-    safe: number;
-  };
-  throughput: {
-    week: string;
+  generated_at: string;
+  /** Window the payload was computed over. `null` means all time. */
+  window_days: number | null;
+
+  summary: {
+    /** Tasks parked in Needs Review, waiting on the user. */
+    awaiting_review: number;
+    /** Days the oldest of those has been waiting. */
+    awaiting_review_oldest_days: number;
+    /** Tasks finished inside the window. */
     completed: number;
-  }[];
-  avg_cycle_time?: number;
-  throughput_this_week?: number;
-  completion_rate?: number;
-  tasks_at_risk?: number;
+    /** Tasks still open (not done, not archived). */
+    open: number;
+    /** Open tasks already past their due date. */
+    overdue: number;
+    /** Hours from task creation to completion. Median and p90, never a mean —
+     *  the distribution is far too skewed for an average to mean anything. */
+    median_turnaround_hours: number | null;
+    p90_turnaround_hours: number | null;
+    /** Share of completed tasks an agent got right in a single run. */
+    first_pass_rate: number | null;
+    first_pass_of: number;
+    /** Share of completed tasks that met their due date. */
+    on_time_rate: number | null;
+    on_time_of: number;
+    /** Median hours finished work waited in Needs Review before sign-off. */
+    median_review_hours: number | null;
+    review_of: number;
+  };
+
+  /** What is waiting on the user, most urgent first. */
+  attention: InsightsAttentionItem[];
+
+  /** Task count per stakeholder, descending. */
+  by_stakeholder: InsightsBar[];
+  /** Task count per output template, descending. */
+  by_output: InsightsBar[];
+  /** Tasks that needed more than one agent run, descending by run count. */
+  rework: InsightsBar[];
+  /** Kaizen entries grouped by area. */
+  kaizen: InsightsBar[];
+
+  /** Tasks created vs completed, per week, oldest first. */
+  weekly: Array<{ week: string; created: number; completed: number }>;
+
+  /** Turnaround histogram over ordered buckets. */
+  turnaround_buckets: Array<{ label: string; count: number }>;
 }

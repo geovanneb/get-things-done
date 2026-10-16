@@ -45,6 +45,8 @@ export default function AppLayout() {
         onClose={() => dispatch({ type: 'CLOSE_NEW_TASK_MODAL' })}
         onCreated={(task) => {
           dispatch({ type: 'CLOSE_NEW_TASK_MODAL' });
+          // Tell any open task list to pick the new card up right away.
+          dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
           navigate(`/board/task/${task.id}`);
         }}
       />
