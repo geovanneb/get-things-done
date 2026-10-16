@@ -4,7 +4,7 @@
 
 **Your executive workload, as plain Markdown files your AI can actually work with.**
 
-[![npm](https://img.shields.io/npm/v/getthingsdone.svg)](https://www.npmjs.com/package/getthingsdone)
+[![npm](https://img.shields.io/npm/v/@bertonha/getthingsdone.svg)](https://www.npmjs.com/package/@bertonha/getthingsdone)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
 
@@ -42,7 +42,7 @@ folder of Markdown files you can back up, move, or put in a private git repo. No
 account, no cloud, no telemetry.
 
 ```bash
-npm install -g getthingsdone
+npm install -g @bertonha/getthingsdone
 mkdir my-workspace && cd my-workspace
 gtd init
 gtd start
@@ -89,7 +89,7 @@ app and you still have everything.
 Requires **Node.js 18 or newer**.
 
 ```bash
-npm install -g getthingsdone
+npm install -g @bertonha/getthingsdone
 ```
 
 This installs the `gtd` command globally. The application lives in your global
@@ -404,7 +404,7 @@ files fell into which bucket.
 ## Upgrading
 
 ```bash
-npm update -g getthingsdone
+npm update -g @bertonha/getthingsdone
 gtd stop
 gtd upgrade
 gtd start

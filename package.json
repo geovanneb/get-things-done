@@ -1,7 +1,7 @@
 {
-  "name": "getthingsdone",
-  "version": "0.1.0",
-  "description": "Get Things Done \u2014 a local GTD workspace for executives. Kanban dashboard over plain Markdown files, with AI agent integration.",
+  "name": "@bertonha/getthingsdone",
+  "version": "0.1.1",
+  "description": "Get Things Done — a local GTD workspace for executives. Kanban dashboard over plain Markdown files, with AI agent integration.",
   "keywords": [
     "gtd",
     "get-things-done",
