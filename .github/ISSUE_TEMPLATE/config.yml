@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/geovanneb/get-things-done/discussions
+    about: Ask questions and share how you use Get Things Done.
+  - name: Report a security vulnerability
+    url: https://github.com/geovanneb/get-things-done/security/advisories/new
+    about: Please report security issues privately.
