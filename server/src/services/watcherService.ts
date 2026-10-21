@@ -1,4 +1,5 @@
-import chokidar, { FSWatcher } from 'chokidar';
+import * as path from 'path';
+import { watch, FSWatcher } from 'chokidar';
 import { FileWatchEvent } from '../types';
 
 type WatchEventType = 'change' | 'add' | 'unlink';
@@ -15,14 +16,18 @@ export class WatcherService {
       this.stop();
     }
 
-    this.watcher = chokidar.watch(`${workspacePath}/**/*.md`, {
-      ignored: [
-        /node_modules/,
-        /\.git/,
-        /\.tmp$/,
-        `${workspacePath}/.situation-board/cache/**`,
-        `${workspacePath}/.situation-board/logs/**`,
-      ],
+    // chokidar 4+ no longer expands globs, so watch the folder and filter here.
+    const skipDirs = [
+      path.join(workspacePath, '.situation-board', 'cache'),
+      path.join(workspacePath, '.situation-board', 'logs'),
+    ];
+    this.watcher = watch(workspacePath, {
+      ignored: (filePath, stats) => {
+        if (/node_modules|\.git(\/|$)|\.tmp$/.test(filePath)) return true;
+        if (skipDirs.some((dir) => filePath === dir || filePath.startsWith(dir + path.sep))) return true;
+        // Only Markdown files matter; directories must pass so their contents are watched.
+        return Boolean(stats?.isFile()) && !filePath.endsWith('.md');
+      },
       persistent: true,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },

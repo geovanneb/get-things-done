@@ -69,6 +69,25 @@ try {
   const insights = await (await fetch(`${base}/api/insights`)).json();
   check('insights count work waiting on review', insights.summary?.awaiting_review === 1);
 
+  // Live updates: an agent editing a task file on disk must reach the dashboard over SSE.
+  const sse = await fetch(`${base}/api/events`);
+  const reader = sse.body.getReader();
+  let streamed = '';
+  const sawChange = (async () => {
+    const until = Date.now() + 8000;
+    while (Date.now() < until && !streamed.includes('event: file_change')) {
+      const { value, done } = await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r({}), 500))]);
+      if (done) break;
+      if (value) streamed += new TextDecoder().decode(value);
+    }
+    return streamed.includes('event: file_change');
+  })();
+  await new Promise((r) => setTimeout(r, 1000)); // let the watcher settle
+  const edited = path.join(ws, 'tasks', 'active', tasks[0].id, 'task.md');
+  fs.appendFileSync(edited, '\nEdited outside the app.\n');
+  check('editing a task file on disk pushes a live update', await sawChange);
+  await reader.cancel();
+
   const task = tasks.find((t) => t.status === 'ready');
   const moved = await (await fetch(`${base}/api/tasks/${task.id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }),
@@ -79,6 +98,23 @@ try {
   const errors = issues.filter((i) => i.level === 'error');
   check('a workspace edited through the app has no validation errors', errors.length === 0,
     errors.length ? JSON.stringify(errors.slice(0, 3)) : '');
+
+  // Git integration: the dashboard can show status, stage and commit in a workspace repo.
+  const git = (...args) => execFileSync('git', ['-C', ws, ...args], { env, stdio: 'pipe' });
+  git('init', '-q');
+  git('config', 'user.name', 'Smoke Test');
+  git('config', 'user.email', 'smoke@example.com');
+  git('config', 'commit.gpgsign', 'false');
+  const post = (url, body) => fetch(`${base}${url}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const status = await (await fetch(`${base}/api/workspace/git/status`)).json();
+  check('git status sees the workspace files', status.is_repo === true && status.untracked.length > 0,
+    `is_repo=${status.is_repo} untracked=${status.untracked?.length}`);
+  check('git stage works', (await post('/api/workspace/git/stage', { file: 'README.md' })).ok);
+  check('git commit works', (await post('/api/workspace/git/commit', { message: 'Smoke test commit' })).ok);
+  const log = await (await fetch(`${base}/api/workspace/git/log`)).json();
+  check('git log shows the commit', log[0]?.message === 'Smoke test commit', `log=${JSON.stringify(log[0] ?? null)}`);
 } catch (err) {
   check('smoke test ran to the end', false, String(err));
 } finally {
