@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, createContext, useContext } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
-import { Task } from '../types';
+import { Task, Stakeholder } from '../types';
 import Badge from '../components/common/Badge';
 import Avatar from '../components/common/Avatar';
 import Input from '../components/common/Input';
@@ -43,17 +43,25 @@ function DueDateChip({ dueDate }: { dueDate?: string }) {
 }
 
 /* ---- Stakeholder avatars ------------------------------------------ */
+// Task cards only carry stakeholder refs (STK-0001…). The board loads the stakeholders once and
+// shares them here, so avatars show the person's initials and name instead of "S" for "STK-…".
+const StakeholderLookup = createContext<Map<string, Stakeholder>>(new Map());
+
 function StakeholderAvatars({ refs, max = 3 }: { refs: Task['stakeholders']; max?: number }) {
+  const lookup = useContext(StakeholderLookup);
   if (!refs.length) return null;
   const visible = refs.slice(0, max);
   const overflow = refs.length - max;
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
-      {visible.map((s, i) => (
-        <div key={s.ref} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: max - i }}>
-          <Avatar name={s.ref} size="sm" />
-        </div>
-      ))}
+      {visible.map((s, i) => {
+        const stk = lookup.get(s.ref);
+        return (
+          <div key={s.ref} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: max - i }}>
+            <Avatar name={stk?.name ?? s.ref} initials={stk?.avatar_initials} size="sm" />
+          </div>
+        );
+      })}
       {overflow > 0 && (
         <span style={{
           marginLeft: -8,
@@ -257,8 +265,11 @@ function KanbanCol({
         e.preventDefault();
         setDragOver(false);
         const taskId = e.dataTransfer.getData('text/plain');
-        const targetStatus = column.statuses[column.statuses.length > 1 ? 1 : 0];
-        onDrop(taskId, targetStatus);
+        // Dropping within the same column keeps the task's own status (e.g. `blocked` stays blocked).
+        if (tasks.some((t) => t.id === taskId)) return;
+        // A column's first status is its canonical one: backlog, in_progress, in_review, done.
+        // (Using the second one made a drop into In Progress set `blocked` and into Done set `approved`.)
+        onDrop(taskId, column.statuses[0]);
       }}
       style={{
         flex: '1 1 0',
@@ -442,6 +453,12 @@ export default function BoardView() {
   // between columns, or an agent editing task.md on disk.
   const tasksVersion = useDataVersion('tasks');
   const { data, loading, refetch } = useApi<Task[]>('/api/tasks', [tasksVersion]);
+  const stakeholdersVersion = useDataVersion('stakeholders');
+  const { data: stakeholders } = useApi<Stakeholder[]>('/api/stakeholders', [stakeholdersVersion]);
+  const stakeholderLookup = useMemo(
+    () => new Map((stakeholders ?? []).map((s) => [s.id, s] as const)),
+    [stakeholders],
+  );
 
   const openNewTask = useCallback((defaultStatus: Task['status']) => {
     dispatch({ type: 'OPEN_NEW_TASK_MODAL', payload: defaultStatus });
@@ -470,7 +487,7 @@ export default function BoardView() {
   const priorities: PriorityFilter[] = ['all', 'critical', 'high', 'medium', 'low'];
 
   return (
-    <>
+    <StakeholderLookup.Provider value={stakeholderLookup}>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Tabs */}
       <div style={{
@@ -605,6 +622,6 @@ export default function BoardView() {
 
     </div>
     <Outlet context={{ refetchTasks: refetch }} />
-    </>
+    </StakeholderLookup.Provider>
   );
 }
