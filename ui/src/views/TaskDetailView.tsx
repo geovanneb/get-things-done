@@ -7,6 +7,8 @@ import { Task, Stakeholder } from '../types';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import MarkdownView from '../components/common/MarkdownView';
+import MarkdownEditor from '../components/common/MarkdownEditor';
 import StakeholderPicker from '../components/task-form/StakeholderPicker';
 import DeliverableList from '../components/task-form/DeliverableList';
 import { selectStyle, dateInputStyle } from '../components/task-form/styles';
@@ -73,29 +75,9 @@ function MarkdownSection({ label, content, onSave }: { label: string; content: s
         )}
       </div>
       {editing ? (
-        <textarea
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          rows={6}
-          autoFocus
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: 'var(--text-base)',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--color-text)',
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border-strong)',
-            borderRadius: 'var(--radius-md)',
-            outline: 'none',
-            resize: 'vertical',
-            lineHeight: 1.5,
-          }}
-        />
+        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus />
       ) : (
-        <div style={{ fontSize: 'var(--text-base)', color: 'var(--color-text)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
-          {content || <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>No content</span>}
-        </div>
+        <MarkdownView content={content} />
       )}
     </div>
   );

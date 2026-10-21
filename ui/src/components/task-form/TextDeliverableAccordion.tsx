@@ -1,7 +1,11 @@
 import React from 'react';
+import MarkdownView from '../common/MarkdownView';
 
-/** Inline expandable preview + copy for a TXT-format deliverable's generated content. */
-export default function TextDeliverableAccordion({ filePath }: { filePath: string }) {
+/**
+ * Inline expandable preview + copy for a TXT- or MD-format deliverable's generated content.
+ * Markdown is shown rendered; Copy always copies the raw text.
+ */
+export default function TextDeliverableAccordion({ filePath, markdown = false }: { filePath: string; markdown?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const [content, setContent] = React.useState<string | null>(null);
   const [fetching, setFetching] = React.useState(false);
@@ -52,7 +56,7 @@ export default function TextDeliverableAccordion({ filePath }: { filePath: strin
           <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span style={{ flex: 1, fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-          Generated text
+          {markdown ? 'Preview' : 'Generated text'}
         </span>
         {content && (
           <button
@@ -100,6 +104,8 @@ export default function TextDeliverableAccordion({ filePath }: { filePath: strin
         }}>
           {fetching ? (
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>Loading...</span>
+          ) : content && markdown ? (
+            <MarkdownView content={content} compact />
           ) : content ? (
             <pre style={{
               margin: 0,

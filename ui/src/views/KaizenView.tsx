@@ -4,6 +4,7 @@ import { KaizenProposal } from '../types';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
+import MarkdownView from '../components/common/MarkdownView';
 import { formatRelativeTime } from '../utils/format';
 
 /* ---- Status helpers -------------------------------------------------- */
@@ -269,9 +270,7 @@ function Section({ title, body }: { title: string; body: string }) {
   return (
     <div>
       <div style={sectionLabel}>{title}</div>
-      <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.6, margin: 0 }}>
-        {body}
-      </p>
+      <MarkdownView content={body} emptyText="—" compact />
     </div>
   );
 }

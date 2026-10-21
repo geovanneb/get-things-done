@@ -10,10 +10,12 @@
     "test:agent-floor": "tsx src/components/agentic/engine/simulation.test.ts"
   },
   "dependencies": {
+    "date-fns": "^3.6.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
     "react-router-dom": "^6.22.3",
-    "date-fns": "^3.6.0"
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",

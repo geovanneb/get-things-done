@@ -4,6 +4,7 @@ import Input from '@/components/common/Input';
 import Modal from '@/components/common/Modal';
 import EmptyState from '@/components/common/EmptyState';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import MarkdownEditor from '@/components/common/MarkdownEditor';
 import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api';
 import { formatRelativeDate } from '@/utils/format';
 import type { ContextNote } from '@/types';
@@ -254,8 +255,8 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
 
         <div>
           <label style={labelStyle}>Content (Markdown)</label>
-          <textarea value={form.body} onChange={(e) => set('body', e.target.value)} rows={8}
-            placeholder="Write context note content in Markdown..." style={textareaStyle} />
+          <MarkdownEditor value={form.body} onChange={(v) => set('body', v)} rows={8}
+            placeholder="Write context note content in Markdown..." textareaStyle={textareaStyle} />
         </div>
 
         {effectiveNote?.id && (
