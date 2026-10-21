@@ -211,7 +211,10 @@ If the executive comes back with feedback on a task that is already \`in_review\
       updated_at: now,
     };
 
-    const { path: _path, body: _body, ...frontmatter } = task;
+    const { path: _path, body: _body, ...fields } = task;
+    // .schemas/task.schema.json requires schema_version and type; write them like every other
+    // workspace file so tasks created from the board validate against the workspace schema.
+    const frontmatter = { schema_version: '1.0', type: 'task', ...fields };
     const content = typeof data.body === 'string' ? data.body : (data.description || '');
     await fileService.writeMarkdown(path.join(taskDir, 'task.md'), frontmatter as Record<string, unknown>, content);
     const created = { ...task, path: path.join(taskDir, 'task.md') };

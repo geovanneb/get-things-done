@@ -2,7 +2,7 @@
 id: OUT-executive-deck
 slug: executive-deck
 name: Executive deck
-format: PPTX
+format: pptx
 description: A slide deck for an executive or board audience
 required_sections:
   - Title

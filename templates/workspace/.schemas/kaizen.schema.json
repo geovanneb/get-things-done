@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KaizenProposal",
+  "description": "Frontmatter of kaizen/KAIZEN-YYYY-NNN.md. Mirrors what server/src/services/kaizenService.ts reads and writes; /gtd-task (Step 10) and /gtd-kaizen refer to this file.",
+  "type": "object",
+  "required": ["id", "title", "status", "root_cause", "proposed_fix", "files_affected", "created_at"],
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "id": {"type": "string", "pattern": "^KAIZEN-\\d{4}-\\d{3}$"},
+    "type": {"type": "string", "enum": ["kaizen"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "status": {"type": "string", "enum": ["proposed", "applied", "rejected"]},
+    "area": {"type": "string", "description": "Optional grouping, e.g. instructions, templates, commands."},
+    "task_ref": {"type": "string", "pattern": "^TASK-\\d{4}-\\d{4}$", "description": "The task whose rework triggered the proposal."},
+    "root_cause": {"type": "string", "minLength": 1, "description": "What instruction or signal was missing (the cause, not the symptom)."},
+    "proposed_fix": {"type": "string", "minLength": 1, "description": "The concrete change to a harness file that prevents recurrence."},
+    "files_affected": {"type": "array", "items": {"type": "string"}, "description": "Workspace-relative paths to change."},
+    "created_at": {"type": "string", "format": "date-time"},
+    "applied_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
+  },
+  "additionalProperties": true
+}

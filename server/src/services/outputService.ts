@@ -7,6 +7,14 @@ import { WorkspaceService } from './workspace';
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
 
+/**
+ * The output-template schema and task deliverables use lower-case formats ("pptx"), but templates
+ * written by hand (and the ones shipped before this fix) say "PPTX". Normalise on read so both work.
+ */
+function normaliseFormat(format: unknown): OutputFormat {
+  return (typeof format === 'string' && format.trim() ? format.trim().toLowerCase() : 'md') as OutputFormat;
+}
+
 export class OutputService {
   private getTemplatesDir(): string {
     return path.join(workspaceService.getWorkspacePath(), 'outputs', 'templates');
@@ -24,6 +32,7 @@ export class OutputService {
         const { data } = await fileService.readMarkdown<OutputTemplate>(filePath);
         results.push({
           ...data,
+          format: normaliseFormat(data.format),
           tags: data.tags ?? [],
           required_sections: data.required_sections ?? [],
           created_at: data.created_at || new Date().toISOString(),
@@ -46,6 +55,7 @@ export class OutputService {
     return {
       ...data,
       id,
+      format: normaliseFormat(data.format),
       tags: data.tags ?? [],
       required_sections: data.required_sections ?? [],
       created_at: data.created_at || new Date().toISOString(),

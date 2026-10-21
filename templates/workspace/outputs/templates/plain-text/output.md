@@ -2,7 +2,7 @@
 id: OUT-plain-text
 slug: plain-text
 name: Plain text message
-format: TXT
+format: txt
 description: Plain text to paste into chat, email, or a messaging app
 required_sections: []
 style_guide: |-
