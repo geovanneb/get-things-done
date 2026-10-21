@@ -124,7 +124,7 @@ export class SituationService {
         slug: t.id,
         due_date: t.due_date!,
         stakeholders: t.stakeholder_refs ?? [],
-        task_type: 'ad_hoc',
+        task_type: typeof t['task_type'] === 'string' ? t['task_type'] : 'ad_hoc',
       }));
 
     // Status counts

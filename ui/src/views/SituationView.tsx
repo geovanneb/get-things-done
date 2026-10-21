@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { SituationData } from '../types';
 import Avatar from '../components/common/Avatar';
+import { useStakeholderNames } from '../hooks/useStakeholderNames';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
@@ -89,14 +90,15 @@ function DueDateChip({ dueDate }: { dueDate?: string }) {
 
 /* ---- Stakeholder avatars ------------------------------------------ */
 function StakeholderAvatars({ names, max = 3 }: { names: string[]; max?: number }) {
+  const nameOf = useStakeholderNames();
   if (!names.length) return null;
   const visible = names.slice(0, max);
   const overflow = names.length - max;
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
       {visible.map((name, i) => (
-        <div key={name} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: max - i }}>
-          <Avatar name={name} size="sm" />
+        <div key={name} style={{ marginLeft: i > 0 ? -4 : 0, zIndex: max - i }}>
+          <Avatar name={nameOf(name)} size="sm" />
         </div>
       ))}
       {overflow > 0 && (

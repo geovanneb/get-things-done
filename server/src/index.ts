@@ -93,6 +93,11 @@ function broadcastEvent(event: FileWatchEvent): void {
   }
 }
 
+// Unknown API paths get a JSON 404 instead of falling through to the UI's index.html
+app.use('/api', (_req: Request, res: Response) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 // Serve pre-built UI in production mode
 const uiPath = process.env['ESB_UI_PATH'];
 if (uiPath && fs.existsSync(uiPath)) {

@@ -57,7 +57,7 @@ function StakeholderAvatars({ refs, max = 3 }: { refs: Task['stakeholders']; max
       {visible.map((s, i) => {
         const stk = lookup.get(s.ref);
         return (
-          <div key={s.ref} style={{ marginLeft: i > 0 ? -8 : 0, zIndex: max - i }}>
+          <div key={s.ref} style={{ marginLeft: i > 0 ? -4 : 0, zIndex: max - i }}>
             <Avatar name={stk?.name ?? s.ref} initials={stk?.avatar_initials} size="sm" />
           </div>
         );
