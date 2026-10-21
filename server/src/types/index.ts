@@ -1,7 +1,7 @@
 export type TaskStatus = 'backlog' | 'ready' | 'in_progress' | 'blocked' | 'review' | 'done' | 'in_review' | 'approved' | 'archived';
 export type Priority = 'critical' | 'high' | 'medium' | 'low';
-export type InfluenceLevel = 'decision_maker' | 'influencer' | 'informed' | 'executor';
-export type OutputFormat = 'pptx' | 'docx' | 'pdf' | 'md' | 'xlsx' | 'html';
+export type InfluenceLevel = 'decision_maker' | 'influencer' | 'informed' | 'executor' | 'sponsor';
+export type OutputFormat = 'pptx' | 'docx' | 'pdf' | 'md' | 'xlsx' | 'html' | 'txt';
 export type ContextCategory = 'company' | 'organization' | 'strategy' | 'programs' | 'decisions' | 'risks' | 'glossary' | 'situation';
 export type AgentScope = 'workspace' | 'global';
 export type ValidationLevel = 'error' | 'warning' | 'info';

@@ -2,7 +2,7 @@
 id: OUT-executive-document
 slug: executive-document
 name: Executive document
-format: PDF
+format: pdf
 description: A structured written document for a senior audience
 required_sections:
   - Executive summary

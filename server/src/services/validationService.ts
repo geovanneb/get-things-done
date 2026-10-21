@@ -4,6 +4,7 @@ import { Task, Stakeholder, ValidationResult } from '../types';
 import { TaskService } from './taskService';
 import { StakeholderService } from './stakeholderService';
 import { OutputService } from './outputService';
+import { isDone, isOpen } from './taskStatus';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -18,11 +19,17 @@ const taskSchema = {
   properties: {
     id: { type: 'string', pattern: '^TASK-\\d{4}-\\d{4}$' },
     title: { type: 'string', minLength: 1 },
-    status: { type: 'string', enum: ['backlog', 'ready', 'in_progress', 'blocked', 'review', 'done', 'archived'] },
+    // Every status the app itself writes or reads (see TaskStatus). `in_review` is what agents set when
+    // they finish; `approved` is the legacy spelling of Done that older workspaces still carry.
+    status: {
+      type: 'string',
+      enum: ['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'],
+    },
     priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
     due_date: { type: 'string', format: 'date' },
-    start_date: { type: 'string', format: 'date' },
-    done_date: { type: 'string', format: 'date' },
+    // stampStatusDates() and the workspace rules write full ISO timestamps; plain dates are still accepted.
+    start_date: { type: 'string', anyOf: [{ format: 'date' }, { format: 'date-time' }] },
+    done_date: { type: 'string', anyOf: [{ format: 'date' }, { format: 'date-time' }] },
     created_at: { type: 'string', format: 'date-time' },
     updated_at: { type: 'string', format: 'date-time' },
   },
@@ -34,7 +41,7 @@ const stakeholderSchema = {
   properties: {
     id: { type: 'string', pattern: '^STK-\\d{4}$' },
     name: { type: 'string', minLength: 1 },
-    influence: { type: 'string', enum: ['decision_maker', 'influencer', 'informed', 'executor'] },
+    influence: { type: 'string', enum: ['decision_maker', 'influencer', 'informed', 'executor', 'sponsor'] },
     email: { type: 'string', format: 'email' },
   },
 };
@@ -66,23 +73,28 @@ export class ValidationService {
 
     // Date logic checks
     if (task.due_date && task.start_date) {
-      if (new Date(task.due_date) < new Date(task.start_date)) {
+      // Compare calendar days: due_date is a date, start_date is usually a timestamp, and a task
+      // started on its due day is not late.
+      if (task.due_date.slice(0, 10) < task.start_date.slice(0, 10)) {
         results.push({ level: 'error', rule: 'date_logic', message: 'due_date must be after start_date', path: 'due_date' });
       }
     }
 
-    if (task.done_date && task.status !== 'done' && task.status !== 'archived') {
+    if (task.done_date && !isDone(task.status) && task.status !== 'archived') {
       results.push({ level: 'warning', rule: 'date_logic', message: 'Task has done_date but status is not done or archived', path: 'done_date' });
     }
 
-    if (task.status === 'done' && !task.done_date) {
+    if (isDone(task.status) && !task.done_date) {
       results.push({ level: 'info', rule: 'best_practice', message: 'Completed task should have a done_date', path: 'done_date' });
     }
 
     // Overdue check
-    if (task.due_date && task.status !== 'done' && task.status !== 'archived') {
-      const dueDate = new Date(task.due_date);
-      if (dueDate < new Date()) {
+    if (task.due_date && isOpen(task.status)) {
+      // Compare calendar days in local time: `new Date('2026-10-21')` is midnight UTC, which made every
+      // task "overdue" on its own due date.
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      if (task.due_date.slice(0, 10) < today) {
         results.push({ level: 'warning', rule: 'overdue', message: `Task is overdue since ${task.due_date}`, path: 'due_date' });
       }
     }

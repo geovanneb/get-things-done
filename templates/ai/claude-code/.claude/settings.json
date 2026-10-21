@@ -9,15 +9,17 @@
       "Bash(git diff)",
       "WebSearch(*)"
     ],
+    "ask": [
+      "Write(stakeholders/**)",
+      "Write(context/**)",
+      "Write(outputs/**)"
+    ],
     "deny": [
       "Bash(git push*)",
       "Bash(git reset --hard*)",
       "Bash(rm -rf*)",
       "Write(.claude/**)",
       "Write(profile/**)",
-      "Write(stakeholders/**)",
-      "Write(context/**)",
-      "Write(outputs/**)",
       "Write(.schemas/**)"
     ]
   }

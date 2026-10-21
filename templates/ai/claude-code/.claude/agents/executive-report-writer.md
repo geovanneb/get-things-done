@@ -44,7 +44,7 @@ Read files in this exact order — do not skip steps:
 - After completing each deliverable, update `task.md`:
   - Read the file first
   - Set the deliverable `status` to `"complete"`
-  - Add `file_path` pointing to the created file
+  - Add `file_path` as the workspace-relative path of the created file (e.g. `tasks/active/TASK-2026-0001/deliverables/DEL-01.pptx`)
   - Update `updated_at` to the current ISO timestamp
   - Write the file back, preserving all other frontmatter exactly
 - Log your execution to: `tasks/active/<TASK-ID>/executions/<ISO-timestamp>.md`
