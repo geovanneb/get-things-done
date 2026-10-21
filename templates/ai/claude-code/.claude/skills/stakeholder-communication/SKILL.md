@@ -163,11 +163,11 @@ Open items (no decision yet):
 | Board / C-suite | Crisp, confident, data-backed | Hedging, excessive caveats, jargon |
 | Peers / direct reports | Clear, direct, collegial | Overly formal language, passive voice |
 | External clients | Professional, client-centric | Internal jargon, assumptions |
-| Japan office | Formal, deferential to seniority | Directness that skips context, blunt refusals |
+| Japanese counterparts | Formal, deferential to seniority | Directness that skips context, blunt refusals |
 
 ## Japanese business communication notes
 
-When communicating with the Japan office or Japanese counterparts:
+When communicating with Japanese colleagues, partners or clients:
 
 ### Keigo (敬語) register
 - **Sonkeigo (尊敬語)**: Use when speaking about the actions of someone senior to you
@@ -175,7 +175,7 @@ When communicating with the Japan office or Japanese counterparts:
 - **Teineigo (丁寧語)**: Standard polite form (desu/masu); appropriate for most business written communication
 
 ### Nemawashi (根回し)
-Before a formal decision is requested, key stakeholders should be consulted individually and informally. This process of building consensus in advance is expected and skipping it can be perceived as disrespectful. For any significant decision involving the Japan office, plan for a nemawashi phase before the formal request.
+Before a formal decision is requested, key stakeholders should be consulted individually and informally. This process of building consensus in advance is expected and skipping it can be perceived as disrespectful. For any significant decision involving Japanese stakeholders, plan for a nemawashi phase before the formal request.
 
 ### Practical conventions
 - Open with a seasonal greeting in formal letters: 「時下ますますご清栄のこととお喜び申し上げます」

@@ -1,0 +1,7 @@
+# Default reviewer for everything
+* @geovanneb
+
+# Pipeline and release changes always need the maintainer
+/.github/ @geovanneb
+/package.json @geovanneb
+/package-lock.json @geovanneb

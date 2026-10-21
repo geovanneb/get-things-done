@@ -4,28 +4,49 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# Read-only by default. Pull requests from forks never get write access or secrets.
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run that is still going.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build and test (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
-        node: ['18', '20', '22']
+        # 20.19.0 is the floor in package.json engines: the CLI require()s ESM-only
+        # packages (chalk, ora, open), which older Node versions cannot load.
+        node: ['20.19.0', '22', '24']
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run build
+      - run: npm test
       - name: Verify the tarball contents
+        # --ignore-scripts: the build already ran. Without it npm pack runs the
+        # lifecycle scripts again and their output corrupts the JSON on stdout.
         run: |
-          npm pack --dry-run --json > pack.json
+          npm pack --dry-run --json --ignore-scripts > pack.json
           node -e "
             const files = require('./pack.json')[0].files.map(f => f.path);
             const leaked = files.filter(f =>
               f.startsWith('executive-workspace/') ||
+              f.startsWith('scripts/') ||
               f.includes('node_modules/') ||
               f.endsWith('.DS_Store')
             );
@@ -41,3 +62,27 @@ jobs:
             }
             console.log('Tarball OK:', files.length, 'files');
           "
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Report only: known advisories show up as a warning and in the job summary
+      # without failing the PR. Dependabot opens the actual upgrade PRs.
+      - name: Report production advisories
+        run: |
+          if npm audit --omit=dev --audit-level=high > audit.txt; then
+            echo "No high or critical advisories in production dependencies." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=npm audit::High or critical advisories in production dependencies. See the job summary."
+            { echo '### npm audit (production dependencies)'; echo '```'; cat audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi

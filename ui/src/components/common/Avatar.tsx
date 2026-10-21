@@ -21,7 +21,8 @@ function hashColor(name: string): string {
 }
 
 const sizeMap: Record<AvatarSize, { size: number; fontSize: string }> = {
-  sm: { size: 24, fontSize: 'var(--text-xs)' },
+  // Two initials have to fit inside 24px, so the small size uses a fixed, tighter font.
+  sm: { size: 24, fontSize: '10px' },
   md: { size: 32, fontSize: 'var(--text-sm)' },
   lg: { size: 44, fontSize: 'var(--text-md)' },
 };
@@ -46,6 +47,9 @@ export default function Avatar({ name, size = 'md', color, initials: explicitIni
         color: 'oklch(1 0 0)',
         fontSize,
         fontWeight: 600,
+        letterSpacing: '-0.02em',
+        // A ring in the surface colour keeps overlapping avatars in a stack readable.
+        boxShadow: '0 0 0 2px var(--color-surface)',
         flexShrink: 0,
         userSelect: 'none',
       }}

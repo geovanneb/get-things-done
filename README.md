@@ -5,8 +5,13 @@
 **Your executive workload, as plain Markdown files your AI can actually work with.**
 
 [![npm](https://img.shields.io/npm/v/@bertonha/getthingsdone.svg)](https://www.npmjs.com/package/@bertonha/getthingsdone)
+[![CI](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml/badge.svg)](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
+[![node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](https://nodejs.org)
+
+<img src="docs/screenshots/board.png" alt="The Get Things Done kanban board with tasks in Backlog, In Progress, Needs Review and Done" width="900">
+
+<sub>All names, companies and numbers in these screenshots are fictional.</sub>
 
 </div>
 
@@ -66,8 +71,42 @@ app and you still have everything.
 
 ---
 
+## A quick tour
+
+**Situation** is your morning view: what is overdue, blocked or due soon, what you
+are focused on, and what changed in the workspace.
+
+<img src="docs/screenshots/situation.png" alt="Situation view with overdue, due soon and blocked counts, a needs-attention list and upcoming commitments" width="900">
+
+**Tasks** carry the objective, the stakeholders, the deliverables and the output
+template they follow. Copy the `/gtd-task` command and hand it to your AI agent.
+
+<img src="docs/screenshots/task-detail.png" alt="Task detail with objective, deliverables linked to output templates, stakeholders and the slash command" width="900">
+
+**Stakeholders** record who people are and what matters to them, so agents write to a
+CFO differently than to a partner.
+
+<img src="docs/screenshots/stakeholders.png" alt="Stakeholder list with roles, organizations and what matters to each person" width="900">
+
+**Insights** show what is waiting on you, how long work takes, and who your work is
+really for.
+
+<img src="docs/screenshots/insights.png" alt="Insights view with turnaround, first-pass rate, attention list and work per stakeholder" width="900">
+
+**Agent Floor** is an optional pixel-art view of your agents picking up, working on
+and handing in tasks. Turn it on under Settings.
+
+<img src="docs/screenshots/agent-floor.png" alt="Pixel-art Agent Floor showing agents moving between the backlog, review and done desks" width="900">
+
+Light and dark themes are built in.
+
+<img src="docs/screenshots/board-dark.png" alt="The board in dark mode" width="900">
+
+---
+
 ## Table of contents
 
+- [A quick tour](#a-quick-tour)
 - [Install](#install)
 - [Your first workspace](#your-first-workspace)
 - [Core concepts](#core-concepts)
@@ -80,13 +119,14 @@ app and you still have everything.
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
 
 ## Install
 
-Requires **Node.js 18 or newer**.
+Requires **Node.js 20.19 or newer** (22 or 24 recommended).
 
 ```bash
 npm install -g @bertonha/getthingsdone
@@ -497,7 +537,7 @@ is migrated to `~/.gtd/` automatically the first time you run it.
 ## Development
 
 ```bash
-git clone git@github.com:geovanneb/get-things-done.git
+git clone https://github.com/geovanneb/get-things-done.git
 cd get-things-done
 npm install
 npm run dev          # API on :3001, Vite UI on :5173
@@ -507,7 +547,18 @@ npm run dev          # API on :3001, Vite UI on :5173
 |---|---|
 | `npm run build` | Build CLI, server and UI into `dist/` |
 | `npm run dev` | Run server and UI in watch mode |
+| `npm test` | Unit tests plus an end-to-end smoke test (needs `npm run build` first) |
+| `npm run seed:demo -- <url>` | Fill a running server with the fictional demo workspace |
 | `npm pack` | Produce the exact tarball that would be published |
+
+To get a populated dashboard for development or screenshots, create a throwaway
+workspace and seed it. Never seed your real workspace.
+
+```bash
+node bin/gtd.js init -y -d /tmp/gtd-demo --name "Alex Morgan" --role COO --org "Northwind Labs"
+cd /tmp/gtd-demo && node /path/to/get-things-done/bin/gtd.js start --no-open
+npm run seed:demo -- http://127.0.0.1:3001
+```
 
 **Architecture.** `src/cli/` is the CLI. `server/` is an Express API over the
 workspace files, with a chokidar watcher pushing changes over SSE. `ui/` is React +
@@ -515,10 +566,20 @@ Vite, served statically by the server in production. `templates/` holds everythi
 scaffolded into a new workspace.
 
 `server/src/services/scaffold.ts` is the single source of truth for creating and
-upgrading workspaces — the CLI loads its compiled output at runtime so `gtd init` and
+upgrading workspaces. The CLI loads its compiled output at runtime so `gtd init` and
 the server's `POST /api/workspace/init` can never disagree.
 
-Releases publish from a `v*` tag via GitHub Actions with npm provenance.
+**Releases.** Maintainers push a `vX.Y.Z` tag. GitHub Actions builds, tests,
+publishes to npm with provenance and creates the GitHub release from
+[CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## Contributing
+
+Contributions are welcome, from typo fixes to new features. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md). Please read the [Code of Conduct](CODE_OF_CONDUCT.md),
+and report security issues privately as described in [SECURITY.md](SECURITY.md).
 
 ---
 
