@@ -52,7 +52,7 @@
     "@inquirer/prompts": "^7.2.0",
     "ajv": "^8.12.0",
     "ajv-formats": "^3.0.1",
-    "chalk": "^5.6.2",
+    "chalk": "^6.0.1",
     "chokidar": "^3.6.0",
     "commander": "^12.1.0",
     "cors": "^2.8.5",
