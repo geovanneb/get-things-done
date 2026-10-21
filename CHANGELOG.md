@@ -29,6 +29,11 @@ minor versions may include breaking changes.
 
 ### Changed
 
+- **Dependencies upgraded:** simple-git 4, chokidar 5, helmet 8, tsx, and GitHub
+  Actions checkout and setup-node v7 (Dependabot #10, #11, #12, #13, #14, #16).
+  Clears every critical and high advisory in production dependencies. The file
+  watcher was ported to chokidar 5, which no longer supports glob patterns; without
+  that change live updates in the dashboard would have stopped silently.
 - **Minimum Node.js is now 20.19.** The CLI loads ESM-only packages (chalk, ora,
   open), which older versions cannot `require()`, so `gtd` already failed on Node 18
   and Node 20 before 20.19 even though `engines` said `>=18`. The `engines` field and
@@ -39,6 +44,8 @@ minor versions may include breaking changes.
 
 ### Project
 
+- Smoke test now also covers live updates over SSE and the git integration
+  (status, stage, commit, log).
 - CI fixed: the tarball check failed because `npm pack` re-ran the build and its
   output corrupted the JSON. CI now tests on Node 20.19 (the minimum), 22 and 24, runs unit and
   end-to-end smoke tests, and reports dependency advisories.

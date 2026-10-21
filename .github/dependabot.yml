@@ -8,6 +8,11 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: chore(deps)
+    ignore:
+      # chalk 6 requires Node 22+, above the current engines floor (20.19).
+      # Remove this when the minimum Node version moves to 22.
+      - dependency-name: chalk
+        update-types: [version-update:semver-major]
     groups:
       dev-dependencies:
         dependency-type: development

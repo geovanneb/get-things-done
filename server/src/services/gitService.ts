@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import simpleGit, { SimpleGit } from 'simple-git';
+import { simpleGit, SimpleGit } from 'simple-git';
 import { GitStatus, GitDiff } from '../types';
 import { WorkspaceService } from './workspace';
 
