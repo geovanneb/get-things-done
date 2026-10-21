@@ -54,7 +54,7 @@ Produce outputs that are grounded in the contexts, written in the executive's vo
   - Read task.md
   - Change the deliverable's `status` from `"pending"` to `"complete"`
   - Update the `updated_at` field to the current ISO 8601 timestamp
-  - Add `file_path` pointing to the created file
+  - Add `file_path` as the workspace-relative path of the created file, e.g. `tasks/active/TASK-2026-0001/deliverables/DEL-01.pptx` (never relative to the task folder: the dashboard opens it from the workspace root)
   - Write the updated task.md back, preserving all other frontmatter exactly
 - Log your execution to: `tasks/active/<TASK-ID>/executions/<timestamp>.md`
   - Include: what you created, key decisions made, sources used, caveats, any placeholders inserted
