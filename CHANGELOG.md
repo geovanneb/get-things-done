@@ -8,6 +8,8 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-21
+
 ### Fixed
 
 - Workspace validation no longer flags tasks the app itself edited: `in_review` and
@@ -30,7 +32,8 @@ minor versions may include breaking changes.
 ### Changed
 
 - **Dependencies upgraded:** simple-git 4, chokidar 5, helmet 8, tsx, and GitHub
-  Actions checkout and setup-node v7 (Dependabot #10, #11, #12, #13, #14, #16).
+  Actions checkout and setup-node v7 (Dependabot #10, #11, #12, #13, #14, #16),
+  ora 9 (#19) and open 11 (#20).
   Clears every critical and high advisory in production dependencies. The file
   watcher was ported to chokidar 5, which no longer supports glob patterns; without
   that change live updates in the dashboard would have stopped silently.
@@ -74,5 +77,6 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/geovanneb/get-things-done/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/geovanneb/get-things-done/releases/tag/v0.1.1
