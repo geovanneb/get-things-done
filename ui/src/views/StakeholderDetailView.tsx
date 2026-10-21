@@ -26,6 +26,8 @@ function influenceBadgeVariant(
       return 'info';
     case 'executor':
       return 'default';
+    case 'sponsor':
+      return 'error';
   }
 }
 
@@ -39,6 +41,8 @@ function influenceLabel(influence: Stakeholder['influence']): string {
       return 'Informed';
     case 'executor':
       return 'Executor';
+    case 'sponsor':
+      return 'Sponsor';
   }
 }
 

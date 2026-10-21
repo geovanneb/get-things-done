@@ -49,7 +49,7 @@ export interface Stakeholder {
   role: string;
   organization: string;
   email?: string;
-  influence: 'decision_maker' | 'influencer' | 'informed' | 'executor';
+  influence: 'decision_maker' | 'influencer' | 'informed' | 'executor' | 'sponsor';
   what_matters: string;
   tags: string[];
   notes?: string;
