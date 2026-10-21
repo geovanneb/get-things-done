@@ -94,9 +94,26 @@ try {
   })).json();
   check('moving a task to done stamps done_date', Boolean(moved.done_date));
 
+  // A task reopened by editing task.md keeps a stale done_date on disk; the app
+  // must not carry it over when the task is completed again.
+  const reopened = tasks.find((t) => t.status === 'backlog' && t.id !== task.id);
+  const reopenedFile = path.join(ws, 'tasks', 'active', reopened.id, 'task.md');
+  const stale = '2020-01-01T00:00:00.000Z';
+  fs.writeFileSync(reopenedFile, fs.readFileSync(reopenedFile, 'utf8').replace(/^status: .*$/m, (m) => `${m}\ndone_date: '${stale}'`));
+  const recompleted = await (await fetch(`${base}/api/tasks/${reopened.id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }),
+  })).json();
+  check('completing a task again replaces a stale done_date', Boolean(recompleted.done_date) && recompleted.done_date !== stale,
+    `done_date=${recompleted.done_date}`);
+
+  const group = await fetch(`${base}/api/stakeholders`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Smoke group', type: 'groups' }),
+  });
+  check('a stakeholder group can be created', group.ok);
+
   const issues = await (await fetch(`${base}/api/workspace/validate`)).json();
   const errors = issues.filter((i) => i.level === 'error');
-  check('a workspace edited through the app has no validation errors', errors.length === 0,
+  check('a workspace edited through the app (incl. a group) has no validation errors', errors.length === 0,
     errors.length ? JSON.stringify(errors.slice(0, 3)) : '');
 
   // Git integration: the dashboard can show status, stage and commit in a workspace repo.

@@ -39,7 +39,8 @@ const stakeholderSchema = {
   type: 'object',
   required: ['id', 'name', 'influence'],
   properties: {
-    id: { type: 'string', pattern: '^STK-\\d{4}$' },
+    // People are STK-NNNN, groups GRP-NNNN (see StakeholderService.generateId).
+    id: { type: 'string', pattern: '^(STK|GRP)-\\d{4}$' },
     name: { type: 'string', minLength: 1 },
     influence: { type: 'string', enum: ['decision_maker', 'influencer', 'informed', 'executor', 'sponsor'] },
     email: { type: 'string', format: 'email' },

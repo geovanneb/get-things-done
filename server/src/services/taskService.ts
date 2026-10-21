@@ -31,11 +31,14 @@ function stampStatusDates(previousStatus: TaskStatus, updated: Task, now: string
   const wasDone = DONE_STATUSES.has(previousStatus);
   const isNowDone = DONE_STATUSES.has(updated.status);
 
-  if (isNowDone && !updated.done_date) {
+  if (isNowDone && (!wasDone || !updated.done_date)) {
+    // Completing a task always records now. A done_date left over from an
+    // earlier completion (e.g. the task was reopened by editing task.md, which
+    // bypasses this function) is not when the task finished this time.
     updated.done_date = now;
-  } else if (wasDone && !isNowDone && updated.status !== 'archived') {
-    // Genuinely reopened — the old completion date is no longer true.
-    // Archiving is filing, not undoing, so it keeps its completion date.
+  } else if (!isNowDone && updated.status !== 'archived' && updated.done_date) {
+    // Reopened, here or earlier on disk — the old completion date is no longer
+    // true. Archiving is filing, not undoing, so it keeps its completion date.
     delete updated.done_date;
   }
 
