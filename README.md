@@ -7,7 +7,7 @@
 [![npm](https://img.shields.io/npm/v/@bertonha/getthingsdone.svg)](https://www.npmjs.com/package/@bertonha/getthingsdone)
 [![CI](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml/badge.svg)](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
+[![node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](https://nodejs.org)
 
 <img src="docs/screenshots/board.png" alt="The Get Things Done kanban board with tasks in Backlog, In Progress, Needs Review and Done" width="900">
 
@@ -126,7 +126,7 @@ Light and dark themes are built in.
 
 ## Install
 
-Requires **Node.js 18 or newer**.
+Requires **Node.js 20.19 or newer** (22 or 24 recommended).
 
 ```bash
 npm install -g @bertonha/getthingsdone

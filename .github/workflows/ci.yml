@@ -23,7 +23,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ['18', '20', '22', '24']
+        # 20.19.0 is the floor in package.json engines: the CLI require()s ESM-only
+        # packages (chalk, ora, open), which older Node versions cannot load.
+        node: ['20.19.0', '22', '24']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,8 +67,6 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Reports known advisories without blocking merges. Dependabot opens the fixes.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,4 +76,13 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm audit --omit=dev --audit-level=high
+      # Report only: known advisories show up as a warning and in the job summary
+      # without failing the PR. Dependabot opens the actual upgrade PRs.
+      - name: Report production advisories
+        run: |
+          if npm audit --omit=dev --audit-level=high > audit.txt; then
+            echo "No high or critical advisories in production dependencies." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=npm audit::High or critical advisories in production dependencies. See the job summary."
+            { echo '### npm audit (production dependencies)'; echo '```'; cat audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi

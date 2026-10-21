@@ -29,6 +29,10 @@ minor versions may include breaking changes.
 
 ### Changed
 
+- **Minimum Node.js is now 20.19.** The CLI loads ESM-only packages (chalk, ora,
+  open), which older versions cannot `require()`, so `gtd` already failed on Node 18
+  and Node 20 before 20.19 even though `engines` said `>=18`. The `engines` field and
+  docs now state the real requirement.
 - The stakeholder-communication skill template uses generic wording for Japanese
   business conventions.
 - Dependencies refreshed with non-breaking security updates.
@@ -36,7 +40,7 @@ minor versions may include breaking changes.
 ### Project
 
 - CI fixed: the tarball check failed because `npm pack` re-ran the build and its
-  output corrupted the JSON. CI now tests on Node 18, 20, 22 and 24, runs unit and
+  output corrupted the JSON. CI now tests on Node 20.19 (the minimum), 22 and 24, runs unit and
   end-to-end smoke tests, and reports dependency advisories.
 - Release workflow: protected `npm` environment, npm provenance, trusted publishing
   support, skips versions already on npm, and creates the GitHub release from this

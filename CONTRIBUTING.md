@@ -49,7 +49,7 @@ Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`.
 
 ## Development setup
 
-You need Node.js 18 or newer (20+ recommended) and npm.
+You need Node.js 20.19 or newer (22 recommended, see `.nvmrc`) and npm.
 
 ```bash
 git clone https://github.com/<you>/get-things-done.git
