@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Org chart",
+  "description": "Reporting lines for one company or organization. Lives at stakeholders/org-charts/org-NNNN.md; the Markdown body holds free-form notes.",
+  "type": "object",
+  "required": ["schema_version", "id", "type", "name", "members"],
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "id": {"type": "string", "pattern": "^ORG-\\d{4}$"},
+    "type": {"type": "string", "enum": ["org_chart"]},
+    "name": {"type": "string", "minLength": 1, "maxLength": 200},
+    "organization": {"type": "string", "description": "Company or organization this chart describes."},
+    "description": {"type": "string"},
+    "members": {
+      "type": "array",
+      "description": "Each stakeholder appears once. A member without reports_to is at the top of the chart.",
+      "items": {
+        "type": "object",
+        "required": ["ref"],
+        "properties": {
+          "ref": {"type": "string", "pattern": "^(STK|GRP)-\\d{4}$", "description": "Stakeholder id."},
+          "reports_to": {"type": "string", "pattern": "^(STK|GRP)-\\d{4}$", "description": "Stakeholder id of the manager, who must also be a member of this chart."}
+        },
+        "additionalProperties": false
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false
+}

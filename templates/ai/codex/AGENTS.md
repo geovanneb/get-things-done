@@ -14,6 +14,7 @@ Read `profile/executive-profile.md` before any writing task. All outputs must re
 profile/                  Executive profile
 tasks/active/             Active tasks (task.md + deliverables/)
 stakeholders/people/      STK-NNNN.md stakeholder profiles
+stakeholders/org-charts/  ORG-NNNN.md reporting lines for one company or organization
 context/                  Context notes (company, strategy, risks, etc.)
 outputs/templates/        Output format templates
 .schemas/                 JSON schema references
@@ -37,6 +38,11 @@ outputs/templates/        Output format templates
 ## Quality standards
 
 - Read all stakeholder files listed in the task before producing output.
+- Also read every org chart in `stakeholders/org-charts/` that lists one of those stakeholders.
+  `reports_to` is the manager's stakeholder id; no `reports_to` means top of the chart. Use each
+  stakeholder's organization, manager, peers and direct reports to decide who approves, what level
+  to pitch at, the escalation path, and who should be kept informed. The chart is the source of
+  truth for reporting lines; flag any conflict with a stakeholder's title.
 - Always read every file the task body `@` mentions. Mentions are Markdown links whose text starts
   with `@`, such as `[@Jane Doe](stakeholders/people/jane-doe.md)`, pointing at a workspace-relative
   path. They mark files the executive wants emphasized. They add to your normal reading of

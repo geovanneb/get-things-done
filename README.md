@@ -217,6 +217,11 @@ matters to them. Influence level drives how agents write to them:
 | `informed` | Summary only, no unrequested detail |
 | `executor` | Clear action, timeline, owner, no ambiguity |
 
+**Org charts** (`stakeholders/org-charts/`) map who reports to whom inside a company or
+organization. Build them in **Stakeholders → Org charts** by dragging people onto their
+manager. Agents read the charts for every stakeholder on a task, so a deliverable is
+pitched at the most senior person involved and names the right escalation path.
+
 ### 3. Context — `context/`
 
 Your background knowledge library, filed by category: `company/`, `organization/`,

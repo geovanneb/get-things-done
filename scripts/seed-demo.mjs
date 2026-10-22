@@ -65,6 +65,19 @@ for (const p of people) {
   stk[p.name.split(' ')[0]] = created.id;
 }
 
+await api('POST', '/api/org-charts', {
+  name: 'Northwind Labs leadership',
+  organization: 'Northwind Labs',
+  description: 'Executive team and direct reports',
+  members: [
+    { ref: stk.Priya },
+    { ref: stk.Marcus, reports_to: stk.Priya },
+    { ref: stk.Sofia, reports_to: stk.Priya },
+    { ref: stk.Daniel, reports_to: stk.Priya },
+  ],
+  notes: 'Marcus has the final say on anything with a budget impact above $50k.',
+});
+
 const notes = [
   { category: 'strategy', title: 'FY27 operating plan', tags: ['planning'], body: 'Three bets for next year: regional warehouse, self-serve onboarding, support automation.' },
   { category: 'risks', title: 'Single freight carrier dependency', tags: ['supply-chain'], body: 'About 70% of outbound volume runs through one carrier. A second carrier is being evaluated.' },

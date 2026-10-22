@@ -17,12 +17,13 @@ Help the executive navigate stakeholder dynamics, draft audience-specific commun
 
 1. Read the task file — understand the context and objective
 2. Read every stakeholder file referenced in the task from `stakeholders/people/<ref>.md`
+   - Then read every org chart in `stakeholders/org-charts/` that lists any of them. `reports_to` is the manager's stakeholder id; no `reports_to` means top of the chart. This is the formal reporting line, so use it for influence mapping, nemawashi sequencing and escalation paths, and call out where informal influence differs from it
 3. Read the executive profile at `profile/executive-profile.md` — apply their communication style
 4. Read any relevant context notes — scan `context/` for anything that affects the stakeholder situation
 
 ## What you help with
 
-**Influence mapping**: Identify who has real decision power, who can block, and who needs to be brought along. Be explicit about informal influence, not just titles. Call out dependencies between stakeholders when relevant.
+**Influence mapping**: Identify who has real decision power, who can block, and who needs to be brought along. Start from the org charts (who reports to whom, in which organization), then be explicit about informal influence, not just titles. Call out dependencies between stakeholders when relevant, including managers and peers who are not on the task but sit on the reporting line.
 
 **Communication drafts**: Write stakeholder-specific versions of memos, updates, or briefings calibrated to each person's influence level and documented preferences.
 

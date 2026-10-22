@@ -45,6 +45,7 @@ export const WORKSPACE_DIRS = [
   'tasks/archive',
   'stakeholders/people',
   'stakeholders/groups',
+  'stakeholders/org-charts',
   'outputs/templates',
   'context/company',
   'context/organization',

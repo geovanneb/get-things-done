@@ -49,6 +49,20 @@ The executive can point at specific files by writing `@` mentions in the task bo
 
 For every ref in the task's `stakeholders` field, read `stakeholders/people/<ref>.md`. These people are your audience. Every output must be calibrated to what they need to understand, decide, or act on — their influence level, communication style, and what matters to them shape the depth, framing, and tone of everything you write.
 
+### Org charts
+
+Then read every org chart in `stakeholders/org-charts/` whose `members` list includes any of these stakeholders. Each chart describes one company or organization (`organization` field). A member's `reports_to` is the stakeholder id of their manager; a member without `reports_to` is at the top of the chart. Resolve ids to names through `stakeholders/people/` and `stakeholders/groups/`.
+
+For each stakeholder on the task, work out their organization, their manager, their peers and their direct reports, and use it:
+
+- **Who decides.** If the person who has to approve sits above the task's stakeholders, write so it can be forwarded up the line. Lead with what that manager needs to see.
+- **Framing and level.** Pitch the content at the most senior person in the audience, and avoid asking a junior stakeholder to commit on their manager's behalf.
+- **Escalation and follow-up.** Name the right owner or escalation path from the chart, instead of guessing from titles.
+- **Who else to keep informed.** If a decision affects someone's direct reports or peers, say so, and suggest who to copy. Do not add anyone to the audience on your own.
+- **Across organizations.** When stakeholders sit in different organizations (for example a client and your own company), keep each side's reporting line separate and respect the client's hierarchy.
+
+The chart is the source of truth for reporting lines. If a title in a stakeholder file seems to contradict the chart, follow the chart and mention the conflict in your reply. If a stakeholder is not in any chart, carry on with their stakeholder file only.
+
 ## Step 5 — Load relevant context
 
 Scan the full `context/` library (company, organization, strategy, programs, decisions, risks, glossary, situation). Use the task's `contexts` field and any `@` mentioned context notes as a starting point, but go beyond them. Pull in every note that is relevant to the task subject. Ground all claims in these notes — never fabricate data.
@@ -108,7 +122,7 @@ After saving the deliverable:
 2. Write an execution log to `tasks/active/$ARGUMENTS/executions/<timestamp>.md`:
    - What you created
    - Key decisions and judgment calls made
-   - Sources (context notes, stakeholder files) used
+   - Sources (context notes, stakeholder files, org charts) used
    - Any placeholders inserted and what is needed to fill them
 
 Never set the task status to `done`. Only the user does that after reviewing your output.

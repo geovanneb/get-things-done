@@ -3,11 +3,13 @@ import addFormats from 'ajv-formats';
 import { Task, Stakeholder, ValidationResult } from '../types';
 import { TaskService } from './taskService';
 import { StakeholderService } from './stakeholderService';
+import { OrgChartService, findLoop } from './orgChartService';
 import { OutputService } from './outputService';
 import { isDone, isOpen } from './taskStatus';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
+const orgChartService = new OrgChartService();
 const outputService = new OutputService();
 
 const ajv = new Ajv({ allErrors: true });
@@ -189,6 +191,33 @@ export class ValidationService {
 
       const stkResults = this.validateStakeholder(stk);
       results.push(...stkResults.map((r) => ({ ...r, path: `${stk.id}: ${r.path || ''}` })));
+    }
+
+    // Check org charts
+    try {
+      for (const chart of await orgChartService.listCharts()) {
+        const refs = new Set<string>();
+        for (const m of chart.members) {
+          if (refs.has(m.ref)) {
+            results.push({ level: 'warning', rule: 'duplicate_id', message: `Org chart ${chart.id} lists ${m.ref} more than once`, path: chart.path });
+          }
+          refs.add(m.ref);
+          if (!stakeholderIds.has(m.ref)) {
+            results.push({ level: 'warning', rule: 'broken_ref', message: `Org chart ${chart.id} references unknown stakeholder: ${m.ref}`, path: chart.path });
+          }
+        }
+        for (const m of chart.members) {
+          if (m.reports_to && !refs.has(m.reports_to)) {
+            results.push({ level: 'warning', rule: 'broken_ref', message: `Org chart ${chart.id}: ${m.ref} reports to ${m.reports_to}, who is not in the chart`, path: chart.path });
+          }
+        }
+        const loop = findLoop(chart.members);
+        if (loop) {
+          results.push({ level: 'error', rule: 'org_chart_loop', message: `Org chart ${chart.id} has a reporting loop: ${loop.join(' → ')}`, path: chart.path });
+        }
+      }
+    } catch {
+      results.push({ level: 'warning', rule: 'workspace', message: 'Could not read org charts directory' });
     }
 
     if (results.length === 0) {

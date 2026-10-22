@@ -20,6 +20,7 @@ Read files in this exact order — do not skip steps:
 
 1. **Task file** — `tasks/active/<TASK-ID>/task.md` — read the complete file including all frontmatter
 2. **Stakeholder files** — for each entry in the task's `stakeholders` field, read `stakeholders/people/<ref>.md` — understand their role, influence level, and what matters to them
+   - **Org charts** — read every chart in `stakeholders/org-charts/` that lists any of these stakeholders. Note each one's organization, manager (`reports_to`), peers and direct reports. Write so the document survives being forwarded up the line, pitch it at the most senior person involved, and name owners and escalation paths from the chart rather than from titles alone
 3. **Context library** — scan all categories in `context/` (company, organization, strategy, programs, decisions, risks, glossary, situation). Use the task's `contexts` field as a starting point, but always supplement by reading the full library for anything relevant. Do not limit yourself to what was explicitly listed.
 4. **Executive profile** — `profile/executive-profile.md` — this defines the voice and style all outputs must reflect
 5. **Output template** — for each deliverable, find the template at `outputs/templates/<slug>/output.md` — read the style guide and any structural guidance it contains
