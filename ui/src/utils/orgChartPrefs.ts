@@ -8,6 +8,8 @@
 export interface OrgChartPrefs {
   /** Whether the "Add people" panel is open. Absent = no explicit choice yet. */
   panelOpen?: boolean;
+  /** Refs of collapsed cards. Absent = no explicit choice yet. */
+  collapsed?: string[];
 }
 
 const keyFor = (workspace: string) => `gtd:org-chart-prefs:${workspace}`;

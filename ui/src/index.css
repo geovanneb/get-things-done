@@ -575,6 +575,19 @@ input, textarea, select {
   cursor: pointer;
 }
 .org-view-toggle__btn--active { background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-sm); }
+.org-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.org-toolbar__label {
+  align-self: center;
+  padding: 0 6px 0 4px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
 
 .org-link-btn {
   border: none;
