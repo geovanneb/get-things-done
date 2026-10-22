@@ -122,16 +122,16 @@ server.listen(PORT, HOST, () => {
   console.log(`ESB server running at http://${HOST}:${PORT}`);
   console.log(`Health check: http://${HOST}:${PORT}/health`);
 
-  // Start file watcher if workspace is configured
+  // Registered unconditionally so the watcher keeps broadcasting after a workspace switch.
+  watcherService.on('change', broadcastEvent);
+  watcherService.on('add', broadcastEvent);
+  watcherService.on('unlink', broadcastEvent);
+
   const workspaceService = new WorkspaceService();
   try {
     const workspacePath = workspaceService.getWorkspacePath();
     console.log(`Watching workspace: ${workspacePath}`);
     watcherService.start(workspacePath);
-
-    watcherService.on('change', broadcastEvent);
-    watcherService.on('add', broadcastEvent);
-    watcherService.on('unlink', broadcastEvent);
   } catch {
     console.log('Workspace not configured yet. File watcher not started.');
     console.log('Use POST /api/workspace/init to configure your workspace.');

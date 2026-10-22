@@ -559,6 +559,14 @@ export default function SettingsView() {
   const [reinitializing,    setReinitializing]    = useState(false);
   const [reinitError,       setReinitError]       = useState<string | null>(null);
 
+  // Change workspace modal
+  const [showChangeModal,   setShowChangeModal]   = useState(false);
+  const [newPath,           setNewPath]           = useState('');
+  const [needsInit,         setNeedsInit]         = useState(false);
+  const [switching,         setSwitching]         = useState(false);
+  const [picking,           setPicking]           = useState(false);
+  const [changeError,       setChangeError]       = useState<string | null>(null);
+
   // Validation
   const [validationResults, setValidationResults] = useState<ValidationResult[] | null>(null);
   const [loadingValidation, setLoadingValidation] = useState(false);
@@ -611,6 +619,57 @@ export default function SettingsView() {
       setReinitError(err instanceof Error ? err.message : 'Re-initialization failed.');
     } finally {
       setReinitializing(false);
+    }
+  };
+
+  const openChangeModal = () => {
+    setNewPath(config?.path ?? '');
+    setNeedsInit(false);
+    setChangeError(null);
+    setShowChangeModal(true);
+  };
+
+  const handleBrowse = async () => {
+    setPicking(true);
+    setChangeError(null);
+    try {
+      const { path: picked } = await apiPost<{ path: string | null }>('/api/workspace/pick-folder', {});
+      if (picked) {
+        setNewPath(picked);
+        setNeedsInit(false);
+      }
+    } catch (err) {
+      setChangeError(err instanceof Error ? err.message : 'Could not open the folder picker.');
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const handleSwitchWorkspace = async () => {
+    setSwitching(true);
+    setChangeError(null);
+    try {
+      const res = await fetch('/api/workspace/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ path: newPath, initialize: needsInit }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 409 && body.needs_init) {
+        setNeedsInit(true);
+        setNewPath(body.path ?? newPath);
+        return;
+      }
+      if (!res.ok) {
+        setChangeError(body.error || `HTTP ${res.status}`);
+        return;
+      }
+      // Every view caches data from the old workspace, so a full reload is the simplest reset.
+      window.location.reload();
+    } catch (err) {
+      setChangeError(err instanceof Error ? err.message : 'Failed to change workspace.');
+    } finally {
+      setSwitching(false);
     }
   };
 
@@ -734,7 +793,7 @@ export default function SettingsView() {
           >
             {config?.path ?? ''}
           </div>
-          <Button variant="ghost" onClick={() => alert('Not implemented')}>
+          <Button variant="ghost" onClick={openChangeModal}>
             Change
           </Button>
         </FieldRow>
@@ -941,6 +1000,91 @@ export default function SettingsView() {
           value={lastValidated ? formatDate(lastValidated.toISOString()) : 'Never'}
         />
       </SectionCard>
+
+      {/* Change workspace modal */}
+      <Modal
+        isOpen={showChangeModal}
+        onClose={() => { if (!switching) setShowChangeModal(false); }}
+        title="Change Workspace"
+      >
+        <p
+          style={{
+            margin: '0 0 16px 0',
+            fontSize: 'var(--text-sm)',
+            fontFamily: 'var(--font-sans)',
+            color: 'var(--color-text-secondary)',
+            lineHeight: 1.6,
+          }}
+        >
+          Point Get Things Done at another folder. Your current workspace stays on disk, untouched.
+        </p>
+
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
+          <Input
+            value={newPath}
+            onChange={v => { setNewPath(v); setNeedsInit(false); }}
+            onKeyDown={e => { if (e.key === 'Enter' && newPath.trim() && !switching) handleSwitchWorkspace(); }}
+            placeholder="/Users/you/Documents/my-workspace"
+            aria-label="Workspace folder path"
+            autoFocus
+            disabled={switching}
+            style={{ flex: 1 }}
+            inputStyle={{ fontFamily: 'var(--font-mono)' }}
+          />
+          <Button variant="secondary" onClick={handleBrowse} disabled={switching || picking}>
+            {picking ? 'Waiting...' : 'Browse...'}
+          </Button>
+        </div>
+
+        {needsInit && (
+          <div
+            style={{
+              marginBottom: '16px',
+              padding: '10px 14px',
+              background: 'var(--color-warning-subtle)',
+              border: '1px solid var(--color-warning)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--text-sm)',
+              fontFamily: 'var(--font-sans)',
+              color: 'var(--color-text)',
+              lineHeight: 1.6,
+            }}
+          >
+            This folder is not a Get Things Done workspace yet. Initialize it to create the
+            workspace structure (tasks, stakeholders, context and so on). Existing files are kept.
+          </div>
+        )}
+
+        {changeError && (
+          <div
+            style={{
+              marginBottom: '16px',
+              padding: '10px 14px',
+              background: 'var(--color-critical-subtle)',
+              border: '1px solid var(--color-critical)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 'var(--text-sm)',
+              fontFamily: 'var(--font-sans)',
+              color: 'var(--color-critical)',
+            }}
+          >
+            {changeError}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <Button variant="ghost" onClick={() => setShowChangeModal(false)} disabled={switching}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleSwitchWorkspace}
+            disabled={switching || !newPath.trim() || newPath.trim() === config?.path}
+          >
+            {switching ? 'Switching...' : needsInit ? 'Initialize and Switch' : 'Switch Workspace'}
+          </Button>
+        </div>
+      </Modal>
 
       {/* Re-initialize confirm modal */}
       <Modal
