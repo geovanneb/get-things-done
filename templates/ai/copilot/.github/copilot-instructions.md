@@ -7,6 +7,7 @@ This workspace is managed by Get Things Done. When working in this directory:
 - `profile/executive-profile.md` — executive identity, voice, and communication style. Read this for any writing task.
 - `tasks/active/` — active tasks with `task.md` frontmatter and `deliverables/` folder.
 - `stakeholders/people/` — STK-NNNN.md stakeholder profiles.
+- `stakeholders/org-charts/` — ORG-NNNN.md reporting lines (`members` with `reports_to`) for one company or organization.
 - `context/` — company, strategy, risks, decisions, and glossary notes.
 - `outputs/templates/` — output format templates.
 
@@ -19,6 +20,8 @@ This workspace is managed by Get Things Done. When working in this directory:
 - Save deliverables to `tasks/active/<TASK-ID>/deliverables/`.
 - Read the executive profile before writing anything — adapt voice and tone to match.
 - Adapt tone and detail to each stakeholder's profile.
+- Read the org charts that include the task's stakeholders. Use their organization, manager, peers
+  and direct reports to decide who approves, what level to pitch at, and who to keep informed.
 - Always read every file the task body `@` mentions (Markdown links whose text starts with `@`, such
   as `[@Jane Doe](stakeholders/people/jane-doe.md)`). The executive is flagging them as important.
   They add to your usual reading of stakeholders and context and never replace it.

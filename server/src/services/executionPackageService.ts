@@ -9,6 +9,7 @@ import { ProfileService } from './profileService';
 import { OutputService } from './outputService';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { orgChartService } from './orgChartService';
 import { extractMentionPaths, mentionService, mentionTypeForPath } from './mentionService';
 
 const taskService = new TaskService();
@@ -60,6 +61,14 @@ export class ExecutionPackageService {
         } catch {
           // Stakeholder not found, skip
         }
+      }
+
+      // Org charts give the reporting lines around the audience.
+      const refSet = new Set(refs);
+      for (const chart of await orgChartService.listCharts()) {
+        if (!chart.path || !chart.members.some((m) => refSet.has(m.ref))) continue;
+        const stats = await fileService.getFileStats(chart.path);
+        files.push({ path: chart.path, type: 'org_chart', size: stats.size, hash: stats.hash });
       }
     }
 

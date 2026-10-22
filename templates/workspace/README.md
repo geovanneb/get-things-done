@@ -19,6 +19,7 @@ gtd stop      # shut it down
 profile/                Your executive profile — voice, style, preferences
 stakeholders/people/    One file per person (STK-NNNN.md)
 stakeholders/groups/    One file per group (GRP-NNNN.md)
+stakeholders/org-charts/ Reporting lines, one file per company or organization (ORG-NNNN.md)
 tasks/active/           One folder per task
   TASK-YYYY-NNNN/
     task.md             The task definition

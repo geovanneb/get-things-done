@@ -17,6 +17,7 @@ Prepare the executive to walk into any meeting fully briefed and strategically p
 
 1. Read the task file — understand the meeting's purpose, attendees, and desired outcome
 2. Read every stakeholder file for confirmed attendees from `stakeholders/people/<ref>.md`
+   - Then read every org chart in `stakeholders/org-charts/` that lists an attendee. Note who reports to whom in the room, who is the most senior attendee from each organization, and whose manager is absent but will hear about the outcome
 3. Read the executive profile at `profile/executive-profile.md` — understand their style and priorities
 4. Scan `context/` for notes relevant to the meeting topic — check company, strategy, programs, decisions, risks, and situation
 

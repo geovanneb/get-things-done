@@ -9,7 +9,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiGet } from '@/utils/api';
 import { formatDate, formatRelativeDate } from '@/utils/format';
-import type { Stakeholder, Task } from '@/types';
+import type { OrgPersonSummary, OrgPosition, Stakeholder, Task } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -264,6 +264,7 @@ export default function StakeholderDetailView() {
 
   const [stakeholder, setStakeholder] = useState<Stakeholder | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [positions, setPositions] = useState<OrgPosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -279,13 +280,15 @@ export default function StakeholderDetailView() {
       setFetchError(null);
 
       try {
-        const [sk, taskList] = await Promise.all([
+        const [sk, taskList, orgPositions] = await Promise.all([
           apiGet<Stakeholder>(`/api/stakeholders/${id}`),
           apiGet<Task[]>(`/api/tasks?stakeholder=${id}`),
+          apiGet<OrgPosition[]>(`/api/org-charts?stakeholder=${encodeURIComponent(id!)}`).catch(() => []),
         ]);
         if (cancelled) return;
         setStakeholder(sk);
         setTasks(taskList);
+        setPositions(orgPositions);
       } catch (err: unknown) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : 'Failed to load.';
@@ -444,6 +447,36 @@ export default function StakeholderDetailView() {
         </div>
       </div>
 
+      {/* Organization */}
+      <SectionCard title="Organization">
+        {positions.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
+            Not in any org chart yet.{' '}
+            <Link to="/stakeholders?tab=charts" style={{ color: 'var(--color-accent)' }}>Open org charts</Link>
+            {' '}to set who they report to.
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {positions.map((p) => (
+              <div key={p.chart.id}>
+                <Link to={`/stakeholders?tab=charts&chart=${encodeURIComponent(p.chart.id)}`}
+                  style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>
+                  {p.chart.name}
+                </Link>
+                {p.chart.organization && p.chart.organization !== p.chart.name && (
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}> · {p.chart.organization}</span>
+                )}
+                <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '6px 16px', margin: '8px 0 0', fontSize: 'var(--text-sm)' }}>
+                  <OrgRow label="Reports to" people={p.manager ? [p.manager] : []} empty="Nobody (top of the chart)" />
+                  <OrgRow label="Direct reports" people={p.direct_reports} empty="None" />
+                  {p.manager && <OrgRow label="Peers" people={p.peers} empty="None" />}
+                </dl>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
+
       {/* What matters */}
       {stakeholder.what_matters && (
         <SectionCard title="What matters">
@@ -490,6 +523,23 @@ export default function StakeholderDetailView() {
         )}
       </SectionCard>
     </div>
+  );
+}
+
+function OrgRow({ label, people, empty }: { label: string; people: OrgPersonSummary[]; empty: string }) {
+  return (
+    <>
+      <dt style={{ color: 'var(--color-text-muted)' }}>{label}</dt>
+      <dd style={{ margin: 0, color: 'var(--color-text)' }}>
+        {people.length === 0 ? <span style={{ color: 'var(--color-text-muted)' }}>{empty}</span> : people.map((person, i) => (
+          <React.Fragment key={person.id}>
+            {i > 0 && ', '}
+            <Link to={`/stakeholders/${encodeURIComponent(person.id)}`} style={{ color: 'var(--color-accent)' }}>{person.name}</Link>
+            {person.role && <span style={{ color: 'var(--color-text-muted)' }}> ({person.role})</span>}
+          </React.Fragment>
+        ))}
+      </dd>
+    </>
   );
 }
 

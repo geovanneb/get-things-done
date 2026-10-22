@@ -47,6 +47,24 @@ export interface Stakeholder {
   path?: string;
 }
 
+export interface OrgChartMember {
+  ref: string;
+  /** Stakeholder id of this member's manager in the same chart. Absent at the top of the chart. */
+  reports_to?: string;
+}
+
+export interface OrgChart {
+  id: string;
+  name: string;
+  organization?: string;
+  description?: string;
+  members: OrgChartMember[];
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  path?: string;
+}
+
 export interface OutputTemplate {
   id: string;
   slug: string;
