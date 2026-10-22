@@ -297,6 +297,8 @@ export interface OrgChartMember {
   ref: string;
   /** Manager's stakeholder id within the same chart; absent at the top. */
   reports_to?: string;
+  /** Title in this chart; overrides the stakeholder's role here only. */
+  title?: string;
 }
 
 export interface OrgChart {
@@ -318,6 +320,8 @@ export interface OrgPersonSummary {
 
 export interface OrgPosition {
   chart: { id: string; name: string; organization?: string };
+  /** Title in this chart, when one is set. */
+  title?: string;
   manager: OrgPersonSummary | null;
   direct_reports: OrgPersonSummary[];
   peers: OrgPersonSummary[];

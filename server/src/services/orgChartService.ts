@@ -25,12 +25,27 @@ export interface StakeholderSummary {
 /** Where one stakeholder sits in one chart, with the people around them resolved to names. */
 export interface OrgPosition {
   chart: { id: string; name: string; organization?: string };
+  /** This person's title in the chart, when it differs from their stakeholder role. */
+  title?: string;
   manager: StakeholderSummary | null;
   direct_reports: StakeholderSummary[];
   peers: StakeholderSummary[];
 }
 
-/** Returns the member list with dangling and self-references cleared, or throws on a reporting loop. */
+/** One member with only known fields; empty optional fields are left out (the YAML writer cannot write `undefined`). */
+function cleanMember(item: Record<string, unknown>, ref: string): OrgChartMember {
+  const member: OrgChartMember = { ref };
+  const reportsTo = typeof item.reports_to === 'string' ? item.reports_to.trim() : '';
+  if (reportsTo && reportsTo !== ref) member.reports_to = reportsTo;
+  const title = typeof item.title === 'string' ? item.title.trim() : '';
+  if (title) member.title = title.slice(0, 200);
+  return member;
+}
+
+/**
+ * Returns the member list with dangling and self-references cleared, or throws on a reporting loop.
+ * Every known member field is kept, so saving a chart never drops a title (or later fields).
+ */
 export function normalizeMembers(raw: unknown): OrgChartMember[] {
   if (!Array.isArray(raw)) return [];
   const members: OrgChartMember[] = [];
@@ -39,9 +54,7 @@ export function normalizeMembers(raw: unknown): OrgChartMember[] {
     const ref = typeof item?.ref === 'string' ? item.ref.trim() : '';
     if (!ref || seen.has(ref)) continue;
     seen.add(ref);
-    const reportsTo = typeof item?.reports_to === 'string' ? item.reports_to.trim() : '';
-    // Omit the key entirely rather than writing `undefined`, which the YAML writer cannot serialize.
-    members.push(reportsTo && reportsTo !== ref ? { ref, reports_to: reportsTo } : { ref });
+    members.push(cleanMember(item, ref));
   }
   for (const m of members) {
     if (m.reports_to && !seen.has(m.reports_to)) delete m.reports_to;
@@ -87,7 +100,8 @@ export class OrgChartService {
 
   private async writeChart(chart: OrgChart, filePath: string): Promise<OrgChart> {
     const frontmatter = {
-      schema_version: '1.0',
+      // 1.1 only when a 1.1 field is used, so existing charts are written exactly as before.
+      schema_version: chart.members.some((m) => m.title) ? '1.1' : '1.0',
       id: chart.id,
       type: 'org_chart',
       name: chart.name,
@@ -132,7 +146,7 @@ export class OrgChartService {
       name,
       organization: data.organization?.trim() || undefined,
       description: data.description?.trim() || undefined,
-      members: normalizeMembers(data.members),
+      members: await this.checkNewRefs(normalizeMembers(data.members), []),
       notes: data.notes?.trim() || undefined,
       created_at: now,
       updated_at: now,
@@ -149,7 +163,7 @@ export class OrgChartService {
       name,
       organization: data.organization !== undefined ? data.organization.trim() || undefined : existing.organization,
       description: data.description !== undefined ? data.description.trim() || undefined : existing.description,
-      members: data.members !== undefined ? normalizeMembers(data.members) : existing.members,
+      members: data.members !== undefined ? await this.checkNewRefs(normalizeMembers(data.members), existing.members) : existing.members,
       notes: data.notes !== undefined ? data.notes.trim() || undefined : existing.notes,
       id,
       updated_at: new Date().toISOString(),
@@ -169,7 +183,12 @@ export class OrgChartService {
       if (!member) continue;
       const members = chart.members
         .filter((m) => m.ref !== ref)
-        .map((m) => (m.reports_to === ref ? (member.reports_to ? { ref: m.ref, reports_to: member.reports_to } : { ref: m.ref }) : m));
+        .map((m) => {
+          if (m.reports_to !== ref) return m;
+          // Keep every other field (title…); only the manager changes.
+          const { reports_to: _old, ...rest } = m;
+          return member.reports_to ? { ...rest, reports_to: member.reports_to } : rest;
+        });
       await this.writeChart({ ...chart, members, updated_at: new Date().toISOString() }, chart.path!);
     }
   }
@@ -178,14 +197,17 @@ export class OrgChartService {
     const charts = (await this.listCharts()).filter((c) => c.members.some((m) => m.ref === ref));
     if (charts.length === 0) return [];
     const byId = new Map<string, Stakeholder>((await stakeholderService.listStakeholders()).map((s) => [s.id, s]));
-    const summary = (id: string): StakeholderSummary => {
-      const s = byId.get(id);
-      return { id, name: s?.name ?? id, role: s?.role || undefined };
-    };
     return charts.map((chart) => {
+      // A title in the chart wins over the stakeholder's role, for everyone listed here.
+      const titleIn = new Map(chart.members.map((m) => [m.ref, m.title]));
+      const summary = (id: string): StakeholderSummary => {
+        const s = byId.get(id);
+        return { id, name: s?.name ?? id, role: titleIn.get(id) || s?.role || undefined };
+      };
       const me = chart.members.find((m) => m.ref === ref)!;
       return {
         chart: { id: chart.id, name: chart.name, organization: chart.organization },
+        title: me.title,
         manager: me.reports_to ? summary(me.reports_to) : null,
         direct_reports: chart.members.filter((m) => m.reports_to === ref).map((m) => summary(m.ref)),
         peers: me.reports_to
@@ -193,6 +215,20 @@ export class OrgChartService {
           : [],
       };
     });
+  }
+
+  /**
+   * Rejects stakeholder ids that are new to the chart and do not exist. Ids already in the chart stay
+   * accepted, so a chart that lost a stakeholder (edited by hand, or deleted elsewhere) can still be edited.
+   */
+  private async checkNewRefs(members: OrgChartMember[], before: OrgChartMember[]): Promise<OrgChartMember[]> {
+    const known = new Set(before.map((m) => m.ref));
+    const added = members.filter((m) => !known.has(m.ref)).map((m) => m.ref);
+    if (added.length === 0) return members;
+    const ids = new Set((await stakeholderService.listStakeholders()).map((s) => s.id));
+    const unknown = added.filter((r) => !ids.has(r));
+    if (unknown.length) throw new OrgChartError(`Unknown stakeholder: ${unknown.join(', ')}`);
+    return members;
   }
 
   private async generateId(): Promise<string> {

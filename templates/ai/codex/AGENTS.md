@@ -42,7 +42,8 @@ outputs/templates/        Output format templates
   `reports_to` is the manager's stakeholder id; no `reports_to` means top of the chart. Use each
   stakeholder's organization, manager, peers and direct reports to decide who approves, what level
   to pitch at, the escalation path, and who should be kept informed. The chart is the source of
-  truth for reporting lines; flag any conflict with a stakeholder's title.
+  truth for reporting lines; flag any conflict with a stakeholder's title. A member's optional
+  `title` is their title in that chart; it overrides the stakeholder file's `role` there only.
 - Always read every file @-mentioned in the task's Objective (Markdown links whose text starts with `@`; paths start at
   the workspace root; a mentioned task no longer in `tasks/active/` is in `tasks/archive/`). Mentions add to the normal
   context scan, they never replace it.

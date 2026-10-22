@@ -42,7 +42,7 @@ For every ref in the task's `stakeholders` field, read `stakeholders/people/<ref
 
 ### Org charts
 
-Then read every org chart in `stakeholders/org-charts/` whose `members` list includes any of these stakeholders. Each chart describes one company or organization (`organization` field). A member's `reports_to` is the stakeholder id of their manager; a member without `reports_to` is at the top of the chart. Resolve ids to names through `stakeholders/people/` and `stakeholders/groups/`.
+Then read every org chart in `stakeholders/org-charts/` whose `members` list includes any of these stakeholders. Each chart describes one company or organization (`organization` field). A member's `reports_to` is the stakeholder id of their manager; a member without `reports_to` is at the top of the chart. Resolve ids to names through `stakeholders/people/` and `stakeholders/groups/`. A member's optional `title` is their title in that chart and overrides the stakeholder file's `role` for that organization only.
 
 For each stakeholder on the task, work out their organization, their manager, their peers and their direct reports, and use it:
 

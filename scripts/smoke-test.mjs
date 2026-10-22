@@ -150,6 +150,47 @@ try {
   check('mention chips can tell an existing file from a deleted one',
     (await resolve(stk.href)) === true && (await resolve('/context/company/does-not-exist/note.md')) === false);
 
+  // Org charts: titles survive every save, new unknown ids are rejected, 1.1 only when needed.
+  {
+    const json = (method, url, body) => fetch(`${base}${url}`, {
+      method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+    });
+    const people = (await (await fetch(`${base}/api/stakeholders`)).json()).filter((p) => p.id.startsWith('STK-'));
+    const [p1, p2, p3] = people.map((p) => p.id);
+    const temp = await (await json('POST', '/api/stakeholders', { name: 'Smoke Temp', role: 'Temporary' })).json();
+    const chartRes = await json('POST', '/api/org-charts', {
+      name: 'Smoke chart', organization: 'Smoke Org',
+      members: [{ ref: p1 }, { ref: p2, reports_to: p1, title: 'Chief of Smoke' }, { ref: temp.id, reports_to: p2 }, { ref: p3, reports_to: temp.id, title: 'Analyst' }],
+    });
+    const smokeChart = await chartRes.json();
+    const chartFile = () => fs.readFileSync(path.join(ws, 'stakeholders', 'org-charts', `${smokeChart.id.toLowerCase()}.md`), 'utf8');
+    check('an org chart with titles is created and written as schema 1.1',
+      chartRes.status === 201 && /schema_version: ['"]?1\.1/.test(chartFile()) && /title: Chief of Smoke/.test(chartFile()));
+    const movedRes = await json('PUT', `/api/org-charts/${smokeChart.id}`, {
+      members: smokeChart.members.map((m) => (m.ref === p2 ? { ...m, reports_to: undefined } : m)),
+    });
+    const moved = await movedRes.json();
+    check('moving someone keeps their title', moved.members.find((m) => m.ref === p2)?.title === 'Chief of Smoke' && !moved.members.find((m) => m.ref === p2).reports_to);
+    const positions = await (await fetch(`${base}/api/org-charts?stakeholder=${p3}`)).json();
+    const pos = positions.find((x) => x.chart.id === smokeChart.id);
+    check('the position API returns the title in this chart', pos?.title === 'Analyst', JSON.stringify(pos ?? null));
+    await fetch(`${base}/api/stakeholders/${temp.id}`, { method: 'DELETE' });
+    const afterDelete = await (await fetch(`${base}/api/org-charts/${smokeChart.id}`)).json();
+    const p3m = afterDelete.members.find((m) => m.ref === p3);
+    check('deleting a stakeholder moves their reports up and keeps the reports\' titles',
+      p3m?.reports_to === p2 && p3m?.title === 'Analyst', JSON.stringify(p3m ?? null));
+    const unknown = await json('PUT', `/api/org-charts/${smokeChart.id}`, { members: [...afterDelete.members, { ref: 'STK-9999' }] });
+    check('adding an unknown stakeholder id to a chart is rejected', unknown.status === 400);
+    fs.writeFileSync(path.join(ws, 'stakeholders', 'org-charts', `${smokeChart.id.toLowerCase()}.md`),
+      chartFile().replace(/members:\n/, 'members:\n  - ref: STK-9998\n'));
+    const stale = await (await fetch(`${base}/api/org-charts/${smokeChart.id}`)).json();
+    const staleSave = await json('PUT', `/api/org-charts/${smokeChart.id}`, { members: stale.members.map((m) => (m.ref === p3 ? { ...m, title: 'Senior Analyst' } : m)) });
+    check('a chart that already lists a missing stakeholder can still be edited', staleSave.status === 200, `status=${staleSave.status}`);
+    const plain = await (await json('POST', '/api/org-charts', { name: 'Plain chart', members: [{ ref: p1 }, { ref: p2, reports_to: p1 }] })).json();
+    check('a chart without titles is still written as schema 1.0',
+      /schema_version: ['"]?1\.0/.test(fs.readFileSync(path.join(ws, 'stakeholders', 'org-charts', `${plain.id.toLowerCase()}.md`), 'utf8')));
+  }
+
   // Git integration: the dashboard can show status, stage and commit in a workspace repo.
   const git = (...args) => execFileSync('git', ['-C', ws, ...args], { env, stdio: 'pipe' });
   git('init', '-q');

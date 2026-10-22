@@ -467,6 +467,12 @@ export default function StakeholderDetailView() {
                   <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}> · {p.chart.organization}</span>
                 )}
                 <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '6px 16px', margin: '8px 0 0', fontSize: 'var(--text-sm)' }}>
+                  {p.title && (
+                    <>
+                      <dt style={{ color: 'var(--color-text-muted)' }}>Title here</dt>
+                      <dd style={{ margin: 0, color: 'var(--color-text)' }}>{p.title}</dd>
+                    </>
+                  )}
                   <OrgRow label="Reports to" people={p.manager ? [p.manager] : []} empty="Nobody (top of the chart)" />
                   <OrgRow label="Direct reports" people={p.direct_reports} empty="None" />
                   {p.manager && <OrgRow label="Peers" people={p.peers} empty="None" />}

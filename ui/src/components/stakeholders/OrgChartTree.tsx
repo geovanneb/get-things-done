@@ -5,7 +5,7 @@ import type { OrgTreeNode } from '@/utils/orgChart';
 
 export const DRAG_MIME = 'application/x-gtd-stakeholder';
 
-export type NodeAction = 'add-report' | 'change-manager' | 'top-level' | 'open' | 'remove';
+export type NodeAction = 'add-report' | 'change-manager' | 'set-title' | 'top-level' | 'open' | 'remove';
 
 interface TreeProps {
   roots: OrgTreeNode[];
@@ -23,6 +23,8 @@ interface TreeProps {
   onDragEnd: () => void;
   onDrop: (ref: string, target: string | null) => void;
   onAction: (ref: string, action: NodeAction) => void;
+  /** Titles set in this chart (override the stakeholder's role on the card). */
+  titles?: Map<string, string>;
   /** Search matches (highlighted) and the match being shown. */
   matches?: Set<string>;
   currentMatch?: string | null;
@@ -110,10 +112,12 @@ function OutlineList({ nodes, depth, ...props }: { nodes: OrgTreeNode[]; depth: 
   );
 }
 
-function NodeCard({ node, compact, people, selected, collapsed, dragging, canDrop, hasManager, onSelect, onToggle, onDragStart, onDragEnd, onDrop, onAction, matches, currentMatch }: { node: OrgTreeNode; compact: boolean } & TreeProps) {
+function NodeCard({ node, compact, people, selected, collapsed, dragging, canDrop, hasManager, onSelect, onToggle, onDragStart, onDragEnd, onDrop, onAction, matches, currentMatch, titles }: { node: OrgTreeNode; compact: boolean } & TreeProps) {
   const person = people.get(node.ref);
   const name = person?.name ?? node.ref;
   const isSelected = selected === node.ref;
+  const chartTitle = titles?.get(node.ref);
+  const role = chartTitle || person?.role;
   const isCollapsed = collapsed.has(node.ref);
   const [over, setOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -163,9 +167,10 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
           <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: person ? 'var(--color-text)' : 'var(--color-critical)' }}>
             {person ? name : `${node.ref} (missing)`}
           </div>
-          {(person?.role || (compact && person?.organization)) && (
-            <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              {compact ? [person?.role, person?.organization].filter(Boolean).join(' · ') : person?.role}
+          {(role || (compact && person?.organization)) && (
+            <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}
+              title={chartTitle ? `Title in this chart${person?.role ? ` · profile role: ${person.role}` : ''}` : undefined}>
+              {compact ? [role, person?.organization].filter(Boolean).join(' · ') : role}
             </div>
           )}
         </div>
@@ -198,6 +203,7 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
               {([
                 ['add-report', 'Add a direct report…'],
                 ['change-manager', 'Change manager…'],
+                ['set-title', 'Title in this chart…'],
                 ...(hasManager(node.ref) ? [['top-level', 'Move to top of chart'] as [NodeAction, string]] : []),
                 ['open', 'Open profile'],
                 ['remove', 'Remove from chart'],

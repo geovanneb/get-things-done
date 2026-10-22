@@ -8,14 +8,14 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { useAppDispatch, useAppState } from '@/store';
-import { ancestorsOf, buildTree, canReportTo, collapsedForLevel, descendantsOf, managerOf, placeMember, removeMember, treeDepth, treeOrder } from '@/utils/orgChart';
+import { ancestorsOf, buildTree, canReportTo, collapsedForLevel, descendantsOf, managerOf, placeMember, removeMember, setTitle, treeDepth, treeOrder } from '@/utils/orgChart';
 import { readChartPrefs, readListCollapsed, writeChartPrefs, writeListCollapsed } from '@/utils/orgChartPrefs';
 import type { OrgChart, OrgChartMember, Stakeholder } from '@/types';
 import OrgChartTree, { DRAG_MIME } from './OrgChartTree';
 import OrgChartViewport, { clampScale } from './OrgChartViewport';
 import type { ViewportHandle } from './OrgChartViewport';
 import type { NodeAction } from './OrgChartTree';
-import { ChartFormModal, PersonPickerModal } from './OrgChartDialogs';
+import { ChartFormModal, PersonPickerModal, TitleModal } from './OrgChartDialogs';
 import type { ChartFormValues } from './OrgChartDialogs';
 
 type View = 'chart' | 'outline';
@@ -65,6 +65,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const exitBtn = useRef<HTMLButtonElement>(null);
   const scaleBefore = useRef(1);
   const [search, setSearch] = useState('');
+  const [titleFor, setTitleFor] = useState<string | null>(null);
   const [matchIndex, setMatchIndex] = useState(0);
   const saveSeq = useRef(0);
 
@@ -101,6 +102,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const members = chart?.members ?? [];
   const memberRefs = useMemo(() => new Set(members.map((m) => m.ref)), [members]);
   const roots = useMemo(() => buildTree(members), [members]);
+  const titles = useMemo(() => new Map(members.filter((m) => m.title).map((m) => [m.ref, m.title!])), [members]);
   const depth = useMemo(() => treeDepth(roots), [roots]);
   const savedCollapsed = useMemo(
     () => collapsedPref ?? (members.length > LARGE_CHART ? collapsedForLevel(roots, 2) : new Set<string>()),
@@ -131,9 +133,9 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     if (!q) return [];
     return treeOrder(roots).filter((ref) => {
       const p = people.get(ref);
-      return [p?.name, p?.role, ref].some((f) => f?.toLowerCase().includes(q));
+      return [p?.name, titles.get(ref) || p?.role, ref].some((f) => f?.toLowerCase().includes(q));
     });
-  }, [search, roots, people]);
+  }, [search, roots, people, titles]);
   const matchSet = useMemo(() => new Set(matchList), [matchList]);
   const currentMatch = matchList.length ? matchList[Math.min(matchIndex, matchList.length - 1)] : null;
 
@@ -158,7 +160,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
 
   // Esc: an open dialog handles it first; then full screen closes; then the people panel.
   useEffect(() => {
-    if (picker || formOpen || (!fullscreen && !panelOpen)) return;
+    if (picker || formOpen || titleFor || (!fullscreen && !panelOpen)) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (fullscreen) exitFullscreen();
@@ -166,7 +168,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [panelOpen, fullscreen, picker, formOpen, setPanelOpen, exitFullscreen]);
+  }, [panelOpen, fullscreen, picker, formOpen, titleFor, setPanelOpen, exitFullscreen]);
 
   // Entering full screen: lock page scroll, fit the chart, move focus to "Exit full screen".
   useEffect(() => {
@@ -242,6 +244,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
       saveMembers(removeMember(members, ref));
       if (selected === ref) setSelected(null);
     } else if (action === 'top-level') place(ref, null);
+    else if (action === 'set-title') setTitleFor(ref);
     else setPicker({ mode: action, ref });
   }
 
@@ -471,6 +474,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     onDragEnd={() => setDragging(null)}
                     onDrop={(ref, target) => { setDragging(null); place(ref, target); }}
                     onAction={handleAction}
+                    titles={titles}
                     matches={matchSet}
                     currentMatch={currentMatch}
                   />
@@ -559,6 +563,15 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
         stakeholders={stakeholders}
         onClose={() => setFormOpen(false)}
         onSubmit={submitChart}
+      />
+
+      <TitleModal
+        isOpen={titleFor !== null}
+        name={titleFor ? people.get(titleFor)?.name ?? titleFor : ''}
+        profileRole={titleFor ? people.get(titleFor)?.role : undefined}
+        current={titleFor ? titles.get(titleFor) : undefined}
+        onClose={() => setTitleFor(null)}
+        onSave={(title) => { if (titleFor) saveMembers(setTitle(members, titleFor, title)); setTitleFor(null); }}
       />
 
       <PersonPickerModal
