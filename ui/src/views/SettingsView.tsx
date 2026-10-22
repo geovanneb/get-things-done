@@ -541,7 +541,7 @@ function GitStatusPanel({ status }: { status: GitStatus }) {
 // ---------------------------------------------------------------------------
 
 export default function SettingsView() {
-  const { agenticVisualMode, theme, accent, textSize } = useAppState();
+  const { agenticVisualMode, showTaskIds, theme, accent, textSize } = useAppState();
   const dispatch = useAppDispatch();
 
   const [config,            setConfig]            = useState<WorkspaceConfig | null>(null);
@@ -923,6 +923,15 @@ export default function SettingsView() {
             value={textSize}
             options={TEXT_SIZE_OPTIONS}
             onChange={next => dispatch({ type: 'SET_TEXT_SIZE', payload: next })}
+          />
+        </FieldRow>
+
+        <FieldRow label="Task IDs on Board">
+          <Toggle
+            id="show-task-ids"
+            label="Show task IDs on board cards and in the list view"
+            checked={showTaskIds}
+            onChange={(next) => dispatch({ type: 'SET_SHOW_TASK_IDS', payload: next })}
           />
         </FieldRow>
 

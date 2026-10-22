@@ -46,6 +46,17 @@ const initialVersions: DataVersions = {
 /** localStorage key for the experimental Agent Floor visualisation. */
 export const AGENTIC_MODE_KEY = 'gtd:agentic-visual-mode';
 
+/** localStorage key for showing task IDs on board cards and in the list view (default: on). */
+export const SHOW_TASK_IDS_KEY = 'gtd:board-show-task-ids';
+
+function readShowTaskIds(): boolean {
+  try {
+    return localStorage.getItem(SHOW_TASK_IDS_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
 function readAgenticMode(): boolean {
   try {
     return localStorage.getItem(AGENTIC_MODE_KEY) === '1';
@@ -66,6 +77,7 @@ interface AppState {
   dataVersions: DataVersions;
   /** Experimental: show the Agent Floor visualisation in the nav. */
   agenticVisualMode: boolean;
+  showTaskIds: boolean;
   /** Appearance preferences, persisted per browser. */
   theme: ThemeMode;
   accent: AccentName;
@@ -85,6 +97,7 @@ type Action =
   | { type: 'CLOSE_NEW_TASK_MODAL' }
   | { type: 'DATA_CHANGED'; payload: DataScope }
   | { type: 'SET_AGENTIC_VISUAL_MODE'; payload: boolean }
+  | { type: 'SET_SHOW_TASK_IDS'; payload: boolean }
   | { type: 'SET_THEME'; payload: ThemeMode }
   | { type: 'SET_ACCENT'; payload: AccentName }
   | { type: 'SET_TEXT_SIZE'; payload: TextSize };
@@ -99,6 +112,7 @@ const initialState: AppState = {
   newTaskModal: { open: false, defaultStatus: 'backlog' },
   dataVersions: initialVersions,
   agenticVisualMode: readAgenticMode(),
+  showTaskIds: readShowTaskIds(),
   theme: readThemeMode(),
   accent: readAccent(),
   textSize: readTextSize(),
@@ -146,6 +160,13 @@ function reducer(state: AppState, action: Action): AppState {
         // Preference is still applied for this session.
       }
       return { ...state, agenticVisualMode: action.payload };
+    case 'SET_SHOW_TASK_IDS':
+      try {
+        localStorage.setItem(SHOW_TASK_IDS_KEY, action.payload ? '1' : '0');
+      } catch {
+        // Preference is still applied for this session.
+      }
+      return { ...state, showTaskIds: action.payload };
     case 'SET_THEME':
       return { ...state, theme: action.payload };
     case 'SET_ACCENT':
