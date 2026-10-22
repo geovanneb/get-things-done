@@ -37,6 +37,10 @@ outputs/templates/        Output format templates
 ## Quality standards
 
 - Read all stakeholder files listed in the task before producing output.
+- Always read every file the task body `@` mentions. Mentions are Markdown links whose text starts
+  with `@`, such as `[@Jane Doe](stakeholders/people/jane-doe.md)`, pointing at a workspace-relative
+  path. They mark files the executive wants emphasized. They add to your normal reading of
+  stakeholders and the context library and never replace it.
 - Adapt tone, depth, and framing to the stakeholder audience.
 - Never fabricate numbers. Placeholder format: `[PLACEHOLDER: what is needed - by: date]`
 - The output template decides which sections exist; these standards decide how each one is written.
