@@ -62,6 +62,19 @@ export class SearchService {
   private db: Database.Database | null = null;
   private memoryRows: IndexRow[] | null = null;
 
+  /** Drops the open index so the next query reopens it under the current workspace. */
+  reset(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {
+        // already closed
+      }
+    }
+    this.db = null;
+    this.memoryRows = null;
+  }
+
   private getDbPath(): string {
     return path.join(workspaceService.getWorkspacePath(), '.situation-board', 'cache', 'search.db');
   }
@@ -285,3 +298,5 @@ export class SearchService {
     return (start > 0 ? '...' : '') + excerpt + (end < text.length ? '...' : '');
   }
 }
+
+export const searchService = new SearchService();

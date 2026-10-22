@@ -47,6 +47,24 @@ export class WorkspaceService {
 
     const updated: EsbConfig = { ...existing, workspace_path: workspacePath };
     fs.writeFileSync(ESB_CONFIG_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+
+    // `gtd start` passes the path via env, which would otherwise keep winning over the config file.
+    if (process.env['ESB_WORKSPACE_PATH']) {
+      process.env['ESB_WORKSPACE_PATH'] = workspacePath;
+    }
+  }
+
+  /** Expands a leading `~` and returns an absolute path. */
+  resolveUserPath(input: string): string {
+    const trimmed = input.trim();
+    const expanded = trimmed === '~' || trimmed.startsWith('~/') || trimmed.startsWith('~\\')
+      ? path.join(os.homedir(), trimmed.slice(1))
+      : trimmed;
+    return path.resolve(expanded);
+  }
+
+  isExistingWorkspace(workspacePath: string): boolean {
+    return fs.existsSync(path.join(workspacePath, 'workspace.yaml'));
   }
 
   async initWorkspace(workspacePath: string, opts: Partial<ScaffoldOptions> = {}): Promise<void> {
