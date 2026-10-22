@@ -3,12 +3,14 @@ import addFormats from 'ajv-formats';
 import { Task, Stakeholder, ValidationResult } from '../types';
 import { TaskService } from './taskService';
 import { StakeholderService } from './stakeholderService';
+import { MentionService } from './mentionService';
 import { OrgChartService, findLoop } from './orgChartService';
 import { OutputService } from './outputService';
 import { isDone, isOpen } from './taskStatus';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
+const mentionService = new MentionService();
 const orgChartService = new OrgChartService();
 const outputService = new OutputService();
 
@@ -178,6 +180,13 @@ export class ValidationService {
       // Check template reference
       if (task.template_ref && !templateIds.has(task.template_ref)) {
         results.push({ level: 'warning', rule: 'broken_ref', message: `Task ${task.id} references unknown template: ${task.template_ref}`, path: task.path });
+      }
+
+      // Check @-mentions in the Objective still point at an existing file
+      for (const m of mentionService.extractMentions(task.body)) {
+        if (!(await mentionService.resolve(m.href))) {
+          results.push({ level: 'warning', rule: 'broken_mention', message: `Task ${task.id} mentions a missing file: @${m.label} (${m.href})`, path: task.path });
+        }
       }
     }
 

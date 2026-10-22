@@ -1,12 +1,14 @@
 import { Router, Request, Response } from 'express';
-import { mentionService } from '../services/mentionService';
+import { MentionService } from '../services/mentionService';
 
 const router = Router();
+const mentionService = new MentionService();
 
-// GET /api/mentions — everything a task can @mention: stakeholders, contexts, templates, tasks
-router.get('/', async (_req: Request, res: Response) => {
-  const candidates = await mentionService.listCandidates();
-  res.json(candidates);
+// GET /api/mentions?q=&limit=  (picker for @-mentions in a task's Objective)
+router.get('/', async (req: Request, res: Response) => {
+  const q = (req.query['q'] as string | undefined) ?? '';
+  const limit = Math.min(Math.max(parseInt((req.query['limit'] as string) || '8', 10) || 8, 1), 50);
+  res.json(await mentionService.search(q, limit));
 });
 
 export default router;

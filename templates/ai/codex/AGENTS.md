@@ -43,10 +43,9 @@ outputs/templates/        Output format templates
   stakeholder's organization, manager, peers and direct reports to decide who approves, what level
   to pitch at, the escalation path, and who should be kept informed. The chart is the source of
   truth for reporting lines; flag any conflict with a stakeholder's title.
-- Always read every file the task body `@` mentions. Mentions are Markdown links whose text starts
-  with `@`, such as `[@Jane Doe](stakeholders/people/jane-doe.md)`, pointing at a workspace-relative
-  path. They mark files the executive wants emphasized. They add to your normal reading of
-  stakeholders and the context library and never replace it.
+- Always read every file @-mentioned in the task's Objective (Markdown links whose text starts with `@`; paths start at
+  the workspace root; a mentioned task no longer in `tasks/active/` is in `tasks/archive/`). Mentions add to the normal
+  context scan, they never replace it.
 - Adapt tone, depth, and framing to the stakeholder audience.
 - Never fabricate numbers. Placeholder format: `[PLACEHOLDER: what is needed - by: date]`
 - The output template decides which sections exist; these standards decide how each one is written.

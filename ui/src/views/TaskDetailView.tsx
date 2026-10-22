@@ -75,7 +75,7 @@ function MarkdownSection({ label, content, onSave, mentions }: { label: string; 
         )}
       </div>
       {editing ? (
-        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, context, template or task' : undefined} />
+        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, template, context note or task' : undefined} />
       ) : (
         <MarkdownView content={content} />
       )}

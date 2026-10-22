@@ -4,10 +4,10 @@ import Button from '@/components/common/Button';
 import StakeholderPicker from '@/components/task-form/StakeholderPicker';
 import DeliverableList from '@/components/task-form/DeliverableList';
 import { DeliverableItem } from '@/components/task-form/DeliverableRow';
-import MentionTextarea from '@/components/common/MentionTextarea';
 import { selectStyle, dateInputStyle, textareaStyle, sectionLabelStyle } from '@/components/task-form/styles';
 import { apiPost } from '@/utils/api';
 import { formatStatusLabel, formatPriorityLabel } from '@/utils/format';
+import MentionTextarea from '../common/MentionTextarea';
 import type { Task, Stakeholder } from '@/types';
 
 interface NewTaskModalProps {
@@ -280,7 +280,7 @@ export default function NewTaskModal({
                 rows={6}
                 value={form.objective}
                 onChange={(v) => setField('objective', v)}
-                placeholder="Describe the goal or context for this task. Type @ to mention a stakeholder, context, template or task."
+                placeholder="Describe the goal or context for this task... Type @ to mention a stakeholder, template, context note or task."
                 style={textareaStyle}
               />
             </div>

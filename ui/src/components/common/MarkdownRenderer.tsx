@@ -1,47 +1,26 @@
-import { useState } from 'react';
-import type { MouseEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useNavigate } from 'react-router-dom';
-import MentionIcon from './MentionIcon';
-import { mentionTypeForPath, resolveMentionRoute } from '@/utils/mentions';
-import type { MentionType } from '@/utils/mentions';
 
-function textOf(node: ReactNode): string {
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(textOf).join('');
+/** In-app route for an @-mention link (`[@Name](/stakeholders/people/stk-0001.md)`), or null. */
+function mentionRoute(rawHref: string | undefined): string | null {
+  // Early mentions were written without the leading slash; treat them as workspace-root paths.
+  const href = rawHref && /^(stakeholders|context|outputs|tasks)\//.test(rawHref) ? `/${rawHref}` : rawHref;
+  if (!href || !href.startsWith('/')) return null;
+  const task = href.match(/^\/tasks\/[^/]+\/(TASK-\d{4}-\d{4})\//);
+  if (task) return `/board/task/${task[1]}`;
+  const stk = href.match(/^\/stakeholders\/[^/]+\/([a-z]+-\d+)\.md$/i);
+  if (stk) return `/stakeholders/${stk[1].toUpperCase()}`;
+  if (href.startsWith('/context/')) return '/context';
+  if (href.startsWith('/outputs/')) return '/outputs';
+  return null;
+}
+
+function textOf(children: ReactNode): string {
+  if (typeof children === 'string') return children;
+  if (Array.isArray(children)) return children.map(textOf).join('');
   return '';
-}
-
-function decodePath(href: string | undefined): string | null {
-  if (!href) return null;
-  try {
-    return decodeURI(href).replace(/^\.\//, '');
-  } catch {
-    return null;
-  }
-}
-
-function MentionChip({ type, relPath, label }: { type: MentionType; relPath: string; label: string }) {
-  const navigate = useNavigate();
-  const [missing, setMissing] = useState(false);
-  const open = async (e: MouseEvent) => {
-    e.preventDefault();
-    const route = await resolveMentionRoute(relPath).catch(() => null);
-    if (route) navigate(route);
-    else setMissing(true);
-  };
-  return (
-    <a
-      href={relPath}
-      onClick={open}
-      className={`mention-chip mention-chip--${type}${missing ? ' mention-chip--missing' : ''}`}
-      title={missing ? `Not found: ${relPath}` : relPath}
-    >
-      <MentionIcon type={type} size={12} />
-      {label}
-    </a>
-  );
 }
 
 /**
@@ -49,22 +28,33 @@ function MentionChip({ type, relPath, label }: { type: MentionType; relPath: str
  * Markdown libraries do not grow the main bundle.
  *
  * Raw HTML in the source is not rendered (react-markdown's default), so a note can never inject
- * markup into the dashboard. Links open in a new tab, except `[@Label](path)` mentions, which
- * render as chips that navigate inside the app.
+ * markup into the dashboard. Links open in a new tab.
  */
 export default function MarkdownRenderer({ content }: { content: string }) {
+  const navigate = useNavigate();
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        a: ({ node: _node, ...props }) => {
-          const label = textOf(props.children);
-          const relPath = decodePath(props.href);
-          const type = relPath ? mentionTypeForPath(relPath) : null;
-          if (label.startsWith('@') && relPath && type) {
-            return <MentionChip type={type} relPath={relPath} label={label.slice(1)} />;
+        a: ({ node: _node, href, children, ...props }) => {
+          const route = textOf(children).startsWith('@') ? mentionRoute(href) : null;
+          if (route) {
+            // @-mention: a chip that opens the item inside the app
+            return (
+              <a
+                href={route}
+                className="mention-chip"
+                title={href}
+                onClick={(e) => {
+                  e.preventDefault();
+                  navigate(route);
+                }}
+              >
+                {children}
+              </a>
+            );
           }
-          return <a {...props} target="_blank" rel="noreferrer noopener" />;
+          return <a {...props} href={href} target="_blank" rel="noreferrer noopener">{children}</a>;
         },
         table: ({ node: _node, ...props }) => (
           <div className="markdown-view__table-wrap">

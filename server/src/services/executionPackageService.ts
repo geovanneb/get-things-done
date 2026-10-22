@@ -9,8 +9,8 @@ import { ProfileService } from './profileService';
 import { OutputService } from './outputService';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { MentionService } from './mentionService';
 import { orgChartService } from './orgChartService';
-import { extractMentionPaths, mentionService, mentionTypeForPath } from './mentionService';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -19,6 +19,16 @@ const profileService = new ProfileService();
 const outputService = new OutputService();
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
+const mentionService = new MentionService();
+
+/** Package file type for a mentioned path, matching the types used for the normal selection. */
+function mentionType(href: string): string {
+  if (href.startsWith('/stakeholders/')) return 'stakeholder';
+  if (href.startsWith('/context/')) return 'context';
+  if (href.startsWith('/outputs/')) return 'template';
+  if (href.startsWith('/tasks/')) return 'task';
+  return 'mention';
+}
 
 interface BuildOptions {
   includeStakeholders: boolean;
@@ -40,12 +50,13 @@ export class ExecutionPackageService {
       files.push({ path: task.path, type: 'task', size: stats.size, hash: stats.hash });
     }
 
-    // Explicit @mentions are always included, on top of (never instead of) the options below.
-    for (const relPath of extractMentionPaths(task.body)) {
-      const absPath = mentionService.resolveMentionPath(relPath);
-      if (!absPath || absPath === task.path || !(await fileService.exists(absPath))) continue;
-      const stats = await fileService.getFileStats(absPath);
-      files.push({ path: absPath, type: mentionTypeForPath(relPath) ?? 'file', size: stats.size, hash: stats.hash, mentioned: true });
+    // Files @-mentioned in the task's Objective: always included, on top of the normal selection.
+    // A mention adds files; it never narrows what the options below would include.
+    for (const m of mentionService.extractMentions(task.body)) {
+      const abs = await mentionService.resolve(m.href);
+      if (!abs) continue;
+      const stats = await fileService.getFileStats(abs);
+      files.push({ path: abs, type: mentionType(m.href), size: stats.size, hash: stats.hash, mentioned: true });
     }
 
     // Add stakeholders
@@ -126,16 +137,18 @@ export class ExecutionPackageService {
       }
     }
 
-    // A mentioned file can also be picked up by the options above; keep the first (mentioned) entry.
+    // A file can be both mentioned and selected (or listed twice): keep the first occurrence.
     const seen = new Set<string>();
-    const uniqueFiles = files.filter((f) => (seen.has(f.path) ? false : (seen.add(f.path), true)));
+    const unique = files.filter((f) => (seen.has(f.path) ? false : (seen.add(f.path), true)));
+    files.length = 0;
+    files.push(...unique);
 
-    const totalSize = uniqueFiles.reduce((sum, f) => sum + f.size, 0);
+    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     const pkg: ExecutionPackage = {
       id: uuidv4(),
       task_id: taskId,
       created_at: new Date().toISOString(),
-      files: uniqueFiles,
+      files,
       agent_ref: task.agent_ref,
       skills: task.skills || [],
       permissions: ['read', 'write'],

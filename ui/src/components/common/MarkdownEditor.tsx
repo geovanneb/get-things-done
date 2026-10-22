@@ -11,7 +11,7 @@ interface MarkdownEditorProps {
   placeholder?: string;
   /** Extra styles for the textarea (the preview takes the same minimum height). */
   textareaStyle?: CSSProperties;
-  /** Typing `@` opens a picker to link stakeholders, contexts, templates and tasks. */
+  /** Typing `@` opens a picker for stakeholders, templates, context notes and tasks. */
   mentions?: boolean;
 }
 
@@ -19,7 +19,17 @@ interface MarkdownEditorProps {
 export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, placeholder, textareaStyle, mentions }: MarkdownEditorProps) {
   const [tab, setTab] = useState<'write' | 'preview'>('write');
   const minHeight = `${rows * 1.5 + 1.5}em`;
-  const textareaBaseStyle: CSSProperties = {
+
+  const tabStyle = (active: boolean): CSSProperties => ({
+    fontSize: 'var(--text-xs)',
+    fontWeight: 600,
+    padding: '4px 10px',
+    borderRadius: 'var(--radius-sm)',
+    color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
+    background: active ? 'var(--color-surface-active)' : 'transparent',
+  });
+
+  const baseTextareaStyle: CSSProperties = {
     width: '100%',
     padding: '10px',
     fontSize: 'var(--text-base)',
@@ -31,17 +41,7 @@ export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, p
     outline: 'none',
     resize: 'vertical',
     lineHeight: 1.5,
-    ...textareaStyle,
   };
-
-  const tabStyle = (active: boolean): CSSProperties => ({
-    fontSize: 'var(--text-xs)',
-    fontWeight: 600,
-    padding: '4px 10px',
-    borderRadius: 'var(--radius-sm)',
-    color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
-    background: active ? 'var(--color-surface-active)' : 'transparent',
-  });
 
   return (
     <div>
@@ -53,19 +53,37 @@ export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, p
           Preview
         </button>
       </div>
-      {tab === 'write' ? (
-        mentions ? (
-          <MentionTextarea value={value} onChange={onChange} rows={rows} autoFocus={autoFocus} placeholder={placeholder} style={textareaBaseStyle} />
-        ) : (
-          <textarea
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            rows={rows}
-            autoFocus={autoFocus}
-            placeholder={placeholder}
-            style={textareaBaseStyle}
-          />
-        )
+      {tab === 'write' && mentions ? (
+        <MentionTextarea
+          value={value}
+          onChange={onChange}
+          rows={rows}
+          autoFocus={autoFocus}
+          placeholder={placeholder}
+          style={{ ...baseTextareaStyle, ...textareaStyle }}
+        />
+      ) : tab === 'write' ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={rows}
+          autoFocus={autoFocus}
+          placeholder={placeholder}
+          style={{
+            width: '100%',
+            padding: '10px',
+            fontSize: 'var(--text-base)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-text)',
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-border-strong)',
+            borderRadius: 'var(--radius-md)',
+            outline: 'none',
+            resize: 'vertical',
+            lineHeight: 1.5,
+            ...textareaStyle,
+          }}
+        />
       ) : (
         <div
           style={{

@@ -36,15 +36,6 @@ Read `profile/executive-profile.md` in full. This is the foundation of everythin
 
 Read `tasks/active/$ARGUMENTS/task.md` completely, including all frontmatter fields. Note the objective, deliverables, stakeholders, preferred agent, and any files in the task folder.
 
-### Explicit mentions
-
-The executive can point at specific files by writing `@` mentions in the task body. They appear as Markdown links whose text starts with `@`, for example `[@Jane Doe](stakeholders/people/jane-doe.md)` or `[@FY26 Strategy](context/strategy/fy26/note.md)`. The link target is a path relative to the workspace root.
-
-- Read every mentioned file in full. A mention is the executive saying "this one matters", so give it extra weight and make sure the deliverable reflects it.
-- Mentions can point at stakeholders, context notes, output templates or other tasks (any status, including `tasks/archive/`).
-- Mentions are **additive**. They never replace Steps 4 to 6: still load every stakeholder in the `stakeholders` field, still scan the full context library, still load the output templates. A task with no mentions is handled exactly as before.
-- If a mentioned file does not exist, say so in your reply and carry on.
-
 ## Step 4 — Load all stakeholders
 
 For every ref in the task's `stakeholders` field, read `stakeholders/people/<ref>.md`. These people are your audience. Every output must be calibrated to what they need to understand, decide, or act on — their influence level, communication style, and what matters to them shape the depth, framing, and tone of everything you write.
@@ -66,6 +57,8 @@ The chart is the source of truth for reporting lines. If a title in a stakeholde
 ## Step 5 — Load relevant context
 
 Scan the full `context/` library (company, organization, strategy, programs, decisions, risks, glossary, situation). Use the task's `contexts` field and any `@` mentioned context notes as a starting point, but go beyond them. Pull in every note that is relevant to the task subject. Ground all claims in these notes — never fabricate data.
+
+**@-mentions in the Objective** — links whose text starts with `@`, for example `[@Jane Doe](/stakeholders/people/stk-0001.md)`, are files the executive explicitly pointed at. Always read every mentioned file, on top of the reads above: a mention adds to the normal context scan, it never replaces or narrows it. Paths start at the workspace root. A mentioned task that is no longer under `tasks/active/` is in `tasks/archive/<TASK-ID>/`. For an output template, read its `output.md` (not the binary template file) unless the task says otherwise. If a mentioned file does not exist, say so in your reply and carry on.
 
 ## Step 6 — Load the output template
 
