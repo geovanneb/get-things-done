@@ -9,6 +9,7 @@ import { ProfileService } from './profileService';
 import { OutputService } from './outputService';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { extractMentionPaths, mentionService, mentionTypeForPath } from './mentionService';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -36,6 +37,14 @@ export class ExecutionPackageService {
     if (task.path) {
       const stats = await fileService.getFileStats(task.path);
       files.push({ path: task.path, type: 'task', size: stats.size, hash: stats.hash });
+    }
+
+    // Explicit @mentions are always included, on top of (never instead of) the options below.
+    for (const relPath of extractMentionPaths(task.body)) {
+      const absPath = mentionService.resolveMentionPath(relPath);
+      if (!absPath || absPath === task.path || !(await fileService.exists(absPath))) continue;
+      const stats = await fileService.getFileStats(absPath);
+      files.push({ path: absPath, type: mentionTypeForPath(relPath) ?? 'file', size: stats.size, hash: stats.hash, mentioned: true });
     }
 
     // Add stakeholders
@@ -108,12 +117,16 @@ export class ExecutionPackageService {
       }
     }
 
-    const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    // A mentioned file can also be picked up by the options above; keep the first (mentioned) entry.
+    const seen = new Set<string>();
+    const uniqueFiles = files.filter((f) => (seen.has(f.path) ? false : (seen.add(f.path), true)));
+
+    const totalSize = uniqueFiles.reduce((sum, f) => sum + f.size, 0);
     const pkg: ExecutionPackage = {
       id: uuidv4(),
       task_id: taskId,
       created_at: new Date().toISOString(),
-      files,
+      files: uniqueFiles,
       agent_ref: task.agent_ref,
       skills: task.skills || [],
       permissions: ['read', 'write'],

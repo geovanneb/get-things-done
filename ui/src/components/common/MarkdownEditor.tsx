@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import MarkdownView from './MarkdownView';
+import MentionTextarea from './MentionTextarea';
 
 interface MarkdownEditorProps {
   value: string;
@@ -10,12 +11,28 @@ interface MarkdownEditorProps {
   placeholder?: string;
   /** Extra styles for the textarea (the preview takes the same minimum height). */
   textareaStyle?: CSSProperties;
+  /** Typing `@` opens a picker to link stakeholders, contexts, templates and tasks. */
+  mentions?: boolean;
 }
 
 /** A Markdown textarea with a Write / Preview switch, like an editor's preview pane. */
-export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, placeholder, textareaStyle }: MarkdownEditorProps) {
+export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, placeholder, textareaStyle, mentions }: MarkdownEditorProps) {
   const [tab, setTab] = useState<'write' | 'preview'>('write');
   const minHeight = `${rows * 1.5 + 1.5}em`;
+  const textareaBaseStyle: CSSProperties = {
+    width: '100%',
+    padding: '10px',
+    fontSize: 'var(--text-base)',
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--color-text)',
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-border-strong)',
+    borderRadius: 'var(--radius-md)',
+    outline: 'none',
+    resize: 'vertical',
+    lineHeight: 1.5,
+    ...textareaStyle,
+  };
 
   const tabStyle = (active: boolean): CSSProperties => ({
     fontSize: 'var(--text-xs)',
@@ -37,27 +54,18 @@ export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, p
         </button>
       </div>
       {tab === 'write' ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={rows}
-          autoFocus={autoFocus}
-          placeholder={placeholder}
-          style={{
-            width: '100%',
-            padding: '10px',
-            fontSize: 'var(--text-base)',
-            fontFamily: 'var(--font-mono)',
-            color: 'var(--color-text)',
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border-strong)',
-            borderRadius: 'var(--radius-md)',
-            outline: 'none',
-            resize: 'vertical',
-            lineHeight: 1.5,
-            ...textareaStyle,
-          }}
-        />
+        mentions ? (
+          <MentionTextarea value={value} onChange={onChange} rows={rows} autoFocus={autoFocus} placeholder={placeholder} style={textareaBaseStyle} />
+        ) : (
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={rows}
+            autoFocus={autoFocus}
+            placeholder={placeholder}
+            style={textareaBaseStyle}
+          />
+        )
       ) : (
         <div
           style={{

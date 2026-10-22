@@ -11,6 +11,7 @@ import situationRouter from './situation';
 import insightsRouter from './insights';
 import kaizenRouter from './kaizen';
 import agentActivityRouter from './agentActivity';
+import mentionsRouter from './mentions';
 
 export function registerRoutes(app: Express): void {
   app.use('/api/tasks', tasksRouter);
@@ -26,4 +27,5 @@ export function registerRoutes(app: Express): void {
   app.use('/api/insights', insightsRouter);
   app.use('/api/kaizen', kaizenRouter);
   app.use('/api/agent-activity', agentActivityRouter);
+  app.use('/api/mentions', mentionsRouter);
 }

@@ -140,6 +140,8 @@ export interface ExecutionPackage {
     type: string;
     size: number;
     hash: string;
+    /** True when the task body explicitly @mentions this file. */
+    mentioned?: boolean;
   }[];
   agent_ref?: string;
   skills: string[];
