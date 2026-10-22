@@ -308,13 +308,11 @@ router.get('/git/enabled', async (req: Request, res: Response) => {
 
 // GET /api/workspace/files/* — serve any file from within the workspace
 router.get('/files/*splat', async (req: Request, res: Response) => {
-  const workspacePath = workspaceService.getWorkspacePath();
-  const relativePath = param(req, 'splat');
-  const fullPath = path.resolve(path.join(workspacePath, relativePath));
+  const root = path.resolve(workspaceService.getWorkspacePath());
+  const fullPath = path.resolve(root, param(req, 'splat'));
 
-  // Prevent path traversal outside the workspace
-  if (!fullPath.startsWith(path.resolve(workspacePath) + path.sep) &&
-      fullPath !== path.resolve(workspacePath)) {
+  // Only files strictly inside the workspace; the workspace folder itself is not a file to serve.
+  if (!fullPath.startsWith(root + path.sep)) {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
