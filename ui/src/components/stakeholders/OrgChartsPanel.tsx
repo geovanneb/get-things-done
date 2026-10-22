@@ -7,8 +7,9 @@ import Input from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
-import { useAppDispatch } from '@/store';
+import { useAppDispatch, useAppState } from '@/store';
 import { buildTree, canReportTo, descendantsOf, managerOf, placeMember, removeMember } from '@/utils/orgChart';
+import { readChartPrefs, readListCollapsed, writeChartPrefs, writeListCollapsed } from '@/utils/orgChartPrefs';
 import type { OrgChart, OrgChartMember, Stakeholder } from '@/types';
 import OrgChartTree, { DRAG_MIME } from './OrgChartTree';
 import type { NodeAction } from './OrgChartTree';
@@ -33,6 +34,8 @@ interface Picker {
 
 export default function OrgChartsPanel({ stakeholders, initialChartId }: { stakeholders: Stakeholder[]; initialChartId?: string | null }) {
   const dispatch = useAppDispatch();
+  const { workspace } = useAppState();
+  const workspaceKey = workspace?.path ?? 'default';
   const navigate = useNavigate();
   const [charts, setCharts] = useState<OrgChart[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +48,9 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const [dragging, setDragging] = useState<string | null>(null);
   const [picker, setPicker] = useState<Picker | null>(null);
   const [peopleQuery, setPeopleQuery] = useState('');
+  // Explicit choice for the "Add people" panel on this chart; undefined = none yet.
+  const [panelPref, setPanelPref] = useState<boolean | undefined>(undefined);
+  const [listCollapsed, setListCollapsed] = useState(readListCollapsed);
   const saveSeq = useRef(0);
 
   const notifyError = useCallback((message: string) => {
@@ -65,13 +71,36 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     try { localStorage.setItem(VIEW_KEY, view); } catch { /* storage unavailable */ }
   }, [view]);
 
-  useEffect(() => { setSelected(null); setCollapsed(new Set()); }, [activeId]);
+  useEffect(() => {
+    setSelected(null);
+    setCollapsed(new Set());
+    setPanelPref(activeId ? readChartPrefs(workspaceKey, activeId).panelOpen : undefined);
+  }, [activeId, workspaceKey]);
 
   const people = useMemo(() => new Map(stakeholders.map((s) => [s.id, s])), [stakeholders]);
   const chart = charts.find((c) => c.id === activeId) ?? null;
   const members = chart?.members ?? [];
   const memberRefs = useMemo(() => new Set(members.map((m) => m.ref)), [members]);
   const roots = useMemo(() => buildTree(members), [members]);
+  // The panel opens by itself only for an empty chart, and only until the user makes a choice.
+  const panelOpen = panelPref ?? members.length === 0;
+
+  const setPanelOpen = useCallback((open: boolean) => {
+    setPanelPref(open);
+    if (activeId) writeChartPrefs(workspaceKey, activeId, { panelOpen: open });
+  }, [activeId, workspaceKey]);
+
+  function toggleList() {
+    setListCollapsed((c) => { writeListCollapsed(!c); return !c; });
+  }
+
+  // Esc closes the people panel, unless a dialog is open (it handles Esc itself).
+  useEffect(() => {
+    if (!panelOpen || picker || formOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanelOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [panelOpen, picker, formOpen, setPanelOpen]);
 
   // Each change is saved right away; a failed save puts the previous members back.
   async function saveMembers(next: OrgChartMember[]) {
@@ -166,12 +195,25 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const pickerName = picker ? people.get(picker.ref)?.name ?? picker.ref : '';
 
   return (
-    <div className="org-layout">
-      {/* Chart list */}
+    <div className={`org-layout${listCollapsed ? ' org-layout--list-collapsed' : ''}`}>
+      {/* Chart list (collapsible to a thin rail) */}
+      {listCollapsed ? (
+        <aside className="org-layout__list org-layout__list--rail" aria-label="Org charts">
+          <button type="button" className="org-rail-btn" onClick={toggleList} aria-label="Show the chart list" title="Show the chart list">
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+          <span className="org-rail-label">Charts · {charts.length}</span>
+        </aside>
+      ) : (
       <aside className="org-layout__list" aria-label="Org charts">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 12px 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, padding: '12px 8px 8px 12px' }}>
           <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Charts</span>
-          <Button size="sm" variant="ghost" onClick={() => { setEditingChart(null); setFormOpen(true); }}>+ New</Button>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Button size="sm" variant="ghost" onClick={() => { setEditingChart(null); setFormOpen(true); }}>+ New</Button>
+            <button type="button" className="org-rail-btn" onClick={toggleList} aria-label="Hide the chart list" title="Hide the chart list">
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M9 3L5 7l4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
+          </span>
         </div>
         {charts.length === 0 && (
           <p style={{ padding: '0 12px 12px', margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No charts yet.</p>
@@ -186,6 +228,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
           </button>
         ))}
       </aside>
+      )}
 
       {/* Editor */}
       <section className="org-layout__editor">
@@ -212,11 +255,15 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                   </button>
                 ))}
               </div>
+              <Button size="sm" variant={panelOpen ? 'primary' : 'secondary'} aria-pressed={panelOpen} aria-controls="org-people-panel"
+                onClick={() => setPanelOpen(!panelOpen)}>
+                {panelOpen ? 'Close Add people' : 'Add people'}
+              </Button>
               <Button size="sm" variant="secondary" onClick={() => { setEditingChart(chart); setFormOpen(true); }}>Edit details</Button>
               <Button size="sm" variant="ghost" onClick={deleteChart} style={{ color: 'var(--color-critical)' }}>Delete</Button>
             </header>
 
-            <div className="org-layout__body">
+            <div className={`org-layout__body${panelOpen ? '' : ' org-layout__body--no-panel'}`}>
               <div className="org-layout__canvas" onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
                 {members.length === 0 ? (
                   <div
@@ -224,7 +271,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     onDrop={(e) => { e.preventDefault(); const ref = e.dataTransfer.getData(DRAG_MIME); if (ref) place(ref, null); }}
                     style={{ border: '1px dashed var(--color-border-strong)', borderRadius: 'var(--radius-lg)', padding: '40px 20px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}
                   >
-                    This chart is empty. Drag people here from the panel on the right, or click <strong>Add</strong> next to a name.
+                    This chart is empty. Drag people here from the <strong>Add people</strong> panel, or click <strong>Add</strong> next to a name.
                     <br />Start with the most senior person, then add their direct reports.
                   </div>
                 ) : (
@@ -246,7 +293,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                   />
                 )}
                 <p style={{ margin: '20px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Drag a card onto someone to make them their manager. Click a card to select it, then add people under it from the panel.
+                  Drag a card onto someone to make them their manager. Select a card and click <strong>+</strong> to add a direct report, or open <strong>Add people</strong> to add under it.
                 </p>
                 {chart.notes && (
                   <div style={{ marginTop: 16, padding: '12px 14px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
@@ -256,10 +303,16 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                 )}
               </div>
 
-              {/* People panel */}
-              <aside className="org-layout__people" aria-label="People to add">
-                <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                  Add people
+              {/* People panel (hidden until opened; Esc or ✕ closes it) */}
+              {panelOpen && (
+              <aside className="org-layout__people" id="org-people-panel" aria-label="People to add">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Add people
+                  </span>
+                  <button type="button" className="org-rail-btn" onClick={() => setPanelOpen(false)} aria-label="Close Add people" title="Close (Esc)">
+                    <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                  </button>
                 </div>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', marginBottom: 8, minHeight: 18 }}>
                   {selectedName ? (
@@ -302,6 +355,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                   )}
                 </div>
               </aside>
+              )}
             </div>
           </>
         )}

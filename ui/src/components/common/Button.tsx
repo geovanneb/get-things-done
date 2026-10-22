@@ -15,6 +15,9 @@ interface ButtonProps {
   iconPosition?: 'left' | 'right';
   title?: string;
   'aria-label'?: string;
+  /** For toggle buttons. */
+  'aria-pressed'?: boolean;
+  'aria-controls'?: string;
   style?: React.CSSProperties;
 }
 
@@ -74,6 +77,8 @@ export default function Button({
   iconPosition = 'left',
   title,
   'aria-label': ariaLabel,
+  'aria-pressed': ariaPressed,
+  'aria-controls': ariaControls,
   style,
 }: ButtonProps) {
   const isDisabled = disabled || loading;
@@ -85,6 +90,8 @@ export default function Button({
       disabled={isDisabled}
       title={title}
       aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
+      aria-controls={ariaControls}
       aria-disabled={isDisabled}
       style={{
         ...baseStyle,

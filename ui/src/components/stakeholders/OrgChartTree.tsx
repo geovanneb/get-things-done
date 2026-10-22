@@ -165,6 +165,17 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
             </div>
           )}
         </div>
+        {isSelected && (
+          <button
+            type="button"
+            className={compact ? 'org-node__add' : 'org-node__add org-node__add--edge'}
+            aria-label={`Add a direct report to ${name}`}
+            title="Add a direct report"
+            onClick={(e) => { e.stopPropagation(); onAction(node.ref, 'add-report'); }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+          </button>
+        )}
         <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
           <button
             type="button"
