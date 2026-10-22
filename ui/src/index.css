@@ -582,6 +582,46 @@ input, textarea, select {
   gap: 8px;
   margin-bottom: 12px;
 }
+.org-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.org-tool-btn:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.org-tool-btn--primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-text-on-accent); }
+.org-tool-btn--primary:hover { background: var(--color-accent); color: var(--color-text-on-accent); opacity: 0.9; }
+
+/* Zoomable chart viewport: the only scroll container of the chart view */
+.org-viewport { position: relative; overflow: auto; cursor: grab; }
+.org-viewport--panning { cursor: grabbing; user-select: none; }
+.org-viewport--fill { flex: 1; min-height: 0; }
+.org-viewport__sizer { position: relative; margin: 0 auto; }
+.org-viewport__content { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+/* Room below the last row for the corner "+" and for scroll bars that overlay content */
+.org-viewport .org-tree-scroll { overflow: visible; padding-bottom: 28px; }
+.org-viewport .org-node { cursor: pointer; }
+
+/* Full screen: the editor covers the app window (dialogs, z-index 1000, stay on top) */
+.org-layout__editor--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  border-radius: 0;
+}
+.org-layout__editor--fullscreen .org-layout__body { flex: 1; min-height: 0; }
+.org-layout__editor--fullscreen .org-layout__canvas { display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+
 .org-toolbar__label {
   align-self: center;
   padding: 0 6px 0 4px;

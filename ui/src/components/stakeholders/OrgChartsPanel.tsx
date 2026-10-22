@@ -12,6 +12,8 @@ import { buildTree, canReportTo, collapsedForLevel, descendantsOf, managerOf, pl
 import { readChartPrefs, readListCollapsed, writeChartPrefs, writeListCollapsed } from '@/utils/orgChartPrefs';
 import type { OrgChart, OrgChartMember, Stakeholder } from '@/types';
 import OrgChartTree, { DRAG_MIME } from './OrgChartTree';
+import OrgChartViewport, { clampScale } from './OrgChartViewport';
+import type { ViewportHandle } from './OrgChartViewport';
 import type { NodeAction } from './OrgChartTree';
 import { ChartFormModal, PersonPickerModal } from './OrgChartDialogs';
 import type { ChartFormValues } from './OrgChartDialogs';
@@ -54,6 +56,14 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   // Explicit choice for the "Add people" panel on this chart; undefined = none yet.
   const [panelPref, setPanelPref] = useState<boolean | undefined>(undefined);
   const [listCollapsed, setListCollapsed] = useState(readListCollapsed);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [scale, setScale] = useState(1);
+  // Temporary "Expand all" in full screen; the saved collapsed state comes back on exit.
+  const [tempCollapsed, setTempCollapsed] = useState<Set<string> | null>(null);
+  const viewportRef = useRef<ViewportHandle>(null);
+  const fullscreenBtn = useRef<HTMLButtonElement>(null);
+  const exitBtn = useRef<HTMLButtonElement>(null);
+  const scaleBefore = useRef(1);
   const saveSeq = useRef(0);
 
   const notifyError = useCallback((message: string) => {
@@ -78,6 +88,8 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     setSelected(null);
     const prefs = activeId ? readChartPrefs(workspaceKey, activeId) : {};
     setCollapsedPref(prefs.collapsed ? new Set(prefs.collapsed) : null);
+    setTempCollapsed(null);
+    setScale(1);
     setPanelPref(prefs.panelOpen);
   }, [activeId, workspaceKey]);
 
@@ -87,15 +99,19 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const memberRefs = useMemo(() => new Set(members.map((m) => m.ref)), [members]);
   const roots = useMemo(() => buildTree(members), [members]);
   const depth = useMemo(() => treeDepth(roots), [roots]);
-  const collapsed = useMemo(
+  const savedCollapsed = useMemo(
     () => collapsedPref ?? (members.length > LARGE_CHART ? collapsedForLevel(roots, 2) : new Set<string>()),
     [collapsedPref, members.length, roots],
   );
+  const collapsed = tempCollapsed ?? savedCollapsed;
 
   const setCollapsed = useCallback((next: Set<string>) => {
     setCollapsedPref(next);
     if (activeId) writeChartPrefs(workspaceKey, activeId, { collapsed: [...next] });
   }, [activeId, workspaceKey]);
+
+  // While "Expand all" is active in full screen, changes stay temporary (not saved).
+  const applyCollapsed = (next: Set<string>) => (tempCollapsed ? setTempCollapsed(next) : setCollapsed(next));
 
   // Which "Levels" button matches what is shown now (null when the user expanded cards by hand).
   const activeLevel = useMemo(() => {
@@ -118,13 +134,44 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     setListCollapsed((c) => { writeListCollapsed(!c); return !c; });
   }
 
-  // Esc closes the people panel, unless a dialog is open (it handles Esc itself).
+  const exitFullscreen = useCallback(() => {
+    setFullscreen(false);
+    setTempCollapsed(null);
+    setScale(scaleBefore.current);
+    requestAnimationFrame(() => fullscreenBtn.current?.focus());
+  }, []);
+
+  // Esc: an open dialog handles it first; then full screen closes; then the people panel.
   useEffect(() => {
-    if (!panelOpen || picker || formOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanelOpen(false); };
+    if (picker || formOpen || (!fullscreen && !panelOpen)) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (fullscreen) exitFullscreen();
+      else setPanelOpen(false);
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [panelOpen, picker, formOpen, setPanelOpen]);
+  }, [panelOpen, fullscreen, picker, formOpen, setPanelOpen, exitFullscreen]);
+
+  // Entering full screen: lock page scroll, fit the chart, move focus to "Exit full screen".
+  useEffect(() => {
+    if (!fullscreen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const id = requestAnimationFrame(() => { viewportRef.current?.fit(); exitBtn.current?.focus(); });
+    return () => { document.body.style.overflow = previous; cancelAnimationFrame(id); };
+  }, [fullscreen]);
+
+  function enterFullscreen() {
+    scaleBefore.current = scale;
+    setFullscreen(true);
+  }
+
+  function expandAllAndFit() {
+    setTempCollapsed(new Set());
+    // Fit after the expanded tree has been laid out.
+    requestAnimationFrame(() => requestAnimationFrame(() => viewportRef.current?.fit()));
+  }
 
   // Each change is saved right away; a failed save puts the previous members back.
   async function saveMembers(next: OrgChartMember[]) {
@@ -147,7 +194,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
       return;
     }
     saveMembers(placeMember(members, ref, manager));
-    if (manager && collapsed.has(manager)) { const n = new Set(collapsed); n.delete(manager); setCollapsed(n); }
+    if (manager && collapsed.has(manager)) { const n = new Set(collapsed); n.delete(manager); applyCollapsed(n); }
   }
 
   function handleAction(ref: string, action: NodeAction) {
@@ -255,7 +302,8 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
       )}
 
       {/* Editor */}
-      <section className="org-layout__editor">
+      <section className={`org-layout__editor${fullscreen ? ' org-layout__editor--fullscreen' : ''}`}
+        aria-label={fullscreen && chart ? `${chart.name} (full screen)` : undefined}>
         {!chart ? (
           <EmptyState
             title="Map who reports to whom"
@@ -279,15 +327,23 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                   </button>
                 ))}
               </div>
-              <Button size="sm" variant={panelOpen ? 'primary' : 'secondary'} aria-pressed={panelOpen} aria-controls="org-people-panel"
-                onClick={() => setPanelOpen(!panelOpen)}>
-                {panelOpen ? 'Close Add people' : 'Add people'}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => { setEditingChart(chart); setFormOpen(true); }}>Edit details</Button>
-              <Button size="sm" variant="ghost" onClick={deleteChart} style={{ color: 'var(--color-critical)' }}>Delete</Button>
+              {fullscreen ? (
+                <button ref={exitBtn} type="button" className="org-tool-btn org-tool-btn--primary" onClick={exitFullscreen} title="Exit full screen (Esc)">
+                  Exit full screen
+                </button>
+              ) : (
+                <>
+                  <Button size="sm" variant={panelOpen ? 'primary' : 'secondary'} aria-pressed={panelOpen} aria-controls="org-people-panel"
+                    onClick={() => setPanelOpen(!panelOpen)}>
+                    {panelOpen ? 'Close Add people' : 'Add people'}
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => { setEditingChart(chart); setFormOpen(true); }}>Edit details</Button>
+                  <Button size="sm" variant="ghost" onClick={deleteChart} style={{ color: 'var(--color-critical)' }}>Delete</Button>
+                </>
+              )}
             </header>
 
-            <div className={`org-layout__body${panelOpen ? '' : ' org-layout__body--no-panel'}`}>
+            <div className={`org-layout__body${panelOpen && !fullscreen ? '' : ' org-layout__body--no-panel'}`}>
               <div className="org-layout__canvas" onClick={(e) => { if (e.target === e.currentTarget) setSelected(null); }}>
                 {members.length === 0 ? (
                   <div
@@ -300,21 +356,43 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                   </div>
                 ) : (
                   <>
+                  <div className="org-toolbar">
                   {depth > 1 && (
-                    <div className="org-toolbar">
                       <div role="group" aria-label="Levels shown" className="org-view-toggle">
                         <span className="org-toolbar__label">Levels</span>
                         {Array.from({ length: depth }, (_, i) => i + 1).map((level) => (
                           <button key={level} type="button" aria-pressed={activeLevel === level}
                             className={activeLevel === level ? 'org-view-toggle__btn org-view-toggle__btn--active' : 'org-view-toggle__btn'}
                             title={level === 1 ? 'Collapse all' : level === depth ? 'Expand all' : `Show ${level} levels`}
-                            onClick={() => setCollapsed(level === depth ? new Set() : collapsedForLevel(roots, level))}>
+                            onClick={() => applyCollapsed(level === depth ? new Set() : collapsedForLevel(roots, level))}>
                             {level === depth ? 'All' : level}
                           </button>
                         ))}
                       </div>
-                    </div>
                   )}
+                    <span style={{ flex: 1 }} />
+                    {view === 'chart' && (
+                      <div role="group" aria-label="Zoom" className="org-view-toggle">
+                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s / 1.25))} aria-label="Zoom out" title="Zoom out (Ctrl/⌘ + scroll)">−</button>
+                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale(1)} title="Reset to 100%" style={{ minWidth: 48 }}>{Math.round(scale * 100)}%</button>
+                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s * 1.25))} aria-label="Zoom in" title="Zoom in (Ctrl/⌘ + scroll)">+</button>
+                        <button type="button" className="org-view-toggle__btn" onClick={() => viewportRef.current?.fit()} title="Fit the visible chart">Fit</button>
+                        {fullscreen && (
+                          <button type="button" className="org-view-toggle__btn" onClick={expandAllAndFit} title="Expand everyone and fit; your collapsed cards come back when you leave full screen">
+                            Expand all &amp; fit
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {!fullscreen && (
+                      <button ref={fullscreenBtn} type="button" className="org-tool-btn" onClick={enterFullscreen} title="Full screen">
+                        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 4.5v-3h3M7.5 1.5h3v3M10.5 7.5v3h-3M4.5 10.5h-3v-3" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        Full screen
+                      </button>
+                    )}
+                  </div>
+                  {(() => {
+                    const tree = (
                   <OrgChartTree
                     roots={roots}
                     people={people}
@@ -325,18 +403,26 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     canDrop={(target) => (dragging ? canReportTo(members, dragging, target) : false)}
                     hasManager={(ref) => managerOf(members, ref) !== null}
                     onSelect={setSelected}
-                    onToggle={(ref) => { const n = new Set(collapsed); if (n.has(ref)) n.delete(ref); else n.add(ref); setCollapsed(n); }}
+                    onToggle={(ref) => { const n = new Set(collapsed); if (n.has(ref)) n.delete(ref); else n.add(ref); applyCollapsed(n); }}
                     onDragStart={setDragging}
                     onDragEnd={() => setDragging(null)}
                     onDrop={(ref, target) => { setDragging(null); place(ref, target); }}
                     onAction={handleAction}
                   />
+                    );
+                    return view === 'chart'
+                      ? <OrgChartViewport ref={viewportRef} scale={scale} onScale={setScale} fill={fullscreen}>{tree}</OrgChartViewport>
+                      : tree;
+                  })()}
                   </>
                 )}
+                {!fullscreen && (
                 <p style={{ margin: '20px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                   Drag a card onto someone to make them their manager. Select a card and click <strong>+</strong> to add a direct report, or open <strong>Add people</strong> to add under it.
+                  {view === 'chart' && ' Drag the background to move around; Ctrl/⌘ + scroll to zoom.'}
                 </p>
-                {chart.notes && (
+                )}
+                {chart.notes && !fullscreen && (
                   <div style={{ marginTop: 16, padding: '12px 14px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
                     <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Notes</div>
                     <MarkdownView content={chart.notes} compact />
@@ -344,8 +430,8 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                 )}
               </div>
 
-              {/* People panel (hidden until opened; Esc or ✕ closes it) */}
-              {panelOpen && (
+              {/* People panel (hidden until opened; Esc or ✕ closes it; never in full screen) */}
+              {panelOpen && !fullscreen && (
               <aside className="org-layout__people" id="org-people-panel" aria-label="People to add">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
