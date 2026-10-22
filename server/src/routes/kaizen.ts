@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { param } from '../utils/params';
 import { KaizenService } from '../services/kaizenService';
 
 const router = Router();
@@ -10,7 +11,7 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 router.get('/:id', async (req: Request, res: Response) => {
-  const proposal = await kaizenService.getKaizen(req.params['id']);
+  const proposal = await kaizenService.getKaizen(param(req, 'id'));
   if (!proposal) { res.status(404).json({ error: 'Not found' }); return; }
   res.json(proposal);
 });
@@ -20,7 +21,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
   const patch: Parameters<typeof kaizenService.updateKaizen>[1] = {};
   if (status) patch.status = status as 'proposed' | 'applied' | 'rejected';
   if (applied_at !== undefined) patch.applied_at = applied_at;
-  const updated = await kaizenService.updateKaizen(req.params['id'], patch);
+  const updated = await kaizenService.updateKaizen(param(req, 'id'), patch);
   if (!updated) { res.status(404).json({ error: 'Not found' }); return; }
   res.json(updated);
 });

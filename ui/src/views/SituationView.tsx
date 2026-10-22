@@ -90,17 +90,20 @@ function DueDateChip({ dueDate }: { dueDate?: string }) {
 
 /* ---- Stakeholder avatars ------------------------------------------ */
 function StakeholderAvatars({ names, max = 3 }: { names: string[]; max?: number }) {
-  const nameOf = useStakeholderNames();
+  const lookup = useStakeholderNames();
   if (!names.length) return null;
   const visible = names.slice(0, max);
   const overflow = names.length - max;
   return (
     <div style={{ display: 'flex', alignItems: 'center' }}>
-      {visible.map((name, i) => (
-        <div key={name} style={{ marginLeft: i > 0 ? -4 : 0, zIndex: max - i }}>
-          <Avatar name={nameOf(name)} size="sm" />
-        </div>
-      ))}
+      {visible.map((name, i) => {
+        const stk = lookup(name);
+        return (
+          <div key={name} style={{ marginLeft: i > 0 ? -4 : 0, zIndex: max - i }}>
+            <Avatar name={stk.name} role={stk.role} initials={stk.initials} size="sm" />
+          </div>
+        );
+      })}
       {overflow > 0 && (
         <span
           style={{

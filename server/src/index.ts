@@ -1,4 +1,3 @@
-import 'express-async-errors';
 import express, { Request, Response } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
@@ -52,6 +51,11 @@ app.use(morgan('dev'));
 // JSON body parser (10mb limit for markdown content)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Express 5 leaves req.body undefined when a request has no body; routes expect an object.
+app.use((req, _res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 
 // Health check
 app.get('/health', (req: Request, res: Response) => {
@@ -102,10 +106,11 @@ app.use('/api', (_req: Request, res: Response) => {
 const uiPath = process.env['ESB_UI_PATH'];
 if (uiPath && fs.existsSync(uiPath)) {
   app.use(express.static(uiPath));
-  app.get('*', (req: Request, res: Response) => {
+  app.get('/{*splat}', (req: Request, res: Response) => {
     const indexPath = path.join(uiPath, 'index.html');
     if (fs.existsSync(indexPath)) {
-      res.sendFile(indexPath);
+      // A global install often lives under a dot-folder (~/.nvm/...), which Express 5 refuses by default.
+      res.sendFile(indexPath, { dotfiles: 'allow' });
     } else {
       res.status(404).json({ error: 'UI not found' });
     }
@@ -122,16 +127,16 @@ server.listen(PORT, HOST, () => {
   console.log(`ESB server running at http://${HOST}:${PORT}`);
   console.log(`Health check: http://${HOST}:${PORT}/health`);
 
-  // Start file watcher if workspace is configured
+  // Registered unconditionally so the watcher keeps broadcasting after a workspace switch.
+  watcherService.on('change', broadcastEvent);
+  watcherService.on('add', broadcastEvent);
+  watcherService.on('unlink', broadcastEvent);
+
   const workspaceService = new WorkspaceService();
   try {
     const workspacePath = workspaceService.getWorkspacePath();
     console.log(`Watching workspace: ${workspacePath}`);
     watcherService.start(workspacePath);
-
-    watcherService.on('change', broadcastEvent);
-    watcherService.on('add', broadcastEvent);
-    watcherService.on('unlink', broadcastEvent);
   } catch {
     console.log('Workspace not configured yet. File watcher not started.');
     console.log('Use POST /api/workspace/init to configure your workspace.');

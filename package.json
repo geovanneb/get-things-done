@@ -57,7 +57,6 @@
     "commander": "^12.1.0",
     "cors": "^2.8.5",
     "express": "^5.3.0",
-    "express-async-errors": "^3.1.1",
     "gray-matter": "^4.0.3",
     "helmet": "^8.3.0",
     "morgan": "^1.10.0",

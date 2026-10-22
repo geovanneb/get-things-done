@@ -9,6 +9,8 @@ import { ProfileService } from './profileService';
 import { OutputService } from './outputService';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { MentionService } from './mentionService';
+import { orgChartService } from './orgChartService';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -17,6 +19,16 @@ const profileService = new ProfileService();
 const outputService = new OutputService();
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
+const mentionService = new MentionService();
+
+/** Package file type for a mentioned path, matching the types used for the normal selection. */
+function mentionType(href: string): string {
+  if (href.startsWith('/stakeholders/')) return 'stakeholder';
+  if (href.startsWith('/context/')) return 'context';
+  if (href.startsWith('/outputs/')) return 'template';
+  if (href.startsWith('/tasks/')) return 'task';
+  return 'mention';
+}
 
 interface BuildOptions {
   includeStakeholders: boolean;
@@ -38,6 +50,15 @@ export class ExecutionPackageService {
       files.push({ path: task.path, type: 'task', size: stats.size, hash: stats.hash });
     }
 
+    // Files @-mentioned in the task's Objective: always included, on top of the normal selection.
+    // A mention adds files; it never narrows what the options below would include.
+    for (const m of mentionService.extractMentions(task.body)) {
+      const abs = await mentionService.resolve(m.href);
+      if (!abs) continue;
+      const stats = await fileService.getFileStats(abs);
+      files.push({ path: abs, type: mentionType(m.href), size: stats.size, hash: stats.hash, mentioned: true });
+    }
+
     // Add stakeholders
     if (options.includeStakeholders) {
       const refs = options.selectedStakeholderRefs || task.stakeholder_refs || [];
@@ -51,6 +72,14 @@ export class ExecutionPackageService {
         } catch {
           // Stakeholder not found, skip
         }
+      }
+
+      // Org charts give the reporting lines around the audience.
+      const refSet = new Set(refs);
+      for (const chart of await orgChartService.listCharts()) {
+        if (!chart.path || !chart.members.some((m) => refSet.has(m.ref))) continue;
+        const stats = await fileService.getFileStats(chart.path);
+        files.push({ path: chart.path, type: 'org_chart', size: stats.size, hash: stats.hash });
       }
     }
 
@@ -107,6 +136,12 @@ export class ExecutionPackageService {
         // Template not found, skip
       }
     }
+
+    // A file can be both mentioned and selected (or listed twice): keep the first occurrence.
+    const seen = new Set<string>();
+    const unique = files.filter((f) => (seen.has(f.path) ? false : (seen.add(f.path), true)));
+    files.length = 0;
+    files.push(...unique);
 
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     const pkg: ExecutionPackage = {

@@ -116,6 +116,40 @@ try {
   check('a workspace edited through the app (incl. a group) has no validation errors', errors.length === 0,
     errors.length ? JSON.stringify(errors.slice(0, 3)) : '');
 
+  // @-mentions in a task's Objective (picker, execution package, archived tasks, validation).
+  const cands = await (await fetch(`${base}/api/mentions?q=`)).json();
+  const kinds = new Set(cands.map((c) => c.type));
+  check('the mention picker searches stakeholders, templates, context notes and tasks',
+    ['stakeholder', 'template', 'context', 'task'].every((k) => kinds.has(k)), [...kinds].join(','));
+  const put = (id, body) => fetch(`${base}/api/tasks/${id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }).then((r) => r.json());
+  const preview = async (id) => (await (await fetch(`${base}/api/tasks/${id}/execution-package/preview`)).json()).files
+    .map((f) => f.path.split(path.sep).join('/'));
+  const host = tasks.find((t) => t.status === 'in_review') ?? tasks.find((t) => t.id !== task.id && t.id !== reopened.id);
+  const toArchive = tasks.find((t) => t.status === 'blocked' || (t.status === 'in_progress' && t.id !== host.id));
+  const stk = cands.find((c) => c.type === 'stakeholder' && !(host.stakeholder_refs ?? []).includes(c.id));
+  const before = await preview(host.id);
+  await fetch(`${base}/api/tasks/${toArchive.id}/archive`, { method: 'POST' });
+  const objective = `${host.body ?? ''}\n\nSee [@${stk.label}](${stk.href}), [@${toArchive.id}](/tasks/active/${toArchive.id}/task.md) `
+    + `and again [@${stk.label}](${stk.href}).`;
+  await put(host.id, { body: objective });
+  const after = await preview(host.id);
+  check('a mentioned stakeholder is added to the execution package', after.some((p) => p.endsWith(stk.href)), stk.href);
+  check('a mentioned task still resolves after it was archived',
+    after.some((p) => p.endsWith(`tasks/archive/${toArchive.id}/task.md`)));
+  check('mentions only add files: everything from before is still in the package', before.every((p) => after.includes(p)));
+  check('the execution package has no duplicate files', new Set(after).size === after.length);
+  await put(host.id, { body: `${objective} Also [@Gone](/context/company/does-not-exist/note.md).` });
+  const issues2 = await (await fetch(`${base}/api/workspace/validate`)).json();
+  check('a broken mention is reported as a validation warning (not an error)',
+    issues2.some((i) => i.rule === 'broken_mention' && i.level === 'warning') && !issues2.some((i) => i.level === 'error'),
+    JSON.stringify(issues2.filter((i) => i.level !== 'info').slice(0, 3)));
+
+  const resolve = async (href) => (await (await fetch(`${base}/api/mentions/resolve?href=${encodeURIComponent(href)}`)).json()).exists;
+  check('mention chips can tell an existing file from a deleted one',
+    (await resolve(stk.href)) === true && (await resolve('/context/company/does-not-exist/note.md')) === false);
+
   // Git integration: the dashboard can show status, stage and commit in a workspace repo.
   const git = (...args) => execFileSync('git', ['-C', ws, ...args], { env, stdio: 'pipe' });
   git('init', '-q');

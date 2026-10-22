@@ -3,9 +3,12 @@ import * as fsp from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Router, Request, Response } from 'express';
+import { param } from '../utils/params';
 import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
 import { GitService } from '../services/gitService';
+import { watcherService } from '../services/watcherService';
+import { searchService } from '../services/searchService';
 
 const router = Router();
 const workspaceService = new WorkspaceService();
@@ -60,6 +63,51 @@ async function openClaudeCode(workspacePath: string): Promise<void> {
   throw new Error('No supported terminal emulator found.');
 }
 
+/**
+ * Open the OS-native folder picker and return the chosen absolute path, or null on cancel.
+ * Nothing from the request reaches the command line.
+ */
+async function pickFolder(): Promise<string | null> {
+  const prompt = 'Choose a workspace folder';
+
+  if (process.platform === 'darwin') {
+    try {
+      const { stdout } = await execFileAsync('osascript', [
+        '-e', `POSIX path of (choose folder with prompt ${appleScriptQuote(prompt)})`,
+      ], { timeout: 10 * 60 * 1000 });
+      return stdout.trim() || null;
+    } catch (err) {
+      // osascript exits with "User canceled. (-128)" when the dialog is dismissed.
+      if (err instanceof Error && /-128/.test(err.message)) return null;
+      throw err;
+    }
+  }
+
+  if (process.platform === 'win32') {
+    const script = [
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+      `$d.Description = '${prompt}'`,
+      "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.SelectedPath }",
+    ].join('; ');
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-STA', '-Command', script], {
+      timeout: 10 * 60 * 1000,
+    });
+    return stdout.trim() || null;
+  }
+
+  try {
+    const { stdout } = await execFileAsync('zenity', ['--file-selection', '--directory', `--title=${prompt}`], {
+      timeout: 10 * 60 * 1000,
+    });
+    return stdout.trim() || null;
+  } catch (err) {
+    // zenity exits with code 1 on cancel.
+    if ((err as { code?: unknown }).code === 1) return null;
+    throw err;
+  }
+}
+
 // GET /api/workspace
 router.get('/', async (req: Request, res: Response) => {
   const config = workspaceService.getWorkspaceConfig();
@@ -96,6 +144,57 @@ router.post('/init', async (req: Request, res: Response) => {
   await workspaceService.initWorkspace(workspacePath);
   const config = workspaceService.getWorkspaceConfig();
   res.status(201).json({ message: 'Workspace initialized', config });
+});
+
+// POST /api/workspace/switch — point the app at another folder
+router.post('/switch', async (req: Request, res: Response) => {
+  const { path: rawPath, initialize } = req.body ?? {};
+  if (!rawPath || typeof rawPath !== 'string' || !rawPath.trim()) {
+    res.status(400).json({ error: 'Please enter a folder path.' });
+    return;
+  }
+
+  const workspacePath = workspaceService.resolveUserPath(rawPath);
+
+  const isValid = await workspaceService.validateWorkspacePath(workspacePath);
+  if (!isValid) {
+    res.status(400).json({ error: `Folder not found, not a directory, or not writable: ${workspacePath}` });
+    return;
+  }
+
+  const isWorkspace = workspaceService.isExistingWorkspace(workspacePath);
+  if (!isWorkspace && initialize !== true) {
+    res.status(409).json({
+      error: 'This folder is not a Get Things Done workspace yet.',
+      needs_init: true,
+      path: workspacePath,
+    });
+    return;
+  }
+
+  if (isWorkspace) {
+    workspaceService.setWorkspacePath(workspacePath);
+  } else {
+    await workspaceService.initWorkspace(workspacePath);
+  }
+
+  searchService.reset();
+  watcherService.start(workspacePath);
+
+  const config = workspaceService.getWorkspaceConfig();
+  const git_enabled = await gitService.isGitRepo();
+  res.json({ message: 'Workspace changed', initialized: !isWorkspace, config: { ...config, git_enabled } });
+});
+
+// POST /api/workspace/pick-folder — native folder picker on the machine running the server
+router.post('/pick-folder', async (req: Request, res: Response) => {
+  try {
+    const picked = await pickFolder();
+    res.json({ path: picked });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(501).json({ error: 'Folder picker is not available on this system. Type the path instead.', message });
+  }
 });
 
 // POST /api/workspace/reinitialize — re-run scaffold on the current workspace
@@ -208,9 +307,9 @@ router.get('/git/enabled', async (req: Request, res: Response) => {
 });
 
 // GET /api/workspace/files/* — serve any file from within the workspace
-router.get('/files/*', async (req: Request, res: Response) => {
+router.get('/files/*splat', async (req: Request, res: Response) => {
   const workspacePath = workspaceService.getWorkspacePath();
-  const relativePath = (req.params as Record<string, string>)[0] ?? '';
+  const relativePath = param(req, 'splat');
   const fullPath = path.resolve(path.join(workspacePath, relativePath));
 
   // Prevent path traversal outside the workspace
@@ -227,7 +326,8 @@ router.get('/files/*', async (req: Request, res: Response) => {
     return;
   }
 
-  res.sendFile(fullPath);
+  // Workspace files can sit in dot-folders (.claude/, .situation-board/); the traversal check above is the guard.
+  res.sendFile(fullPath, { dotfiles: 'allow' });
 });
 
 export default router;

@@ -7,7 +7,7 @@ import Avatar from '../components/common/Avatar';
 import Input from '../components/common/Input';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
-import { useAppDispatch, useDataVersion } from '../store';
+import { useAppDispatch, useAppState, useDataVersion } from '../store';
 import { apiPut } from '../utils/api';
 import { formatDate, formatDueStatus, formatStatusLabel, formatPriorityLabel } from '../utils/format';
 
@@ -58,7 +58,7 @@ function StakeholderAvatars({ refs, max = 3 }: { refs: Task['stakeholders']; max
         const stk = lookup.get(s.ref);
         return (
           <div key={s.ref} style={{ marginLeft: i > 0 ? -4 : 0, zIndex: max - i }}>
-            <Avatar name={stk?.name ?? s.ref} initials={stk?.avatar_initials} size="sm" />
+            <Avatar name={stk?.name ?? s.ref} role={stk?.role} initials={stk?.avatar_initials} size="sm" />
           </div>
         );
       })}
@@ -146,10 +146,11 @@ function AgentWorkingIndicator({ task }: { task: Task }) {
 /* ---- Task card (Kanban) ------------------------------------------- */
 
 function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
+  const { showTaskIds } = useAppState();
   return (
     <button
       onClick={onClick}
-      aria-label={`Open task: ${task.title}`}
+      aria-label={`Open task ${task.id}: ${task.title}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -173,12 +174,23 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
         (e.currentTarget as HTMLElement).style.boxShadow = 'none';
       }}
     >
-      {/* Row 1: priority + type */}
+      {/* Row 1: priority + type + task ID */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Badge variant={`priority-${task.priority}` as 'priority-critical'} size="sm">
           {formatPriorityLabel(task.priority)}
         </Badge>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{task.task_type}</span>
+        {showTaskIds && <span
+          style={{
+            marginLeft: 'auto',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 'var(--text-xs)',
+            color: 'var(--color-text-muted)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {task.id}
+        </span>}
       </div>
 
       {/* Title */}
@@ -334,6 +346,7 @@ function ListView({
   tasks: Task[];
   onRowClick: (id: string) => void;
 }) {
+  const { showTaskIds } = useAppState();
   const [sortKey, setSortKey] = useState<keyof Task>('created_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -410,6 +423,11 @@ function ListView({
               </td>
               <td style={{ padding: '10px 14px', fontWeight: 500, maxWidth: 360 }}>
                 <span className="truncate" style={{ display: 'block' }}>{task.title}</span>
+                {showTaskIds && (
+                  <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontWeight: 400 }}>
+                    {task.id}
+                  </span>
+                )}
                 {task.tags.length > 0 && (
                   <div style={{ marginTop: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {task.tags.slice(0, 3).map((t) => <Badge key={t} size="sm">{t}</Badge>)}
@@ -471,7 +489,10 @@ export default function BoardView() {
 
   const filtered = tasks.filter((t) => {
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
-    if (search && !t.title.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!t.title.toLowerCase().includes(q) && !t.id.toLowerCase().includes(q)) return false;
+    }
     return true;
   });
 
@@ -561,7 +582,7 @@ export default function BoardView() {
           <Input
             value={search}
             onChange={setSearch}
-            placeholder="Search tasks..."
+            placeholder="Search title or ID..."
             style={{ maxWidth: 220 }}
             icon={
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">

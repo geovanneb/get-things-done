@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { param } from '../utils/params';
 import multer from 'multer';
 import { OutputService } from '../services/outputService';
 
@@ -20,38 +21,38 @@ router.post('/templates', async (req: Request, res: Response) => {
 
 // GET /api/outputs/templates/:id
 router.get('/templates/:id', async (req: Request, res: Response) => {
-  const template = await outputService.getTemplate(req.params['id']);
+  const template = await outputService.getTemplate(param(req, 'id'));
   res.json(template);
 });
 
 // PUT /api/outputs/templates/:id
 router.put('/templates/:id', async (req: Request, res: Response) => {
-  const template = await outputService.updateTemplate(req.params['id'], req.body);
+  const template = await outputService.updateTemplate(param(req, 'id'), req.body);
   res.json(template);
 });
 
 // DELETE /api/outputs/templates/:id
 router.delete('/templates/:id', async (req: Request, res: Response) => {
-  await outputService.deleteTemplate(req.params['id']);
+  await outputService.deleteTemplate(param(req, 'id'));
   res.status(204).send();
 });
 
 // GET /api/outputs/templates/:id/files
 router.get('/templates/:id/files', async (req: Request, res: Response) => {
-  const files = await outputService.listTemplateFiles(req.params['id']);
+  const files = await outputService.listTemplateFiles(param(req, 'id'));
   res.json(files);
 });
 
 // POST /api/outputs/templates/:id/files
 router.post('/templates/:id/files', upload.single('file'), async (req: Request, res: Response) => {
   if (!req.file) { res.status(400).json({ error: 'No file provided' }); return; }
-  const saved = await outputService.saveTemplateFile(req.params['id'], req.file.originalname, req.file.buffer);
+  const saved = await outputService.saveTemplateFile(param(req, 'id'), req.file.originalname, req.file.buffer);
   res.status(201).json(saved);
 });
 
 // DELETE /api/outputs/templates/:id/files/:filename
 router.delete('/templates/:id/files/:filename', async (req: Request, res: Response) => {
-  await outputService.deleteTemplateFile(req.params['id'], req.params['filename']);
+  await outputService.deleteTemplateFile(param(req, 'id'), param(req, 'filename'));
   res.status(204).send();
 });
 

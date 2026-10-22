@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { param } from '../utils/params';
 import { AgentService } from '../services/agentService';
 
 const agentService = new AgentService();
@@ -14,7 +15,7 @@ agentsRouter.get('/', async (req: Request, res: Response) => {
 
 // GET /api/agents/:name
 agentsRouter.get('/:name', async (req: Request, res: Response) => {
-  const agent = await agentService.getAgent(req.params['name']);
+  const agent = await agentService.getAgent(param(req, 'name'));
   res.json(agent);
 });
 
@@ -52,7 +53,7 @@ skillsRouter.post('/install', async (req: Request, res: Response) => {
 // DELETE /api/skills/:name
 skillsRouter.delete('/:name', async (req: Request, res: Response) => {
   try {
-    await agentService.deleteSkill(req.params['name']);
+    await agentService.deleteSkill(param(req, 'name'));
     res.json({ ok: true });
   } catch (err: unknown) {
     res.status(404).json({ error: err instanceof Error ? err.message : 'Delete failed' });
@@ -61,6 +62,6 @@ skillsRouter.delete('/:name', async (req: Request, res: Response) => {
 
 // GET /api/skills/:name
 skillsRouter.get('/:name', async (req: Request, res: Response) => {
-  const skill = await agentService.getSkill(req.params['name']);
+  const skill = await agentService.getSkill(param(req, 'name'));
   res.json(skill);
 });

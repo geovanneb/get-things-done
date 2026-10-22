@@ -1,8 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { SearchService } from '../services/searchService';
+import { searchService } from '../services/searchService';
 
 const router = Router();
-const searchService = new SearchService();
 
 // GET /api/search?q=&types=
 router.get('/', async (req: Request, res: Response) => {
