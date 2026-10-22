@@ -8,6 +8,49 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-22
+
+### Added
+
+- **Org charts.** A new **Stakeholders → Org charts** tab maps who reports to whom,
+  one chart per company or organization. Drag a card onto someone to make them the
+  manager, or use the card menu. Charts have a chart view and an outline view, a
+  panel to add people (the chart's organization first), and can start with everyone
+  from an organization. Reporting loops are blocked. Charts are stored in
+  `stakeholders/org-charts/` with a new `org-chart.schema.json`. A stakeholder's page
+  shows who they report to, their direct reports and their peers. (#35, #36)
+- **@ mentions in tasks.** Typing `@` in a task's Objective opens a picker across
+  stakeholders, output templates, context notes and tasks (including archived ones),
+  with tabs per type. The choice is saved as a plain Markdown link and shown as a chip.
+  Mentioned files are always added to the execution package, on top of the normal
+  context loading, which is unchanged for tasks without mentions. Works with Japanese,
+  Chinese and Korean input. Validation warns about mentions of files that no longer
+  exist. (#31, #32, #34, #37)
+- **Change the workspace folder from Settings.** The Change button opens a folder
+  picker, offers to initialize a folder that is not a workspace yet, and switches
+  without restarting the server. (#29, #30)
+- Markdown fields render as Markdown, and edit boxes get Write / Preview tabs. (#25)
+- Board cards and the list view show the task ID, and board search matches it. (#33)
+- Hovering a stakeholder's avatar shows their role. (#28)
+
+### Changed
+
+- **Agent instructions** (Claude Code, Codex, Copilot): agents always read files
+  mentioned with `@`, and read the org charts of every task stakeholder to decide who
+  approves, what level to pitch at, the escalation path and who to keep informed. The
+  execution package also includes those org charts. Run `gtd upgrade` in an existing
+  workspace to get the new instructions and schema.
+- **Server upgraded to Express 5.** `express-async-errors` is no longer needed and was
+  removed. (#18)
+- Dependencies: better-sqlite3 13 (#22), Vite 6 (#27).
+
+### Fixed
+
+- Stakeholder groups (`GRP-NNNN`) no longer fail workspace validation, and a stale
+  `done_date` is cleared when a task leaves Done. (#26)
+- Workspace files under dot-folders (such as `.claude/`) and the dashboard installed
+  under a dot-folder (such as `~/.nvm/`) are served correctly. (#18)
+
 ## [0.1.2] - 2026-10-21
 
 ### Fixed
@@ -77,6 +120,7 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/geovanneb/get-things-done/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/geovanneb/get-things-done/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/geovanneb/get-things-done/releases/tag/v0.1.1
