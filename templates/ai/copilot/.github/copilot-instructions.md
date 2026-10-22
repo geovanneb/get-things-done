@@ -19,6 +19,9 @@ This workspace is managed by Get Things Done. When working in this directory:
 - Save deliverables to `tasks/active/<TASK-ID>/deliverables/`.
 - Read the executive profile before writing anything — adapt voice and tone to match.
 - Adapt tone and detail to each stakeholder's profile.
+- Always read every file @-mentioned in the task's Objective (Markdown links whose text starts with `@`; paths start at the
+  workspace root; a mentioned task no longer in `tasks/active/` is in `tasks/archive/`). Mentions add to the normal context
+  scan, they never replace it.
 - Never fabricate data. Use placeholders: `[PLACEHOLDER: description - by: date]`.
 - The output template decides which sections exist; these rules decide how each one is written. Never
   add a top-level section the template does not define. If one seems missing, say so and let the user

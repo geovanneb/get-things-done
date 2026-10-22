@@ -33,6 +33,8 @@ Read files in this order:
 4. **The executive profile** at `profile/executive-profile.md` — this defines the voice, communication style, and decision-making approach that all outputs must reflect.
 5. **Output templates** for each deliverable listed in the task's `deliverables` field — find them at `outputs/templates/<template-slug>/output.md`. The template defines the expected format, required sections, and style guide for the output.
 
+**@-mentions in the Objective** — links whose text starts with `@`, for example `[@Jane Doe](/stakeholders/people/stk-0001.md)`, are files the executive explicitly pointed at. Always read every mentioned file, on top of the reads above: a mention adds to the normal context scan, it never replaces or narrows it. Paths start at the workspace root. A mentioned task that is no longer under `tasks/active/` is in `tasks/archive/<TASK-ID>/`. For an output template, read its `output.md` (not the binary template file) unless the task says otherwise.
+
 Do not skip any of these reads. The quality of your output depends on understanding the full picture before writing anything.
 
 ## The core production model

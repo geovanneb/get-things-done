@@ -75,7 +75,7 @@ function MarkdownSection({ label, content, onSave }: { label: string; content: s
         )}
       </div>
       {editing ? (
-        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus />
+        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus mentions />
       ) : (
         <MarkdownView content={content} />
       )}

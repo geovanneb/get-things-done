@@ -37,6 +37,9 @@ outputs/templates/        Output format templates
 ## Quality standards
 
 - Read all stakeholder files listed in the task before producing output.
+- Always read every file @-mentioned in the task's Objective (Markdown links whose text starts with `@`; paths start at
+  the workspace root; a mentioned task no longer in `tasks/active/` is in `tasks/archive/`). Mentions add to the normal
+  context scan, they never replace it.
 - Adapt tone, depth, and framing to the stakeholder audience.
 - Never fabricate numbers. Placeholder format: `[PLACEHOLDER: what is needed - by: date]`
 - The output template decides which sections exist; these standards decide how each one is written.

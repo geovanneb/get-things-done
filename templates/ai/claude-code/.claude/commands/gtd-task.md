@@ -44,6 +44,8 @@ For every ref in the task's `stakeholders` field, read `stakeholders/people/<ref
 
 Scan the full `context/` library (company, organization, strategy, programs, decisions, risks, glossary, situation). Use the task's `contexts` field as a starting point, but go beyond it. Pull in every note that is relevant to the task subject. Ground all claims in these notes — never fabricate data.
 
+**@-mentions in the Objective** — links whose text starts with `@`, for example `[@Jane Doe](/stakeholders/people/stk-0001.md)`, are files the executive explicitly pointed at. Always read every mentioned file, on top of the reads above: a mention adds to the normal context scan, it never replaces or narrows it. Paths start at the workspace root. A mentioned task that is no longer under `tasks/active/` is in `tasks/archive/<TASK-ID>/`. For an output template, read its `output.md` (not the binary template file) unless the task says otherwise.
+
 ## Step 6 — Load the output template
 
 For each deliverable in the task, find the template at `outputs/templates/<template-slug>/output.md`. The template defines required sections and the style guide. Every required section must be present in your output.

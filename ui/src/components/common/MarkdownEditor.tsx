@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import MarkdownView from './MarkdownView';
+import MentionTextarea from './MentionTextarea';
 
 interface MarkdownEditorProps {
   value: string;
@@ -10,10 +11,12 @@ interface MarkdownEditorProps {
   placeholder?: string;
   /** Extra styles for the textarea (the preview takes the same minimum height). */
   textareaStyle?: CSSProperties;
+  /** Typing `@` opens a picker for stakeholders, templates, context notes and tasks. */
+  mentions?: boolean;
 }
 
 /** A Markdown textarea with a Write / Preview switch, like an editor's preview pane. */
-export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, placeholder, textareaStyle }: MarkdownEditorProps) {
+export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, placeholder, textareaStyle, mentions }: MarkdownEditorProps) {
   const [tab, setTab] = useState<'write' | 'preview'>('write');
   const minHeight = `${rows * 1.5 + 1.5}em`;
 
@@ -26,6 +29,20 @@ export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, p
     background: active ? 'var(--color-surface-active)' : 'transparent',
   });
 
+  const baseTextareaStyle: CSSProperties = {
+    width: '100%',
+    padding: '10px',
+    fontSize: 'var(--text-base)',
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--color-text)',
+    background: 'var(--color-surface)',
+    border: '1px solid var(--color-border-strong)',
+    borderRadius: 'var(--radius-md)',
+    outline: 'none',
+    resize: 'vertical',
+    lineHeight: 1.5,
+  };
+
   return (
     <div>
       <div role="tablist" aria-label="Markdown editor" style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
@@ -36,7 +53,16 @@ export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, p
           Preview
         </button>
       </div>
-      {tab === 'write' ? (
+      {tab === 'write' && mentions ? (
+        <MentionTextarea
+          value={value}
+          onChange={onChange}
+          rows={rows}
+          autoFocus={autoFocus}
+          placeholder={placeholder}
+          style={{ ...baseTextareaStyle, ...textareaStyle }}
+        />
+      ) : tab === 'write' ? (
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
