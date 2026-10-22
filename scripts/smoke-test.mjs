@@ -187,6 +187,34 @@ try {
     const staleSave = await json('PUT', `/api/org-charts/${smokeChart.id}`, { members: stale.members.map((m) => (m.ref === p3 ? { ...m, title: 'Senior Analyst' } : m)) });
     check('a chart that already lists a missing stakeholder can still be edited', staleSave.status === 200, `status=${staleSave.status}`);
     const plain = await (await json('POST', '/api/org-charts', { name: 'Plain chart', members: [{ ref: p1 }, { ref: p2, reports_to: p1 }] })).json();
+    // Units: membership containers; reporting lines are untouched.
+    const unitTemp = await (await json('POST', '/api/stakeholders', { name: 'Smoke Head', role: 'Head' })).json();
+    const uChart = await (await json('POST', '/api/org-charts', {
+      name: 'Unit chart',
+      members: [{ ref: p1, unit: 'U-1' }, { ref: unitTemp.id, reports_to: p1, unit: 'U-2' }, { ref: p2, reports_to: unitTemp.id, unit: 'U-2' }, { ref: p3, reports_to: p1, unit: 'U-9' }],
+      units: [{ id: 'U-1', name: 'Operations', head: p1 }, { id: 'U-2', name: 'Logistics', parent: 'U-1', head: unitTemp.id }, { name: 'Unnamed id' }, { id: 'U-3', name: 'Ghost', head: 'STK-9999' }],
+    })).json();
+    const uFile = () => fs.readFileSync(path.join(ws, 'stakeholders', 'org-charts', `${uChart.id.toLowerCase()}.md`), 'utf8');
+    check('a chart with units is written as schema 1.1 with its units',
+      /schema_version: ['"]?1\.1/.test(uFile()) && /name: Logistics/.test(uFile()) && uChart.units?.length === 4, JSON.stringify(uChart.units));
+    check('a unit without an id gets the next free one', uChart.units?.find((u) => u.name === 'Unnamed id')?.id === 'U-4');
+    check('a member in an unknown unit is kept, without the unit', uChart.members.find((m) => m.ref === p3) && !uChart.members.find((m) => m.ref === p3).unit);
+    check('a unit head who is not in the chart is dropped', !uChart.units.find((u) => u.id === 'U-3').head);
+    const uLoop = await json('PUT', `/api/org-charts/${uChart.id}`, { units: [{ id: 'U-1', name: 'A', parent: 'U-2' }, { id: 'U-2', name: 'B', parent: 'U-1' }] });
+    check('units nested in a loop are rejected', uLoop.status === 400);
+    const uPos = (await (await fetch(`${base}/api/org-charts?stakeholder=${p2}`)).json()).find((x) => x.chart.id === uChart.id);
+    check('the position API returns the unit path and head',
+      uPos?.unit?.path?.join('/') === 'Operations/Logistics' && uPos.unit.head?.id === unitTemp.id && uPos.manager?.id === unitTemp.id, JSON.stringify(uPos?.unit ?? null));
+    const headPos = (await (await fetch(`${base}/api/org-charts?stakeholder=${p1}`)).json()).find((x) => x.chart.id === uChart.id);
+    check('the position API lists the units someone leads', headPos?.head_of?.map((u) => u.name).join(',') === 'Operations');
+    await fetch(`${base}/api/stakeholders/${unitTemp.id}`, { method: 'DELETE' });
+    const uAfter = await (await fetch(`${base}/api/org-charts/${uChart.id}`)).json();
+    check('deleting a unit head keeps the unit without a head, and their reports move up with their unit',
+      uAfter.units.find((u) => u.id === 'U-2') && !uAfter.units.find((u) => u.id === 'U-2').head
+      && uAfter.members.find((m) => m.ref === p2)?.reports_to === p1 && uAfter.members.find((m) => m.ref === p2)?.unit === 'U-2');
+    const titleOnly = await (await json('PUT', `/api/org-charts/${uChart.id}`, { members: uAfter.members.map((m) => (m.ref === p2 ? { ...m, title: 'Coordinator' } : m)) })).json();
+    check('saving members only keeps the units', titleOnly.units?.length === 4 && titleOnly.members.find((m) => m.ref === p2)?.unit === 'U-2');
+
     check('a chart without titles is still written as schema 1.0',
       /schema_version: ['"]?1\.0/.test(fs.readFileSync(path.join(ws, 'stakeholders', 'org-charts', `${plain.id.toLowerCase()}.md`), 'utf8')));
   }

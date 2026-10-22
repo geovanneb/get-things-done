@@ -8,24 +8,31 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { useAppDispatch, useAppState } from '@/store';
-import { ancestorsOf, buildTree, canReportTo, collapsedForLevel, descendantsOf, managerOf, placeMember, removeMember, setTitle, treeDepth, treeOrder } from '@/utils/orgChart';
+import {
+  ancestorsOf, buildTree, buildUnitTree, canNestUnit, canReportTo, collapsedForLevel, deleteUnit, descendantsOf, managerOf, nextUnitId, placeMember,
+  removeMember, saveUnit, setMemberUnit, setTitle, treeDepth, treeOrder, withoutHead,
+} from '@/utils/orgChart';
 import { readChartPrefs, readListCollapsed, writeChartPrefs, writeListCollapsed } from '@/utils/orgChartPrefs';
-import type { OrgChart, OrgChartMember, Stakeholder } from '@/types';
+import type { OrgChart, OrgChartMember, OrgUnit, Stakeholder } from '@/types';
 import OrgChartTree, { DRAG_MIME } from './OrgChartTree';
 import OrgChartViewport, { clampScale } from './OrgChartViewport';
 import type { ViewportHandle } from './OrgChartViewport';
 import type { NodeAction } from './OrgChartTree';
-import { ChartFormModal, PersonPickerModal, TitleModal } from './OrgChartDialogs';
-import type { ChartFormValues } from './OrgChartDialogs';
+import { ChartFormModal, PersonPickerModal, TitleModal, UnitFormModal, UnitPickerModal } from './OrgChartDialogs';
+import type { ChartFormValues, UnitFormValues } from './OrgChartDialogs';
+import OrgUnitsView from './OrgUnitsView';
+import type { UnitAction } from './OrgUnitsView';
 
-type View = 'chart' | 'outline';
+type View = 'chart' | 'outline' | 'units';
+const VIEW_LABELS: Record<View, string> = { chart: 'Chart', outline: 'Outline', units: 'Units' };
 const VIEW_KEY = 'gtd:org-chart-view';
 /** Charts with more people than this open at two levels until the user chooses otherwise. */
 const LARGE_CHART = 15;
 
 function readView(): View {
   try {
-    return localStorage.getItem(VIEW_KEY) === 'outline' ? 'outline' : 'chart';
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === 'outline' || v === 'units' ? v : 'chart';
   } catch {
     return 'chart';
   }
@@ -66,6 +73,9 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const scaleBefore = useRef(1);
   const [search, setSearch] = useState('');
   const [titleFor, setTitleFor] = useState<string | null>(null);
+  const [unitFor, setUnitFor] = useState<string | null>(null);
+  // Unit dialog: editing an existing unit, or creating one (optionally inside `parent`).
+  const [unitForm, setUnitForm] = useState<{ editing: OrgUnit | null; parent: string | null } | null>(null);
   const [matchIndex, setMatchIndex] = useState(0);
   const saveSeq = useRef(0);
 
@@ -103,6 +113,12 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const memberRefs = useMemo(() => new Set(members.map((m) => m.ref)), [members]);
   const roots = useMemo(() => buildTree(members), [members]);
   const titles = useMemo(() => new Map(members.filter((m) => m.title).map((m) => [m.ref, m.title!])), [members]);
+  const units = useMemo(() => chart?.units ?? [], [chart]);
+  const unitRoots = useMemo(() => buildUnitTree(units), [units]);
+  const unitNames = useMemo(() => {
+    const names = new Map(units.map((u) => [u.id, u.name]));
+    return new Map(members.filter((m) => m.unit && names.has(m.unit)).map((m) => [m.ref, names.get(m.unit!)!]));
+  }, [units, members]);
   const depth = useMemo(() => treeDepth(roots), [roots]);
   const savedCollapsed = useMemo(
     () => collapsedPref ?? (members.length > LARGE_CHART ? collapsedForLevel(roots, 2) : new Set<string>()),
@@ -133,9 +149,9 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     if (!q) return [];
     return treeOrder(roots).filter((ref) => {
       const p = people.get(ref);
-      return [p?.name, titles.get(ref) || p?.role, ref].some((f) => f?.toLowerCase().includes(q));
+      return [p?.name, titles.get(ref) || p?.role, unitNames.get(ref), ref].some((f) => f?.toLowerCase().includes(q));
     });
-  }, [search, roots, people, titles]);
+  }, [search, roots, people, titles, unitNames]);
   const matchSet = useMemo(() => new Set(matchList), [matchList]);
   const currentMatch = matchList.length ? matchList[Math.min(matchIndex, matchList.length - 1)] : null;
 
@@ -160,7 +176,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
 
   // Esc: an open dialog handles it first; then full screen closes; then the people panel.
   useEffect(() => {
-    if (picker || formOpen || titleFor || (!fullscreen && !panelOpen)) return;
+    if (picker || formOpen || titleFor || unitFor || unitForm || (!fullscreen && !panelOpen)) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (fullscreen) exitFullscreen();
@@ -168,7 +184,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [panelOpen, fullscreen, picker, formOpen, titleFor, setPanelOpen, exitFullscreen]);
+  }, [panelOpen, fullscreen, picker, formOpen, titleFor, unitFor, unitForm, setPanelOpen, exitFullscreen]);
 
   // Entering full screen: lock page scroll, fit the chart, move focus to "Exit full screen".
   useEffect(() => {
@@ -214,18 +230,56 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     requestAnimationFrame(() => requestAnimationFrame(() => viewportRef.current?.fit()));
   }
 
-  // Each change is saved right away; a failed save puts the previous members back.
-  async function saveMembers(next: OrgChartMember[]) {
+  // Each change is saved right away; a failed save puts the previous members and units back.
+  async function saveChart(next: { members?: OrgChartMember[]; units?: OrgUnit[] }) {
     if (!chart) return;
-    const previous = chart.members;
+    const previous = { members: chart.members, units: chart.units };
     const seq = ++saveSeq.current;
-    setCharts((list) => list.map((c) => (c.id === chart.id ? { ...c, members: next } : c)));
+    setCharts((list) => list.map((c) => (c.id === chart.id ? { ...c, ...next } : c)));
     try {
-      const saved = await apiPut<OrgChart>(`/api/org-charts/${chart.id}`, { members: next });
+      const saved = await apiPut<OrgChart>(`/api/org-charts/${chart.id}`, next);
       if (seq === saveSeq.current) setCharts((list) => list.map((c) => (c.id === saved.id ? saved : c)));
     } catch (err) {
-      if (seq === saveSeq.current) setCharts((list) => list.map((c) => (c.id === chart.id ? { ...c, members: previous } : c)));
+      if (seq === saveSeq.current) setCharts((list) => list.map((c) => (c.id === chart.id ? { ...c, ...previous } : c)));
       notifyError(err instanceof Error ? err.message : 'Could not save the change.');
+    }
+  }
+  const saveMembers = (next: OrgChartMember[]) => saveChart({ members: next });
+
+  function assignUnit(ref: string, unit: string | null) {
+    if ((members.find((m) => m.ref === ref)?.unit ?? null) === unit) return;
+    if (memberRefs.has(ref)) saveMembers(setMemberUnit(members, ref, unit));
+    // Someone dragged in from "Add people" joins the chart at the top level, in that unit.
+    else saveMembers(setMemberUnit(placeMember(members, ref, null), ref, unit));
+  }
+
+  function submitUnit(values: UnitFormValues) {
+    if (!unitForm) return;
+    const id = unitForm.editing?.id ?? nextUnitId(units);
+    if (values.parent && !canNestUnit(units, id, values.parent)) {
+      notifyError('A unit cannot sit inside one of its own sub-units.');
+      return;
+    }
+    saveChart({ units: saveUnit(units, { id, name: values.name, parent: values.parent ?? undefined, head: values.head ?? undefined }) });
+    setUnitForm(null);
+  }
+
+  function handleUnitAction(unit: OrgUnit, action: UnitAction) {
+    if (action === 'edit') setUnitForm({ editing: unit, parent: null });
+    else if (action === 'add-sub-unit') setUnitForm({ editing: null, parent: unit.id });
+    else {
+      const people = members.filter((m) => m.unit === unit.id).length;
+      const subUnits = units.filter((u) => u.parent === unit.id).length;
+      const parentName = unit.parent ? units.find((u) => u.id === unit.parent)?.name ?? 'the unit above' : null;
+      const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+      const moves = parentName
+        ? [people && count(people, 'person', 'people'), subUnits && count(subUnits, 'sub-unit', 'sub-units')].filter(Boolean).join(' and ')
+            .replace(/^(.+)$/, `Its $1 move to "${parentName}".`)
+        : [subUnits && `Its ${count(subUnits, 'sub-unit moves', 'sub-units move')} to the top level.`,
+           people && `Its ${count(people, 'person is', 'people are')} left without a unit.`].filter(Boolean).join(' ');
+      const message = `Delete the unit "${unit.name}"?${moves ? ` ${moves}` : ''} Nobody is removed from the chart.`;
+      if (!window.confirm(message)) return;
+      saveChart(deleteUnit(units, members, unit.id));
     }
   }
 
@@ -241,10 +295,13 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   function handleAction(ref: string, action: NodeAction) {
     if (action === 'open') navigate(`/stakeholders/${encodeURIComponent(ref)}`);
     else if (action === 'remove') {
-      saveMembers(removeMember(members, ref));
+      saveChart(units.some((u) => u.head === ref)
+        ? { members: removeMember(members, ref), units: withoutHead(units, ref) }
+        : { members: removeMember(members, ref) });
       if (selected === ref) setSelected(null);
     } else if (action === 'top-level') place(ref, null);
     else if (action === 'set-title') setTitleFor(ref);
+    else if (action === 'set-unit') setUnitFor(ref);
     else setPicker({ mode: action, ref });
   }
 
@@ -362,10 +419,10 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                 </div>
               </div>
               <div role="tablist" aria-label="Chart view" className="org-view-toggle">
-                {(['chart', 'outline'] as View[]).map((v) => (
+                {(['chart', 'outline', 'units'] as View[]).map((v) => (
                   <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}
                     className={view === v ? 'org-view-toggle__btn org-view-toggle__btn--active' : 'org-view-toggle__btn'}>
-                    {v === 'chart' ? 'Chart' : 'Outline'}
+                    {VIEW_LABELS[v]}
                   </button>
                 ))}
               </div>
@@ -399,7 +456,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                 ) : (
                   <>
                   <div className="org-toolbar">
-                  {depth > 1 && (
+                  {view !== 'units' && depth > 1 && (
                       <div role="group" aria-label="Levels shown" className="org-view-toggle">
                         <span className="org-toolbar__label">Levels</span>
                         {Array.from({ length: depth }, (_, i) => i + 1).map((level) => (
@@ -412,6 +469,10 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                         ))}
                       </div>
                   )}
+                    {view === 'units' && (
+                      <button type="button" className="org-tool-btn" onClick={() => setUnitForm({ editing: null, parent: null })}>+ New unit</button>
+                    )}
+                    {view !== 'units' && (
                     <div className="org-search" role="search">
                       <input
                         type="search"
@@ -436,14 +497,15 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                         </>
                       )}
                     </div>
+                    )}
                     <span style={{ flex: 1 }} />
-                    {view === 'chart' && (
+                    {view !== 'outline' && (
                       <div role="group" aria-label="Zoom" className="org-view-toggle">
                         <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s / 1.25))} aria-label="Zoom out" title="Zoom out (Ctrl/⌘ + scroll)">−</button>
                         <button type="button" className="org-view-toggle__btn" onClick={() => setScale(1)} title="Reset to 100%" style={{ minWidth: 48 }}>{Math.round(scale * 100)}%</button>
                         <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s * 1.25))} aria-label="Zoom in" title="Zoom in (Ctrl/⌘ + scroll)">+</button>
                         <button type="button" className="org-view-toggle__btn" onClick={() => viewportRef.current?.fit()} title="Fit the visible chart">Fit</button>
-                        {fullscreen && (
+                        {fullscreen && view === 'chart' && (
                           <button type="button" className="org-view-toggle__btn" onClick={expandAllAndFit} title="Expand everyone and fit; your collapsed cards come back when you leave full screen">
                             Expand all &amp; fit
                           </button>
@@ -462,7 +524,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                   <OrgChartTree
                     roots={roots}
                     people={people}
-                    view={view}
+                    view={view === 'outline' ? 'outline' : 'chart'}
                     selected={selected}
                     collapsed={collapsed}
                     dragging={dragging}
@@ -475,10 +537,40 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     onDrop={(ref, target) => { setDragging(null); place(ref, target); }}
                     onAction={handleAction}
                     titles={titles}
+                    unitNames={unitNames}
                     matches={matchSet}
                     currentMatch={currentMatch}
                   />
                     );
+                    if (view === 'units') {
+                      return (
+                        <>
+                          {units.length === 0 && (
+                            <div className="org-unit-intro">
+                              <strong>Group people into departments or teams.</strong> Units are optional and only group people:
+                              who reports to whom stays as it is in the chart. Create a unit, then drag people into it.
+                              <div style={{ marginTop: 10 }}>
+                                <Button size="sm" variant="primary" onClick={() => setUnitForm({ editing: null, parent: null })}>New unit</Button>
+                              </div>
+                            </div>
+                          )}
+                          <OrgChartViewport ref={viewportRef} scale={scale} onScale={setScale} fill={fullscreen}>
+                            <OrgUnitsView
+                              roots={unitRoots}
+                              members={members}
+                              people={people}
+                              titles={titles}
+                              dragging={dragging}
+                              onDragStart={setDragging}
+                              onDragEnd={() => setDragging(null)}
+                              onAssign={(ref, unit) => { setDragging(null); assignUnit(ref, unit); }}
+                              onUnitAction={handleUnitAction}
+                              onPerson={setUnitFor}
+                            />
+                          </OrgChartViewport>
+                        </>
+                      );
+                    }
                     return view === 'chart'
                       ? <OrgChartViewport ref={viewportRef} scale={scale} onScale={setScale} fill={fullscreen}>{tree}</OrgChartViewport>
                       : tree;
@@ -487,8 +579,10 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                 )}
                 {!fullscreen && (
                 <p style={{ margin: '20px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Drag a card onto someone to make them their manager. Select a card and click <strong>+</strong> to add a direct report, or open <strong>Add people</strong> to add under it.
-                  {view === 'chart' && ' Drag the background to move around; Ctrl/⌘ + scroll to zoom.'}
+                  {view === 'units'
+                    ? <>Drag a person onto a unit to move them, or click a person to pick their unit. Units only group people; reporting lines do not change.</>
+                    : <>Drag a card onto someone to make them their manager. Select a card and click <strong>+</strong> to add a direct report, or open <strong>Add people</strong> to add under it.</>}
+                  {view !== 'outline' && ' Drag the background to move around; Ctrl/⌘ + scroll to zoom.'}
                 </p>
                 )}
                 {chart.notes && !fullscreen && (
@@ -572,6 +666,31 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
         current={titleFor ? titles.get(titleFor) : undefined}
         onClose={() => setTitleFor(null)}
         onSave={(title) => { if (titleFor) saveMembers(setTitle(members, titleFor, title)); setTitleFor(null); }}
+      />
+
+      <UnitPickerModal
+        isOpen={unitFor !== null}
+        name={unitFor ? people.get(unitFor)?.name ?? unitFor : ''}
+        units={units}
+        current={unitFor ? members.find((m) => m.ref === unitFor)?.unit : undefined}
+        onClose={() => setUnitFor(null)}
+        onPick={(unit) => { if (unitFor) assignUnit(unitFor, unit); setUnitFor(null); }}
+        onCreate={(name) => {
+          if (!unitFor) return;
+          const id = nextUnitId(units);
+          saveChart({ units: saveUnit(units, { id, name }), members: setMemberUnit(members, unitFor, id) });
+          setUnitFor(null);
+        }}
+      />
+
+      <UnitFormModal
+        isOpen={unitForm !== null}
+        editing={unitForm?.editing ?? null}
+        defaultParent={unitForm?.parent ?? null}
+        units={units}
+        members={members.map((m) => people.get(m.ref)).filter((s): s is Stakeholder => !!s)}
+        onClose={() => setUnitForm(null)}
+        onSave={submitUnit}
       />
 
       <PersonPickerModal

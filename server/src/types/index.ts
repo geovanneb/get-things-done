@@ -53,6 +53,19 @@ export interface OrgChartMember {
   reports_to?: string;
   /** Title in this chart; overrides the stakeholder's role here (and only here). */
   title?: string;
+  /** Id of the unit (department, team…) this member belongs to. Membership only: it says nothing about reporting. */
+  unit?: string;
+}
+
+/** A department, team or other group inside one chart. Units nest through `parent`; people report to people, never to units. */
+export interface OrgUnit {
+  /** Chart-local id, `U-<n>`; stays the same when the unit is renamed or moved. */
+  id: string;
+  name: string;
+  /** Id of the unit this one sits in; absent for a top-level unit. */
+  parent?: string;
+  /** Stakeholder id of the person who leads the unit; must be a member of the chart. */
+  head?: string;
 }
 
 export interface OrgChart {
@@ -61,6 +74,8 @@ export interface OrgChart {
   organization?: string;
   description?: string;
   members: OrgChartMember[];
+  /** Optional units; charts without units behave exactly as before. */
+  units?: OrgUnit[];
   notes?: string;
   created_at: string;
   updated_at: string;

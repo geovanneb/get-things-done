@@ -1,8 +1,11 @@
 /**
  * Unit tests for the org chart tree helpers. Run with `npm run test:org-chart --workspace=ui`.
  */
-import { buildTree, collapsedForLevel, placeMember, removeMember, setTitle, treeDepth } from './orgChart';
-import type { OrgChartMember } from '@/types';
+import {
+  buildTree, buildUnitTree, canNestUnit, collapsedForLevel, deleteUnit, nextUnitId, placeMember, removeMember, saveUnit,
+  setMemberUnit, setTitle, treeDepth, unitPath, withoutHead,
+} from './orgChart';
+import type { OrgChartMember, OrgUnit } from '@/types';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -43,6 +46,40 @@ check('removing a manager moves their reports up and keeps the reports\' titles'
 check('setTitle sets a trimmed title', setTitle(titled, 'A', '  Board chair ').find((m) => m.ref === 'A')?.title === 'Board chair');
 const cleared = setTitle(titled, 'A', '   ').find((m) => m.ref === 'A')!;
 check('a blank title clears it (the profile role applies again)', !('title' in cleared));
+
+// --- Units --------------------------------------------------------------------
+// Ops (U-1) ─┬─ Logistics (U-2) ── Yard (U-4)
+//            └─ Warehousing (U-3)
+const units: OrgUnit[] = [
+  { id: 'U-1', name: 'Ops', head: 'A' }, { id: 'U-2', name: 'Logistics', parent: 'U-1', head: 'B' },
+  { id: 'U-3', name: 'Warehousing', parent: 'U-1' }, { id: 'U-4', name: 'Yard', parent: 'U-2' },
+];
+const inUnits: OrgChartMember[] = [
+  { ref: 'A', unit: 'U-1' }, { ref: 'B', reports_to: 'A', unit: 'U-2', title: 'Lead' }, { ref: 'C', reports_to: 'B', unit: 'U-2' },
+  { ref: 'D', reports_to: 'B', unit: 'U-4' },
+];
+const unitRoots = buildUnitTree(units);
+check('the unit tree nests sub-units', unitRoots.length === 1 && unitRoots[0].children.map((n) => n.unit.id).join(',') === 'U-2,U-3'
+  && unitRoots[0].children[0].children[0]?.unit.id === 'U-4');
+check('a unit cannot move inside its own sub-unit', !canNestUnit(units, 'U-1', 'U-4') && canNestUnit(units, 'U-3', 'U-4') && canNestUnit(units, 'U-4', null));
+check('the next unit id follows the highest one', nextUnitId(units) === 'U-5' && nextUnitId([]) === 'U-1');
+check('the unit path runs from the top down', unitPath(units, 'U-4').join(' / ') === 'Ops / Logistics / Yard');
+const afterDelete = deleteUnit(units, inUnits, 'U-2');
+check('deleting a unit moves its sub-units up', afterDelete.units.find((u) => u.id === 'U-4')?.parent === 'U-1' && !afterDelete.units.some((u) => u.id === 'U-2'));
+check('deleting a unit moves its people up and keeps them in the chart',
+  afterDelete.members.length === 4 && afterDelete.members.filter((m) => m.unit === 'U-1').map((m) => m.ref).join(',') === 'A,B,C');
+check('deleting a unit keeps reporting lines and titles',
+  afterDelete.members.find((m) => m.ref === 'C')?.reports_to === 'B' && afterDelete.members.find((m) => m.ref === 'B')?.title === 'Lead');
+const topDelete = deleteUnit(units, inUnits, 'U-1');
+check('deleting a top-level unit leaves its people without a unit', !('unit' in topDelete.members.find((m) => m.ref === 'A')!)
+  && !('parent' in topDelete.units.find((u) => u.id === 'U-2')!));
+check('moving someone to another unit keeps their title and manager',
+  (() => { const b = setMemberUnit(inUnits, 'B', 'U-3').find((m) => m.ref === 'B')!; return b.unit === 'U-3' && b.title === 'Lead' && b.reports_to === 'A'; })());
+check('taking someone out of a unit drops the field', !('unit' in setMemberUnit(inUnits, 'C', null).find((m) => m.ref === 'C')!));
+check('changing manager keeps the unit', placeMember(inUnits, 'D', 'A').find((m) => m.ref === 'D')?.unit === 'U-4');
+check('saving a unit updates it in place and clears an empty head',
+  (() => { const u = saveUnit(units, { id: 'U-2', name: ' Freight ', parent: 'U-1', head: '' }).find((x) => x.id === 'U-2')!; return u.name === 'Freight' && !('head' in u); })());
+check('a person leaving the chart stops being a unit head', !('head' in withoutHead(units, 'B').find((u) => u.id === 'U-2')!));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

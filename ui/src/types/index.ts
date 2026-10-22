@@ -299,6 +299,17 @@ export interface OrgChartMember {
   reports_to?: string;
   /** Title in this chart; overrides the stakeholder's role here only. */
   title?: string;
+  /** Unit (department, team…) id; membership only, not reporting. */
+  unit?: string;
+}
+
+/** A department or team inside one chart; units nest through `parent`. */
+export interface OrgUnit {
+  id: string;
+  name: string;
+  parent?: string;
+  /** Stakeholder id of the person who leads it (a chart member). */
+  head?: string;
 }
 
 export interface OrgChart {
@@ -307,6 +318,7 @@ export interface OrgChart {
   organization?: string;
   description?: string;
   members: OrgChartMember[];
+  units?: OrgUnit[];
   notes?: string;
   created_at: string;
   updated_at: string;
@@ -322,6 +334,10 @@ export interface OrgPosition {
   chart: { id: string; name: string; organization?: string };
   /** Title in this chart, when one is set. */
   title?: string;
+  /** Their unit, with the unit names from the top down. */
+  unit?: { id: string; name: string; path: string[]; head: OrgPersonSummary | null };
+  /** Units they lead. */
+  head_of?: Array<{ id: string; name: string }>;
   manager: OrgPersonSummary | null;
   direct_reports: OrgPersonSummary[];
   peers: OrgPersonSummary[];

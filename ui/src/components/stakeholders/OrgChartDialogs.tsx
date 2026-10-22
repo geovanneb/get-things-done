@@ -3,7 +3,9 @@ import Avatar from '@/components/common/Avatar';
 import Button from '@/components/common/Button';
 import Input, { Textarea } from '@/components/common/Input';
 import Modal from '@/components/common/Modal';
-import type { OrgChart, Stakeholder } from '@/types';
+import type { OrgChart, OrgUnit, Stakeholder } from '@/types';
+import { buildUnitTree, unitDescendants } from '@/utils/orgChart';
+import type { UnitTreeNode } from '@/utils/orgChart';
 
 // ---------------------------------------------------------------------------
 // Title in this chart
@@ -34,6 +36,145 @@ export function TitleModal({ isOpen, name, profileRole, current, onClose, onSave
         {current && <Button variant="ghost" onClick={() => onSave('')}>Use profile role</Button>}
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button variant="primary" onClick={() => onSave(value)}>Save</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Units
+// ---------------------------------------------------------------------------
+
+const selectStyle: React.CSSProperties = {
+  width: '100%', height: 34, padding: '0 8px', fontSize: 'var(--text-sm)', color: 'var(--color-text)',
+  background: 'var(--color-surface)', border: '1px solid var(--color-border-strong)', borderRadius: 'var(--radius-md)',
+};
+const fieldLabel: React.CSSProperties = { display: 'block', marginBottom: 4, fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)' };
+
+/** Units in tree order with their depth, for indented lists. */
+function flatUnits(units: OrgUnit[]): Array<{ unit: OrgUnit; depth: number }> {
+  const out: Array<{ unit: OrgUnit; depth: number }> = [];
+  const walk = (nodes: UnitTreeNode[], depth: number) => nodes.forEach((n) => { out.push({ unit: n.unit, depth }); walk(n.children, depth + 1); });
+  walk(buildUnitTree(units), 0);
+  return out;
+}
+
+export interface UnitFormValues {
+  name: string;
+  parent: string | null;
+  head: string | null;
+}
+
+interface UnitFormModalProps {
+  isOpen: boolean;
+  /** The unit being edited; null to create one. */
+  editing: OrgUnit | null;
+  /** Parent to start with when creating a sub-unit. */
+  defaultParent?: string | null;
+  units: OrgUnit[];
+  /** Chart members who can lead a unit. */
+  members: Stakeholder[];
+  onClose: () => void;
+  onSave: (values: UnitFormValues) => void;
+}
+
+export function UnitFormModal({ isOpen, editing, defaultParent, units, members, onClose, onSave }: UnitFormModalProps) {
+  const [values, setValues] = useState<UnitFormValues>({ name: '', parent: null, head: null });
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    setValues({ name: editing?.name ?? '', parent: editing ? editing.parent ?? null : defaultParent ?? null, head: editing?.head ?? null });
+    setError(null);
+  }, [isOpen, editing, defaultParent]);
+
+  // A unit cannot sit inside itself or one of its own sub-units.
+  const blocked = editing ? unitDescendants(units, editing.id) : new Set<string>();
+  const parents = flatUnits(units).filter(({ unit }) => !blocked.has(unit.id));
+  const sortedMembers = [...members].sort((a, b) => a.name.localeCompare(b.name));
+
+  function submit() {
+    if (!values.name.trim()) { setError('Give the unit a name.'); return; }
+    onSave({ ...values, name: values.name.trim() });
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={editing ? `Edit ${editing.name}` : 'New unit'} size="sm">
+      <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+        A department, team or other group. Units only group people; reporting lines stay as they are in the chart.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Input label="Name *" value={values.name} onChange={(v) => setValues((x) => ({ ...x, name: v }))} placeholder="Engineering" autoFocus
+          error={error ?? undefined} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+        <label>
+          <span style={fieldLabel}>Part of</span>
+          <select value={values.parent ?? ''} onChange={(e) => setValues((x) => ({ ...x, parent: e.target.value || null }))} style={selectStyle}>
+            <option value="">Nothing (a top-level unit)</option>
+            {parents.map(({ unit, depth }) => (
+              <option key={unit.id} value={unit.id}>{'\u00a0\u00a0'.repeat(depth)}{unit.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span style={fieldLabel}>Head</span>
+          <select value={values.head ?? ''} onChange={(e) => setValues((x) => ({ ...x, head: e.target.value || null }))} style={selectStyle}>
+            <option value="">Nobody</option>
+            {sortedMembers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <span style={{ display: 'block', marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            Anyone in this chart. Leading a unit does not make them everyone's manager.
+          </span>
+        </label>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={submit}>{editing ? 'Save' : 'Create unit'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+interface UnitPickerModalProps {
+  isOpen: boolean;
+  name: string;
+  units: OrgUnit[];
+  current?: string;
+  onClose: () => void;
+  /** null = no unit. */
+  onPick: (unit: string | null) => void;
+  /** Creates a top-level unit with this name and puts the person in it. */
+  onCreate: (name: string) => void;
+}
+
+export function UnitPickerModal({ isOpen, name, units, current, onClose, onPick, onCreate }: UnitPickerModalProps) {
+  const [newName, setNewName] = useState('');
+  useEffect(() => { if (isOpen) setNewName(''); }, [isOpen]);
+  const rowStyle = (active: boolean): React.CSSProperties => ({
+    display: 'block', width: '100%', padding: '7px 10px', textAlign: 'left', border: 'none', cursor: 'pointer',
+    borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)', color: 'var(--color-text)',
+    background: active ? 'var(--color-accent-subtle)' : 'transparent', fontWeight: active ? 600 : 400,
+  });
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`${name}: unit`} size="sm">
+      <p style={{ margin: '0 0 10px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+        Which department or team are they in? This does not change who they report to.
+      </p>
+      <div role="listbox" aria-label="Units" style={{ maxHeight: 300, overflowY: 'auto' }}>
+        <button type="button" role="option" aria-selected={!current} style={rowStyle(!current)} onClick={() => onPick(null)}>
+          <span style={{ color: 'var(--color-text-muted)' }}>No unit</span>
+        </button>
+        {flatUnits(units).map(({ unit, depth }) => (
+          <button key={unit.id} type="button" role="option" aria-selected={current === unit.id} style={{ ...rowStyle(current === unit.id), paddingLeft: 10 + depth * 16 }}
+            onClick={() => onPick(unit.id)}>
+            {unit.name}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--color-border)' }}>
+        <div style={{ flex: 1 }}>
+          <Input value={newName} onChange={setNewName} placeholder="New unit name" aria-label="New unit name"
+            onKeyDown={(e) => { if (e.key === 'Enter' && newName.trim()) onCreate(newName.trim()); }} />
+        </div>
+        <Button variant="secondary" disabled={!newName.trim()} onClick={() => onCreate(newName.trim())}>Create and add</Button>
       </div>
     </Modal>
   );

@@ -473,6 +473,18 @@ export default function StakeholderDetailView() {
                       <dd style={{ margin: 0, color: 'var(--color-text)' }}>{p.title}</dd>
                     </>
                   )}
+                  {p.unit && (
+                    <>
+                      <dt style={{ color: 'var(--color-text-muted)' }}>Unit</dt>
+                      <dd style={{ margin: 0, color: 'var(--color-text)' }}>{p.unit.path.join(' › ')}</dd>
+                    </>
+                  )}
+                  {p.head_of && (
+                    <>
+                      <dt style={{ color: 'var(--color-text-muted)' }}>Leads</dt>
+                      <dd style={{ margin: 0, color: 'var(--color-text)' }}>{p.head_of.map((u) => u.name).join(', ')}</dd>
+                    </>
+                  )}
                   <OrgRow label="Reports to" people={p.manager ? [p.manager] : []} empty="Nobody (top of the chart)" />
                   <OrgRow label="Direct reports" people={p.direct_reports} empty="None" />
                   {p.manager && <OrgRow label="Peers" people={p.peers} empty="None" />}

@@ -4,7 +4,7 @@ import { Task, Stakeholder, ValidationResult } from '../types';
 import { TaskService } from './taskService';
 import { StakeholderService } from './stakeholderService';
 import { MentionService } from './mentionService';
-import { OrgChartService, findLoop } from './orgChartService';
+import { OrgChartService, findLoop, findUnitLoop } from './orgChartService';
 import { OutputService } from './outputService';
 import { isDone, isOpen } from './taskStatus';
 
@@ -223,6 +223,24 @@ export class ValidationService {
         const loop = findLoop(chart.members);
         if (loop) {
           results.push({ level: 'error', rule: 'org_chart_loop', message: `Org chart ${chart.id} has a reporting loop: ${loop.join(' → ')}`, path: chart.path });
+        }
+        const unitIds = new Set((chart.units ?? []).map((u) => u.id));
+        for (const u of chart.units ?? []) {
+          if (u.parent && !unitIds.has(u.parent)) {
+            results.push({ level: 'warning', rule: 'broken_ref', message: `Org chart ${chart.id}: unit ${u.id} sits in unknown unit ${u.parent}`, path: chart.path });
+          }
+          if (u.head && !refs.has(u.head)) {
+            results.push({ level: 'warning', rule: 'broken_ref', message: `Org chart ${chart.id}: the head of unit ${u.id} (${u.head}) is not in the chart`, path: chart.path });
+          }
+        }
+        for (const m of chart.members) {
+          if (m.unit && !unitIds.has(m.unit)) {
+            results.push({ level: 'warning', rule: 'broken_ref', message: `Org chart ${chart.id}: ${m.ref} belongs to unknown unit ${m.unit}`, path: chart.path });
+          }
+        }
+        const unitLoop = findUnitLoop(chart.units ?? []);
+        if (unitLoop) {
+          results.push({ level: 'error', rule: 'org_chart_loop', message: `Org chart ${chart.id} has units nested in a loop: ${unitLoop.join(' → ')}`, path: chart.path });
         }
       }
     } catch {
