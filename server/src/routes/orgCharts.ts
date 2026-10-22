@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { param } from '../utils/params';
 import { orgChartService } from '../services/orgChartService';
 
 const router = Router();
@@ -21,17 +22,17 @@ router.post('/', async (req: Request, res: Response) => {
 
 // GET /api/org-charts/:id
 router.get('/:id', async (req: Request, res: Response) => {
-  res.json(await orgChartService.getChart(req.params['id']));
+  res.json(await orgChartService.getChart(param(req, 'id')));
 });
 
 // PUT /api/org-charts/:id
 router.put('/:id', async (req: Request, res: Response) => {
-  res.json(await orgChartService.updateChart(req.params['id'], req.body ?? {}));
+  res.json(await orgChartService.updateChart(param(req, 'id'), req.body ?? {}));
 });
 
 // DELETE /api/org-charts/:id
 router.delete('/:id', async (req: Request, res: Response) => {
-  await orgChartService.deleteChart(req.params['id']);
+  await orgChartService.deleteChart(param(req, 'id'));
   res.status(204).send();
 });
 
