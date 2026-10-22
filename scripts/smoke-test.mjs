@@ -146,6 +146,10 @@ try {
     issues2.some((i) => i.rule === 'broken_mention' && i.level === 'warning') && !issues2.some((i) => i.level === 'error'),
     JSON.stringify(issues2.filter((i) => i.level !== 'info').slice(0, 3)));
 
+  const resolve = async (href) => (await (await fetch(`${base}/api/mentions/resolve?href=${encodeURIComponent(href)}`)).json()).exists;
+  check('mention chips can tell an existing file from a deleted one',
+    (await resolve(stk.href)) === true && (await resolve('/context/company/does-not-exist/note.md')) === false);
+
   // Git integration: the dashboard can show status, stage and commit in a workspace repo.
   const git = (...args) => execFileSync('git', ['-C', ws, ...args], { env, stdio: 'pipe' });
   git('init', '-q');
