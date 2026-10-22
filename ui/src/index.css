@@ -318,6 +318,21 @@ input, textarea, select {
 .markdown-view li.task-list-item { list-style: none; margin-left: -1.25em; }
 .markdown-view li.task-list-item input { margin-right: 0.4em; vertical-align: middle; }
 .markdown-view a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.markdown-view a.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.markdown-view a.mention-chip:hover { background: var(--color-accent-subtle-hover); }
+.markdown-view a.mention-chip--missing { background: var(--color-surface-active); color: var(--color-text-muted); text-decoration: line-through; cursor: default; }
 .markdown-view strong { font-weight: 600; }
 .markdown-view blockquote {
   padding: 0.25em 0.9em;
@@ -352,18 +367,6 @@ input, textarea, select {
 .markdown-view img { max-width: 100%; }
 
 /* @-mentions (task Objective) */
-.markdown-view a.mention-chip {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: var(--radius-sm);
-  background: var(--color-accent-subtle, var(--color-surface-active));
-  color: var(--color-accent);
-  text-decoration: none;
-  font-weight: 500;
-  font-size: 0.95em;
-  line-height: 1.6;
-}
-.markdown-view a.mention-chip:hover { text-decoration: underline; }
 .mention-picker {
   position: absolute;
   left: 0;
@@ -379,7 +382,37 @@ input, textarea, select {
   padding: 4px 0;
   font-family: var(--font-sans);
 }
+.mention-picker__tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px 6px 6px;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+.mention-picker__tab {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  white-space: nowrap;
+}
+.mention-picker__tab.is-active { background: var(--color-accent-subtle); color: var(--color-accent); }
+.mention-picker__more {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 4px 12px 6px 32px;
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  background: transparent;
+}
+.mention-picker__more:hover { text-decoration: underline; }
 .mention-picker__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px 2px;
   font-size: var(--text-xs);
   font-weight: 600;

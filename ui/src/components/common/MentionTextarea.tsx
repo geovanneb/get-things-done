@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { apiGet } from '@/utils/api';
+import MentionIcon from './MentionIcon';
 
 export interface MentionCandidate {
   type: 'stakeholder' | 'template' | 'context' | 'task';
@@ -17,6 +18,9 @@ const GROUPS: { type: MentionCandidate['type']; title: string }[] = [
   { type: 'context', title: 'Context notes' },
   { type: 'task', title: 'Tasks' },
 ];
+
+/** In the "All" tab, at most this many results per type; the rest sit behind "Show N more". */
+const PER_GROUP_IN_ALL = 5;
 
 /** `@` (or full-width `＠`) at the start of the text or after a space / bracket, then the query typed so far. */
 const TRIGGER = /(^|[\s(（])[@＠]([^\s@＠[\]()]{0,40})$/;
@@ -41,20 +45,29 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
   const ref = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
-  const [results, setResults] = useState<MentionCandidate[]>([]);
+  const [all, setAll] = useState<MentionCandidate[]>([]);
+  const [typeFilter, setTypeFilter] = useState<MentionCandidate['type'] | 'all'>('all');
   const [active, setActive] = useState(0);
+
+  // What is on screen: one type in full, or up to PER_GROUP_IN_ALL per type in "All"
+  const results =
+    typeFilter === 'all'
+      ? GROUPS.flatMap((g) => all.filter((c) => c.type === g.type).slice(0, PER_GROUP_IN_ALL))
+      : all.filter((c) => c.type === typeFilter);
+  const hidden = (type: MentionCandidate['type']) =>
+    typeFilter === 'all' ? Math.max(0, all.filter((c) => c.type === type).length - PER_GROUP_IN_ALL) : 0;
 
   // Search (debounced) while the picker is open
   useEffect(() => {
     if (!trigger) return;
     const t = setTimeout(() => {
-      apiGet<MentionCandidate[]>(`/api/mentions?q=${encodeURIComponent(trigger.query)}&limit=6`)
+      apiGet<MentionCandidate[]>(`/api/mentions?q=${encodeURIComponent(trigger.query)}&limit=50`)
         .then((r) => {
           // Keep the on-screen order (grouped) so arrow keys follow what the user sees
-          setResults(GROUPS.flatMap((g) => r.filter((c) => c.type === g.type)));
+          setAll(GROUPS.flatMap((g) => r.filter((c) => c.type === g.type)));
           setActive(0);
         })
-        .catch(() => setResults([]));
+        .catch(() => setAll([]));
     }, 120);
     return () => clearTimeout(t);
   }, [trigger?.query, trigger?.start]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -62,7 +75,9 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
   const detect = (text: string, caret: number) => {
     if (composing.current) return;
     const m = TRIGGER.exec(text.slice(0, caret));
-    setTrigger(m ? { start: caret - m[2].length - 1, query: m[2] } : null);
+    const next = m ? { start: caret - m[2].length - 1, query: m[2] } : null;
+    if (!next || next.start !== trigger?.start) setTypeFilter('all'); // a new @ starts on "All"
+    setTrigger(next);
   };
 
   const pick = (c: MentionCandidate) => {
@@ -130,6 +145,24 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
           aria-label="Mention a stakeholder, template, context note or task"
           className="mention-picker"
         >
+          <div className="mention-picker__tabs" role="tablist" aria-label="Filter by type">
+            {([{ type: 'all', title: 'All' }, ...GROUPS] as { type: MentionCandidate['type'] | 'all'; title: string }[]).map((t) => (
+              <button
+                key={t.type}
+                type="button"
+                role="tab"
+                aria-selected={typeFilter === t.type}
+                className={typeFilter === t.type ? 'mention-picker__tab is-active' : 'mention-picker__tab'}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setTypeFilter(t.type);
+                  setActive(0);
+                }}
+              >
+                {t.title}
+              </button>
+            ))}
+          </div>
           {results.length === 0 ? (
             <div className="mention-picker__empty">No matches</div>
           ) : (
@@ -138,7 +171,10 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
               if (items.length === 0) return null;
               return (
                 <div key={g.type}>
-                  <div className="mention-picker__group">{g.title}</div>
+                  <div className="mention-picker__group">
+                    <MentionIcon type={g.type} size={12} />
+                    {g.title}
+                  </div>
                   {items.map((c) => {
                     const idx = results.indexOf(c);
                     return (
@@ -164,6 +200,19 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
                       </div>
                     );
                   })}
+                  {hidden(g.type) > 0 && (
+                    <button
+                      type="button"
+                      className="mention-picker__more"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setTypeFilter(g.type);
+                        setActive(0);
+                      }}
+                    >
+                      Show {hidden(g.type)} more
+                    </button>
+                  )}
                 </div>
               );
             })
