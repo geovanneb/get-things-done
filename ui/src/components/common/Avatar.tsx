@@ -8,6 +8,8 @@ interface AvatarProps {
   color?: string;
   /** Explicit initials (e.g. a stakeholder's `avatar_initials`); derived from `name` when omitted. */
   initials?: string;
+  /** Shown next to the name on hover ("Jane Doe · CFO") when provided. */
+  role?: string;
 }
 
 function hashColor(name: string): string {
@@ -27,15 +29,16 @@ const sizeMap: Record<AvatarSize, { size: number; fontSize: string }> = {
   lg: { size: 44, fontSize: 'var(--text-md)' },
 };
 
-export default function Avatar({ name, size = 'md', color, initials: explicitInitials }: AvatarProps) {
+export default function Avatar({ name, size = 'md', color, initials: explicitInitials, role }: AvatarProps) {
   const { size: px, fontSize } = sizeMap[size];
   const bg = color ?? hashColor(name);
   const initials = explicitInitials?.trim() || getInitials(name);
+  const label = role?.trim() ? `${name} · ${role.trim()}` : name;
 
   return (
     <span
-      title={name}
-      aria-label={name}
+      title={label}
+      aria-label={label}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
