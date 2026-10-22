@@ -23,6 +23,9 @@ interface TreeProps {
   onDragEnd: () => void;
   onDrop: (ref: string, target: string | null) => void;
   onAction: (ref: string, action: NodeAction) => void;
+  /** Search matches (highlighted) and the match being shown. */
+  matches?: Set<string>;
+  currentMatch?: string | null;
 }
 
 function countBelow(node: OrgTreeNode): number {
@@ -107,7 +110,7 @@ function OutlineList({ nodes, depth, ...props }: { nodes: OrgTreeNode[]; depth: 
   );
 }
 
-function NodeCard({ node, compact, people, selected, collapsed, dragging, canDrop, hasManager, onSelect, onToggle, onDragStart, onDragEnd, onDrop, onAction }: { node: OrgTreeNode; compact: boolean } & TreeProps) {
+function NodeCard({ node, compact, people, selected, collapsed, dragging, canDrop, hasManager, onSelect, onToggle, onDragStart, onDragEnd, onDrop, onAction, matches, currentMatch }: { node: OrgTreeNode; compact: boolean } & TreeProps) {
   const person = people.get(node.ref);
   const name = person?.name ?? node.ref;
   const isSelected = selected === node.ref;
@@ -129,7 +132,8 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
 
   return (
     <div
-      className={`org-node${isSelected ? ' org-node--selected' : ''}${over && dropAllowed ? ' org-node--drop' : ''}${dragging === node.ref ? ' org-node--dragging' : ''}`}
+      className={`org-node${isSelected ? ' org-node--selected' : ''}${over && dropAllowed ? ' org-node--drop' : ''}${dragging === node.ref ? ' org-node--dragging' : ''}${matches?.has(node.ref) ? ' org-node--match' : ''}${currentMatch === node.ref ? ' org-node--current' : ''}`}
+      data-ref={node.ref}
       style={{ width: compact ? 'auto' : 184, display: compact ? 'flex' : undefined, maxWidth: compact ? 520 : undefined }}
       draggable
       onDragStart={(e) => { e.dataTransfer.setData(DRAG_MIME, node.ref); e.dataTransfer.effectAllowed = 'move'; onDragStart(node.ref); }}

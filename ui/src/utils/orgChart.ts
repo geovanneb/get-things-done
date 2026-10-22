@@ -39,6 +39,26 @@ export function collapsedForLevel(roots: OrgTreeNode[], level: number): Set<stri
   return out;
 }
 
+/** Every ref in top-down, left-to-right order (ignores collapsing). */
+export function treeOrder(roots: OrgTreeNode[]): string[] {
+  const out: string[] = [];
+  const walk = (nodes: OrgTreeNode[]) => nodes.forEach((n) => { out.push(n.ref); walk(n.children); });
+  walk(roots);
+  return out;
+}
+
+/** The managers above `ref`, nearest first. */
+export function ancestorsOf(members: OrgChartMember[], ref: string): string[] {
+  const managerOf = new Map(members.map((m) => [m.ref, m.reports_to]));
+  const out: string[] = [];
+  let current = managerOf.get(ref);
+  while (current && !out.includes(current)) {
+    out.push(current);
+    current = managerOf.get(current);
+  }
+  return out;
+}
+
 /** `ref` and everyone below it. */
 export function descendantsOf(members: OrgChartMember[], ref: string): Set<string> {
   const out = new Set<string>([ref]);
