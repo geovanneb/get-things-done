@@ -5,7 +5,7 @@
   "required": ["schema_version", "id", "type", "name", "influence"],
   "properties": {
     "schema_version": {"type": "string", "enum": ["1.0"]},
-    "id": {"type": "string", "pattern": "^STK-\\d{4}$"},
+    "id": {"type": "string", "pattern": "^(STK|GRP)-\\d{4}$"},
     "type": {"type": "string", "enum": ["stakeholder"]},
     "name": {"type": "string", "minLength": 1, "maxLength": 200},
     "role": {"type": "string"},
