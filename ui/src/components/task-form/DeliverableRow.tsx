@@ -108,9 +108,9 @@ export default function DeliverableRow({ item, index, templates, onChange, onRem
         </div>
       )}
 
-      {/* TXT accordion: inline text with copy button */}
-      {effectiveFormat?.toUpperCase() === 'TXT' && item.file_path && (
-        <TextDeliverableAccordion filePath={item.file_path} />
+      {/* TXT / MD accordion: inline text (Markdown rendered as a preview) with copy button */}
+      {['TXT', 'MD'].includes(effectiveFormat?.toUpperCase() ?? '') && item.file_path && (
+        <TextDeliverableAccordion filePath={item.file_path} markdown={effectiveFormat?.toUpperCase() === 'MD'} />
       )}
 
       {/* Output template select — the format comes with the template */}

@@ -285,3 +285,68 @@ input, textarea, select {
   font-family: inherit;
   font-size: inherit;
 }
+
+/* ---------------------------------------------------------------------------
+   Markdown preview (components/common/MarkdownView.tsx)
+   The global reset removes all margins, so spacing is restored here, scoped to
+   rendered Markdown only. Sizes use the --text-* tokens so the text-size
+   preference applies.
+   --------------------------------------------------------------------------- */
+.markdown-view {
+  font-size: var(--text-base);
+  line-height: 1.7;
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+.markdown-view--compact { font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-secondary); }
+.markdown-view > * + * { margin-top: 0.75em; }
+.markdown-view h1, .markdown-view h2, .markdown-view h3,
+.markdown-view h4, .markdown-view h5, .markdown-view h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--color-text);
+  margin-top: 1.25em;
+}
+.markdown-view > :first-child { margin-top: 0; }
+.markdown-view h1 { font-size: var(--text-xl); }
+.markdown-view h2 { font-size: var(--text-lg); padding-bottom: 0.25em; border-bottom: 1px solid var(--color-border); }
+.markdown-view h3 { font-size: var(--text-md); }
+.markdown-view h4, .markdown-view h5, .markdown-view h6 { font-size: var(--text-base); }
+.markdown-view ul, .markdown-view ol { padding-left: 1.5em; }
+.markdown-view li + li { margin-top: 0.25em; }
+.markdown-view li > ul, .markdown-view li > ol { margin-top: 0.25em; }
+.markdown-view li.task-list-item { list-style: none; margin-left: -1.25em; }
+.markdown-view li.task-list-item input { margin-right: 0.4em; vertical-align: middle; }
+.markdown-view a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.markdown-view strong { font-weight: 600; }
+.markdown-view blockquote {
+  padding: 0.25em 0.9em;
+  border-left: 3px solid var(--color-border-strong);
+  color: var(--color-text-secondary);
+}
+.markdown-view code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
+}
+.markdown-view pre {
+  padding: 0.75em 1em;
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+.markdown-view pre code { padding: 0; background: none; font-size: var(--text-sm); }
+.markdown-view hr { border: none; border-top: 1px solid var(--color-border); }
+.markdown-view__table-wrap { overflow-x: auto; }
+.markdown-view table { border-collapse: collapse; font-size: var(--text-sm); }
+.markdown-view th, .markdown-view td {
+  border: 1px solid var(--color-border);
+  padding: 0.35em 0.7em;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown-view th { background: var(--color-surface-hover); font-weight: 600; }
+.markdown-view img { max-width: 100%; }

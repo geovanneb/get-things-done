@@ -6,6 +6,7 @@ import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import EmptyState from '@/components/common/EmptyState';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import MarkdownView from '@/components/common/MarkdownView';
 import { apiGet } from '@/utils/api';
 import { formatDate, formatRelativeDate } from '@/utils/format';
 import type { Stakeholder, Task } from '@/types';
@@ -462,19 +463,7 @@ export default function StakeholderDetailView() {
       {/* Notes */}
       {notes && (
         <SectionCard title="Notes">
-          <pre
-            style={{
-              margin: 0,
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-base)',
-              color: 'var(--color-text)',
-              lineHeight: 1.7,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-          >
-            {notes}
-          </pre>
+          <MarkdownView content={notes} />
         </SectionCard>
       )}
 

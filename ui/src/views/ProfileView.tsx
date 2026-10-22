@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import MarkdownView from '@/components/common/MarkdownView';
 import { apiGet, apiPut } from '@/utils/api';
 import type { Profile } from '@/types';
 
@@ -374,18 +375,7 @@ export default function ProfileView() {
               onBlur={e => { e.currentTarget.style.borderColor = 'var(--color-border-strong)'; }}
             />
           ) : (
-            <p style={{
-              margin: 0,
-              fontSize: 'var(--text-sm)',
-              fontFamily: 'var(--font-sans)',
-              color: 'var(--color-text)',
-              lineHeight: 1.7,
-              whiteSpace: 'pre-wrap',
-            }}>
-              {profile[key] || (
-                <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>Not set</span>
-              )}
-            </p>
+            <MarkdownView content={profile[key]} emptyText="Not set" compact />
           )}
         </SectionCard>
       ))}
