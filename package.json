@@ -68,7 +68,7 @@
     "uuid": "^11.1.0"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^9.4.3"
+    "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
