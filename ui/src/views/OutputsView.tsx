@@ -1,9 +1,10 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
 import Modal from '@/components/common/Modal';
 import EmptyState from '@/components/common/EmptyState';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import AttachedFiles from '@/components/common/AttachedFiles';
 import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api';
 import { formatRelativeDate } from '@/utils/format';
 import type { OutputTemplate } from '@/types';
@@ -65,88 +66,6 @@ const textareaStyle: React.CSSProperties = {
   color: 'var(--color-text)', fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)',
   resize: 'vertical' as const, lineHeight: 1.5, boxSizing: 'border-box' as const,
 };
-
-// ---------------------------------------------------------------------------
-// Files section
-// ---------------------------------------------------------------------------
-
-interface TemplateFile { name: string; size: number; modified: string; type: string; }
-
-function TemplateFilesSection({ templateId }: { templateId: string }) {
-  const [files, setFiles] = useState<TemplateFile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    apiGet<TemplateFile[]>(`/api/outputs/templates/${templateId}/files`)
-      .then((data) => { setFiles(data ?? []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [templateId]);
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch(`/api/outputs/templates/${templateId}/files`, { method: 'POST', body: form });
-      if (!res.ok) throw new Error(await res.text());
-      const saved = await res.json();
-      setFiles((prev) => [saved, ...prev]);
-    } catch (err) { alert(err instanceof Error ? err.message : 'Upload failed'); }
-    finally { setUploading(false); if (inputRef.current) inputRef.current.value = ''; }
-  };
-
-  const handleDelete = async (name: string) => {
-    if (!window.confirm(`Remove "${name}"?`)) return;
-    try {
-      const res = await fetch(`/api/outputs/templates/${templateId}/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await res.text());
-      setFiles((prev) => prev.filter((f) => f.name !== name));
-    } catch (err) { alert(err instanceof Error ? err.message : 'Delete failed'); }
-  };
-
-  if (loading) return <LoadingSpinner />;
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <label style={labelStyle}>Example Files</label>
-        <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleUpload} />
-        <Button variant="secondary" size="sm" loading={uploading} onClick={() => inputRef.current?.click()}>
-          Attach file
-        </Button>
-      </div>
-      {files.length === 0 ? (
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>No files attached.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {files.map((f) => (
-            <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
-                <path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5Z" stroke="currentColor" strokeWidth="1.2" />
-                <path d="M9 1.5V5.5h4" stroke="currentColor" strokeWidth="1.2" />
-              </svg>
-              <span style={{ flex: 1, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>{(f.size / 1024).toFixed(1)} KB</span>
-              <button
-                onClick={() => handleDelete(f.name)}
-                title="Remove"
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: 0 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-critical)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-muted)'; }}
-              >
-                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1 1l9 9M10 1l-9 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Template modal
@@ -233,7 +152,7 @@ function TemplateModal({ isOpen, onClose, initial, mode, onSaved }: TemplateModa
         </div>
 
         {mode === 'edit' && initial?.id && (
-          <TemplateFilesSection templateId={initial.id} />
+          <AttachedFiles baseUrl={`/api/outputs/templates/${initial.id}/files`} label="Files" />
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>

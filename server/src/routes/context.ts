@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import multer from 'multer';
 import { ContextService } from '../services/contextService';
+import { sendFile } from '../utils/files';
 import { ContextCategory } from '../types';
 
 const router = Router();
@@ -50,6 +51,12 @@ router.post('/:id/files', upload.single('file'), async (req: Request, res: Respo
   if (!req.file) { res.status(400).json({ error: 'No file provided' }); return; }
   const saved = await contextService.saveContextFile(param(req, 'id'), req.file.originalname, req.file.buffer);
   res.status(201).json(saved);
+});
+
+// GET /api/context/:id/files/:filename — open in the browser; ?download=1 to save it
+router.get('/:id/files/:filename', async (req: Request, res: Response) => {
+  const fullPath = await contextService.contextFilePath(param(req, 'id'), param(req, 'filename'));
+  sendFile(res, fullPath, req.query['download'] === '1');
 });
 
 // DELETE /api/context/:id/files/:filename

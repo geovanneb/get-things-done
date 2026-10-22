@@ -116,6 +116,28 @@ try {
   check('a workspace edited through the app (incl. a group) has no validation errors', errors.length === 0,
     errors.length ? JSON.stringify(errors.slice(0, 3)) : '');
 
+  // Files kept with a template or a context note can be opened and downloaded, never anything outside their folder.
+  {
+    const templates = await (await fetch(`${base}/api/outputs/templates`)).json();
+    const notes = await (await fetch(`${base}/api/context`)).json();
+    for (const [label, files] of [['template', `/api/outputs/templates/${templates[0].id}/files`], ['context note', `/api/context/${notes[0].id}/files`]]) {
+      const form = new FormData();
+      form.append('file', new Blob(['hello from the smoke test'], { type: 'text/plain' }), 'smoke-note.txt');
+      const up = await fetch(`${base}${files}`, { method: 'POST', body: form });
+      const open = await fetch(`${base}${files}/smoke-note.txt`);
+      check(`a ${label} file opens in the browser`, up.status === 201 && open.ok && (await open.text()) === 'hello from the smoke test'
+        && !(open.headers.get('content-disposition') ?? '').includes('attachment'), `upload=${up.status} open=${open.status}`);
+      const dl = await fetch(`${base}${files}/smoke-note.txt?download=1`);
+      check(`a ${label} file downloads as an attachment`, dl.ok && /^attachment; filename="?smoke-note\.txt"?$/.test(dl.headers.get('content-disposition') ?? ''),
+        dl.headers.get('content-disposition') ?? 'no header');
+      const missing = await fetch(`${base}${files}/no-such-file.txt`);
+      const escape = await fetch(`${base}${files}/..%2F..%2F..%2Fworkspace.yaml`);
+      check(`a ${label} file route returns 404 for a missing file and 400 outside the folder`, missing.status === 404 && escape.status === 400,
+        `missing=${missing.status} escape=${escape.status}`);
+      await fetch(`${base}${files}/smoke-note.txt`, { method: 'DELETE' });
+    }
+  }
+
   // @-mentions in a task's Objective (picker, execution package, archived tasks, validation).
   const cands = await (await fetch(`${base}/api/mentions?q=`)).json();
   const kinds = new Set(cands.map((c) => c.type));

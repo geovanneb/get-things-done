@@ -3,6 +3,7 @@ import * as fsp from 'fs/promises';
 import { ContextNote, ContextCategory } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { fileInside } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -205,6 +206,13 @@ export class ContextService {
       });
     }
     return files.sort((a, b) => b.modified.localeCompare(a.modified));
+  }
+
+  /** Absolute path of one file attached to the note (404 if missing, 400 if outside the note's folder). */
+  async contextFilePath(id: string, name: string): Promise<string> {
+    const result = await this.findContextFile(id);
+    if (!result) throw new Error(`Context note not found: ${id}`);
+    return fileInside(path.dirname(result.filePath), name);
   }
 
   async saveContextFile(id: string, originalName: string, buffer: Buffer): Promise<{ name: string; size: number; modified: string; type: string }> {
