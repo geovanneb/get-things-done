@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import multer from 'multer';
 import { OutputService } from '../services/outputService';
-import { sendFile } from '../utils/files';
+import { sendFile, sendZip } from '../utils/files';
 
 const router = Router();
 const outputService = new OutputService();
@@ -49,6 +49,11 @@ router.post('/templates/:id/files', upload.single('file'), async (req: Request, 
   if (!req.file) { res.status(400).json({ error: 'No file provided' }); return; }
   const saved = await outputService.saveTemplateFile(param(req, 'id'), req.file.originalname, req.file.buffer);
   res.status(201).json(saved);
+});
+
+// GET /api/outputs/templates/:id/archive — the whole template folder as <folder>.zip
+router.get('/templates/:id/archive', async (req: Request, res: Response) => {
+  sendZip(res, await outputService.templateArchive(param(req, 'id')));
 });
 
 // GET /api/outputs/templates/:id/files/<path> — open in the browser; ?download=1 to save it. The path may include subfolders.

@@ -9,6 +9,8 @@ interface AttachedFilesProps {
   /** Collection URL, e.g. `/api/outputs/templates/OUT-x/files`. GET lists, POST uploads, `/<name>` opens, DELETE removes. */
   baseUrl: string;
   label: string;
+  /** URL of a ZIP with the whole folder; shows a "Download all" link. */
+  archiveUrl?: string;
 }
 
 const labelStyle: React.CSSProperties = {
@@ -25,7 +27,7 @@ const iconButton: React.CSSProperties = {
  * Opening uses the browser's own viewer (PDF, HTML, images, text); other types download.
  * Subfolders (e.g. assets/, source/) are listed read-only: attach and remove act on the top level only.
  */
-export default function AttachedFiles({ baseUrl, label }: AttachedFilesProps) {
+export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFilesProps) {
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -84,9 +86,19 @@ export default function AttachedFiles({ baseUrl, label }: AttachedFilesProps) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <label style={labelStyle}>{label}</label>
         <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleUpload} />
-        <Button variant="secondary" size="sm" loading={uploading} onClick={() => inputRef.current?.click()}>
-          Attach file
-        </Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {archiveUrl && files.length > 0 && (
+            <a href={archiveUrl} download title="Download everything in this folder as one .zip"
+              style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', textDecoration: 'none', whiteSpace: 'nowrap' }}
+              onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
+              Download all (.zip)
+            </a>
+          )}
+          <Button variant="secondary" size="sm" loading={uploading} onClick={() => inputRef.current?.click()}>
+            Attach file
+          </Button>
+        </div>
       </div>
       {files.length === 0 ? (
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>No files attached.</p>

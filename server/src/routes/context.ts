@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import multer from 'multer';
 import { ContextService } from '../services/contextService';
-import { sendFile } from '../utils/files';
+import { sendFile, sendZip } from '../utils/files';
 import { ContextCategory } from '../types';
 
 const router = Router();
@@ -51,6 +51,11 @@ router.post('/:id/files', upload.single('file'), async (req: Request, res: Respo
   if (!req.file) { res.status(400).json({ error: 'No file provided' }); return; }
   const saved = await contextService.saveContextFile(param(req, 'id'), req.file.originalname, req.file.buffer);
   res.status(201).json(saved);
+});
+
+// GET /api/context/:id/archive — the note's folder (note.md and attachments) as <folder>.zip
+router.get('/:id/archive', async (req: Request, res: Response) => {
+  sendZip(res, await contextService.contextArchive(param(req, 'id')));
 });
 
 // GET /api/context/:id/files/<path> — open in the browser; ?download=1 to save it. The path may include subfolders.

@@ -152,6 +152,24 @@ try {
     const delNested = await fetch(`${base}${tplFiles}/assets%2Flogo.txt`, { method: 'DELETE' });
     check('removing a file in a subfolder is refused and leaves the top-level file alone',
       delNested.status === 400 && fs.existsSync(path.join(tplDir, 'logo.txt')) && fs.existsSync(path.join(tplDir, 'assets', 'logo.txt')), `status=${delNested.status}`);
+    // "Download all": the whole folder, including output.md and subfolders, as one valid ZIP.
+    const zipRes = await fetch(`${base}/api/outputs/templates/${templates[0].id}/archive`);
+    const zipBuf = Buffer.from(await zipRes.arrayBuffer());
+    const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gtd-zip-'));
+    fs.writeFileSync(path.join(zipDir, 'all.zip'), zipBuf);
+    let unzipped = [];
+    try {
+      execFileSync('unzip', ['-q', 'all.zip'], { cwd: zipDir });
+      const folder = path.basename(tplDir);
+      unzipped = ['output.md', 'logo.txt', 'assets/logo.txt'].map((f) => fs.existsSync(path.join(zipDir, folder, f)));
+    } catch (e) { unzipped = [String(e)]; }
+    check('a template downloads as one ZIP with output.md and its subfolders',
+      zipRes.ok && (zipRes.headers.get('content-type') ?? '').includes('application/zip')
+      && (zipRes.headers.get('content-disposition') ?? '').includes('.zip') && unzipped.every((x) => x === true),
+      `status=${zipRes.status} ${JSON.stringify(unzipped)}`);
+    const noteZip = await fetch(`${base}/api/context/${notes[0].id}/archive`);
+    check('a context note downloads as one ZIP', noteZip.ok && (noteZip.headers.get('content-type') ?? '').includes('application/zip'));
+    fs.rmSync(zipDir, { recursive: true, force: true });
     fs.rmSync(path.join(tplDir, 'assets'), { recursive: true, force: true });
     fs.rmSync(path.join(tplDir, '.hidden'), { force: true });
     fs.rmSync(path.join(tplDir, 'logo.txt'), { force: true });
