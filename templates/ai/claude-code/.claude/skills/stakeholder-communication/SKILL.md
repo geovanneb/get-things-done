@@ -11,6 +11,14 @@ tags: ["communication", "stakeholders", "memos", "email"]
 
 Use when drafting any communication that goes to a specific stakeholder: emails, memos, updates, decision requests, or meeting follow-ups. The right tone and structure depends on the audience.
 
+## Check the reporting line first
+
+Before choosing a framework, look the recipient up in `stakeholders/org-charts/` (`reports_to` is their manager's stakeholder id). Their manager, peers and direct reports change the message:
+
+- Writing to someone whose manager is the real decision maker: make it easy to forward. Put the ask and the key facts at the top, in words that work for the manager too.
+- Writing to a manager about their team: name the direct reports affected and what you need from them.
+- Writing across organizations: respect the other side's hierarchy. Do not go around the person you work with to reach their manager unless the executive asks for it.
+
 ## Communication framework by influence level
 
 ### Decision makers (influence: decision_maker)

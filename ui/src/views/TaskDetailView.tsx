@@ -38,7 +38,7 @@ function SidebarField({ label, children }: { label: string; children: React.Reac
 }
 
 /* ---- Inline-editable text ----------------------------------------- */
-function MarkdownSection({ label, content, onSave }: { label: string; content: string; onSave?: (v: string) => void }) {
+function MarkdownSection({ label, content, onSave, mentions }: { label: string; content: string; onSave?: (v: string) => void; mentions?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(content);
 
@@ -75,7 +75,7 @@ function MarkdownSection({ label, content, onSave }: { label: string; content: s
         )}
       </div>
       {editing ? (
-        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus mentions />
+        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, template, context note or task' : undefined} />
       ) : (
         <MarkdownView content={content} />
       )}
@@ -172,7 +172,7 @@ function WorkTab({ task, onFieldChange }: { task: Task; onFieldChange: (field: s
     <div style={{ display: 'flex', gap: 24, flex: 1, minHeight: 0 }}>
       {/* Main */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 4 }}>
-        <MarkdownSection label="Objective" content={task.body ?? ''} onSave={saveField('body')} />
+        <MarkdownSection label="Objective" content={task.body ?? ''} onSave={saveField('body')} mentions />
 
         {/* Deliverables */}
         <div style={{ marginBottom: 24 }}>

@@ -7,6 +7,8 @@ You are working in an executive workspace managed by Get Things Done. This works
 ```
 profile/                  Executive profile (read this first on every task)
 stakeholders/people/      STK-NNNN.md files for each stakeholder
+stakeholders/groups/      GRP-NNNN.md files for stakeholder groups
+stakeholders/org-charts/  ORG-NNNN.md reporting lines for one company or organization
 tasks/active/             One directory per active task
   TASK-YYYY-NNNN/
     task.md               Task definition (frontmatter + body)
@@ -29,6 +31,7 @@ Read files in this order:
 
 1. **task.md** for the task you are working on (read the complete file, including all frontmatter fields)
 2. **All stakeholder files** listed in the task's `stakeholders` field — these are the **intended audience** for the output you will produce. Read each file at `stakeholders/people/<ref>.md`. Understand who they are, their influence level, what matters to them, and how they communicate. Every output must be calibrated to this audience.
+   - **Org charts** at `stakeholders/org-charts/` — read every chart whose `members` include a task stakeholder. `reports_to` holds the manager's stakeholder id; no `reports_to` means top of the chart. Use each stakeholder's organization, manager, peers and direct reports to decide who really approves, what level to pitch at, the right escalation path, and who else should be kept informed. Treat the chart as the source of truth for reporting lines and flag any conflict with a stakeholder's title.
 3. **Context library** — do not limit yourself to the task's `contexts` field. Proactively scan `context/` across all categories (company, organization, strategy, programs, decisions, risks, glossary, situation) and select any notes that are relevant to the task subject, title, and objective. Use the task's `contexts` field as a starting point if present, but always supplement it by searching the full library. The goal is to bring in everything that informs the work, not just what was explicitly listed.
 4. **The executive profile** at `profile/executive-profile.md` — this defines the voice, communication style, and decision-making approach that all outputs must reflect.
 5. **Output templates** for each deliverable listed in the task's `deliverables` field — find them at `outputs/templates/<template-slug>/output.md`. The template defines the expected format, required sections, and style guide for the output.
@@ -161,6 +164,7 @@ All frontmatter structures are documented in `.schemas/`. Refer to these when cr
 
 - Tasks: `.schemas/task.schema.json`
 - Stakeholders: `.schemas/stakeholder.schema.json`
+- Org charts: `.schemas/org-chart.schema.json`
 - Context notes: `.schemas/context.schema.json`
 - Output templates: `.schemas/output-template.schema.json`
 - Executive profile: `.schemas/profile.schema.json`

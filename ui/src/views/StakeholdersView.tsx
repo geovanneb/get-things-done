@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import Avatar from '@/components/common/Avatar';
 // Badge removed — counts shown inside TabBar directly
@@ -8,6 +8,7 @@ import EmptyState from '@/components/common/EmptyState';
 import Input, { Textarea } from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Modal from '@/components/common/Modal';
+import OrgChartsPanel from '@/components/stakeholders/OrgChartsPanel';
 import { apiDelete, apiPost, apiPut } from '@/utils/api';
 import type { Stakeholder } from '@/types';
 
@@ -147,7 +148,7 @@ interface StakeholderModalProps {
   onClose: () => void;
   editing: Stakeholder | null;
   onSaved: () => void;
-  type: TabType;
+  type: ListTab;
 }
 
 function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: StakeholderModalProps) {
@@ -319,7 +320,8 @@ function StakeholderRow({ stakeholder: s, isLast, onEdit, onDelete }: RowProps) 
 // Tabs
 // ---------------------------------------------------------------------------
 
-type TabType = 'people' | 'groups';
+type ListTab = 'people' | 'groups';
+type TabType = ListTab | 'charts';
 
 interface TabBarProps {
   active: TabType;
@@ -329,9 +331,10 @@ interface TabBarProps {
 }
 
 function TabBar({ active, peopleCt, groupsCt, onChange }: TabBarProps) {
-  const tabs: { key: TabType; label: string; count: number }[] = [
+  const tabs: { key: TabType; label: string; count?: number }[] = [
     { key: 'people', label: 'Individuals', count: peopleCt },
     { key: 'groups', label: 'Groups', count: groupsCt },
+    { key: 'charts', label: 'Org charts' },
   ];
   return (
     <div
@@ -372,7 +375,7 @@ function TabBar({ active, peopleCt, groupsCt, onChange }: TabBarProps) {
             }}
           >
             {label}
-            <span
+            {count !== undefined && <span
               style={{
                 fontSize: 'var(--text-xs)',
                 fontWeight: 600,
@@ -385,7 +388,7 @@ function TabBar({ active, peopleCt, groupsCt, onChange }: TabBarProps) {
               }}
             >
               {count}
-            </span>
+            </span>}
           </button>
         );
       })}
@@ -398,7 +401,8 @@ function TabBar({ active, peopleCt, groupsCt, onChange }: TabBarProps) {
 // ---------------------------------------------------------------------------
 
 export default function StakeholdersView() {
-  const [tab, setTab] = useState<TabType>('people');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<TabType>(params.get('tab') === 'charts' ? 'charts' : params.get('tab') === 'groups' ? 'groups' : 'people');
   const [people, setPeople] = useState<Stakeholder[]>([]);
   const [groups, setGroups] = useState<Stakeholder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -474,6 +478,7 @@ export default function StakeholdersView() {
             onChange={(t) => { setTab(t); setSearch(''); }}
           />
         )}
+        {tab === 'charts' ? <div style={{ flex: 1 }} /> : <>
         <div style={{ flex: 1, minWidth: 200 }}>
           <Input
             value={search}
@@ -486,6 +491,7 @@ export default function StakeholdersView() {
         <Button variant="primary" onClick={() => { setEditing(null); setModalOpen(true); }}>
           + Add {tab === 'groups' ? 'Group' : 'Individual'}
         </Button>
+        </>}
       </div>
 
       {fetchError && (
@@ -494,7 +500,9 @@ export default function StakeholdersView() {
 
       {loading && <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><LoadingSpinner /></div>}
 
-      {!loading && (
+      {!loading && tab === 'charts' && <OrgChartsPanel stakeholders={[...people, ...groups]} initialChartId={params.get('chart')} />}
+
+      {!loading && tab !== 'charts' && (
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
           {sorted.length === 0 ? (
             <EmptyState
@@ -531,7 +539,7 @@ export default function StakeholdersView() {
         onClose={() => setModalOpen(false)}
         editing={editing}
         onSaved={fetchStakeholders}
-        type={tab}
+        type={tab === 'groups' ? 'groups' : 'people'}
       />
     </div>
   );

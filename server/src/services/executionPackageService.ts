@@ -10,6 +10,7 @@ import { OutputService } from './outputService';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { MentionService } from './mentionService';
+import { orgChartService } from './orgChartService';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -55,7 +56,7 @@ export class ExecutionPackageService {
       const abs = await mentionService.resolve(m.href);
       if (!abs) continue;
       const stats = await fileService.getFileStats(abs);
-      files.push({ path: abs, type: mentionType(m.href), size: stats.size, hash: stats.hash });
+      files.push({ path: abs, type: mentionType(m.href), size: stats.size, hash: stats.hash, mentioned: true });
     }
 
     // Add stakeholders
@@ -71,6 +72,14 @@ export class ExecutionPackageService {
         } catch {
           // Stakeholder not found, skip
         }
+      }
+
+      // Org charts give the reporting lines around the audience.
+      const refSet = new Set(refs);
+      for (const chart of await orgChartService.listCharts()) {
+        if (!chart.path || !chart.members.some((m) => refSet.has(m.ref))) continue;
+        const stats = await fileService.getFileStats(chart.path);
+        files.push({ path: chart.path, type: 'org_chart', size: stats.size, hash: stats.hash });
       }
     }
 

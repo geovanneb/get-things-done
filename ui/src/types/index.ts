@@ -292,3 +292,33 @@ export interface WorkspaceConfig {
   name: string;
   git_enabled: boolean;
 }
+
+export interface OrgChartMember {
+  ref: string;
+  /** Manager's stakeholder id within the same chart; absent at the top. */
+  reports_to?: string;
+}
+
+export interface OrgChart {
+  id: string;
+  name: string;
+  organization?: string;
+  description?: string;
+  members: OrgChartMember[];
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrgPersonSummary {
+  id: string;
+  name: string;
+  role?: string;
+}
+
+export interface OrgPosition {
+  chart: { id: string; name: string; organization?: string };
+  manager: OrgPersonSummary | null;
+  direct_reports: OrgPersonSummary[];
+  peers: OrgPersonSummary[];
+}

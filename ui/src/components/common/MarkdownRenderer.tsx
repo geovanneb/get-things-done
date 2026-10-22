@@ -4,7 +4,9 @@ import remarkGfm from 'remark-gfm';
 import { useNavigate } from 'react-router-dom';
 
 /** In-app route for an @-mention link (`[@Name](/stakeholders/people/stk-0001.md)`), or null. */
-function mentionRoute(href: string | undefined): string | null {
+function mentionRoute(rawHref: string | undefined): string | null {
+  // Early mentions were written without the leading slash; treat them as workspace-root paths.
+  const href = rawHref && /^(stakeholders|context|outputs|tasks)\//.test(rawHref) ? `/${rawHref}` : rawHref;
   if (!href || !href.startsWith('/')) return null;
   const task = href.match(/^\/tasks\/[^/]+\/(TASK-\d{4}-\d{4})\//);
   if (task) return `/board/task/${task[1]}`;

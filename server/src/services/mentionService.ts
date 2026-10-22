@@ -36,9 +36,10 @@ export interface ParsedMention {
 /**
  * A mention is a normal Markdown link whose text starts with `@`:
  * `[@Jane Doe](/stakeholders/people/stk-0001.md)`. The path is relative to the workspace root
- * (leading slash), so it means the same thing wherever the task file lives.
+ * (leading slash), so it means the same thing wherever the task file lives. Links without the
+ * slash that start with a mention folder are accepted too.
  */
-const MENTION_RE = /\[@([^\]\n]+)\]\((\/[^)\s]+)\)/g;
+const MENTION_RE = /\[@([^\]\n]+)\]\((\/[^)\s]+|(?:stakeholders|context|outputs|tasks)\/[^)\s]+)\)/g;
 const TASK_ID_RE = /TASK-\d{4}-\d{4}/;
 
 function restrictedLevel(v: unknown): string | undefined {
@@ -57,9 +58,11 @@ export class MentionService {
     const seen = new Set<string>();
     const out: ParsedMention[] = [];
     for (const m of markdown.matchAll(MENTION_RE)) {
-      if (seen.has(m[2])) continue;
-      seen.add(m[2]);
-      out.push({ label: m[1], href: m[2] });
+      // Early mentions were written without the leading slash; they mean the same workspace-root path.
+      const href = m[2].startsWith('/') ? m[2] : `/${m[2]}`;
+      if (seen.has(href)) continue;
+      seen.add(href);
+      out.push({ label: m[1], href });
     }
     return out;
   }
@@ -69,7 +72,7 @@ export class MentionService {
    * Task mentions are resolved by ID, so they keep working after a task moves to the archive.
    */
   async resolve(href: string): Promise<string | null> {
-    const ws = workspaceService.getWorkspacePath();
+    const ws = path.resolve(workspaceService.getWorkspacePath());
     const direct = path.resolve(ws, '.' + href);
     if (!direct.startsWith(ws + path.sep)) return null; // never leave the workspace
     if (await fileService.exists(direct)) return direct;

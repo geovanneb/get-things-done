@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { StakeholderService } from '../services/stakeholderService';
+import { orgChartService } from '../services/orgChartService';
 
 const router = Router();
 const stakeholderService = new StakeholderService();
@@ -32,6 +33,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 // DELETE /api/stakeholders/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   await stakeholderService.deleteStakeholder(req.params['id']);
+  await orgChartService.removeStakeholder(req.params['id']);
   res.status(204).send();
 });
 
