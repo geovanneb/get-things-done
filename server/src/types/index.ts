@@ -48,7 +48,10 @@ export interface Stakeholder {
 }
 
 export interface OrgChartMember {
+  /** Stakeholder id, or a chart-local placeholder id `P-<n>` for someone who is not a stakeholder (yet). */
   ref: string;
+  /** Placeholders only: who or what this is ("Head of Sales (vacant)"). */
+  name?: string;
   /** Stakeholder id of this member's manager in the same chart. Absent at the top of the chart. */
   reports_to?: string;
   /** Title in this chart; overrides the stakeholder's role here (and only here). */

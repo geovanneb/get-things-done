@@ -24,6 +24,7 @@ This workspace is managed by Get Things Done. When working in this directory:
   and direct reports to decide who approves, what level to pitch at, and who to keep informed.
   A member's optional `title` is their title in that chart and overrides their stakeholder `role` there.
   Optional `units` (departments, teams) are membership only; reporting still comes from `reports_to`.
+  A `ref` starting with `P-` is a placeholder (not a stakeholder yet, or a vacant role); treat it as unconfirmed.
 - Always read every file @-mentioned in the task's Objective (Markdown links whose text starts with `@`; paths start at the
   workspace root; a mentioned task no longer in `tasks/active/` is in `tasks/archive/`). Mentions add to the normal context
   scan, they never replace it.

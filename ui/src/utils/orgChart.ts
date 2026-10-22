@@ -209,3 +209,39 @@ export function withoutHead(units: OrgUnit[], ref: string): OrgUnit[] {
     return rest;
   });
 }
+
+// --- Placeholders -------------------------------------------------------------
+// Someone who is not a stakeholder (yet), or a vacant role. They live only in this chart.
+
+export const isPlaceholder = (ref: string) => /^P-\d+$/.test(ref);
+
+export function nextPlaceholderId(members: OrgChartMember[]): string {
+  const max = members.reduce((n, m) => Math.max(n, Number(m.ref.match(/^P-(\d+)$/)?.[1] ?? 0)), 0);
+  return `P-${max + 1}`;
+}
+
+/** Sets a placeholder's name and title (blank title clears it). */
+export function editPlaceholder(members: OrgChartMember[], ref: string, name: string, title: string): OrgChartMember[] {
+  return setTitle(members.map((m) => (m.ref === ref ? { ...m, name: name.trim() } : m)), ref, title);
+}
+
+/**
+ * Replaces placeholder `from` with stakeholder `to` everywhere in the chart: the member itself, the
+ * people who report to it, and the units it leads. Reporting line, unit and (unless `keepTitle` is
+ * false) the title are kept; the placeholder name is dropped.
+ */
+export function replaceRef(
+  members: OrgChartMember[], units: OrgUnit[], from: string, to: string, keepTitle = true,
+): { members: OrgChartMember[]; units: OrgUnit[] } {
+  return {
+    members: members.map((m) => {
+      let next = m;
+      if (m.ref === from) {
+        const { name: _name, title, ...rest } = m;
+        next = { ...rest, ref: to, ...(keepTitle && title ? { title } : {}) };
+      }
+      return next.reports_to === from ? { ...next, reports_to: to } : next;
+    }),
+    units: units.map((u) => (u.head === from ? { ...u, head: to } : u)),
+  };
+}

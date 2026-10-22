@@ -20,6 +20,8 @@ export interface StakeholderSummary {
   id: string;
   name: string;
   role?: string;
+  /** True for a chart placeholder (not a stakeholder file). */
+  placeholder?: boolean;
 }
 
 export interface UnitSummary {
@@ -44,9 +46,16 @@ export interface OrgPosition {
   peers: StakeholderSummary[];
 }
 
+/** Chart-local placeholder ids: someone known only by role, or not yet added as a stakeholder. */
+export const isPlaceholder = (ref: string) => /^P-\d+$/.test(ref);
+
 /** One member with only known fields; empty optional fields are left out (the YAML writer cannot write `undefined`). */
 function cleanMember(item: Record<string, unknown>, ref: string): OrgChartMember {
   const member: OrgChartMember = { ref };
+  if (isPlaceholder(ref)) {
+    const name = typeof item.name === 'string' ? item.name.trim().slice(0, 120) : '';
+    member.name = name || 'Unnamed placeholder';
+  }
   const reportsTo = typeof item.reports_to === 'string' ? item.reports_to.trim() : '';
   if (reportsTo && reportsTo !== ref) member.reports_to = reportsTo;
   const title = typeof item.title === 'string' ? item.title.trim() : '';
@@ -119,7 +128,7 @@ function reconcileUnits(members: OrgChartMember[], units: OrgUnit[]): { members:
 
 /** 1.1 only when a 1.1 field is used, so existing charts are written exactly as before. */
 function schemaVersion(chart: OrgChart): string {
-  const uses11 = (chart.units?.length ?? 0) > 0 || chart.members.some((m) => m.title || m.unit);
+  const uses11 = (chart.units?.length ?? 0) > 0 || chart.members.some((m) => m.title || m.unit || isPlaceholder(m.ref));
   return uses11 ? '1.1' : '1.0';
 }
 
@@ -295,7 +304,11 @@ export class OrgChartService {
     return charts.map((chart) => {
       // A title in the chart wins over the stakeholder's role, for everyone listed here.
       const titleIn = new Map(chart.members.map((m) => [m.ref, m.title]));
+      const placeholderName = new Map(chart.members.filter((m) => isPlaceholder(m.ref)).map((m) => [m.ref, m.name]));
       const summary = (id: string): StakeholderSummary => {
+        if (placeholderName.has(id)) {
+          return { id, name: placeholderName.get(id) || id, role: titleIn.get(id) || undefined, placeholder: true };
+        }
         const s = byId.get(id);
         return { id, name: s?.name ?? id, role: titleIn.get(id) || s?.role || undefined };
       };
@@ -332,7 +345,8 @@ export class OrgChartService {
    */
   private async checkNewRefs(members: OrgChartMember[], before: OrgChartMember[]): Promise<OrgChartMember[]> {
     const known = new Set(before.map((m) => m.ref));
-    const added = members.filter((m) => !known.has(m.ref)).map((m) => m.ref);
+    // Placeholders are chart-local, so they never need a stakeholder file.
+    const added = members.filter((m) => !known.has(m.ref) && !isPlaceholder(m.ref)).map((m) => m.ref);
     if (added.length === 0) return members;
     const ids = new Set((await stakeholderService.listStakeholders()).map((s) => s.id));
     const unknown = added.filter((r) => !ids.has(r));

@@ -552,7 +552,9 @@ function OrgRow({ label, people, empty }: { label: string; people: OrgPersonSumm
         {people.length === 0 ? <span style={{ color: 'var(--color-text-muted)' }}>{empty}</span> : people.map((person, i) => (
           <React.Fragment key={person.id}>
             {i > 0 && ', '}
-            <Link to={`/stakeholders/${encodeURIComponent(person.id)}`} style={{ color: 'var(--color-accent)' }}>{person.name}</Link>
+            {person.placeholder
+              ? <span title="Placeholder in the chart, not a stakeholder">{person.name} <em style={{ color: 'var(--color-text-muted)' }}>(placeholder)</em></span>
+              : <Link to={`/stakeholders/${encodeURIComponent(person.id)}`} style={{ color: 'var(--color-accent)' }}>{person.name}</Link>}
             {person.role && <span style={{ color: 'var(--color-text-muted)' }}> ({person.role})</span>}
           </React.Fragment>
         ))}

@@ -20,6 +20,8 @@ interface UnitsViewProps {
   onUnitAction: (unit: OrgUnit, action: UnitAction) => void;
   /** Opens the unit picker for one person. */
   onPerson: (ref: string) => void;
+  /** Placeholder refs (not stakeholders yet). */
+  placeholders?: Set<string>;
 }
 
 /**
@@ -145,8 +147,8 @@ function Bucket({ title, refs, unit, people, titles, dragging, onAssign, ...rest
   );
 }
 
-function PersonList({ refs, head, people, titles, onDragStart, onDragEnd, onPerson, wrap }: {
-  refs: string[]; head?: string; people: Map<string, Stakeholder>; titles: Map<string, string>; wrap?: boolean;
+function PersonList({ refs, head, people, titles, onDragStart, onDragEnd, onPerson, wrap, placeholders }: {
+  refs: string[]; head?: string; people: Map<string, Stakeholder>; titles: Map<string, string>; wrap?: boolean; placeholders?: Set<string>;
   onDragStart: (ref: string) => void; onDragEnd: () => void; onPerson: (ref: string) => void;
 }) {
   if (refs.length === 0) return null;
@@ -165,8 +167,9 @@ function PersonList({ refs, head, people, titles, onDragStart, onDragEnd, onPers
               title={`Move ${name} to another unit`}>
               <Avatar name={name} size="sm" initials={p?.avatar_initials} />
               <span style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-                <span className="org-node__line" style={{ display: 'block', fontSize: 'var(--text-sm)', color: p ? 'var(--color-text)' : 'var(--color-critical)' }}>{name}</span>
+                <span className="org-node__clamp" style={{ fontSize: 'var(--text-sm)', color: p ? 'var(--color-text)' : 'var(--color-critical)' }}>{name}</span>
                 {role && <span className="org-node__clamp" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{role}</span>}
+                {placeholders?.has(ref) && <span className="org-node__unit org-node__unit--ph">Placeholder</span>}
               </span>
               {ref === head && <span className="org-unit__badge">Head</span>}
             </button>

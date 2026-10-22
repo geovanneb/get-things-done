@@ -5,7 +5,9 @@ import type { OrgTreeNode } from '@/utils/orgChart';
 
 export const DRAG_MIME = 'application/x-gtd-stakeholder';
 
-export type NodeAction = 'add-report' | 'change-manager' | 'set-title' | 'set-unit' | 'top-level' | 'open' | 'remove';
+export type NodeAction =
+  | 'add-report' | 'change-manager' | 'set-title' | 'set-unit' | 'top-level' | 'open' | 'remove'
+  | 'edit-placeholder' | 'make-stakeholder' | 'link-stakeholder';
 
 interface TreeProps {
   roots: OrgTreeNode[];
@@ -27,6 +29,8 @@ interface TreeProps {
   titles?: Map<string, string>;
   /** Unit name per person, when the chart uses units. */
   unitNames?: Map<string, string>;
+  /** Placeholder refs (people who are not stakeholders yet). */
+  placeholders?: Set<string>;
   /** Search matches (highlighted) and the match being shown. */
   matches?: Set<string>;
   currentMatch?: string | null;
@@ -114,13 +118,25 @@ function OutlineList({ nodes, depth, ...props }: { nodes: OrgTreeNode[]; depth: 
   );
 }
 
-function NodeCard({ node, compact, people, selected, collapsed, dragging, canDrop, hasManager, onSelect, onToggle, onDragStart, onDragEnd, onDrop, onAction, matches, currentMatch, titles, unitNames }: { node: OrgTreeNode; compact: boolean } & TreeProps) {
+function NodeCard({ node, compact, people, selected, collapsed, dragging, canDrop, hasManager, onSelect, onToggle, onDragStart, onDragEnd, onDrop, onAction, matches, currentMatch, titles, unitNames, placeholders }: { node: OrgTreeNode; compact: boolean } & TreeProps) {
   const person = people.get(node.ref);
   const name = person?.name ?? node.ref;
   const isSelected = selected === node.ref;
   const chartTitle = titles?.get(node.ref);
   const role = chartTitle || person?.role;
   const unitName = unitNames?.get(node.ref);
+  const isPh = placeholders?.has(node.ref) ?? false;
+  const menu: Array<[NodeAction, string]> = [
+    ['add-report', 'Add a direct report…'],
+    ['change-manager', 'Change manager…'],
+    ...(isPh
+      ? [['edit-placeholder', 'Edit placeholder…'], ['make-stakeholder', 'Make stakeholder…'], ['link-stakeholder', 'Link to existing stakeholder…']] as Array<[NodeAction, string]>
+      : [['set-title', 'Title in this chart…']] as Array<[NodeAction, string]>),
+    ['set-unit', unitName ? 'Change unit…' : 'Add to a unit…'],
+    ...(hasManager(node.ref) ? [['top-level', 'Move to top of chart'] as [NodeAction, string]] : []),
+    ...(isPh ? [] : [['open', 'Open profile'] as [NodeAction, string]]),
+    ['remove', 'Remove from chart'],
+  ];
   const isCollapsed = collapsed.has(node.ref);
   const [over, setOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -139,7 +155,7 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
 
   return (
     <div
-      className={`org-node${isSelected ? ' org-node--selected' : ''}${over && dropAllowed ? ' org-node--drop' : ''}${dragging === node.ref ? ' org-node--dragging' : ''}${matches?.has(node.ref) ? ' org-node--match' : ''}${currentMatch === node.ref ? ' org-node--current' : ''}`}
+      className={`org-node${isPh ? ' org-node--placeholder' : ''}${isSelected ? ' org-node--selected' : ''}${over && dropAllowed ? ' org-node--drop' : ''}${dragging === node.ref ? ' org-node--dragging' : ''}${matches?.has(node.ref) ? ' org-node--match' : ''}${currentMatch === node.ref ? ' org-node--current' : ''}`}
       data-ref={node.ref}
       style={{ width: compact ? 'auto' : 184, display: compact ? 'flex' : undefined, maxWidth: compact ? 520 : undefined }}
       draggable
@@ -176,6 +192,7 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
               {compact ? [role, unitName, person?.organization].filter(Boolean).join(' · ') : role}
             </div>
           )}
+          {isPh && <div className="org-node__unit org-node__unit--ph" title="Placeholder: not a stakeholder yet, or a vacant role">Placeholder</div>}
           {unitName && !compact && <div className="org-node__unit" title={`Unit: ${unitName}`}>{unitName}</div>}
         </div>
         {isSelected && (
@@ -204,15 +221,7 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
           </button>
           {menuOpen && (
             <div role="menu" className="org-node__menu" onClick={(e) => e.stopPropagation()}>
-              {([
-                ['add-report', 'Add a direct report…'],
-                ['change-manager', 'Change manager…'],
-                ['set-title', 'Title in this chart…'],
-                ['set-unit', unitName ? 'Change unit…' : 'Add to a unit…'],
-                ...(hasManager(node.ref) ? [['top-level', 'Move to top of chart'] as [NodeAction, string]] : []),
-                ['open', 'Open profile'],
-                ['remove', 'Remove from chart'],
-              ] as Array<[NodeAction, string]>).map(([action, label]) => (
+              {menu.map(([action, label]) => (
                 <button key={action} type="button" role="menuitem"
                   className={action === 'remove' ? 'org-node__menu-item org-node__menu-item--danger' : 'org-node__menu-item'}
                   onClick={() => { setMenuOpen(false); onAction(node.ref, action); }}>
