@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import { OutputTemplate, OutputFormat } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { fileInside } from '../utils/files';
+import { fileInside, listFolderFiles, topLevelName, FolderFile } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -118,24 +118,10 @@ export class OutputService {
     await fsp.rm(templateDir, { recursive: true, force: true });
   }
 
-  async listTemplateFiles(id: string): Promise<Array<{ name: string; size: number; modified: string; type: string }>> {
+  async listTemplateFiles(id: string): Promise<FolderFile[]> {
     const filePath = await this.findTemplateFile(id);
     if (!filePath) throw new Error(`Output template not found: ${id}`);
-    const templateDir = path.dirname(filePath);
-    const entries = await fsp.readdir(templateDir, { withFileTypes: true }).catch(() => []);
-    const files = [];
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.name === 'output.md') continue;
-      const fp = path.join(templateDir, entry.name);
-      const stat = await fsp.stat(fp);
-      files.push({
-        name: entry.name,
-        size: stat.size,
-        modified: stat.mtime.toISOString(),
-        type: path.extname(entry.name).slice(1).toLowerCase() || 'file',
-      });
-    }
-    return files.sort((a, b) => b.modified.localeCompare(a.modified));
+    return listFolderFiles(path.dirname(filePath), ['output.md']);
   }
 
   /** Absolute path of one file in the template's folder (404 if missing, 400 if outside the folder). */
@@ -159,7 +145,7 @@ export class OutputService {
   async deleteTemplateFile(id: string, filename: string): Promise<void> {
     const filePath = await this.findTemplateFile(id);
     if (!filePath) throw new Error(`Output template not found: ${id}`);
-    const safe = path.basename(filename);
+    const safe = topLevelName(filename);
     if (safe === 'output.md') throw new Error('Cannot delete output.md');
     const templateDir = path.dirname(filePath);
     await fsp.unlink(path.join(templateDir, safe));

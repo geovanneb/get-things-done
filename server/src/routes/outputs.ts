@@ -51,8 +51,8 @@ router.post('/templates/:id/files', upload.single('file'), async (req: Request, 
   res.status(201).json(saved);
 });
 
-// GET /api/outputs/templates/:id/files/:filename — open in the browser; ?download=1 to save it
-router.get('/templates/:id/files/:filename', async (req: Request, res: Response) => {
+// GET /api/outputs/templates/:id/files/<path> — open in the browser; ?download=1 to save it. The path may include subfolders.
+router.get('/templates/:id/files/*filename', async (req: Request, res: Response) => {
   const fullPath = await outputService.templateFilePath(param(req, 'id'), param(req, 'filename'));
   sendFile(res, fullPath, req.query['download'] === '1');
 });

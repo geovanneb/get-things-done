@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import { ContextNote, ContextCategory } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { fileInside } from '../utils/files';
+import { fileInside, listFolderFiles, topLevelName, FolderFile } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -188,24 +188,10 @@ export class ContextService {
     }
   }
 
-  async listContextFiles(id: string): Promise<Array<{ name: string; size: number; modified: string; type: string }>> {
+  async listContextFiles(id: string): Promise<FolderFile[]> {
     const result = await this.findContextFile(id);
     if (!result) throw new Error(`Context note not found: ${id}`);
-    const noteDir = path.dirname(result.filePath);
-    const entries = await fsp.readdir(noteDir, { withFileTypes: true }).catch(() => []);
-    const files = [];
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.name === 'note.md') continue;
-      const fp = path.join(noteDir, entry.name);
-      const stat = await fsp.stat(fp);
-      files.push({
-        name: entry.name,
-        size: stat.size,
-        modified: stat.mtime.toISOString(),
-        type: path.extname(entry.name).slice(1).toLowerCase() || 'file',
-      });
-    }
-    return files.sort((a, b) => b.modified.localeCompare(a.modified));
+    return listFolderFiles(path.dirname(result.filePath), ['note.md']);
   }
 
   /** Absolute path of one file attached to the note (404 if missing, 400 if outside the note's folder). */
@@ -229,7 +215,7 @@ export class ContextService {
   async deleteContextFile(id: string, filename: string): Promise<void> {
     const result = await this.findContextFile(id);
     if (!result) throw new Error(`Context note not found: ${id}`);
-    const safe = path.basename(filename);
+    const safe = topLevelName(filename);
     if (safe === 'note.md') throw new Error('Cannot delete note.md');
     const noteDir = path.dirname(result.filePath);
     await fsp.unlink(path.join(noteDir, safe));

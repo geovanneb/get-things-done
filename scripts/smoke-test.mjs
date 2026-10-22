@@ -136,6 +136,25 @@ try {
         `missing=${missing.status} escape=${escape.status}`);
       await fetch(`${base}${files}/smoke-note.txt`, { method: 'DELETE' });
     }
+
+    // Subfolders are listed and can be opened; remove only works on top-level files.
+    const tplDir = path.dirname(templates[0].path);
+    fs.mkdirSync(path.join(tplDir, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(tplDir, 'assets', 'logo.txt'), 'nested');
+    fs.writeFileSync(path.join(tplDir, '.hidden'), 'secret');
+    fs.writeFileSync(path.join(tplDir, 'logo.txt'), 'top level');
+    const tplFiles = `/api/outputs/templates/${templates[0].id}/files`;
+    const listed = (await (await fetch(`${base}${tplFiles}`)).json()).map((f) => f.name);
+    check('template files in subfolders are listed, hidden files are not',
+      listed.includes('assets/logo.txt') && listed.includes('logo.txt') && !listed.some((n) => n.startsWith('.') || n === 'output.md'), JSON.stringify(listed));
+    const nested = await fetch(`${base}${tplFiles}/assets/logo.txt`);
+    check('a file in a subfolder opens', nested.ok && (await nested.text()) === 'nested');
+    const delNested = await fetch(`${base}${tplFiles}/assets%2Flogo.txt`, { method: 'DELETE' });
+    check('removing a file in a subfolder is refused and leaves the top-level file alone',
+      delNested.status === 400 && fs.existsSync(path.join(tplDir, 'logo.txt')) && fs.existsSync(path.join(tplDir, 'assets', 'logo.txt')), `status=${delNested.status}`);
+    fs.rmSync(path.join(tplDir, 'assets'), { recursive: true, force: true });
+    fs.rmSync(path.join(tplDir, '.hidden'), { force: true });
+    fs.rmSync(path.join(tplDir, 'logo.txt'), { force: true });
   }
 
   // @-mentions in a task's Objective (picker, execution package, archived tasks, validation).

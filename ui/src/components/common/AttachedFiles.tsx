@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import { apiGet } from '@/utils/api';
@@ -23,6 +23,7 @@ const iconButton: React.CSSProperties = {
 /**
  * Files kept next to a template or a context note: open one in a new tab, download it, attach or remove.
  * Opening uses the browser's own viewer (PDF, HTML, images, text); other types download.
+ * Subfolders (e.g. assets/, source/) are listed read-only: attach and remove act on the top level only.
  */
 export default function AttachedFiles({ baseUrl, label }: AttachedFilesProps) {
   const [files, setFiles] = useState<AttachedFile[]>([]);
@@ -36,7 +37,21 @@ export default function AttachedFiles({ baseUrl, label }: AttachedFilesProps) {
       .catch(() => setLoading(false));
   }, [baseUrl]);
 
-  const fileUrl = (name: string) => `${baseUrl}/${encodeURIComponent(name)}`;
+  // Names can include subfolders ("assets/logo.png"); encode each part, keep the slashes.
+  const fileUrl = (name: string) => `${baseUrl}/${name.split('/').map(encodeURIComponent).join('/')}`;
+
+  // Top-level files first (they can be removed here), then one group per subfolder (read-only here).
+  const groups = useMemo(() => {
+    const out: Array<{ folder: string; items: AttachedFile[] }> = [];
+    for (const f of files) {
+      const slash = f.name.lastIndexOf('/');
+      const folder = slash === -1 ? '' : f.name.slice(0, slash);
+      const last = out[out.length - 1];
+      if (last && last.folder === folder) last.items.push(f);
+      else out.push({ folder, items: [f] });
+    }
+    return out;
+  }, [files]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -77,35 +92,59 @@ export default function AttachedFiles({ baseUrl, label }: AttachedFilesProps) {
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>No files attached.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {files.map((f) => (
-            <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
-                <path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5Z" stroke="currentColor" strokeWidth="1.2" />
-                <path d="M9 1.5V5.5h4" stroke="currentColor" strokeWidth="1.2" />
-              </svg>
-              <a href={fileUrl(f.name)} target="_blank" rel="noopener noreferrer" title={`Open ${f.name} in a new tab`}
-                style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
-                {f.name}
-              </a>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>{(f.size / 1024).toFixed(1)} KB</span>
-              <a href={`${fileUrl(f.name)}?download=1`} download={f.name} title="Download" aria-label={`Download ${f.name}`} style={iconButton}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-accent)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
-                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                  <path d="M7 1.5v8M3.5 6.5 7 10l3.5-3.5M2 12.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </a>
-              <button type="button" onClick={() => handleDelete(f.name)} title="Remove" aria-label={`Remove ${f.name}`} style={iconButton}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-critical)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
-                <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true"><path d="M1 1l9 9M10 1l-9 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-              </button>
+          {groups.map((g) => (
+            <div key={g.folder || '.'} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {g.folder && (
+                <div title="Files in subfolders can be opened and downloaded here; change them in the workspace folder"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}>
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M1.5 4.5a1 1 0 0 1 1-1h3.6l1.4 1.5h5.9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-10.9a1 1 0 0 1-1-1V4.5Z" stroke="currentColor" strokeWidth="1.2" />
+                  </svg>
+                  {g.folder}/ · {g.items.length}
+                </div>
+              )}
+              {g.items.map((f) => (
+                <FileRow key={f.name} file={f} url={fileUrl(f.name)}
+                  label={g.folder ? f.name.slice(g.folder.length + 1) : f.name}
+                  onRemove={g.folder ? undefined : () => handleDelete(f.name)} />
+              ))}
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** One file: name opens it in a new tab, then size, download and (top-level files only) remove. */
+function FileRow({ file, url, label, onRemove }: { file: AttachedFile; url: string; label: string; onRemove?: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', marginLeft: file.name.includes('/') ? 18 : 0, background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
+        <path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5Z" stroke="currentColor" strokeWidth="1.2" />
+        <path d="M9 1.5V5.5h4" stroke="currentColor" strokeWidth="1.2" />
+      </svg>
+      <a href={url} target="_blank" rel="noopener noreferrer" title={`Open ${file.name} in a new tab`}
+        style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
+        {label}
+      </a>
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>{(file.size / 1024).toFixed(1)} KB</span>
+      <a href={`${url}?download=1`} download={label} title="Download" aria-label={`Download ${file.name}`} style={iconButton}
+        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-accent)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+          <path d="M7 1.5v8M3.5 6.5 7 10l3.5-3.5M2 12.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </a>
+      {onRemove ? (
+        <button type="button" onClick={onRemove} title="Remove" aria-label={`Remove ${file.name}`} style={iconButton}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-critical)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true"><path d="M1 1l9 9M10 1l-9 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+        </button>
+      ) : <span style={{ width: 20, flexShrink: 0 }} />}
     </div>
   );
 }
