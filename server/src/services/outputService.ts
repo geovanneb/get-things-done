@@ -3,6 +3,7 @@ import * as fsp from 'fs/promises';
 import { OutputTemplate, OutputFormat } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { fileInside } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -135,6 +136,13 @@ export class OutputService {
       });
     }
     return files.sort((a, b) => b.modified.localeCompare(a.modified));
+  }
+
+  /** Absolute path of one file in the template's folder (404 if missing, 400 if outside the folder). */
+  async templateFilePath(id: string, name: string): Promise<string> {
+    const filePath = await this.findTemplateFile(id);
+    if (!filePath) throw new Error(`Output template not found: ${id}`);
+    return fileInside(path.dirname(filePath), name);
   }
 
   async saveTemplateFile(id: string, originalName: string, buffer: Buffer): Promise<{ name: string; size: number; modified: string; type: string }> {

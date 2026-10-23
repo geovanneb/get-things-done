@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import multer from 'multer';
 import { OutputService } from '../services/outputService';
+import { sendFile } from '../utils/files';
 
 const router = Router();
 const outputService = new OutputService();
@@ -48,6 +49,12 @@ router.post('/templates/:id/files', upload.single('file'), async (req: Request, 
   if (!req.file) { res.status(400).json({ error: 'No file provided' }); return; }
   const saved = await outputService.saveTemplateFile(param(req, 'id'), req.file.originalname, req.file.buffer);
   res.status(201).json(saved);
+});
+
+// GET /api/outputs/templates/:id/files/:filename — open in the browser; ?download=1 to save it
+router.get('/templates/:id/files/:filename', async (req: Request, res: Response) => {
+  const fullPath = await outputService.templateFilePath(param(req, 'id'), param(req, 'filename'));
+  sendFile(res, fullPath, req.query['download'] === '1');
 });
 
 // DELETE /api/outputs/templates/:id/files/:filename
