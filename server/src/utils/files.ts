@@ -87,24 +87,61 @@ export function topLevelName(name: string): string {
   return path.basename(name);
 }
 
-/** Largest folder the app zips in one request (sum of file sizes). */
+/** Largest folder the app zips in one request (sum of the bytes actually read). */
 export const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
+/** Most files and deepest subfolder level a ZIP may hold; larger folders are refused, never cut short. */
+export const MAX_ARCHIVE_FILES = 2000;
+export const MAX_ARCHIVE_DEPTH = 16;
 
 /**
- * A ZIP of a template's or a note's whole folder: its own .md and every listed file, under `<folderName>/`.
- * Throws "Invalid: folder too large" (400) above MAX_ARCHIVE_BYTES.
+ * Every file a ZIP of `dir` must contain, as POSIX paths relative to `dir`. Unlike listFolderFiles (a capped
+ * list for the screen), this walks the whole folder and throws instead of leaving anything out. Hidden files
+ * and folders are skipped, and so are symlinks (only regular files and real folders are followed).
+ */
+async function archiveFiles(dir: string): Promise<string[]> {
+  const found: string[] = [];
+  async function walk(current: string, prefix: string, depth: number): Promise<void> {
+    for (const entry of await fsp.readdir(current, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (depth >= MAX_ARCHIVE_DEPTH) throw new Error(`Invalid: "${rel}" is nested too deep to download as one file`);
+        await walk(path.join(current, entry.name), rel, depth + 1);
+      } else if (entry.isFile()) {
+        // A ZIP entry name must mean the same path on every system: no backslashes, colons or control characters.
+        if (/[\\:\x00-\x1f]/.test(entry.name)) {
+          throw new Error(`Invalid: "${rel}" cannot be put in a ZIP; rename it in the workspace folder`);
+        }
+        found.push(rel);
+        if (found.length > MAX_ARCHIVE_FILES) {
+          throw new Error(`Invalid: folder has more than ${MAX_ARCHIVE_FILES} files, too many to download as one file`);
+        }
+      }
+    }
+  }
+  await walk(dir, '', 1);
+  return found.sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * A ZIP of a template's or a note's whole folder: its own .md first, then every file, under `<folderName>/`.
+ * Each file is read through fileInside, so the ZIP never holds anything the file route would refuse.
+ * Throws an "Invalid: ..." error (400) rather than returning a ZIP with files missing.
  */
 export async function zipFolder(dir: string, ownMarkdown: string): Promise<{ name: string; data: Buffer }> {
   const folderName = path.basename(dir);
-  const files = await listFolderFiles(dir);
-  const total = files.reduce((n, f) => n + f.size, 0);
-  if (total > MAX_ARCHIVE_BYTES) throw new Error('Invalid: folder too large to download as one file');
-  const ordered = [...files.filter((f) => f.name === ownMarkdown), ...files.filter((f) => f.name !== ownMarkdown)];
-  const entries = await Promise.all(ordered.map(async (f) => ({
-    name: `${folderName}/${f.name}`,
-    data: await fsp.readFile(path.join(dir, ...f.name.split('/'))),
-    modified: new Date(f.modified),
-  })));
+  const files = await archiveFiles(dir);
+  if (!files.includes(ownMarkdown)) throw new Error(`File not found: ${ownMarkdown}`);
+  const ordered = [ownMarkdown, ...files.filter((f) => f !== ownMarkdown)];
+  const entries = [];
+  let total = 0;
+  for (const name of ordered) {
+    const full = await fileInside(dir, name);
+    const [data, stat] = await Promise.all([fsp.readFile(full), fsp.stat(full)]);
+    total += data.length;
+    if (total > MAX_ARCHIVE_BYTES) throw new Error('Invalid: folder too large to download as one file');
+    entries.push({ name: `${folderName}/${name}`, data, modified: stat.mtime });
+  }
   return { name: `${folderName}.zip`, data: buildZip(entries) };
 }
 
