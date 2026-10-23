@@ -39,7 +39,7 @@
     "build": "npm run build:clean && npm run build:server && npm run build:ui && npm run build:cli && npm run build:copy-ui && npm run build:copy-server",
     "start": "npm run start --workspace=server",
     "test": "npm run test:harness && npm run test:unit && npm run test:smoke",
-    "test:unit": "npm run test --workspace=server && npm run test:agent-floor --workspace=ui && npm run test:org-chart --workspace=ui",
+    "test:unit": "npm run test --workspace=server && npm run test:agent-floor --workspace=ui && npm run test:org-chart --workspace=ui && npm run test:files --workspace=ui",
     "test:smoke": "node scripts/smoke-test.mjs",
     "seed:demo": "node scripts/seed-demo.mjs",
     "prepublishOnly": "npm run build",
