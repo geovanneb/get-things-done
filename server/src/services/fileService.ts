@@ -1,8 +1,8 @@
-import * as fs from 'fs';
+import { atomicWrite } from '../utils/atomicWrite';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import matter from 'gray-matter';
+import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { WorkspaceService } from './workspace';
 
 const workspaceService = new WorkspaceService();
@@ -10,7 +10,7 @@ const workspaceService = new WorkspaceService();
 export class FileService {
   async readMarkdown<T>(filePath: string): Promise<{ data: T; content: string }> {
     const raw = await fsp.readFile(filePath, 'utf-8');
-    const parsed = matter(raw);
+    const parsed = parseMarkdown(raw);
     return { data: parsed.data as T, content: parsed.content.trim() };
   }
 
@@ -28,8 +28,8 @@ export class FileService {
       if (v !== undefined) clean[k] = v;
     }
 
-    const body = matter.stringify(content, clean);
-    await this.atomicWrite(filePath, body);
+    const body = stringifyMarkdown(content, clean);
+    await atomicWrite(filePath, body);
   }
 
   async deleteFile(filePath: string): Promise<void> {
@@ -46,7 +46,7 @@ export class FileService {
     await fsp.mkdir(trashDir, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const basename = path.basename(filePath);
-    const trashPath = path.join(trashDir, `${timestamp}-${basename}`);
+    const trashPath = path.join(trashDir, `${timestamp}-${crypto.randomUUID()}-${basename}`);
     await fsp.rename(filePath, trashPath);
   }
 
@@ -64,7 +64,7 @@ export class FileService {
 
   async writeFile(filePath: string, content: string): Promise<void> {
     await this.ensureDir(path.dirname(filePath));
-    await this.atomicWrite(filePath, content);
+    await atomicWrite(filePath, content);
   }
 
   async ensureDir(dir: string): Promise<void> {
@@ -87,12 +87,6 @@ export class FileService {
     return { size: stat.size, mtime: stat.mtime, hash };
   }
 
-  private async atomicWrite(filePath: string, content: string): Promise<void> {
-    const tmpPath = `${filePath}.tmp`;
-    await fsp.writeFile(tmpPath, content, 'utf-8');
-    await fsp.rename(tmpPath, filePath);
-  }
-
   private async backupFile(filePath: string): Promise<void> {
     if (!(await this.exists(filePath))) return;
 
@@ -107,7 +101,7 @@ export class FileService {
     await fsp.mkdir(trashDir, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const basename = path.basename(filePath);
-    const backupPath = path.join(trashDir, `${timestamp}-${basename}`);
+    const backupPath = path.join(trashDir, `${timestamp}-${crypto.randomUUID()}-${basename}`);
     await fsp.copyFile(filePath, backupPath);
   }
 

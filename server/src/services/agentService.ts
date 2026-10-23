@@ -1,6 +1,7 @@
+import { topLevelName } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
-import matter from 'gray-matter';
+import { parseMarkdown } from '../utils/markdown';
 import { ClaudeAgent, Skill, AgentScope, MarketplaceSkill } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
@@ -45,7 +46,7 @@ export class AgentService {
 
   async getAgent(name: string): Promise<ClaudeAgent> {
     const agentsDir = this.getAgentsDir();
-    const filePath = path.join(agentsDir, `${name}.md`);
+    const filePath = path.join(agentsDir, `${topLevelName(name)}.md`);
 
     if (!(await fileService.exists(filePath))) {
       // Try case-insensitive search
@@ -99,7 +100,7 @@ export class AgentService {
 
   async getSkill(name: string): Promise<Skill> {
     const skillsDir = this.getSkillsDir();
-    const skillDir = path.join(skillsDir, name);
+    const skillDir = path.join(skillsDir, topLevelName(name));
 
     if (await fileService.exists(skillDir)) {
       const mainFile = (await fileService.exists(path.join(skillDir, 'SKILL.md')))
@@ -110,7 +111,7 @@ export class AgentService {
     }
 
     // Try as direct file
-    const filePath = path.join(skillsDir, `${name}.md`);
+    const filePath = path.join(skillsDir, `${topLevelName(name)}.md`);
     if (await fileService.exists(filePath)) {
       return this.parseSkillFile(filePath, name, skillsDir);
     }
@@ -143,7 +144,7 @@ export class AgentService {
           const mdRes = await fetch(rawUrl, { headers: ghHeaders });
           if (!mdRes.ok) return null;
           const raw = await mdRes.text();
-          const parsed = matter(raw);
+          const parsed = parseMarkdown(raw);
           return {
             slug: dir.name,
             name: (parsed.data['name'] as string) || dir.name,
@@ -167,6 +168,7 @@ export class AgentService {
   }
 
   async installSkill(slug: string): Promise<void> {
+    topLevelName(slug);
     const ghHeaders: Record<string, string> = { 'User-Agent': 'GTD-Executive-Workspace' };
     const contentsUrl = `https://api.github.com/repos/${GITHUB_ORG}/${GITHUB_REPO}/contents/${SKILLS_PATH}/${slug}`;
     const contentsRes = await fetch(contentsUrl, { headers: ghHeaders });
@@ -185,7 +187,7 @@ export class AgentService {
         const fileRes = await fetch(file.download_url, { headers: ghHeaders });
         if (!fileRes.ok) continue;
         const content = await fileRes.text();
-        await fsp.writeFile(path.join(targetDir, file.name), content, 'utf-8');
+        await fsp.writeFile(path.join(targetDir, topLevelName(file.name)), content, 'utf-8');
       }
     }
 
@@ -194,7 +196,7 @@ export class AgentService {
 
   async deleteSkill(name: string): Promise<void> {
     const skillsDir = this.getSkillsDir();
-    const skillDir = path.join(skillsDir, name);
+    const skillDir = path.join(skillsDir, topLevelName(name));
 
     if (await fileService.exists(skillDir)) {
       await fsp.rm(skillDir, { recursive: true, force: true });
@@ -202,7 +204,7 @@ export class AgentService {
       return;
     }
 
-    const filePath = path.join(skillsDir, `${name}.md`);
+    const filePath = path.join(skillsDir, `${topLevelName(name)}.md`);
     if (await fileService.exists(filePath)) {
       await fsp.unlink(filePath);
       this.marketplaceCache = null;
@@ -214,7 +216,7 @@ export class AgentService {
 
   private async parseAgentFile(filePath: string): Promise<ClaudeAgent> {
     const raw = await fileService.readFile(filePath);
-    const parsed = matter(raw);
+    const parsed = parseMarkdown(raw);
     const fm = parsed.data;
     const stat = await fsp.stat(filePath);
 
@@ -235,7 +237,7 @@ export class AgentService {
 
   private async parseSkillFile(filePath: string, name: string, dir: string): Promise<Skill> {
     const raw = await fileService.readFile(filePath);
-    const parsed = matter(raw);
+    const parsed = parseMarkdown(raw);
     const fm = parsed.data;
     const stat = await fsp.stat(filePath);
 

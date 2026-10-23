@@ -20,3 +20,5 @@ See "Keeping pull requests independent" in CONTRIBUTING.md. -->
 - [ ] The diff contains only this change; any dependency on another PR is stated above
 - [ ] No real names, company data or private workspace content anywhere in the diff
 - [ ] Docs or templates updated if behaviour changed
+
+- [ ] Security/persistence changes include a regression test and use the documented shared boundaries

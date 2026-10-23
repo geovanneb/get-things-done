@@ -33,13 +33,14 @@ export function useApi<T>(url: string, deps: unknown[] = []): ApiResult<T> {
         throw new Error(text || `HTTP ${res.status}`);
       }
       const json = await res.json();
+      if (controller.signal.aborted) return;
       setData(json);
       loadedUrlRef.current = url;
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
+      if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ...deps]);

@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import { ContextNote, ContextCategory } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
+import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -15,11 +15,11 @@ const workspaceService = new WorkspaceService();
 export class ContextService {
   private getContextDir(category?: ContextCategory): string {
     const base = path.join(workspaceService.getWorkspacePath(), 'context');
-    return category ? path.join(base, category) : base;
+    return category ? path.join(base, topLevelName(category)) : base;
   }
 
   private getNoteDir(category: ContextCategory, slug: string): string {
-    return path.join(this.getContextDir(category), slug);
+    return path.join(this.getContextDir(category), topLevelName(slug));
   }
 
   private getNoteFile(category: ContextCategory, slug: string): string {
@@ -212,18 +212,14 @@ export class ContextService {
     const result = await this.findContextFile(id);
     if (!result) throw new Error(`Context note not found: ${id}`);
     const noteDir = path.dirname(result.filePath);
-    const safe = path.basename(originalName).replace(/[^\w.\-]/g, '_');
-    const fp = path.join(noteDir, safe);
-    await fsp.writeFile(fp, buffer);
-    const stat = await fsp.stat(fp);
-    return { name: safe, size: stat.size, modified: stat.mtime.toISOString(), type: path.extname(safe).slice(1).toLowerCase() || 'file' };
+    return saveAttachment(noteDir, originalName, buffer, 'note.md');
   }
 
   async deleteContextFile(id: string, filename: string): Promise<void> {
     const result = await this.findContextFile(id);
     if (!result) throw new Error(`Context note not found: ${id}`);
     const safe = topLevelName(filename);
-    if (safe === 'note.md') throw new Error('Cannot delete note.md');
+    if (safe.toLowerCase() === 'note.md') throw new Error('Invalid file name: cannot delete note.md');
     const noteDir = path.dirname(result.filePath);
     await fsp.unlink(path.join(noteDir, safe));
   }

@@ -49,6 +49,22 @@ try {
   check('server answers /health', healthy);
   if (!healthy) throw new Error('server did not start');
 
+  const forbidden = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { Origin: 'https://untrusted.example' } });
+  check('untrusted origins are rejected before routes run', forbidden.status === 403);
+  const malformed = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
+  check('malformed JSON returns a client error', malformed.status === 400);
+  fs.writeFileSync(path.join(tmp, 'outside.txt'), 'private fixture');
+  fs.symlinkSync(path.join(tmp, 'outside.txt'), path.join(ws, 'outside-link.txt'));
+  const escaped = await fetch(`${base}/api/workspace/files/outside-link.txt`);
+  check('workspace downloads reject symlinks outside the workspace', escaped.status === 400);
+  fs.unlinkSync(path.join(ws, 'outside-link.txt'));
+  fs.writeFileSync(path.join(ws, 'preview.html'), '<script>fetch("/api/tasks")</script>');
+  const htmlPreview = await fetch(`${base}/api/workspace/files/preview.html`);
+  check('workspace HTML is sandboxed without script or same-origin privileges',
+    htmlPreview.ok && htmlPreview.headers.get('content-security-policy')?.includes('sandbox;') &&
+    !htmlPreview.headers.get('content-security-policy')?.includes('allow-scripts') &&
+    !htmlPreview.headers.get('content-security-policy')?.includes('allow-same-origin'));
+
   const ui = await fetch(`${base}/board`);
   check('UI is served for app routes', ui.ok && (await ui.text()).includes('<div id="root">'));
 
@@ -132,6 +148,11 @@ try {
       const open = await fetch(`${base}${files}/smoke-note.txt`);
       check(`a ${label} file opens in the browser`, up.status === 201 && open.ok && (await open.text()) === 'hello from the smoke test'
         && !(open.headers.get('content-disposition') ?? '').includes('attachment'), `upload=${up.status} open=${open.status}`);
+      check(`a ${label} preview is sandboxed`, open.headers.get('content-security-policy')?.includes('sandbox;'));
+      const protectedUpload = new FormData();
+      protectedUpload.append('file', new Blob(['bad']), label === 'template' ? 'output.md' : 'note.md');
+      const rejected = await fetch(`${base}${files}`, { method: 'POST', body: protectedUpload });
+      check(`a ${label} upload cannot replace entity metadata`, rejected.status === 400);
       const dl = await fetch(`${base}${files}/smoke-note.txt?download=1`);
       check(`a ${label} file downloads as an attachment`, dl.ok && /^attachment; filename="?smoke-note\.txt"?$/.test(dl.headers.get('content-disposition') ?? ''),
         dl.headers.get('content-disposition') ?? 'no header');

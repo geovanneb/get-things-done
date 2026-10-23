@@ -165,6 +165,32 @@ npm run seed:demo -- http://127.0.0.1:3001
 `server/src/services/scaffold.ts` is the single source of truth for creating and
 upgrading workspaces. Change workspace structure there, not in the CLI.
 
+## Architecture and regression rules
+
+Read [the architecture guide](docs/architecture.md) before changing persistence or
+HTTP boundaries. Keep route handlers focused on HTTP, domain operations in services,
+and shared parsing, file access and writes in the existing utilities.
+
+- Parse and serialize Markdown through `server/src/utils/markdown.ts`. Workspace and
+  marketplace content is data; executable frontmatter is forbidden. `test:harness`
+  rejects direct parser imports outside this boundary.
+- Validate request-derived path components before joining them. Use `fileInside` for
+  file responses and mention resolution, `sendFile` for sandboxed previews, and
+  `saveAttachment` for uploads. Cover traversal, symlinks and protected metadata.
+- Use `atomicWrite` for replacement writes; never share a fixed temporary filename.
+  Atomic replacement is not a transaction for a read-modify-write operation.
+- Keep local request checks before body parsers and routes. Test rejected requests
+  for absence of side effects as well as their status code.
+- Async UI requests must not publish state after cancellation. Keep large feature
+  changes independently reviewable and measure performance before adding caches.
+- Every security or persistence fix needs a failing-before regression in
+  `server/tests/` and API behaviour changes need smoke coverage. Tests must use
+  temporary directories and fictional fixtures, never the configured workspace.
+
+`npm test` runs the parser boundary check, server regressions, UI unit tests and
+built-package smoke tests. CI runs them on Node 20, 22 and 24 and rejects high or
+critical production dependency advisories. Run `npm run build` before `npm test`.
+
 ## Changes to workspace templates
 
 Files under `templates/` end up in users' workspaces. If you change them:

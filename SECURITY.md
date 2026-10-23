@@ -44,3 +44,22 @@ your workspace files. Reports are most useful when they show:
 - Path traversal outside the workspace through the API or file uploads
 - Code execution through workspace content, templates or the CLI
 - Problems in the published npm package or the release pipeline
+
+## Local trust boundary
+
+Use the dashboard on `http://127.0.0.1:<port>` or `http://localhost:<port>`.
+The API validates Host and Origin headers and rejects cross-site browser requests
+before parsing request bodies. Development origins use ports 3000, 5173 and 4173.
+Requests without an Origin remain available to local CLI clients; this is not
+an authentication system. Do not expose the API through a public reverse proxy.
+
+Workspace and marketplace Markdown is parsed as data, with executable JavaScript
+frontmatter disabled. Workspace file previews have a restrictive CSP sandbox:
+interactive HTML attachments must be downloaded to use outside the dashboard.
+Download resolution checks real paths so symlinks cannot escape the selected root.
+Uploads cannot replace entity metadata files or follow a destination file symlink.
+
+A local process that can change workspace directories remains trusted. Path checks
+are not an OS sandbox against another process swapping directories during a request.
+Atomic replacement avoids partial files and temporary-file collisions, but concurrent
+read-modify-write operations can still lose updates. Keep workspace backups.

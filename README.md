@@ -565,7 +565,8 @@ cd /tmp/gtd-demo && node /path/to/get-things-done/bin/gtd.js start --no-open
 npm run seed:demo -- http://127.0.0.1:3001
 ```
 
-**Architecture.** `src/cli/` is the CLI. `server/` is an Express API over the
+**Architecture.** See the [architecture and regression guide](docs/architecture.md)
+for module ownership, trust boundaries and testing rules. `src/cli/` is the CLI. `server/` is an Express API over the
 workspace files, with a chokidar watcher pushing changes over SSE. `ui/` is React +
 Vite, served statically by the server in production. `templates/` holds everything
 scaffolded into a new workspace.

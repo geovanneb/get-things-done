@@ -1,8 +1,8 @@
 import * as path from 'path';
-import * as fsp from 'fs/promises';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Router, Request, Response } from 'express';
+import { fileInside, sendFile } from '../utils/files';
 import { param } from '../utils/params';
 import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
@@ -308,24 +308,8 @@ router.get('/git/enabled', async (req: Request, res: Response) => {
 
 // GET /api/workspace/files/* — serve any file from within the workspace
 router.get('/files/*splat', async (req: Request, res: Response) => {
-  const root = path.resolve(workspaceService.getWorkspacePath());
-  const fullPath = path.resolve(root, param(req, 'splat'));
-
-  // Only files strictly inside the workspace; the workspace folder itself is not a file to serve.
-  if (!fullPath.startsWith(root + path.sep)) {
-    res.status(403).json({ error: 'Forbidden' });
-    return;
-  }
-
-  try {
-    await fsp.access(fullPath);
-  } catch {
-    res.status(404).json({ error: 'Not found' });
-    return;
-  }
-
-  // Workspace files can sit in dot-folders (.claude/, .situation-board/); the traversal check above is the guard.
-  res.sendFile(fullPath, { dotfiles: 'allow' });
+  const fullPath = await fileInside(workspaceService.getWorkspacePath(), param(req, 'splat'));
+  sendFile(res, fullPath, req.query['download'] === '1');
 });
 
 export default router;
