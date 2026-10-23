@@ -126,6 +126,8 @@ function AgentCard({
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
+        minWidth: 0,
+        overflowWrap: 'anywhere',
       }}
     >
       {/* Name */}
@@ -559,7 +561,8 @@ export default function AgentsView() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
+                // Three columns when there is room (as before); two, then one, as the content area narrows.
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, max(260px, calc((100% - 32px) / 3))), 1fr))',
                 gap: 16,
               }}
             >

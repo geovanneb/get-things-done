@@ -459,8 +459,10 @@ export default function ContextView() {
               {filtered.length}
             </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Input value={search} onChange={(v) => setSearch(v)} placeholder="Search notes..." style={{ width: 200 }} />
+          {/* Wraps the button under the search when the list area is narrow, instead of cutting it off */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+            <Input value={search} onChange={(v) => setSearch(v)} placeholder="Search notes..." aria-label="Search notes"
+              style={{ flex: '0 1 200px', minWidth: 140 }} />
             <Button variant="primary" onClick={openCreate}>+ New Note</Button>
           </div>
         </div>
