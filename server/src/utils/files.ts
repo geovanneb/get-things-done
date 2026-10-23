@@ -37,7 +37,11 @@ export function sendZip(res: Response, archive: { name: string; data: Buffer }):
   res.send(archive.data);
 }
 
-export interface FolderFile { name: string; size: number; modified: string; type: string; }
+export interface FolderFile {
+  name: string; size: number; modified: string; type: string;
+  /** False when the dashboard cannot remove this file: it is in a subfolder, or its name is refused by topLevelName. */
+  removable?: boolean;
+}
 
 const MAX_DEPTH = 4;
 const MAX_FILES = 500;
@@ -68,9 +72,12 @@ export async function listFolderFiles(dir: string, exclude: string[] = []): Prom
         size: stat.size,
         modified: stat.mtime.toISOString(),
         type: path.extname(entry.name).slice(1).toLowerCase() || 'file',
+        removable: !prefix && isTopLevelName(entry.name),
       });
     }
   }
+  // A file created outside the app can have a name the app refuses to change (e.g. "draft." or "a:b").
+  const isTopLevelName = (name: string) => { try { topLevelName(name); return true; } catch { return false; } };
   await walk(dir, '', 1);
   top.sort((a, b) => b.modified.localeCompare(a.modified));
   nested.sort((a, b) => a.name.localeCompare(b.name));
