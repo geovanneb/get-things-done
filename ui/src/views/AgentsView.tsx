@@ -613,6 +613,8 @@ export default function AgentsView() {
                 overflow: 'hidden',
               }}
             >
+              {/* The table scrolls inside the card when the window is narrow, so every row's actions stay reachable. */}
+              <div role="region" aria-label="Skills table" tabIndex={0} style={{ overflowX: 'auto' }}>
               <table
                 style={{
                   width: '100%',
@@ -658,6 +660,7 @@ export default function AgentsView() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>
