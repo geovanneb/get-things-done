@@ -88,6 +88,11 @@ try {
   check('editing a task file on disk pushes a live update', await sawChange);
   await reader.cancel();
 
+  const situation = await (await fetch(`${base}/api/situation`)).json();
+  const editedRow = situation.recent_activity?.find((a) => a.path === `tasks/active/${tasks[0].id}/task.md`);
+  check('recent activity names the changed task, not just task.md', editedRow?.title === tasks[0].title,
+    JSON.stringify(editedRow ?? null));
+
   const task = tasks.find((t) => t.status === 'ready');
   const moved = await (await fetch(`${base}/api/tasks/${task.id}`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }),

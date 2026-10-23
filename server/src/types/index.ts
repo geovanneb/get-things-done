@@ -301,7 +301,8 @@ export interface SituationData {
     by_status: Record<TaskStatus, number>;
     cycle_time_data: { title: string; days: number; priority?: Priority }[];
   };
-  recent_activity: { filename: string; event: string; timestamp: string }[];
+  /** `path` is relative to the workspace; `title` comes from frontmatter or the first heading. */
+  recent_activity: { filename: string; path: string; title?: string; event: string; timestamp: string }[];
 }
 
 /** One row in a ranked horizontal-bar panel. */

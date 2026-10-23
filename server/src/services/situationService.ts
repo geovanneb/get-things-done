@@ -1,5 +1,6 @@
 import * as fsp from 'fs/promises';
 import * as path from 'path';
+import matter from 'gray-matter';
 import { SituationData, AttentionItem, Task, Priority, TaskStatus } from '../types';
 import { TaskService } from './taskService';
 import { WorkspaceService } from './workspace';
@@ -175,7 +176,7 @@ export class SituationService {
     return 50;
   }
 
-  private async getRecentActivity(): Promise<{ filename: string; event: string; timestamp: string }[]> {
+  private async getRecentActivity(): Promise<SituationData['recent_activity']> {
     try {
       const workspacePath = workspaceService.getWorkspacePath();
       const mdFiles: { path: string; mtime: Date }[] = [];
@@ -195,16 +196,31 @@ export class SituationService {
 
       await scanDir(workspacePath);
 
-      return mdFiles
-        .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
-        .slice(0, 10)
-        .map((f) => ({
+      const recent = mdFiles.sort((a, b) => b.mtime.getTime() - a.mtime.getTime()).slice(0, 10);
+      return Promise.all(
+        recent.map(async (f) => ({
           filename: path.basename(f.path),
+          path: path.relative(workspacePath, f.path).split(path.sep).join('/'),
+          title: await this.readTitle(f.path),
           event: 'modified',
           timestamp: f.mtime.toISOString(),
-        }));
+        }))
+      );
     } catch {
       return [];
+    }
+  }
+
+  // Most workspace files share a name (task.md, note.md, output.md), so the
+  // dashboard needs the item's own title to tell them apart.
+  private async readTitle(filePath: string): Promise<string | undefined> {
+    try {
+      const { data, content } = matter(await fsp.readFile(filePath, 'utf-8'));
+      const fromMeta = [data.title, data.name].find((v) => typeof v === 'string' && v.trim());
+      if (fromMeta) return fromMeta.trim();
+      return content.match(/^#\s+(.+)$/m)?.[1].trim() || undefined;
+    } catch {
+      return undefined;
     }
   }
 }

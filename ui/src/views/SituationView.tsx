@@ -201,6 +201,13 @@ function CycleTimeScatter({ data }: { data: Array<{ title: string; days: number;
   );
 }
 
+/* ---- Recent activity ---------------------------------------------- */
+// "tasks/active/TASK-004/task.md" -> "TASK-004/task.md": the folder is what tells
+// two task.md files apart, the rest of the path is in the hover text.
+function shortPath(filePath: string): string {
+  return filePath.split('/').slice(-2).join('/');
+}
+
 /* ---- Progress bar -------------------------------------------------- */
 function ProgressBar({ value }: { value: number }) {
   const pct = Math.min(Math.max(value, 0), 100);
@@ -610,14 +617,16 @@ export default function SituationView() {
                         <path d="M7 1v4h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
                       </svg>
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0 }} title={a.path}>
                       <div
                         className="truncate"
-                        style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text)', marginBottom: 2 }}
+                        style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', marginBottom: 2 }}
                       >
-                        <span title={a.filename}>{a.filename}</span>
+                        {a.title ?? a.filename}
                       </div>
-                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{a.event}</div>
+                      <div className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>{shortPath(a.path)}</span> · {a.event}
+                      </div>
                     </div>
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                       {formatRelativeTime(a.timestamp)}
