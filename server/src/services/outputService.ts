@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import { OutputTemplate, OutputFormat } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { fileInside, listFolderFiles, topLevelName, FolderFile } from '../utils/files';
+import { fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -122,6 +122,13 @@ export class OutputService {
     const filePath = await this.findTemplateFile(id);
     if (!filePath) throw new Error(`Output template not found: ${id}`);
     return listFolderFiles(path.dirname(filePath), ['output.md']);
+  }
+
+  /** The template's whole folder (output.md and every file) as one ZIP. */
+  async templateArchive(id: string): Promise<{ name: string; data: Buffer }> {
+    const filePath = await this.findTemplateFile(id);
+    if (!filePath) throw new Error(`Output template not found: ${id}`);
+    return zipFolder(path.dirname(filePath), 'output.md');
   }
 
   /** Absolute path of one file in the template's folder (404 if missing, 400 if outside the folder). */

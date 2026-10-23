@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
 import { Response } from 'express';
+import { buildZip } from './zip';
 
 /**
  * Resolves `relative` inside `dir` and returns the absolute path of an existing file.
@@ -20,6 +21,13 @@ export async function fileInside(dir: string, relative: string): Promise<string>
 export function sendFile(res: Response, fullPath: string, download: boolean): void {
   if (download) res.download(fullPath, path.basename(fullPath), { dotfiles: 'allow' });
   else res.sendFile(fullPath, { dotfiles: 'allow' });
+}
+
+/** Sends a generated ZIP as a download. */
+export function sendZip(res: Response, archive: { name: string; data: Buffer }): void {
+  res.attachment(archive.name);
+  res.type('application/zip');
+  res.send(archive.data);
 }
 
 export interface FolderFile { name: string; size: number; modified: string; type: string; }
@@ -68,4 +76,25 @@ export function topLevelName(name: string): string {
     throw new Error('Invalid file name: only files at the top of the folder can be changed');
   }
   return name;
+}
+
+/** Largest folder the app zips in one request (sum of file sizes). */
+export const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
+
+/**
+ * A ZIP of a template's or a note's whole folder: its own .md and every listed file, under `<folderName>/`.
+ * Throws "Invalid: folder too large" (400) above MAX_ARCHIVE_BYTES.
+ */
+export async function zipFolder(dir: string, ownMarkdown: string): Promise<{ name: string; data: Buffer }> {
+  const folderName = path.basename(dir);
+  const files = await listFolderFiles(dir);
+  const total = files.reduce((n, f) => n + f.size, 0);
+  if (total > MAX_ARCHIVE_BYTES) throw new Error('Invalid: folder too large to download as one file');
+  const ordered = [...files.filter((f) => f.name === ownMarkdown), ...files.filter((f) => f.name !== ownMarkdown)];
+  const entries = await Promise.all(ordered.map(async (f) => ({
+    name: `${folderName}/${f.name}`,
+    data: await fsp.readFile(path.join(dir, ...f.name.split('/'))),
+    modified: new Date(f.modified),
+  })));
+  return { name: `${folderName}.zip`, data: buildZip(entries) };
 }

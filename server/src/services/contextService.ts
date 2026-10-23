@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import { ContextNote, ContextCategory } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { fileInside, listFolderFiles, topLevelName, FolderFile } from '../utils/files';
+import { fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -192,6 +192,13 @@ export class ContextService {
     const result = await this.findContextFile(id);
     if (!result) throw new Error(`Context note not found: ${id}`);
     return listFolderFiles(path.dirname(result.filePath), ['note.md']);
+  }
+
+  /** The note's whole folder (note.md and every attached file) as one ZIP. */
+  async contextArchive(id: string): Promise<{ name: string; data: Buffer }> {
+    const result = await this.findContextFile(id);
+    if (!result) throw new Error(`Context note not found: ${id}`);
+    return zipFolder(path.dirname(result.filePath), 'note.md');
   }
 
   /** Absolute path of one file attached to the note (404 if missing, 400 if outside the note's folder). */

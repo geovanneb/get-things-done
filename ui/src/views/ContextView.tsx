@@ -180,7 +180,7 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
         </div>
 
         {effectiveNote?.id && (
-          <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} label="Attached Files" />
+          <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label="Attached Files" />
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>

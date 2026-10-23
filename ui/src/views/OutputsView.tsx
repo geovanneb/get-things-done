@@ -152,7 +152,7 @@ function TemplateModal({ isOpen, onClose, initial, mode, onSaved }: TemplateModa
         </div>
 
         {mode === 'edit' && initial?.id && (
-          <AttachedFiles baseUrl={`/api/outputs/templates/${initial.id}/files`} label="Files" />
+          <AttachedFiles baseUrl={`/api/outputs/templates/${initial.id}/files`} archiveUrl={`/api/outputs/templates/${initial.id}/archive`} label="Files" />
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 4 }}>
