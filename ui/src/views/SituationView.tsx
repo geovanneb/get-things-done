@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { SituationData } from '../types';
 import Avatar from '../components/common/Avatar';
@@ -233,7 +233,7 @@ export default function SituationView() {
   return (
     <div className="situation" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto' }}>
       {/* Metric cards */}
-      <div style={{ display: 'flex', gap: 14 }} role="region" aria-label="Key metrics">
+      <div className="situation__metrics" role="region" aria-label="Key metrics">
         <MetricCard
           label="Overdue"
           count={data.overdue_count}
@@ -283,7 +283,7 @@ export default function SituationView() {
       {/* Main grid: one column, two from 1,000 px of content width (see .situation__grid in index.css) */}
       <div className="situation__grid">
         {/* Left column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+        <div className="situation__main" style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
           {/* Attention Queue */}
           <section
             aria-labelledby="attention-heading"
@@ -308,20 +308,17 @@ export default function SituationView() {
                 {data.attention_queue.map((item, idx) => (
                   <li
                     key={item.id}
+                    className="situation__attention-row"
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
                       padding: '11px 18px',
                       borderBottom: idx < data.attention_queue.length - 1 ? '1px solid var(--color-border)' : 'none',
                     }}
                   >
                     <ReasonBadge reason={item.reason} />
                     <button
+                      className="situation__attention-title"
                       onClick={() => navigate(`/board/task/${item.id}`)}
                       style={{
-                        flex: 1,
-                        minWidth: 0,
                         background: 'transparent',
                         border: 'none',
                         padding: 0,
@@ -337,6 +334,7 @@ export default function SituationView() {
                     >
                       <span title={item.title}>{item.title}</span>
                     </button>
+                    <div className="situation__attention-meta">
                     <DueDateChip dueDate={item.due_date} />
                     <StakeholderAvatars names={item.stakeholders} />
                     <button
@@ -360,6 +358,7 @@ export default function SituationView() {
                         <path d="M2.5 6H9.5M6.5 3L9.5 6L6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
                     </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -429,7 +428,9 @@ export default function SituationView() {
                           <DueDateChip dueDate={c.due_date} />
                         </td>
                         <td style={{ padding: '10px 18px', maxWidth: 280 }}>
-                          <span className="truncate" title={c.title} style={{ display: 'block', fontWeight: 500 }}>{c.title}</span>
+                          <Link to={`/board/task/${c.id}`} className="truncate situation__task-link" title={c.title}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ display: 'block', fontWeight: 500, color: 'inherit', textDecoration: 'none' }}>{c.title}</Link>
                         </td>
                         <td style={{ padding: '10px 18px' }}>
                           <StakeholderAvatars names={c.stakeholders} />
@@ -458,7 +459,7 @@ export default function SituationView() {
             <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)' }}>
               <h2 id="workflow-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Workflow snapshot</h2>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, padding: 18 }}>
+            <div className="situation__snapshot">
               <div>
                 <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
                   Tasks by status
@@ -543,9 +544,9 @@ export default function SituationView() {
                         </Badge>
                       </div>
                       <ProgressBar value={progress} />
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                         <StakeholderAvatars names={task.stakeholders} />
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                           {task.deliverables.slice(0, 3).map((d, i) => (
                             d.format && <Badge key={i} size="sm">{d.format}</Badge>
                           ))}
