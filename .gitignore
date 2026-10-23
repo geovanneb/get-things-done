@@ -51,3 +51,7 @@ node-compile-cache/
 
 # npm artifacts
 *.tgz
+
+# Personal notes for AI coding agents (see AGENTS.md); never commit them
+/AGENTS.local.md
+/CLAUDE.local.md
