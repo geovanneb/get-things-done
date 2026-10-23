@@ -28,8 +28,11 @@ export interface ZipEntry {
   modified: Date;
 }
 
-function dosDateTime(d: Date): { time: number; date: number } {
-  const year = Math.max(1980, d.getFullYear());
+/** The ZIP date field only holds 1980–2107; dates outside it (or invalid ones) are clamped. */
+function dosDateTime(input: Date): { time: number; date: number } {
+  const d = Number.isNaN(input.getTime()) || input.getFullYear() < 1980 ? new Date(1980, 0, 1)
+    : input.getFullYear() > 2107 ? new Date(2107, 11, 31, 23, 59, 58) : input;
+  const year = d.getFullYear();
   return {
     time: (d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2),
     date: ((year - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(),

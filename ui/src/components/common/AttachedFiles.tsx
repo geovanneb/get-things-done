@@ -89,6 +89,7 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {archiveUrl && files.length > 0 && (
             <a href={archiveUrl} download title="Download everything in this folder as one .zip"
+              onClick={(e) => { e.preventDefault(); void downloadArchive(archiveUrl); }}
               style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', textDecoration: 'none', whiteSpace: 'nowrap' }}
               onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
               onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
@@ -159,4 +160,26 @@ function FileRow({ file, url, label, onRemove }: { file: AttachedFile; url: stri
       ) : <span style={{ width: 20, flexShrink: 0 }} />}
     </div>
   );
+}
+
+/**
+ * Fetches the folder's ZIP and saves it. When the server refuses (too many files, a name a ZIP cannot hold),
+ * its message is shown instead of a failed or half-empty download.
+ */
+async function downloadArchive(url: string): Promise<void> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { message?: string } | null;
+      throw new Error(body?.message?.replace(/^Invalid: /, '') ?? `Download failed (${res.status})`);
+    }
+    const name = /filename="?([^";]+)"?/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'files.zip';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(await res.blob());
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch (err) {
+    alert(err instanceof Error ? err.message : 'Download failed');
+  }
 }
