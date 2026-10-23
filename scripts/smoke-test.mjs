@@ -237,6 +237,34 @@ try {
     const titleOnly = await (await json('PUT', `/api/org-charts/${uChart.id}`, { members: uAfter.members.map((m) => (m.ref === p2 ? { ...m, title: 'Coordinator' } : m)) })).json();
     check('saving members only keeps the units', titleOnly.units?.length === 4 && titleOnly.members.find((m) => m.ref === p2)?.unit === 'U-2');
 
+    // Placeholders: chart-local people (P-n) who can manage, lead a unit and be swapped for a stakeholder later.
+    const phRes = await json('POST', '/api/org-charts', {
+      name: 'Placeholder chart',
+      members: [{ ref: p1 }, { ref: 'P-1', name: 'Head of Sales (vacant)', title: 'Head of Sales', reports_to: p1, unit: 'U-1' },
+        { ref: p2, reports_to: 'P-1', name: 'ignored for stakeholders' }, { ref: 'P-2', reports_to: 'P-1' }],
+      units: [{ id: 'U-1', name: 'Sales', head: 'P-1' }],
+    });
+    const phChart = await phRes.json();
+    const phFile = fs.readFileSync(path.join(ws, 'stakeholders', 'org-charts', `${phChart.id.toLowerCase()}.md`), 'utf8');
+    check('a chart with placeholders is accepted and written as schema 1.1',
+      phRes.status === 201 && /schema_version: ['"]?1\.1/.test(phFile) && /name: Head of Sales \(vacant\)/.test(phFile), `status=${phRes.status}`);
+    check('a placeholder can lead a unit and manage people', phChart.units?.[0]?.head === 'P-1' && phChart.members.find((m) => m.ref === p2)?.reports_to === 'P-1');
+    check('a placeholder without a name gets a default one; stakeholders never get a name field',
+      phChart.members.find((m) => m.ref === 'P-2')?.name === 'Unnamed placeholder' && !('name' in phChart.members.find((m) => m.ref === p2)));
+    const phPos = (await (await fetch(`${base}/api/org-charts?stakeholder=${p2}`)).json()).find((x) => x.chart.id === phChart.id);
+    check('the position API marks a placeholder manager', phPos?.manager?.placeholder === true && phPos.manager.name === 'Head of Sales (vacant)'
+      && phPos.manager.role === 'Head of Sales', JSON.stringify(phPos?.manager ?? null));
+    const phIssues = await (await fetch(`${base}/api/workspace/validate`)).json();
+    check('validation does not report placeholders as unknown stakeholders', !phIssues.some((i) => /P-\d/.test(i.message ?? '')),
+      JSON.stringify(phIssues.filter((i) => /P-\d/.test(i.message ?? ''))));
+    const swapped = await json('PUT', `/api/org-charts/${phChart.id}`, {
+      members: phChart.members.map((m) => (m.ref === 'P-1' ? { ref: p3, reports_to: p1, unit: 'U-1', title: 'Head of Sales' } : m.reports_to === 'P-1' ? { ...m, reports_to: p3 } : m)),
+      units: [{ id: 'U-1', name: 'Sales', head: p3 }],
+    });
+    const swappedChart = await swapped.json();
+    check('a placeholder can be swapped for a stakeholder', swapped.status === 200 && swappedChart.members.find((m) => m.ref === p2)?.reports_to === p3
+      && swappedChart.units[0].head === p3 && !swappedChart.members.some((m) => m.ref === 'P-1'));
+
     check('a chart without titles is still written as schema 1.0',
       /schema_version: ['"]?1\.0/.test(fs.readFileSync(path.join(ws, 'stakeholders', 'org-charts', `${plain.id.toLowerCase()}.md`), 'utf8')));
   }

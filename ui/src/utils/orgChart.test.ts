@@ -3,7 +3,7 @@
  */
 import {
   buildTree, buildUnitTree, canNestUnit, collapsedForLevel, deleteUnit, nextUnitId, placeMember, removeMember, saveUnit,
-  setMemberUnit, setTitle, treeDepth, unitPath, withoutHead,
+  setMemberUnit, setTitle, treeDepth, unitPath, withoutHead, editPlaceholder, isPlaceholder, nextPlaceholderId, replaceRef,
 } from './orgChart';
 import type { OrgChartMember, OrgUnit } from '@/types';
 
@@ -80,6 +80,25 @@ check('changing manager keeps the unit', placeMember(inUnits, 'D', 'A').find((m)
 check('saving a unit updates it in place and clears an empty head',
   (() => { const u = saveUnit(units, { id: 'U-2', name: ' Freight ', parent: 'U-1', head: '' }).find((x) => x.id === 'U-2')!; return u.name === 'Freight' && !('head' in u); })());
 check('a person leaving the chart stops being a unit head', !('head' in withoutHead(units, 'B').find((u) => u.id === 'U-2')!));
+
+// --- Placeholders -----------------------------------------------------------
+const withPh: OrgChartMember[] = [
+  { ref: 'A' }, { ref: 'P-1', name: 'New sales lead', title: 'Head of Sales', reports_to: 'A', unit: 'U-1' },
+  { ref: 'C', reports_to: 'P-1' }, { ref: 'P-3', name: 'Analyst (vacant)', reports_to: 'P-1' },
+];
+const phUnits: OrgUnit[] = [{ id: 'U-1', name: 'Sales', head: 'P-1' }];
+check('placeholder ids are recognised', isPlaceholder('P-12') && !isPlaceholder('STK-0001') && !isPlaceholder('P-x'));
+check('the next placeholder id follows the highest one', nextPlaceholderId(withPh) === 'P-4' && nextPlaceholderId(members) === 'P-1');
+check('editing a placeholder sets name and title', (() => { const p = editPlaceholder(withPh, 'P-3', ' Analyst ', 'Data analyst').find((m) => m.ref === 'P-3')!; return p.name === 'Analyst' && p.title === 'Data analyst' && p.reports_to === 'P-1'; })());
+const linked = replaceRef(withPh, phUnits, 'P-1', 'STK-0009');
+const promoted = linked.members.find((m) => m.ref === 'STK-0009')!;
+check('linking a placeholder keeps its manager, unit and title and drops its name',
+  promoted.reports_to === 'A' && promoted.unit === 'U-1' && promoted.title === 'Head of Sales' && !('name' in promoted));
+check('linking a placeholder moves its reports to the stakeholder',
+  linked.members.filter((m) => m.reports_to === 'STK-0009').map((m) => m.ref).join(',') === 'C,P-3' && !linked.members.some((m) => m.ref === 'P-1'));
+check('linking a placeholder moves the units it leads', linked.units[0].head === 'STK-0009');
+check('making a stakeholder can drop the chart title (it becomes their role)',
+  !('title' in replaceRef(withPh, phUnits, 'P-1', 'STK-0009', false).members.find((m) => m.ref === 'STK-0009')!));
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -500,7 +500,8 @@ export default function StakeholdersView() {
 
       {loading && <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><LoadingSpinner /></div>}
 
-      {!loading && tab === 'charts' && <OrgChartsPanel stakeholders={[...people, ...groups]} initialChartId={params.get('chart')} />}
+      {!loading && tab === 'charts' && <OrgChartsPanel stakeholders={[...people, ...groups]} initialChartId={params.get('chart')}
+        onStakeholderCreated={(s) => setPeople((prev) => [...prev, s])} />}
 
       {!loading && tab !== 'charts' && (
         <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>

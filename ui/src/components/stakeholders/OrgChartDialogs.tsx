@@ -42,6 +42,107 @@ export function TitleModal({ isOpen, name, profileRole, current, onClose, onSave
 }
 
 // ---------------------------------------------------------------------------
+// Placeholders
+// ---------------------------------------------------------------------------
+
+interface PlaceholderModalProps {
+  isOpen: boolean;
+  /** Current values when editing; undefined when adding one. */
+  current?: { name: string; title?: string };
+  /** Shown in the description when adding ("under Ava Lindqvist"). */
+  managerName?: string | null;
+  onClose: () => void;
+  onSave: (name: string, title: string) => void;
+}
+
+export function PlaceholderModal({ isOpen, current, managerName, onClose, onSave }: PlaceholderModalProps) {
+  const [name, setName] = useState('');
+  const [title, setTitle] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(current?.name ?? '');
+    setTitle(current?.title ?? '');
+    setError(null);
+  }, [isOpen, current]);
+  function submit() {
+    if (!name.trim()) { setError('Describe who this is, for example "Head of Sales (vacant)".'); return; }
+    onSave(name.trim(), title.trim());
+  }
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={current ? 'Edit placeholder' : 'Add a placeholder'} size="sm">
+      <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+        Someone who is not a stakeholder yet, or a role that is vacant{!current && managerName ? <>, reporting to <strong>{managerName}</strong></> : ''}.
+        It lives only in this chart. You can turn it into a stakeholder later.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Input label="Name or description *" value={name} onChange={setName} placeholder="Head of Sales (vacant)" autoFocus
+          error={error ?? undefined} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+        <Input label="Title" value={title} onChange={setTitle} placeholder="Head of Sales"
+          onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={submit}>{current ? 'Save' : 'Add placeholder'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+export interface NewStakeholderValues {
+  name: string;
+  role: string;
+  organization: string;
+}
+
+interface MakeStakeholderModalProps {
+  isOpen: boolean;
+  initial: NewStakeholderValues;
+  onClose: () => void;
+  /** Creates the stakeholder and puts them in the placeholder's place; rejects with a message on failure. */
+  onSubmit: (values: NewStakeholderValues) => Promise<void>;
+}
+
+export function MakeStakeholderModal({ isOpen, initial, onClose, onSubmit }: MakeStakeholderModalProps) {
+  const [values, setValues] = useState<NewStakeholderValues>(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { if (isOpen) { setValues(initial); setError(null); } }, [isOpen, initial]);
+  const set = (key: keyof NewStakeholderValues) => (v: string) => setValues((x) => ({ ...x, [key]: v }));
+  async function submit() {
+    if (!values.name.trim()) { setError('Enter their name.'); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSubmit({ name: values.name.trim(), role: values.role.trim(), organization: values.organization.trim() });
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create the stakeholder.');
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Make stakeholder" size="sm">
+      <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+        Creates a stakeholder and puts them in the placeholder's place in this chart, with the same manager, reports and unit.
+        Other charts are not changed.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Input label="Name *" value={values.name} onChange={set('name')} autoFocus error={error && !values.name.trim() ? error : undefined} />
+        <Input label="Role" value={values.role} onChange={set('role')} />
+        <Input label="Organization" value={values.organization} onChange={set('organization')} />
+      </div>
+      {error && values.name.trim() && <p role="alert" style={{ marginTop: 12, fontSize: 'var(--text-sm)', color: 'var(--color-critical)' }}>{error}</p>}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" loading={saving} onClick={submit}>Create stakeholder</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Units
 // ---------------------------------------------------------------------------
 
@@ -321,9 +422,11 @@ interface PersonPickerModalProps {
   emptyText: string;
   onClose: () => void;
   onPick: (id: string | null) => void;
+  /** Extra content under the list, e.g. "Add a placeholder instead". */
+  footer?: React.ReactNode;
 }
 
-export function PersonPickerModal({ isOpen, title, description, people, noneLabel, emptyText, onClose, onPick }: PersonPickerModalProps) {
+export function PersonPickerModal({ isOpen, title, description, people, noneLabel, emptyText, onClose, onPick, footer }: PersonPickerModalProps) {
   const [query, setQuery] = useState('');
   useEffect(() => { if (isOpen) setQuery(''); }, [isOpen]);
 
@@ -369,6 +472,7 @@ export function PersonPickerModal({ isOpen, title, description, people, noneLabe
           </p>
         )}
       </div>
+      {footer && <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--color-border)' }}>{footer}</div>}
     </Modal>
   );
 }

@@ -824,6 +824,8 @@ input, textarea, select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.org-node--placeholder { border-style: dashed; }
+.org-node__unit--ph { border-style: dashed; color: var(--color-text-muted); font-style: italic; }
 .org-unit {
   width: 220px;
   padding: 8px;

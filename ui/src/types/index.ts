@@ -294,7 +294,10 @@ export interface WorkspaceConfig {
 }
 
 export interface OrgChartMember {
+  /** Stakeholder id, or `P-<n>` for a chart-local placeholder. */
   ref: string;
+  /** Placeholders only: who or what this is. */
+  name?: string;
   /** Manager's stakeholder id within the same chart; absent at the top. */
   reports_to?: string;
   /** Title in this chart; overrides the stakeholder's role here only. */
@@ -328,6 +331,8 @@ export interface OrgPersonSummary {
   id: string;
   name: string;
   role?: string;
+  /** A chart placeholder, not a stakeholder. */
+  placeholder?: boolean;
 }
 
 export interface OrgPosition {

@@ -11,6 +11,7 @@ import { useAppDispatch, useAppState } from '@/store';
 import {
   ancestorsOf, buildTree, buildUnitTree, canNestUnit, canReportTo, collapsedForLevel, deleteUnit, descendantsOf, managerOf, nextUnitId, placeMember,
   removeMember, saveUnit, setMemberUnit, setTitle, treeDepth, treeOrder, withoutHead,
+  editPlaceholder, isPlaceholder, nextPlaceholderId, replaceRef,
 } from '@/utils/orgChart';
 import { readChartPrefs, readListCollapsed, writeChartPrefs, writeListCollapsed } from '@/utils/orgChartPrefs';
 import type { OrgChart, OrgChartMember, OrgUnit, Stakeholder } from '@/types';
@@ -18,8 +19,10 @@ import OrgChartTree, { DRAG_MIME } from './OrgChartTree';
 import OrgChartViewport, { clampScale } from './OrgChartViewport';
 import type { ViewportHandle } from './OrgChartViewport';
 import type { NodeAction } from './OrgChartTree';
-import { ChartFormModal, PersonPickerModal, TitleModal, UnitFormModal, UnitPickerModal } from './OrgChartDialogs';
-import type { ChartFormValues, UnitFormValues } from './OrgChartDialogs';
+import {
+  ChartFormModal, MakeStakeholderModal, PersonPickerModal, PlaceholderModal, TitleModal, UnitFormModal, UnitPickerModal,
+} from './OrgChartDialogs';
+import type { ChartFormValues, NewStakeholderValues, UnitFormValues } from './OrgChartDialogs';
 import OrgUnitsView from './OrgUnitsView';
 import type { UnitAction } from './OrgUnitsView';
 
@@ -39,11 +42,23 @@ function readView(): View {
 }
 
 interface Picker {
-  mode: 'add-report' | 'change-manager';
+  mode: 'add-report' | 'change-manager' | 'link';
   ref: string;
 }
 
-export default function OrgChartsPanel({ stakeholders, initialChartId }: { stakeholders: Stakeholder[]; initialChartId?: string | null }) {
+/** A placeholder shown with the same components as a stakeholder. */
+function placeholderPerson(m: OrgChartMember): Stakeholder {
+  return { id: m.ref, name: m.name || m.ref, role: '', organization: '', influence: 'informed', what_matters: '', tags: [] };
+}
+
+interface PanelProps {
+  stakeholders: Stakeholder[];
+  initialChartId?: string | null;
+  /** Called after "Make stakeholder" creates one, so the page can list them. */
+  onStakeholderCreated?: (s: Stakeholder) => void;
+}
+
+export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeholderCreated }: PanelProps) {
   const dispatch = useAppDispatch();
   const { workspace } = useAppState();
   const workspaceKey = workspace?.path ?? 'default';
@@ -74,6 +89,11 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const [search, setSearch] = useState('');
   const [titleFor, setTitleFor] = useState<string | null>(null);
   const [unitFor, setUnitFor] = useState<string | null>(null);
+  // Placeholder dialog: add one (under `manager`) or edit `ref`.
+  const [phForm, setPhForm] = useState<{ ref?: string; manager: string | null } | null>(null);
+  const [makeFor, setMakeFor] = useState<string | null>(null);
+  // Stakeholders created here, until the page's own list includes them.
+  const [created, setCreated] = useState<Stakeholder[]>([]);
   // Unit dialog: editing an existing unit, or creating one (optionally inside `parent`).
   const [unitForm, setUnitForm] = useState<{ editing: OrgUnit | null; parent: string | null } | null>(null);
   const [matchIndex, setMatchIndex] = useState(0);
@@ -107,9 +127,18 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     setPanelPref(prefs.panelOpen);
   }, [activeId, workspaceKey]);
 
-  const people = useMemo(() => new Map(stakeholders.map((s) => [s.id, s])), [stakeholders]);
   const chart = charts.find((c) => c.id === activeId) ?? null;
-  const members = chart?.members ?? [];
+  const members = useMemo(() => chart?.members ?? [], [chart]);
+  const placeholders = useMemo(() => new Set(members.filter((m) => isPlaceholder(m.ref)).map((m) => m.ref)), [members]);
+  const allStakeholders = useMemo(
+    () => [...stakeholders, ...created.filter((c) => !stakeholders.some((s) => s.id === c.id))],
+    [stakeholders, created],
+  );
+  // Stakeholders and this chart's placeholders, by id.
+  const people = useMemo(() => new Map([
+    ...allStakeholders.map((s) => [s.id, s] as const),
+    ...members.filter((m) => isPlaceholder(m.ref)).map((m) => [m.ref, placeholderPerson(m)] as const),
+  ]), [allStakeholders, members]);
   const memberRefs = useMemo(() => new Set(members.map((m) => m.ref)), [members]);
   const roots = useMemo(() => buildTree(members), [members]);
   const titles = useMemo(() => new Map(members.filter((m) => m.title).map((m) => [m.ref, m.title!])), [members]);
@@ -176,7 +205,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
 
   // Esc: an open dialog handles it first; then full screen closes; then the people panel.
   useEffect(() => {
-    if (picker || formOpen || titleFor || unitFor || unitForm || (!fullscreen && !panelOpen)) return;
+    if (picker || formOpen || titleFor || unitFor || unitForm || phForm || makeFor || (!fullscreen && !panelOpen)) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (fullscreen) exitFullscreen();
@@ -184,7 +213,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [panelOpen, fullscreen, picker, formOpen, titleFor, unitFor, unitForm, setPanelOpen, exitFullscreen]);
+  }, [panelOpen, fullscreen, picker, formOpen, titleFor, unitFor, unitForm, phForm, makeFor, setPanelOpen, exitFullscreen]);
 
   // Entering full screen: lock page scroll, fit the chart, move focus to "Exit full screen".
   useEffect(() => {
@@ -231,17 +260,42 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   }
 
   // Each change is saved right away; a failed save puts the previous members and units back.
-  async function saveChart(next: { members?: OrgChartMember[]; units?: OrgUnit[] }) {
-    if (!chart) return;
+  async function saveChart(next: { members?: OrgChartMember[]; units?: OrgUnit[] }): Promise<boolean> {
+    if (!chart) return false;
     const previous = { members: chart.members, units: chart.units };
     const seq = ++saveSeq.current;
     setCharts((list) => list.map((c) => (c.id === chart.id ? { ...c, ...next } : c)));
     try {
       const saved = await apiPut<OrgChart>(`/api/org-charts/${chart.id}`, next);
       if (seq === saveSeq.current) setCharts((list) => list.map((c) => (c.id === saved.id ? saved : c)));
+      return true;
     } catch (err) {
       if (seq === saveSeq.current) setCharts((list) => list.map((c) => (c.id === chart.id ? { ...c, ...previous } : c)));
       notifyError(err instanceof Error ? err.message : 'Could not save the change.');
+      return false;
+    }
+  }
+
+  function savePlaceholder(name: string, title: string) {
+    if (!phForm) return;
+    if (phForm.ref) saveMembers(editPlaceholder(members, phForm.ref, name, title));
+    else {
+      const ref = nextPlaceholderId(members);
+      const manager = phForm.manager;
+      saveMembers([...members, { ref, name, ...(title ? { title } : {}), ...(manager ? { reports_to: manager } : {}) }]);
+      if (manager && collapsed.has(manager)) { const n = new Set(collapsed); n.delete(manager); applyCollapsed(n); }
+    }
+    setPhForm(null);
+  }
+
+  // Creates the stakeholder, then swaps them in for the placeholder in this chart only.
+  async function makeStakeholder(ref: string, values: NewStakeholderValues) {
+    const person = await apiPost<Stakeholder>('/api/stakeholders', values);
+    setCreated((list) => [...list, person]);
+    onStakeholderCreated?.(person);
+    const ok = await saveChart(replaceRef(members, units, ref, person.id, false));
+    if (!ok) {
+      notifyError(`${person.name} was created as a stakeholder, but the chart was not updated. Use "Link to existing stakeholder…" on the placeholder to finish.`);
     }
   }
   const saveMembers = (next: OrgChartMember[]) => saveChart({ members: next });
@@ -294,6 +348,9 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
 
   function handleAction(ref: string, action: NodeAction) {
     if (action === 'open') navigate(`/stakeholders/${encodeURIComponent(ref)}`);
+    else if (action === 'edit-placeholder') setPhForm({ ref, manager: null });
+    else if (action === 'make-stakeholder') setMakeFor(ref);
+    else if (action === 'link-stakeholder') setPicker({ mode: 'link', ref });
     else if (action === 'remove') {
       saveChart(units.some((u) => u.head === ref)
         ? { members: removeMember(members, ref), units: withoutHead(units, ref) }
@@ -343,23 +400,32 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const available = useMemo(() => {
     const org = chart?.organization?.trim().toLowerCase();
     const q = peopleQuery.trim().toLowerCase();
-    return stakeholders
+    return allStakeholders
       .filter((s) => !memberRefs.has(s.id))
       .filter((s) => !q || s.name.toLowerCase().includes(q) || (s.role ?? '').toLowerCase().includes(q) || (s.organization ?? '').toLowerCase().includes(q))
       .map((s) => ({ s, sameOrg: !!org && s.organization?.trim().toLowerCase() === org }))
       .sort((a, b) => Number(b.sameOrg) - Number(a.sameOrg) || a.s.name.localeCompare(b.s.name));
-  }, [stakeholders, memberRefs, chart, peopleQuery]);
+  }, [allStakeholders, memberRefs, chart, peopleQuery]);
   const sameOrgCount = available.filter((a) => a.sameOrg).length;
 
   const pickerPeople = useMemo(() => {
     if (!picker) return [];
-    if (picker.mode === 'add-report') return stakeholders.filter((s) => !memberRefs.has(s.id));
+    if (picker.mode !== 'change-manager') return allStakeholders.filter((s) => !memberRefs.has(s.id));
     const blocked = descendantsOf(members, picker.ref);
     const current = managerOf(members, picker.ref);
-    return stakeholders.filter((s) => memberRefs.has(s.id) && !blocked.has(s.id) && s.id !== current);
-  }, [picker, stakeholders, memberRefs, members]);
+    // Anyone in the chart can be a manager, placeholders included.
+    return [...people.values()].filter((s) => memberRefs.has(s.id) && !blocked.has(s.id) && s.id !== current);
+  }, [picker, allStakeholders, people, memberRefs, members]);
+
+  // "Make stakeholder" starts from the placeholder: its description as the name, its title as the role.
+  const makeInitial = useMemo<NewStakeholderValues>(() => ({
+    name: makeFor ? people.get(makeFor)?.name ?? '' : '',
+    role: makeFor ? titles.get(makeFor) ?? '' : '',
+    organization: chart?.organization ?? '',
+  }), [makeFor, people, titles, chart?.organization]);
 
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><LoadingSpinner /></div>;
+
 
   const selectedName = selected ? people.get(selected)?.name ?? selected : null;
   const pickerName = picker ? people.get(picker.ref)?.name ?? picker.ref : '';
@@ -538,6 +604,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     onAction={handleAction}
                     titles={titles}
                     unitNames={unitNames}
+                    placeholders={placeholders}
                     matches={matchSet}
                     currentMatch={currentMatch}
                   />
@@ -566,6 +633,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                               onAssign={(ref, unit) => { setDragging(null); assignUnit(ref, unit); }}
                               onUnitAction={handleUnitAction}
                               onPerson={setUnitFor}
+                              placeholders={placeholders}
                             />
                           </OrgChartViewport>
                         </>
@@ -610,6 +678,10 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                   ) : 'Adding at the top level. Select a card to add under it.'}
                 </div>
                 <Input value={peopleQuery} onChange={setPeopleQuery} placeholder="Search stakeholders" aria-label="Search stakeholders to add" />
+                <Button size="sm" variant="ghost" style={{ marginTop: 6, width: '100%' }} onClick={() => setPhForm({ manager: selected })}
+                  title="Someone who is not a stakeholder yet, or a vacant role">
+                  + Add a placeholder
+                </Button>
                 {sameOrgCount > 1 && !peopleQuery && (
                   <Button size="sm" variant="secondary" style={{ marginTop: 8, width: '100%' }}
                     onClick={() => saveMembers(available.filter((a) => a.sameOrg).reduce((acc, a) => placeMember(acc, a.s.id, selected), members))}>
@@ -695,18 +767,41 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
 
       <PersonPickerModal
         isOpen={picker !== null}
-        title={picker?.mode === 'add-report' ? `Add a direct report to ${pickerName}` : `Who does ${pickerName} report to?`}
-        description={picker?.mode === 'change-manager' ? 'People in their own team are not listed, so the chart cannot loop.' : undefined}
+        title={picker?.mode === 'add-report' ? `Add a direct report to ${pickerName}`
+          : picker?.mode === 'link' ? `Who is "${pickerName}"?` : `Who does ${pickerName} report to?`}
+        description={picker?.mode === 'change-manager' ? 'People in their own team are not listed, so the chart cannot loop.'
+          : picker?.mode === 'link' ? 'They take the placeholder\'s place in this chart, with the same manager, reports, unit and title. Other charts are not changed.' : undefined}
         people={pickerPeople}
         noneLabel={picker?.mode === 'change-manager' && managerOf(members, picker.ref) ? 'Nobody (top of the chart)' : undefined}
-        emptyText={picker?.mode === 'add-report' ? 'Every stakeholder is already in this chart.' : 'Nobody else in this chart can be their manager.'}
+        emptyText={picker?.mode === 'change-manager' ? 'Nobody else in this chart can be their manager.' : 'Every stakeholder is already in this chart.'}
         onClose={() => setPicker(null)}
         onPick={(id) => {
           if (!picker) return;
           if (picker.mode === 'add-report' && id) place(id, picker.ref);
           else if (picker.mode === 'change-manager') place(picker.ref, id);
+          else if (picker.mode === 'link' && id) saveChart(replaceRef(members, units, picker.ref, id, true));
           setPicker(null);
         }}
+        footer={picker?.mode === 'add-report' ? (
+          <Button size="sm" variant="ghost" onClick={() => { const manager = picker.ref; setPicker(null); setPhForm({ manager }); }}>
+            Not a stakeholder yet? Add a placeholder instead
+          </Button>
+        ) : undefined}
+      />
+
+      <PlaceholderModal
+        isOpen={phForm !== null}
+        current={phForm?.ref ? { name: people.get(phForm.ref)?.name ?? '', title: titles.get(phForm.ref) } : undefined}
+        managerName={phForm?.manager ? people.get(phForm.manager)?.name ?? phForm.manager : null}
+        onClose={() => setPhForm(null)}
+        onSave={savePlaceholder}
+      />
+
+      <MakeStakeholderModal
+        isOpen={makeFor !== null}
+        initial={makeInitial}
+        onClose={() => setMakeFor(null)}
+        onSubmit={(values) => (makeFor ? makeStakeholder(makeFor, values) : Promise.resolve())}
       />
     </div>
   );

@@ -4,7 +4,7 @@ import { Task, Stakeholder, ValidationResult } from '../types';
 import { TaskService } from './taskService';
 import { StakeholderService } from './stakeholderService';
 import { MentionService } from './mentionService';
-import { OrgChartService, findLoop, findUnitLoop } from './orgChartService';
+import { OrgChartService, findLoop, findUnitLoop, isPlaceholder } from './orgChartService';
 import { OutputService } from './outputService';
 import { isDone, isOpen } from './taskStatus';
 
@@ -211,7 +211,7 @@ export class ValidationService {
             results.push({ level: 'warning', rule: 'duplicate_id', message: `Org chart ${chart.id} lists ${m.ref} more than once`, path: chart.path });
           }
           refs.add(m.ref);
-          if (!stakeholderIds.has(m.ref)) {
+          if (!isPlaceholder(m.ref) && !stakeholderIds.has(m.ref)) {
             results.push({ level: 'warning', rule: 'broken_ref', message: `Org chart ${chart.id} references unknown stakeholder: ${m.ref}`, path: chart.path });
           }
         }
