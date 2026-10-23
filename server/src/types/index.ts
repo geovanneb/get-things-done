@@ -51,6 +51,8 @@ export interface OrgChartMember {
   ref: string;
   /** Stakeholder id of this member's manager in the same chart. Absent at the top of the chart. */
   reports_to?: string;
+  /** Title in this chart; overrides the stakeholder's role here (and only here). */
+  title?: string;
 }
 
 export interface OrgChart {

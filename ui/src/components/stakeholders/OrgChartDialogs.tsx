@@ -6,6 +6,40 @@ import Modal from '@/components/common/Modal';
 import type { OrgChart, Stakeholder } from '@/types';
 
 // ---------------------------------------------------------------------------
+// Title in this chart
+// ---------------------------------------------------------------------------
+
+interface TitleModalProps {
+  isOpen: boolean;
+  name: string;
+  /** The stakeholder's role from their profile (the fallback). */
+  profileRole?: string;
+  current?: string;
+  onClose: () => void;
+  onSave: (title: string) => void;
+}
+
+export function TitleModal({ isOpen, name, profileRole, current, onClose, onSave }: TitleModalProps) {
+  const [value, setValue] = useState('');
+  useEffect(() => { if (isOpen) setValue(current ?? ''); }, [isOpen, current]);
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`${name}: title in this chart`} size="sm">
+      <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+        Shown on the card and read by agents for this organization only. Their profile role stays as it is
+        {profileRole ? <> (<strong>{profileRole}</strong>)</> : null}. Leave empty to use the profile role.
+      </p>
+      <Input value={value} onChange={setValue} placeholder={profileRole || 'Title'} autoFocus aria-label="Title in this chart"
+        onKeyDown={(e) => { if (e.key === 'Enter') onSave(value); }} />
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+        {current && <Button variant="ghost" onClick={() => onSave('')}>Use profile role</Button>}
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={() => onSave(value)}>Save</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Create / edit chart details
 // ---------------------------------------------------------------------------
 

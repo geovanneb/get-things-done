@@ -82,15 +82,17 @@ export function canReportTo(members: OrgChartMember[], ref: string, manager: str
   return !descendantsOf(members, ref).has(manager);
 }
 
-function member(ref: string, manager: string | null): OrgChartMember {
-  return manager ? { ref, reports_to: manager } : { ref };
+/** A member with a new manager; every other field (title…) is kept. */
+function withManager(m: OrgChartMember, manager: string | null): OrgChartMember {
+  const { reports_to: _old, ...rest } = m;
+  return manager ? { ...rest, reports_to: manager } : rest;
 }
 
 /** Adds `ref` (or moves it, if already in the chart) under `manager`. */
 export function placeMember(members: OrgChartMember[], ref: string, manager: string | null): OrgChartMember[] {
   if (!canReportTo(members, ref, manager)) return members;
-  if (members.some((m) => m.ref === ref)) return members.map((m) => (m.ref === ref ? member(ref, manager) : m));
-  return [...members, member(ref, manager)];
+  if (members.some((m) => m.ref === ref)) return members.map((m) => (m.ref === ref ? withManager(m, manager) : m));
+  return [...members, withManager({ ref }, manager)];
 }
 
 /** Removes `ref`; their direct reports move up to `ref`'s manager. */
@@ -99,7 +101,17 @@ export function removeMember(members: OrgChartMember[], ref: string): OrgChartMe
   if (!removed) return members;
   return members
     .filter((m) => m.ref !== ref)
-    .map((m) => (m.reports_to === ref ? member(m.ref, removed.reports_to ?? null) : m));
+    .map((m) => (m.reports_to === ref ? withManager(m, removed.reports_to ?? null) : m));
+}
+
+/** Sets (or, when blank, clears) `ref`'s title in this chart. */
+export function setTitle(members: OrgChartMember[], ref: string, title: string): OrgChartMember[] {
+  const clean = title.trim();
+  return members.map((m) => {
+    if (m.ref !== ref) return m;
+    const { title: _old, ...rest } = m;
+    return clean ? { ...rest, title: clean } : rest;
+  });
 }
 
 export function managerOf(members: OrgChartMember[], ref: string): string | null {
