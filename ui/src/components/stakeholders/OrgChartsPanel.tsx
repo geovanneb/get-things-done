@@ -8,7 +8,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { useAppDispatch, useAppState } from '@/store';
-import { buildTree, canReportTo, collapsedForLevel, descendantsOf, managerOf, placeMember, removeMember, treeDepth } from '@/utils/orgChart';
+import { ancestorsOf, buildTree, canReportTo, collapsedForLevel, descendantsOf, managerOf, placeMember, removeMember, treeDepth, treeOrder } from '@/utils/orgChart';
 import { readChartPrefs, readListCollapsed, writeChartPrefs, writeListCollapsed } from '@/utils/orgChartPrefs';
 import type { OrgChart, OrgChartMember, Stakeholder } from '@/types';
 import OrgChartTree, { DRAG_MIME } from './OrgChartTree';
@@ -64,6 +64,8 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const fullscreenBtn = useRef<HTMLButtonElement>(null);
   const exitBtn = useRef<HTMLButtonElement>(null);
   const scaleBefore = useRef(1);
+  const [search, setSearch] = useState('');
+  const [matchIndex, setMatchIndex] = useState(0);
   const saveSeq = useRef(0);
 
   const notifyError = useCallback((message: string) => {
@@ -90,6 +92,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     setCollapsedPref(prefs.collapsed ? new Set(prefs.collapsed) : null);
     setTempCollapsed(null);
     setScale(1);
+    setSearch('');
     setPanelPref(prefs.panelOpen);
   }, [activeId, workspaceKey]);
 
@@ -121,6 +124,18 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     }
     return [...collapsed].some((r) => members.some((m) => m.reports_to === r)) ? null : depth;
   }, [roots, depth, collapsed, members]);
+
+  // In-chart search: name, role or id; results in top-down order.
+  const matchList = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return [];
+    return treeOrder(roots).filter((ref) => {
+      const p = people.get(ref);
+      return [p?.name, p?.role, ref].some((f) => f?.toLowerCase().includes(q));
+    });
+  }, [search, roots, people]);
+  const matchSet = useMemo(() => new Set(matchList), [matchList]);
+  const currentMatch = matchList.length ? matchList[Math.min(matchIndex, matchList.length - 1)] : null;
 
   // The panel opens by itself only for an empty chart, and only until the user makes a choice.
   const panelOpen = panelPref ?? members.length === 0;
@@ -161,6 +176,30 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
     const id = requestAnimationFrame(() => { viewportRef.current?.fit(); exitBtn.current?.focus(); });
     return () => { document.body.style.overflow = previous; cancelAnimationFrame(id); };
   }, [fullscreen]);
+
+  // Show the current match: open its collapsed managers, select it and centre it.
+  useEffect(() => {
+    if (!currentMatch) return;
+    const hidden = ancestorsOf(members, currentMatch).filter((r) => collapsed.has(r));
+    if (hidden.length) {
+      const n = new Set(collapsed);
+      hidden.forEach((r) => n.delete(r));
+      applyCollapsed(n);
+    }
+    setSelected(currentMatch);
+    const id = requestAnimationFrame(() => {
+      document.querySelector(`.org-node[data-ref="${CSS.escape(currentMatch)}"]`)
+        ?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(id);
+    // Only when the match changes; revealing changes `collapsed` and must not re-run this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentMatch]);
+
+  function stepMatch(delta: number) {
+    if (!matchList.length) return;
+    setMatchIndex((i) => (Math.min(i, matchList.length - 1) + delta + matchList.length) % matchList.length);
+  }
 
   function enterFullscreen() {
     scaleBefore.current = scale;
@@ -370,6 +409,30 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                         ))}
                       </div>
                   )}
+                    <div className="org-search" role="search">
+                      <input
+                        type="search"
+                        value={search}
+                        onChange={(e) => { setSearch(e.target.value); setMatchIndex(0); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); }
+                          else if (e.key === 'ArrowUp') { e.preventDefault(); stepMatch(-1); }
+                          else if (e.key === 'Escape' && search) { e.preventDefault(); e.stopPropagation(); setSearch(''); }
+                        }}
+                        placeholder="Find in chart"
+                        aria-label="Find a person in this chart"
+                        className="org-search__input"
+                      />
+                      {search.trim() && (
+                        <>
+                          <span className="org-search__count" aria-live="polite">
+                            {matchList.length ? `${Math.min(matchIndex, matchList.length - 1) + 1}/${matchList.length}` : 'No match'}
+                          </span>
+                          <button type="button" className="org-view-toggle__btn" onClick={() => stepMatch(-1)} disabled={!matchList.length} aria-label="Previous match">↑</button>
+                          <button type="button" className="org-view-toggle__btn" onClick={() => stepMatch(1)} disabled={!matchList.length} aria-label="Next match">↓</button>
+                        </>
+                      )}
+                    </div>
                     <span style={{ flex: 1 }} />
                     {view === 'chart' && (
                       <div role="group" aria-label="Zoom" className="org-view-toggle">
@@ -408,6 +471,8 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     onDragEnd={() => setDragging(null)}
                     onDrop={(ref, target) => { setDragging(null); place(ref, target); }}
                     onAction={handleAction}
+                    matches={matchSet}
+                    currentMatch={currentMatch}
                   />
                     );
                     return view === 'chart'
