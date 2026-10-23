@@ -231,7 +231,7 @@ export default function SituationView() {
   in14.setDate(today.getDate() + 14);
 
   return (
-    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto' }}>
+    <div className="situation" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto' }}>
       {/* Metric cards */}
       <div style={{ display: 'flex', gap: 14 }} role="region" aria-label="Key metrics">
         <MetricCard
@@ -280,10 +280,10 @@ export default function SituationView() {
         />
       </div>
 
-      {/* Main 2-col grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20, alignItems: 'start' }}>
+      {/* Main grid: one column, two from 1,000 px of content width (see .situation__grid in index.css) */}
+      <div className="situation__grid">
         {/* Left column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
           {/* Attention Queue */}
           <section
             aria-labelledby="attention-heading"
@@ -335,7 +335,7 @@ export default function SituationView() {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {item.title}
+                      <span title={item.title}>{item.title}</span>
                     </button>
                     <DueDateChip dueDate={item.due_date} />
                     <StakeholderAvatars names={item.stakeholders} />
@@ -429,7 +429,7 @@ export default function SituationView() {
                           <DueDateChip dueDate={c.due_date} />
                         </td>
                         <td style={{ padding: '10px 18px', maxWidth: 280 }}>
-                          <span className="truncate" style={{ display: 'block', fontWeight: 500 }}>{c.title}</span>
+                          <span className="truncate" title={c.title} style={{ display: 'block', fontWeight: 500 }}>{c.title}</span>
                         </td>
                         <td style={{ padding: '10px 18px' }}>
                           <StakeholderAvatars names={c.stakeholders} />
@@ -480,7 +480,7 @@ export default function SituationView() {
         </div>
 
         {/* Right column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
           {/* Current focus */}
           <section
             aria-labelledby="focus-heading"
@@ -532,7 +532,7 @@ export default function SituationView() {
                               whiteSpace: 'nowrap',
                             }}
                           >
-                            {task.title}
+                            <span title={task.title}>{task.title}</span>
                           </button>
                         </div>
                         <Badge
@@ -614,7 +614,7 @@ export default function SituationView() {
                         className="truncate"
                         style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text)', marginBottom: 2 }}
                       >
-                        {a.filename}
+                        <span title={a.filename}>{a.filename}</span>
                       </div>
                       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{a.event}</div>
                     </div>
