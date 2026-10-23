@@ -366,6 +366,24 @@ input, textarea, select {
 .markdown-view th { background: var(--color-surface-hover); font-weight: 600; }
 .markdown-view img { max-width: 100%; }
 
+/* App header: compacts step by step as its own width shrinks (follows the collapsible sidebar).
+   The page title truncates; Search, then Open Claude Code, then New task fall back to icons.
+   Accessible names stay the same (aria-label / title on each button). */
+.app-header { container: app-header / inline-size; }
+.app-header__search { min-width: 200px; padding: 0 12px; }
+.app-header__compact-icon { display: none; }
+@container app-header (max-width: 720px) {
+  .app-header__search { min-width: 0; padding: 0 9px; }
+  .app-header__search-text { display: none; }
+}
+@container app-header (max-width: 600px) {
+  .app-header__compact-icon { display: inline-flex; }
+  .app-header__label--claude { display: none; }
+}
+@container app-header (max-width: 440px) {
+  .app-header__label--new { display: none; }
+}
+
 /* @-mentions (task Objective) */
 .mention-picker {
   position: absolute;
