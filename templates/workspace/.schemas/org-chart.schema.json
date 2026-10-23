@@ -5,7 +5,7 @@
   "type": "object",
   "required": ["schema_version", "id", "type", "name", "members"],
   "properties": {
-    "schema_version": {"type": "string", "enum": ["1.0", "1.1"], "description": "1.1 when a member has a title."},
+    "schema_version": {"type": "string", "enum": ["1.0", "1.1"], "description": "1.1 when the chart uses units or a member has a title or unit."},
     "id": {"type": "string", "pattern": "^ORG-\\d{4}$"},
     "type": {"type": "string", "enum": ["org_chart"]},
     "name": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -20,7 +20,23 @@
         "properties": {
           "ref": {"type": "string", "pattern": "^(STK|GRP)-\\d{4}$", "description": "Stakeholder id."},
           "reports_to": {"type": "string", "pattern": "^(STK|GRP)-\\d{4}$", "description": "Stakeholder id of the manager, who must also be a member of this chart."},
-          "title": {"type": "string", "maxLength": 200, "description": "Title in this chart. Overrides the stakeholder's role for this organization only."}
+          "title": {"type": "string", "maxLength": 200, "description": "Title in this chart. Overrides the stakeholder's role for this organization only."},
+          "unit": {"type": "string", "pattern": "^U-\\d+$", "description": "Id of the unit this member belongs to. Membership only; reporting lines come from reports_to."}
+        },
+        "additionalProperties": false
+      }
+    },
+    "units": {
+      "type": "array",
+      "description": "Optional departments, teams or other groups in this chart. Units nest through parent; people report to people, never to units.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^U-\\d+$", "description": "Chart-local id; stays the same when the unit is renamed or moved."},
+          "name": {"type": "string", "minLength": 1, "maxLength": 120},
+          "parent": {"type": "string", "pattern": "^U-\\d+$", "description": "Id of the unit this one sits in. Absent for a top-level unit."},
+          "head": {"type": "string", "pattern": "^(STK|GRP)-\\d{4}$", "description": "Stakeholder id of the person who leads the unit; must be a member of this chart."}
         },
         "additionalProperties": false
       }

@@ -44,6 +44,9 @@ outputs/templates/        Output format templates
   to pitch at, the escalation path, and who should be kept informed. The chart is the source of
   truth for reporting lines; flag any conflict with a stakeholder's title. A member's optional
   `title` is their title in that chart; it overrides the stakeholder file's `role` there only.
+  Optional `units` group people into departments or teams (`unit` on a member, `parent` for
+  nesting, `head` for who leads it). A unit is membership only: its head is not everyone's
+  manager, and approval authority still comes from `reports_to`.
 - Always read every file @-mentioned in the task's Objective (Markdown links whose text starts with `@`; paths start at
   the workspace root; a mentioned task no longer in `tasks/active/` is in `tasks/archive/`). Mentions add to the normal
   context scan, they never replace it.

@@ -1,4 +1,4 @@
-import type { OrgChartMember } from '@/types';
+import type { OrgChartMember, OrgUnit } from '@/types';
 
 export interface OrgTreeNode {
   ref: string;
@@ -116,4 +116,96 @@ export function setTitle(members: OrgChartMember[], ref: string, title: string):
 
 export function managerOf(members: OrgChartMember[], ref: string): string | null {
   return members.find((m) => m.ref === ref)?.reports_to ?? null;
+}
+
+// --- Units ------------------------------------------------------------------
+// Units are membership containers (departments, teams). They never change who reports to whom.
+
+export interface UnitTreeNode {
+  unit: OrgUnit;
+  children: UnitTreeNode[];
+}
+
+/** Top-level units with their sub-units nested; a unit whose parent is missing is top-level. */
+export function buildUnitTree(units: OrgUnit[]): UnitTreeNode[] {
+  const nodes = new Map(units.map((u) => [u.id, { unit: u, children: [] as UnitTreeNode[] }]));
+  const roots: UnitTreeNode[] = [];
+  for (const u of units) {
+    const node = nodes.get(u.id)!;
+    if (u.parent && u.parent !== u.id && nodes.has(u.parent)) nodes.get(u.parent)!.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+}
+
+/** `id` and every unit nested inside it. */
+export function unitDescendants(units: OrgUnit[], id: string): Set<string> {
+  return descendantsOf(units.map((u) => ({ ref: u.id, reports_to: u.parent })), id);
+}
+
+/** True when unit `id` may sit inside `parent` (null = top level) without a loop. */
+export function canNestUnit(units: OrgUnit[], id: string, parent: string | null): boolean {
+  return parent === null || !unitDescendants(units, id).has(parent);
+}
+
+/** The next free chart-local unit id. */
+export function nextUnitId(units: OrgUnit[]): string {
+  const max = units.reduce((n, u) => Math.max(n, Number(u.id.match(/^U-(\d+)$/)?.[1] ?? 0)), 0);
+  return `U-${max + 1}`;
+}
+
+/** Unit names from the top down to `id`. */
+export function unitPath(units: OrgUnit[], id: string): string[] {
+  const byId = new Map(units.map((u) => [u.id, u]));
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (let u = byId.get(id); u && !seen.has(u.id); u = u.parent ? byId.get(u.parent) : undefined) {
+    seen.add(u.id);
+    names.unshift(u.name);
+  }
+  return names;
+}
+
+/** Adds a unit, or updates it when the id exists. Empty parent/head clear the field. */
+export function saveUnit(units: OrgUnit[], unit: OrgUnit): OrgUnit[] {
+  const clean: OrgUnit = { id: unit.id, name: unit.name.trim() };
+  if (unit.parent && unit.parent !== unit.id) clean.parent = unit.parent;
+  if (unit.head) clean.head = unit.head;
+  return units.some((u) => u.id === unit.id) ? units.map((u) => (u.id === unit.id ? clean : u)) : [...units, clean];
+}
+
+/**
+ * Deletes a unit. Its sub-units and its people move up to the unit it sat in (or out of any unit
+ * when it was top-level); nobody is removed from the chart.
+ */
+export function deleteUnit(units: OrgUnit[], members: OrgChartMember[], id: string): { units: OrgUnit[]; members: OrgChartMember[] } {
+  const gone = units.find((u) => u.id === id);
+  if (!gone) return { units, members };
+  return {
+    units: units.filter((u) => u.id !== id).map((u) => {
+      if (u.parent !== id) return u;
+      const { parent: _old, ...rest } = u;
+      return gone.parent ? { ...rest, parent: gone.parent } : rest;
+    }),
+    members: members.map((m) => (m.unit === id ? setUnitOf(m, gone.parent ?? null) : m)),
+  };
+}
+
+function setUnitOf(m: OrgChartMember, unit: string | null): OrgChartMember {
+  const { unit: _old, ...rest } = m;
+  return unit ? { ...rest, unit } : rest;
+}
+
+/** Puts `ref` in `unit` (null = no unit); every other field is kept. */
+export function setMemberUnit(members: OrgChartMember[], ref: string, unit: string | null): OrgChartMember[] {
+  return members.map((m) => (m.ref === ref ? setUnitOf(m, unit) : m));
+}
+
+/** Units no longer led by `ref` (used when `ref` leaves the chart). */
+export function withoutHead(units: OrgUnit[], ref: string): OrgUnit[] {
+  return units.map((u) => {
+    if (u.head !== ref) return u;
+    const { head: _old, ...rest } = u;
+    return rest;
+  });
 }

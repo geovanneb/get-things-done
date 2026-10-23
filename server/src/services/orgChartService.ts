@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { OrgChart, OrgChartMember, Stakeholder } from '../types';
+import { OrgChart, OrgChartMember, OrgUnit, Stakeholder } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { StakeholderService } from './stakeholderService';
@@ -22,11 +22,23 @@ export interface StakeholderSummary {
   role?: string;
 }
 
+export interface UnitSummary {
+  id: string;
+  name: string;
+  /** Unit names from the top of the chart down to this unit. */
+  path: string[];
+  head: StakeholderSummary | null;
+}
+
 /** Where one stakeholder sits in one chart, with the people around them resolved to names. */
 export interface OrgPosition {
   chart: { id: string; name: string; organization?: string };
   /** This person's title in the chart, when it differs from their stakeholder role. */
   title?: string;
+  /** The unit they belong to, when the chart uses units. */
+  unit?: UnitSummary;
+  /** Units they lead. */
+  head_of?: Array<{ id: string; name: string }>;
   manager: StakeholderSummary | null;
   direct_reports: StakeholderSummary[];
   peers: StakeholderSummary[];
@@ -39,7 +51,76 @@ function cleanMember(item: Record<string, unknown>, ref: string): OrgChartMember
   if (reportsTo && reportsTo !== ref) member.reports_to = reportsTo;
   const title = typeof item.title === 'string' ? item.title.trim() : '';
   if (title) member.title = title.slice(0, 200);
+  const unit = typeof item.unit === 'string' ? item.unit.trim() : '';
+  if (unit) member.unit = unit;
   return member;
+}
+
+const UNIT_ID = /^U-\d+$/;
+
+/**
+ * Returns the units with names trimmed, missing or duplicate ids replaced, and references to unknown
+ * parents dropped; throws when units are nested in a loop. Heads and member units are checked later
+ * against the final member list (see reconcileUnits).
+ */
+export function normalizeUnits(raw: unknown): OrgUnit[] {
+  if (!Array.isArray(raw)) return [];
+  const units: OrgUnit[] = [];
+  const ids = new Set<string>();
+  let next = 1 + raw.reduce((max: number, u) => {
+    const m = typeof u?.id === 'string' ? u.id.trim().match(/^U-(\d+)$/) : null;
+    return m ? Math.max(max, parseInt(m[1], 10)) : max;
+  }, 0);
+  for (const item of raw) {
+    const name = typeof item?.name === 'string' ? item.name.trim().slice(0, 120) : '';
+    if (!name) continue;
+    let id = typeof item.id === 'string' ? item.id.trim() : '';
+    if (!UNIT_ID.test(id) || ids.has(id)) id = `U-${next++}`;
+    ids.add(id);
+    const unit: OrgUnit = { id, name };
+    const parent = typeof item.parent === 'string' ? item.parent.trim() : '';
+    if (parent && parent !== id) unit.parent = parent;
+    const head = typeof item.head === 'string' ? item.head.trim() : '';
+    if (head) unit.head = head;
+    units.push(unit);
+  }
+  for (const u of units) {
+    if (u.parent && !ids.has(u.parent)) delete u.parent;
+  }
+  const loop = findUnitLoop(units);
+  if (loop) {
+    const names = new Map(units.map((u) => [u.id, u.name]));
+    throw new OrgChartError(`Invalid units: ${loop.map((id) => names.get(id) ?? id).join(' → ')} are nested in a loop`);
+  }
+  return units;
+}
+
+export function findUnitLoop(units: OrgUnit[]): string[] | null {
+  return findLoop(units.map((u) => ({ ref: u.id, reports_to: u.parent })));
+}
+
+/** Drops unit heads who are not in the chart and member units that no longer exist. */
+function reconcileUnits(members: OrgChartMember[], units: OrgUnit[]): { members: OrgChartMember[]; units: OrgUnit[] } {
+  const refs = new Set(members.map((m) => m.ref));
+  const ids = new Set(units.map((u) => u.id));
+  return {
+    members: members.map((m) => {
+      if (!m.unit || ids.has(m.unit)) return m;
+      const { unit: _gone, ...rest } = m;
+      return rest;
+    }),
+    units: units.map((u) => {
+      if (!u.head || refs.has(u.head)) return u;
+      const { head: _gone, ...rest } = u;
+      return rest;
+    }),
+  };
+}
+
+/** 1.1 only when a 1.1 field is used, so existing charts are written exactly as before. */
+function schemaVersion(chart: OrgChart): string {
+  const uses11 = (chart.units?.length ?? 0) > 0 || chart.members.some((m) => m.title || m.unit);
+  return uses11 ? '1.1' : '1.0';
 }
 
 /**
@@ -91,6 +172,7 @@ export class OrgChartService {
       organization: data.organization || undefined,
       description: data.description || undefined,
       members: Array.isArray(data.members) ? data.members : [],
+      units: Array.isArray(data.units) && data.units.length ? data.units : undefined,
       notes: content.trim() || undefined,
       created_at: data.created_at || new Date().toISOString(),
       updated_at: data.updated_at || new Date().toISOString(),
@@ -100,14 +182,14 @@ export class OrgChartService {
 
   private async writeChart(chart: OrgChart, filePath: string): Promise<OrgChart> {
     const frontmatter = {
-      // 1.1 only when a 1.1 field is used, so existing charts are written exactly as before.
-      schema_version: chart.members.some((m) => m.title) ? '1.1' : '1.0',
+      schema_version: schemaVersion(chart),
       id: chart.id,
       type: 'org_chart',
       name: chart.name,
       organization: chart.organization || undefined,
       description: chart.description || undefined,
       members: chart.members,
+      units: chart.units?.length ? chart.units : undefined,
       created_at: chart.created_at,
       updated_at: chart.updated_at,
     };
@@ -141,12 +223,14 @@ export class OrgChartService {
     if (!name) throw new OrgChartError('Chart name is required');
     const id = await this.generateId();
     const now = new Date().toISOString();
+    const { members, units } = reconcileUnits(await this.checkNewRefs(normalizeMembers(data.members), []), normalizeUnits(data.units));
     const chart: OrgChart = {
       id,
       name,
       organization: data.organization?.trim() || undefined,
       description: data.description?.trim() || undefined,
-      members: await this.checkNewRefs(normalizeMembers(data.members), []),
+      members,
+      units: units.length ? units : undefined,
       notes: data.notes?.trim() || undefined,
       created_at: now,
       updated_at: now,
@@ -158,12 +242,17 @@ export class OrgChartService {
     const existing = await this.getChart(id);
     const name = data.name !== undefined ? String(data.name).trim() : existing.name;
     if (!name) throw new OrgChartError('Chart name is required');
+    const { members, units } = reconcileUnits(
+      data.members !== undefined ? await this.checkNewRefs(normalizeMembers(data.members), existing.members) : existing.members,
+      data.units !== undefined ? normalizeUnits(data.units) : existing.units ?? [],
+    );
     const updated: OrgChart = {
       ...existing,
       name,
       organization: data.organization !== undefined ? data.organization.trim() || undefined : existing.organization,
       description: data.description !== undefined ? data.description.trim() || undefined : existing.description,
-      members: data.members !== undefined ? await this.checkNewRefs(normalizeMembers(data.members), existing.members) : existing.members,
+      members,
+      units: units.length ? units : undefined,
       notes: data.notes !== undefined ? data.notes.trim() || undefined : existing.notes,
       id,
       updated_at: new Date().toISOString(),
@@ -189,7 +278,13 @@ export class OrgChartService {
           const { reports_to: _old, ...rest } = m;
           return member.reports_to ? { ...rest, reports_to: member.reports_to } : rest;
         });
-      await this.writeChart({ ...chart, members, updated_at: new Date().toISOString() }, chart.path!);
+      // A unit they led keeps its people but no longer has a head.
+      const units = chart.units?.map((u) => {
+        if (u.head !== ref) return u;
+        const { head: _gone, ...rest } = u;
+        return rest;
+      });
+      await this.writeChart({ ...chart, members, units, updated_at: new Date().toISOString() }, chart.path!);
     }
   }
 
@@ -205,9 +300,23 @@ export class OrgChartService {
         return { id, name: s?.name ?? id, role: titleIn.get(id) || s?.role || undefined };
       };
       const me = chart.members.find((m) => m.ref === ref)!;
+      const units = new Map((chart.units ?? []).map((u) => [u.id, u]));
+      const unitPath = (id: string): string[] => {
+        const names: string[] = [];
+        const seen = new Set<string>();
+        for (let u = units.get(id); u && !seen.has(u.id); u = u.parent ? units.get(u.parent) : undefined) {
+          seen.add(u.id);
+          names.unshift(u.name);
+        }
+        return names;
+      };
+      const myUnit = me.unit ? units.get(me.unit) : undefined;
+      const headOf = (chart.units ?? []).filter((u) => u.head === ref).map((u) => ({ id: u.id, name: u.name }));
       return {
         chart: { id: chart.id, name: chart.name, organization: chart.organization },
         title: me.title,
+        ...(myUnit ? { unit: { id: myUnit.id, name: myUnit.name, path: unitPath(myUnit.id), head: myUnit.head ? summary(myUnit.head) : null } } : {}),
+        ...(headOf.length ? { head_of: headOf } : {}),
         manager: me.reports_to ? summary(me.reports_to) : null,
         direct_reports: chart.members.filter((m) => m.reports_to === ref).map((m) => summary(m.ref)),
         peers: me.reports_to

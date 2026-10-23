@@ -807,6 +807,74 @@ input, textarea, select {
   border-left: 1px solid var(--color-border-strong);
 }
 .org-outline { padding-top: 22px; }
+
+/* Units view: unit boxes in the same tree layout, people listed inside */
+.org-node__unit {
+  display: inline-block;
+  max-width: 100%;
+  margin-top: 3px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.org-unit {
+  width: 220px;
+  padding: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  text-align: left;
+}
+.org-unit--drop { border-color: var(--color-accent); background: var(--color-accent-subtle); }
+.org-unit--bucket { margin: 24px auto 0; border-style: dashed; box-shadow: none; background: transparent; }
+.org-unit__head { display: flex; align-items: flex-start; gap: 6px; padding: 0 0 6px 4px; }
+.org-unit__people,
+.org-tree ul.org-unit__people { list-style: none; margin: 0; padding: 6px 0 0; border-top: 1px solid var(--color-border); display: flex; flex-direction: column; justify-content: flex-start; gap: 2px; }
+.org-tree ul.org-unit__people::before,
+.org-tree .org-unit__people li::before,
+.org-tree .org-unit__people li::after { display: none; }
+.org-tree .org-unit__people li { padding: 0; display: block; }
+.org-unit__people--wrap { flex-direction: row; flex-wrap: wrap; }
+.org-unit__people--wrap > li { width: 204px; }
+.org-unit__person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: grab;
+}
+.org-unit__person:hover { background: var(--color-surface-hover); }
+.org-unit__badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.org-unit__empty { padding: 8px 4px 2px; font-size: var(--text-xs); color: var(--color-text-muted); }
+.org-unit-intro {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
 .org-node__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .org-node__clamp {
   display: -webkit-box;
