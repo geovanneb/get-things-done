@@ -89,7 +89,8 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
       >
         {label}
       </span>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* minWidth 0: lets long values (e.g. a workspace path) shrink and truncate instead of pushing past the card */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
         {children}
       </div>
     </div>
@@ -124,6 +125,8 @@ function AboutRow({ label, value, mono }: { label: string; value: string; mono?:
           fontSize: 'var(--text-sm)',
           fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
           color: 'var(--color-text)',
+          minWidth: 0,
+          overflowWrap: 'anywhere',
         }}
       >
         {value}
@@ -777,8 +780,10 @@ export default function SettingsView() {
       <SectionCard title="Workspace">
         <FieldRow label="Workspace Path">
           <div
+            title={config?.path ?? ''}
             style={{
               flex: 1,
+              minWidth: 0,
               fontSize: 'var(--text-sm)',
               fontFamily: 'var(--font-mono)',
               color: 'var(--color-text)',
