@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
 import { Response } from 'express';
+import { atomicWrite } from './atomicWrite';
 import { buildZip } from './zip';
 
 /**
@@ -12,13 +13,19 @@ export async function fileInside(dir: string, relative: string): Promise<string>
   const base = path.resolve(dir);
   const full = path.resolve(base, relative);
   if (!full.startsWith(base + path.sep)) throw new Error('Invalid path traversal');
-  const stat = await fsp.stat(full).catch(() => null);
+  const realBase = await fsp.realpath(base);
+  const realFull = await fsp.realpath(full).catch(() => null);
+  if (realFull && !realFull.startsWith(realBase + path.sep)) throw new Error('Invalid path traversal');
+  const stat = realFull ? await fsp.stat(realFull) : null;
   if (!stat?.isFile()) throw new Error(`File not found: ${relative}`);
-  return full;
+  return realFull!;
 }
 
 /** Sends a file to open in the browser, or as a download when `download` is true. */
 export function sendFile(res: Response, fullPath: string, download: boolean): void {
+  // Attachments are untrusted documents, even when opened from the dashboard.
+  res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   if (download) res.download(fullPath, path.basename(fullPath), { dotfiles: 'allow' });
   else res.sendFile(fullPath, { dotfiles: 'allow' });
 }
@@ -72,10 +79,12 @@ export async function listFolderFiles(dir: string, exclude: string[] = []): Prom
 
 /** A plain top-level file name for upload or delete; names with folders are refused. */
 export function topLevelName(name: string): string {
-  if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+  if (typeof name !== 'string' || !name || name.includes('\0') || name.includes(':') || /[. ]$/.test(name) || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
     throw new Error('Invalid file name: only files at the top of the folder can be changed');
   }
-  return name;
+  // Keep rejection above: basename alone would silently accept traversal attempts.
+  // Return a path primitive's result so downstream consumers also receive an explicit filename.
+  return path.basename(name);
 }
 
 /** Largest folder the app zips in one request (sum of file sizes). */
@@ -97,4 +106,16 @@ export async function zipFolder(dir: string, ownMarkdown: string): Promise<{ nam
     modified: new Date(f.modified),
   })));
   return { name: `${folderName}.zip`, data: buildZip(entries) };
+}
+
+/** Save attachments without following an existing file symlink or replacing entity metadata. */
+export async function saveAttachment(dir: string, originalName: string, buffer: Buffer, reserved: string): Promise<FolderFile> {
+  const name = topLevelName(path.basename(originalName).replace(/[^\w.\-]/g, '_'));
+  if (name.startsWith('.') || name.toLowerCase() === reserved.toLowerCase()) {
+    throw new Error('Invalid attachment name: reserved file');
+  }
+  const target = path.join(dir, name);
+  await atomicWrite(target, buffer);
+  const stat = await fsp.stat(target);
+  return { name, size: stat.size, modified: stat.mtime.toISOString(), type: path.extname(name).slice(1).toLowerCase() || 'file' };
 }

@@ -8,6 +8,25 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Security
+
+- Disable executable Markdown frontmatter and enforce a shared data-only parser.
+- Reject untrusted local HTTP hosts/origins and request-derived path traversal;
+  confine file downloads by real path and sandbox workspace document previews.
+- Protect entity metadata from attachment uploads and case-insensitive deletion.
+
+### Fixed
+
+- Prevent concurrent writes from sharing temporary files, clean up failed writes,
+  and avoid backup/trash filename collisions.
+- Preserve malformed/oversized request status codes and hide unexpected error details.
+- Prevent cancelled UI requests from changing the active request's loading state.
+
+### Added
+
+- Server boundary regressions, a parser import check, blocking high/critical
+  dependency audits, and architecture/contributor guidance for future changes.
+
 ## [0.2.0] - 2026-10-22
 
 ### Added

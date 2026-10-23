@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import { OutputTemplate, OutputFormat } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
+import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -69,7 +69,7 @@ export class OutputService {
     const now = new Date().toISOString();
     const slug = data.slug || this.slugify(data.name || 'untitled');
     const id = `OUT-${slug}`;
-    const templateDir = path.join(this.getTemplatesDir(), slug);
+    const templateDir = path.join(this.getTemplatesDir(), topLevelName(slug));
     const filePath = path.join(templateDir, 'output.md');
 
     await fileService.ensureDir(templateDir);
@@ -142,18 +142,14 @@ export class OutputService {
     const filePath = await this.findTemplateFile(id);
     if (!filePath) throw new Error(`Output template not found: ${id}`);
     const templateDir = path.dirname(filePath);
-    const safe = path.basename(originalName).replace(/[^\w.\-]/g, '_');
-    const fp = path.join(templateDir, safe);
-    await fsp.writeFile(fp, buffer);
-    const stat = await fsp.stat(fp);
-    return { name: safe, size: stat.size, modified: stat.mtime.toISOString(), type: path.extname(safe).slice(1).toLowerCase() || 'file' };
+    return saveAttachment(templateDir, originalName, buffer, 'output.md');
   }
 
   async deleteTemplateFile(id: string, filename: string): Promise<void> {
     const filePath = await this.findTemplateFile(id);
     if (!filePath) throw new Error(`Output template not found: ${id}`);
     const safe = topLevelName(filename);
-    if (safe === 'output.md') throw new Error('Cannot delete output.md');
+    if (safe.toLowerCase() === 'output.md') throw new Error('Invalid file name: cannot delete output.md');
     const templateDir = path.dirname(filePath);
     await fsp.unlink(path.join(templateDir, safe));
   }

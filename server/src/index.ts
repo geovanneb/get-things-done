@@ -6,6 +6,7 @@ import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
 import { registerRoutes } from './routes';
+import { localRequestGuard, allowedOrigins } from './middleware/localRequestGuard';
 import { errorHandler } from './middleware/errorHandler';
 import { watcherService } from './services/watcherService';
 import { WorkspaceService } from './services/workspace';
@@ -22,28 +23,9 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 
-// CORS - localhost only
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) {
-      // Allow non-browser requests (curl, etc.)
-      callback(null, true);
-      return;
-    }
-    // Vite dev/preview ports, plus whatever port this server actually bound —
-    // the CLI picks the next free one when the default is taken.
-    const allowedOrigins = [3000, 5173, 4173, PORT].flatMap((p) => [
-      `http://localhost:${p}`,
-      `http://127.0.0.1:${p}`,
-    ]);
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS blocked: ${origin}`));
-    }
-  },
-  credentials: true,
-}));
+// Reject untrusted requests before parsing bodies or running any route.
+app.use(localRequestGuard(PORT));
+app.use(cors({ origin: [...allowedOrigins(PORT)], credentials: true }));
 
 // Request logging
 app.use(morgan('dev'));

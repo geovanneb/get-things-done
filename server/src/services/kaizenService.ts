@@ -1,3 +1,5 @@
+import { topLevelName } from '../utils/files';
+import { atomicWrite } from '../utils/atomicWrite';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { WorkspaceService } from './workspace';
@@ -139,19 +141,19 @@ export class KaizenService {
   }
 
   async getKaizen(id: string): Promise<KaizenProposal | null> {
-    const file = path.join(this.kaizenDir(), `${id}.md`);
+    const file = path.join(this.kaizenDir(), `${topLevelName(id)}.md`);
     return this.readKaizenFile(file);
   }
 
   async updateKaizen(id: string, patch: Partial<Pick<KaizenProposal, 'status' | 'applied_at'>>): Promise<KaizenProposal | null> {
-    const file = path.join(this.kaizenDir(), `${id}.md`);
+    const file = path.join(this.kaizenDir(), `${topLevelName(id)}.md`);
     const proposal = await this.readKaizenFile(file);
     if (!proposal) return null;
 
     const updated = { ...proposal, ...patch };
     const raw = await fsp.readFile(file, 'utf-8');
     const { body } = parseFrontmatter(raw, path.basename(file));
-    await fsp.writeFile(file, serializeFrontmatter(updated, body), 'utf-8');
+    await atomicWrite(file, serializeFrontmatter(updated, body));
     return updated;
   }
 

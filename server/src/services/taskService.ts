@@ -1,3 +1,4 @@
+import { saveAttachment, topLevelName } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
@@ -120,7 +121,7 @@ export class TaskService {
   }
 
   async getTask(id: string): Promise<Task> {
-    const taskFile = path.join(this.getActiveDir(), id, 'task.md');
+    const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
 
     const buildTask = (data: Task, content: string, filePath: string): Task => {
       const raw = data as Record<string, unknown>;
@@ -144,7 +145,7 @@ export class TaskService {
     };
 
     if (!(await fileService.exists(taskFile))) {
-      const archiveFile = path.join(this.getArchiveDir(), id, 'task.md');
+      const archiveFile = path.join(this.getArchiveDir(), topLevelName(id), 'task.md');
       if (!(await fileService.exists(archiveFile))) {
         throw new Error(`Task not found: ${id}`);
       }
@@ -179,7 +180,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
   async createTask(data: Partial<Task>): Promise<Task> {
     const id = await this.generateTaskId();
     const now = new Date().toISOString();
-    const taskDir = path.join(this.getActiveDir(), id);
+    const taskDir = path.join(this.getActiveDir(), topLevelName(id));
 
     await fileService.ensureDir(taskDir);
     await fileService.ensureDir(path.join(taskDir, 'attachments'));
@@ -227,7 +228,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
 
   async updateTask(id: string, data: Partial<Task>): Promise<Task> {
     const existing = await this.getTask(id);
-    const taskFile = path.join(this.getActiveDir(), id, 'task.md');
+    const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
     const { content: existingContent } = await fileService.readMarkdown<Task>(taskFile);
 
     const now = new Date().toISOString();
@@ -250,7 +251,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async deleteTask(id: string): Promise<void> {
-    const taskDir = path.join(this.getActiveDir(), id);
+    const taskDir = path.join(this.getActiveDir(), topLevelName(id));
     if (!(await fileService.exists(taskDir))) {
       throw new Error(`Task not found: ${id}`);
     }
@@ -258,8 +259,8 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async archiveTask(id: string): Promise<void> {
-    const activeDir = path.join(this.getActiveDir(), id);
-    const archiveDir = path.join(this.getArchiveDir(), id);
+    const activeDir = path.join(this.getActiveDir(), topLevelName(id));
+    const archiveDir = path.join(this.getArchiveDir(), topLevelName(id));
 
     if (!(await fileService.exists(activeDir))) {
       throw new Error(`Task not found: ${id}`);
@@ -277,7 +278,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async getTaskContent(id: string): Promise<string> {
-    const taskFile = path.join(this.getActiveDir(), id, 'task.md');
+    const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
     if (!(await fileService.exists(taskFile))) {
       throw new Error(`Task not found: ${id}`);
     }
@@ -286,7 +287,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async updateTaskContent(id: string, content: string): Promise<void> {
-    const taskFile = path.join(this.getActiveDir(), id, 'task.md');
+    const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
     if (!(await fileService.exists(taskFile))) {
       throw new Error(`Task not found: ${id}`);
     }
@@ -326,7 +327,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async listTaskFiles(id: string): Promise<Array<{ name: string; size: number; modified: string; type: string }>> {
-    const taskDir = path.join(this.getActiveDir(), id);
+    const taskDir = path.join(this.getActiveDir(), topLevelName(id));
     if (!(await fileService.exists(taskDir))) throw new Error(`Task not found: ${id}`);
 
     const entries = await fsp.readdir(taskDir, { withFileTypes: true });
@@ -346,20 +347,16 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async saveTaskFile(id: string, originalName: string, buffer: Buffer): Promise<{ name: string; size: number; modified: string; type: string }> {
-    const taskDir = path.join(this.getActiveDir(), id);
+    const taskDir = path.join(this.getActiveDir(), topLevelName(id));
     if (!(await fileService.exists(taskDir))) throw new Error(`Task not found: ${id}`);
 
-    const safe = path.basename(originalName).replace(/[^\w.\-]/g, '_');
-    const filePath = path.join(taskDir, safe);
-    await fsp.writeFile(filePath, buffer);
-    const stat = await fsp.stat(filePath);
-    return { name: safe, size: stat.size, modified: stat.mtime.toISOString(), type: path.extname(safe).slice(1).toLowerCase() || 'file' };
+    return saveAttachment(taskDir, originalName, buffer, 'task.md');
   }
 
   async deleteTaskFile(id: string, filename: string): Promise<void> {
-    const safe = path.basename(filename);
-    if (safe === 'task.md') throw new Error('Cannot delete task.md');
-    const filePath = path.join(this.getActiveDir(), id, safe);
+    const safe = topLevelName(filename);
+    if (safe.toLowerCase() === 'task.md') throw new Error('Invalid file name: cannot delete task.md');
+    const filePath = path.join(this.getActiveDir(), topLevelName(id), safe);
     await fsp.unlink(filePath);
   }
 }

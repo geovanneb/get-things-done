@@ -3,14 +3,24 @@ import { Request, Response, NextFunction } from 'express';
 export interface AppError extends Error {
   statusCode?: number;
   details?: unknown;
+  status?: number;
+  code?: string;
 }
 
 export function errorHandler(err: AppError, req: Request, res: Response, _next: NextFunction): void {
-  const statusCode = err.statusCode || 500;
+  if (res.headersSent) { _next(err); return; }
+  const requestedStatus = err.statusCode ?? err.status;
+  const statusCode = requestedStatus && requestedStatus >= 400 && requestedStatus <= 599 ? requestedStatus : 500;
 
   // Map common error patterns to HTTP status codes
   let status = statusCode;
-  if (err.message?.toLowerCase().includes('not found')) {
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    status = 413;
+  } else if (err.code?.startsWith('LIMIT_')) {
+    status = 400;
+  } else if (statusCode !== 500) {
+    status = statusCode;
+  } else if (err.message?.toLowerCase().includes('not found')) {
     status = 404;
   } else if (err.message?.toLowerCase().includes('already exists') || err.message?.toLowerCase().includes('duplicate')) {
     status = 409;
@@ -27,7 +37,7 @@ export function errorHandler(err: AppError, req: Request, res: Response, _next: 
 
   res.status(status).json({
     error: status >= 500 ? 'Internal Server Error' : err.name || 'Error',
-    message: err.message,
-    details: err.details,
+    message: status >= 500 ? 'An unexpected server error occurred' : err.message,
+    details: status >= 500 ? undefined : err.details,
   });
 }

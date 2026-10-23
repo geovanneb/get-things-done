@@ -76,13 +76,5 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci --ignore-scripts
-      # Report only: known advisories show up as a warning and in the job summary
-      # without failing the PR. Dependabot opens the actual upgrade PRs.
-      - name: Report production advisories
-        run: |
-          if npm audit --omit=dev --audit-level=high > audit.txt; then
-            echo "No high or critical advisories in production dependencies." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning title=npm audit::High or critical advisories in production dependencies. See the job summary."
-            { echo '### npm audit (production dependencies)'; echo '```'; cat audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          fi
+      - name: Reject high or critical production advisories
+        run: npm audit --omit=dev --audit-level=high

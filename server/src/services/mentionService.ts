@@ -1,3 +1,4 @@
+import { fileInside } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { TaskService } from './taskService';
@@ -75,12 +76,15 @@ export class MentionService {
     const ws = path.resolve(workspaceService.getWorkspacePath());
     const direct = path.resolve(ws, '.' + href);
     if (!direct.startsWith(ws + path.sep)) return null; // never leave the workspace
-    if (await fileService.exists(direct)) return direct;
+    const resolveFile = (candidate: string) => fileInside(ws, path.relative(ws, candidate)).catch(() => null);
+    const resolved = await resolveFile(direct);
+    if (resolved) return resolved;
     const taskId = href.startsWith('/tasks/') ? href.match(TASK_ID_RE)?.[0] : undefined;
     if (taskId) {
       for (const dir of ['active', 'archive']) {
         const candidate = path.join(ws, 'tasks', dir, taskId, 'task.md');
-        if (await fileService.exists(candidate)) return candidate;
+        const resolvedTask = await resolveFile(candidate);
+        if (resolvedTask) return resolvedTask;
       }
     }
     return null;

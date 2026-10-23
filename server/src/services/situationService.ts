@@ -1,6 +1,6 @@
 import * as fsp from 'fs/promises';
 import * as path from 'path';
-import matter from 'gray-matter';
+import { parseMarkdown } from '../utils/markdown';
 import { SituationData, AttentionItem, Task, Priority, TaskStatus } from '../types';
 import { TaskService } from './taskService';
 import { WorkspaceService } from './workspace';
@@ -215,7 +215,7 @@ export class SituationService {
   // dashboard needs the item's own title to tell them apart.
   private async readTitle(filePath: string): Promise<string | undefined> {
     try {
-      const { data, content } = matter(await fsp.readFile(filePath, 'utf-8'));
+      const { data, content } = parseMarkdown(await fsp.readFile(filePath, 'utf-8'));
       const fromMeta = [data.title, data.name].find((v) => typeof v === 'string' && v.trim());
       if (fromMeta) return fromMeta.trim();
       return content.match(/^#\s+(.+)$/m)?.[1].trim() || undefined;

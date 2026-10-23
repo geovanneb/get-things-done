@@ -54,3 +54,18 @@ The maintainer **squash-merges**, so the original commits of a merged PR are not
   together.
 - Match the surrounding code: inline styles with the design tokens (`var(--color-…)`,
   `var(--text-…)`), small components, comments only where they explain why.
+
+## Architecture and regression harness
+
+Follow [CONTRIBUTING.md](CONTRIBUTING.md#architecture-and-regression-rules) and
+[docs/architecture.md](docs/architecture.md) for boundary changes. In particular:
+
+- Use the data-only Markdown wrapper, contained file resolver, sandboxed file sender,
+  protected attachment saver and unique temporary-file writer. Do not bypass them
+  in new services or routes.
+- Validate path components at service boundaries, including values from JSON bodies;
+  TypeScript types do not validate requests at runtime.
+- Add failing-before regressions for security and persistence fixes, using temporary
+  fictional workspaces. Preserve `test:harness` and the blocking dependency audit.
+- Do not describe an atomic file replacement as preventing concurrent lost updates.
+  Document remaining risks and the checks actually run.
