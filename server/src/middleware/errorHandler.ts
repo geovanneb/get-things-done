@@ -9,6 +9,11 @@ export interface AppError extends Error {
 
 export function errorHandler(err: AppError, req: Request, res: Response, _next: NextFunction): void {
   if (res.headersSent) { _next(err); return; }
+  // The client went away mid-request (e.g. a cancelled upload): nobody is left to answer, and it is not a server fault.
+  if (req.socket?.destroyed) {
+    console.error(`[${new Date().toISOString()}] ${req.method} ${req.path} -> client disconnected: ${err.message}`);
+    return;
+  }
   const requestedStatus = err.statusCode ?? err.status;
   const statusCode = requestedStatus && requestedStatus >= 400 && requestedStatus <= 599 ? requestedStatus : 500;
 
