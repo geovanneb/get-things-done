@@ -82,7 +82,9 @@ export function topLevelName(name: string): string {
   if (typeof name !== 'string' || !name || name.includes('\0') || name.includes(':') || /[. ]$/.test(name) || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
     throw new Error('Invalid file name: only files at the top of the folder can be changed');
   }
-  return name;
+  // Keep rejection above: basename alone would silently accept traversal attempts.
+  // Return a path primitive's result so downstream consumers also receive an explicit filename.
+  return path.basename(name);
 }
 
 /** Largest folder the app zips in one request (sum of file sizes). */

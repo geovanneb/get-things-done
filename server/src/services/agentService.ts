@@ -168,9 +168,9 @@ export class AgentService {
   }
 
   async installSkill(slug: string): Promise<void> {
-    topLevelName(slug);
+    const safeSlug = topLevelName(slug);
     const ghHeaders: Record<string, string> = { 'User-Agent': 'GTD-Executive-Workspace' };
-    const contentsUrl = `https://api.github.com/repos/${GITHUB_ORG}/${GITHUB_REPO}/contents/${SKILLS_PATH}/${slug}`;
+    const contentsUrl = `https://api.github.com/repos/${GITHUB_ORG}/${GITHUB_REPO}/contents/${SKILLS_PATH}/${encodeURIComponent(safeSlug)}`;
     const contentsRes = await fetch(contentsUrl, { headers: ghHeaders });
     if (!contentsRes.ok) throw new Error(`Skill not found in marketplace: ${slug}`);
     const contents = (await contentsRes.json()) as Array<{
@@ -179,7 +179,7 @@ export class AgentService {
       download_url: string | null;
     }>;
 
-    const targetDir = path.join(this.getSkillsDir(), slug);
+    const targetDir = path.join(this.getSkillsDir(), safeSlug);
     await fsp.mkdir(targetDir, { recursive: true });
 
     for (const file of contents) {

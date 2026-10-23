@@ -178,3 +178,13 @@ test('file components reject Windows aliases and alternate data streams', () => 
     assert.throws(() => topLevelName(name), /Invalid/);
   }
 });
+
+
+test('filename validation preserves valid names and rejects paths rather than stripping them', () => {
+  for (const name of ['report.md', 'TASK-2026-0001', 'quarterly report.md', '計画.md']) {
+    assert.equal(topLevelName(name), name);
+  }
+  for (const name of ['../report.md', '..\\report.md', '/tmp/report.md', 'folder/report.md', 'folder\\report.md']) {
+    assert.throws(() => topLevelName(name), /Invalid/);
+  }
+});
