@@ -163,6 +163,8 @@ export interface SituationData {
   };
   recent_activity: Array<{
     filename: string;
+    path: string;
+    title?: string;
     event: string;
     timestamp: string;
   }>;
