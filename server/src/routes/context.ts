@@ -53,8 +53,8 @@ router.post('/:id/files', upload.single('file'), async (req: Request, res: Respo
   res.status(201).json(saved);
 });
 
-// GET /api/context/:id/files/:filename — open in the browser; ?download=1 to save it
-router.get('/:id/files/:filename', async (req: Request, res: Response) => {
+// GET /api/context/:id/files/<path> — open in the browser; ?download=1 to save it. The path may include subfolders.
+router.get('/:id/files/*filename', async (req: Request, res: Response) => {
   const fullPath = await contextService.contextFilePath(param(req, 'id'), param(req, 'filename'));
   sendFile(res, fullPath, req.query['download'] === '1');
 });
