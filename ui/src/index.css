@@ -826,3 +826,21 @@ input, textarea, select {
 @container situation (min-width: 1000px) {
   .situation__grid { grid-template-columns: minmax(0, 1fr) 380px; }
 }
+
+/* Situation, narrow widths: count tiles 2 × 2, attention metadata under the title, snapshot charts stacked. */
+.situation__metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+@container situation (max-width: 720px) {
+  .situation__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.situation__main { container: situation-main / inline-size; }
+.situation__attention-row { display: flex; align-items: center; gap: 12px; }
+.situation__attention-title { flex: 1 1 0; min-width: 0; }
+.situation__attention-meta { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.situation__snapshot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; padding: 18px; }
+@container situation-main (max-width: 560px) {
+  .situation__attention-row { flex-wrap: wrap; row-gap: 6px; }
+  .situation__attention-meta { flex-basis: 100%; justify-content: flex-end; }
+  .situation__snapshot { grid-template-columns: minmax(0, 1fr); }
+}
+.situation__task-link:hover { text-decoration: underline; }
+.situation__task-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 2px; }
