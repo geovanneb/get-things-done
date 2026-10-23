@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import ReactDOM from 'react-dom';
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
@@ -18,19 +18,50 @@ const widthMap: Record<ModalSize, number> = {
   xl: 900,
 };
 
+// Open modals, innermost last: only the topmost one handles Escape and Tab.
+const openModals: symbol[] = [];
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export default function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    },
-    [onClose]
-  );
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, handleKeyDown]);
+    const me = Symbol('modal');
+    openModals.push(me);
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Move focus into the dialog so keys no longer reach the page behind it.
+    const panel = panelRef.current;
+    if (panel && !panel.contains(document.activeElement)) panel.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (openModals[openModals.length - 1] !== me) return;
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key === 'Tab' && panelRef.current) {
+        const items = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+        if (items.length === 0) { e.preventDefault(); panelRef.current.focus(); return; }
+        const first = items[0], last = items[items.length - 1];
+        const inside = panelRef.current.contains(document.activeElement);
+        if (e.shiftKey && (document.activeElement === first || !inside)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || !inside)) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      openModals.splice(openModals.indexOf(me), 1);
+      // Back to where the user was, if that element is still on the page.
+      if (opener && document.contains(opener)) opener.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -38,7 +69,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby={title ? 'modal-title' : undefined}
+      aria-labelledby={title ? titleId : undefined}
       style={{
         position: 'fixed',
         inset: 0,
@@ -62,8 +93,11 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
 
       {/* Dialog panel */}
       <div
+        ref={panelRef}
         role="document"
+        tabIndex={-1}
         style={{
+          outline: 'none',
           position: 'relative',
           zIndex: 1,
           width: widthMap[size],
@@ -90,7 +124,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
             }}
           >
             <h2
-              id="modal-title"
+              id={titleId}
               style={{ fontSize: 'var(--text-md)', fontWeight: 600, color: 'var(--color-text)' }}
             >
               {title}
