@@ -678,3 +678,13 @@ input, textarea, select {
   line-height: 1.3;
   overflow-wrap: anywhere;
 }
+
+/* Situation: one column by default; two columns when the content area has room.
+   Measured on the content area (not the window), so it follows the collapsible sidebar.
+   minmax(0, 1fr) lets the main column shrink, so long titles end in "…" instead of pushing
+   the side column out of view. */
+.situation { container: situation / inline-size; }
+.situation__grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+@container situation (min-width: 1000px) {
+  .situation__grid { grid-template-columns: minmax(0, 1fr) 380px; }
+}
