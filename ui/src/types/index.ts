@@ -14,7 +14,6 @@ export type Priority = 'critical' | 'high' | 'medium' | 'low';
 export interface Task {
   id: string;
   title: string;
-  slug: string;
   status: TaskStatus;
   priority: Priority;
   task_type: string;
