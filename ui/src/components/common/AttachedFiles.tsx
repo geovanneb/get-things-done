@@ -3,7 +3,7 @@ import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import { apiGet } from '@/utils/api';
 
-interface AttachedFile { name: string; size: number; modified: string; type: string; }
+interface AttachedFile { name: string; size: number; modified: string; type: string; removable?: boolean; }
 
 interface AttachedFilesProps {
   /** Collection URL, e.g. `/api/outputs/templates/OUT-x/files`. GET lists, POST uploads, `/<name>` opens, DELETE removes. */
@@ -16,6 +16,12 @@ interface AttachedFilesProps {
 const labelStyle: React.CSSProperties = {
   display: 'block', marginBottom: 0, fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)',
 };
+
+/** The server's error message (`{ message }`) for a failed request, or `fallback`. */
+async function responseError(res: Response, fallback: string): Promise<Error> {
+  const body = await res.json().catch(() => null) as { message?: string } | null;
+  return new Error(body?.message ?? `${fallback} (${res.status})`);
+}
 
 const iconButton: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, border: 'none',
@@ -63,7 +69,7 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
       const form = new FormData();
       form.append('file', file);
       const res = await fetch(baseUrl, { method: 'POST', body: form });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw await responseError(res, 'Upload failed');
       const saved = await res.json();
       setFiles((prev) => [saved, ...prev.filter((f) => f.name !== saved.name)]);
     } catch (err) { alert(err instanceof Error ? err.message : 'Upload failed'); }
@@ -74,7 +80,7 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
     if (!window.confirm(`Remove "${name}"?`)) return;
     try {
       const res = await fetch(fileUrl(name), { method: 'DELETE' });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw await responseError(res, 'Remove failed');
       setFiles((prev) => prev.filter((f) => f.name !== name));
     } catch (err) { alert(err instanceof Error ? err.message : 'Delete failed'); }
   };
@@ -119,7 +125,8 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
               {g.items.map((f) => (
                 <FileRow key={f.name} file={f} url={fileUrl(f.name)}
                   label={g.folder ? f.name.slice(g.folder.length + 1) : f.name}
-                  onRemove={g.folder ? undefined : () => handleDelete(f.name)} />
+                  onRemove={g.folder || f.removable === false ? undefined : () => handleDelete(f.name)}
+                  note={!g.folder && f.removable === false ? 'This name can only be changed or removed in the workspace folder' : undefined} />
               ))}
             </div>
           ))}
@@ -130,9 +137,9 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
 }
 
 /** One file: name opens it in a new tab, then size, download and (top-level files only) remove. */
-function FileRow({ file, url, label, onRemove }: { file: AttachedFile; url: string; label: string; onRemove?: () => void }) {
+function FileRow({ file, url, label, onRemove, note }: { file: AttachedFile; url: string; label: string; onRemove?: () => void; note?: string }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', marginLeft: file.name.includes('/') ? 18 : 0, background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
+    <div title={note} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', marginLeft: file.name.includes('/') ? 18 : 0, background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
         <path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5Z" stroke="currentColor" strokeWidth="1.2" />
         <path d="M9 1.5V5.5h4" stroke="currentColor" strokeWidth="1.2" />
