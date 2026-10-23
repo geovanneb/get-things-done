@@ -259,8 +259,18 @@ function TaskItem({ task, isLast }: TaskItemProps) {
 // Main view
 // ---------------------------------------------------------------------------
 
-export default function StakeholderDetailView() {
-  const { id } = useParams<{ id: string }>();
+/**
+ * A stakeholder's profile. As a page it reads the id from the URL; `embedded` shows it inside a dialog
+ * (e.g. from an org chart card) for `stakeholderId`, without the Back button or page padding.
+ */
+export default function StakeholderDetailView({ stakeholderId, embedded = false, onNavigate }: {
+  stakeholderId?: string;
+  embedded?: boolean;
+  /** Embedded only: called when a link inside the profile is followed, so the dialog can close. */
+  onNavigate?: () => void;
+} = {}) {
+  const params = useParams<{ id: string }>();
+  const id = stakeholderId ?? params.id;
 
   const [stakeholder, setStakeholder] = useState<Stakeholder | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -318,9 +328,9 @@ export default function StakeholderDetailView() {
   // ---- 404 ----
   if (notFound) {
     return (
-      <div style={{ padding: 16, maxWidth: 720, margin: '0 auto' }}>
-        <BackButton />
-        <div style={{ marginTop: 32 }}>
+      <div style={{ padding: embedded ? 0 : 16, maxWidth: 720, margin: '0 auto' }}>
+        {!embedded && <BackButton />}
+        <div style={{ marginTop: embedded ? 0 : 32 }}>
           <EmptyState
             title="Stakeholder not found"
             description="This stakeholder may have been deleted or the link is incorrect."
@@ -333,9 +343,9 @@ export default function StakeholderDetailView() {
   // ---- Error ----
   if (fetchError) {
     return (
-      <div style={{ padding: 16, maxWidth: 720, margin: '0 auto' }}>
-        <BackButton />
-        <p role="alert" style={{ marginTop: 24, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>
+      <div style={{ padding: embedded ? 0 : 16, maxWidth: 720, margin: '0 auto' }}>
+        {!embedded && <BackButton />}
+        <p role="alert" style={{ marginTop: embedded ? 0 : 24, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>
           {fetchError}
         </p>
       </div>
@@ -349,8 +359,9 @@ export default function StakeholderDetailView() {
 
   return (
     <div
+      onClickCapture={embedded && onNavigate ? (e) => { if ((e.target as HTMLElement).closest('a')) onNavigate(); } : undefined}
       style={{
-        padding: 16,
+        padding: embedded ? 0 : 16,
         maxWidth: 720,
         margin: '0 auto',
         boxSizing: 'border-box',
@@ -359,7 +370,7 @@ export default function StakeholderDetailView() {
         gap: 16,
       }}
     >
-      <BackButton />
+      {!embedded && <BackButton />}
 
       {/* Profile card */}
       <div
@@ -376,17 +387,15 @@ export default function StakeholderDetailView() {
         <Avatar name={stakeholder.name} size="lg" />
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1
-            style={{
+          {React.createElement(embedded ? 'h3' : 'h1', {
+            style: {
               margin: 0,
               fontSize: 'var(--text-xl)',
               fontWeight: 700,
               color: 'var(--color-text)',
               lineHeight: 1.2,
-            }}
-          >
-            {stakeholder.name}
-          </h1>
+            },
+          }, stakeholder.name)}
 
           {stakeholder.role && (
             <p style={{ margin: '4px 0 0', fontSize: 'var(--text-md)', color: 'var(--color-text-secondary)' }}>
