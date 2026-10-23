@@ -18,6 +18,27 @@ export function buildTree(members: OrgChartMember[]): OrgTreeNode[] {
   return roots;
 }
 
+/** Number of levels in the tree (1 = only top-level people). */
+export function treeDepth(roots: OrgTreeNode[]): number {
+  return roots.reduce((max, n) => Math.max(max, 1 + treeDepth(n.children)), 0);
+}
+
+/**
+ * Cards to collapse so that only the first `level` levels show (level 1 = top-level people only).
+ * Every card from that depth down is collapsed, so expanding one later reveals one level at a time.
+ */
+export function collapsedForLevel(roots: OrgTreeNode[], level: number): Set<string> {
+  const out = new Set<string>();
+  const walk = (nodes: OrgTreeNode[], depth: number) => {
+    for (const n of nodes) {
+      if (n.children.length > 0 && depth >= level - 1) out.add(n.ref);
+      walk(n.children, depth + 1);
+    }
+  };
+  walk(roots, 0);
+  return out;
+}
+
 /** `ref` and everyone below it. */
 export function descendantsOf(members: OrgChartMember[], ref: string): Set<string> {
   const out = new Set<string>([ref]);

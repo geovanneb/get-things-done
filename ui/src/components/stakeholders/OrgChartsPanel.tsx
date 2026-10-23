@@ -8,7 +8,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { useAppDispatch, useAppState } from '@/store';
-import { buildTree, canReportTo, descendantsOf, managerOf, placeMember, removeMember } from '@/utils/orgChart';
+import { buildTree, canReportTo, collapsedForLevel, descendantsOf, managerOf, placeMember, removeMember, treeDepth } from '@/utils/orgChart';
 import { readChartPrefs, readListCollapsed, writeChartPrefs, writeListCollapsed } from '@/utils/orgChartPrefs';
 import type { OrgChart, OrgChartMember, Stakeholder } from '@/types';
 import OrgChartTree, { DRAG_MIME } from './OrgChartTree';
@@ -18,6 +18,8 @@ import type { ChartFormValues } from './OrgChartDialogs';
 
 type View = 'chart' | 'outline';
 const VIEW_KEY = 'gtd:org-chart-view';
+/** Charts with more people than this open at two levels until the user chooses otherwise. */
+const LARGE_CHART = 15;
 
 function readView(): View {
   try {
@@ -44,7 +46,8 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const [editingChart, setEditingChart] = useState<OrgChart | null>(null);
   const [view, setView] = useState<View>(readView);
   const [selected, setSelected] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Explicit collapsed cards for this chart; null = no choice yet (large charts then open at two levels).
+  const [collapsedPref, setCollapsedPref] = useState<Set<string> | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [picker, setPicker] = useState<Picker | null>(null);
   const [peopleQuery, setPeopleQuery] = useState('');
@@ -73,8 +76,9 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
 
   useEffect(() => {
     setSelected(null);
-    setCollapsed(new Set());
-    setPanelPref(activeId ? readChartPrefs(workspaceKey, activeId).panelOpen : undefined);
+    const prefs = activeId ? readChartPrefs(workspaceKey, activeId) : {};
+    setCollapsedPref(prefs.collapsed ? new Set(prefs.collapsed) : null);
+    setPanelPref(prefs.panelOpen);
   }, [activeId, workspaceKey]);
 
   const people = useMemo(() => new Map(stakeholders.map((s) => [s.id, s])), [stakeholders]);
@@ -82,6 +86,26 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
   const members = chart?.members ?? [];
   const memberRefs = useMemo(() => new Set(members.map((m) => m.ref)), [members]);
   const roots = useMemo(() => buildTree(members), [members]);
+  const depth = useMemo(() => treeDepth(roots), [roots]);
+  const collapsed = useMemo(
+    () => collapsedPref ?? (members.length > LARGE_CHART ? collapsedForLevel(roots, 2) : new Set<string>()),
+    [collapsedPref, members.length, roots],
+  );
+
+  const setCollapsed = useCallback((next: Set<string>) => {
+    setCollapsedPref(next);
+    if (activeId) writeChartPrefs(workspaceKey, activeId, { collapsed: [...next] });
+  }, [activeId, workspaceKey]);
+
+  // Which "Levels" button matches what is shown now (null when the user expanded cards by hand).
+  const activeLevel = useMemo(() => {
+    for (let level = 1; level < depth; level++) {
+      const want = collapsedForLevel(roots, level);
+      if (want.size === collapsed.size && [...want].every((r) => collapsed.has(r))) return level;
+    }
+    return [...collapsed].some((r) => members.some((m) => m.reports_to === r)) ? null : depth;
+  }, [roots, depth, collapsed, members]);
+
   // The panel opens by itself only for an empty chart, and only until the user makes a choice.
   const panelOpen = panelPref ?? members.length === 0;
 
@@ -123,7 +147,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
       return;
     }
     saveMembers(placeMember(members, ref, manager));
-    if (manager) setCollapsed((c) => { const n = new Set(c); n.delete(manager); return n; });
+    if (manager && collapsed.has(manager)) { const n = new Set(collapsed); n.delete(manager); setCollapsed(n); }
   }
 
   function handleAction(ref: string, action: NodeAction) {
@@ -275,6 +299,22 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     <br />Start with the most senior person, then add their direct reports.
                   </div>
                 ) : (
+                  <>
+                  {depth > 1 && (
+                    <div className="org-toolbar">
+                      <div role="group" aria-label="Levels shown" className="org-view-toggle">
+                        <span className="org-toolbar__label">Levels</span>
+                        {Array.from({ length: depth }, (_, i) => i + 1).map((level) => (
+                          <button key={level} type="button" aria-pressed={activeLevel === level}
+                            className={activeLevel === level ? 'org-view-toggle__btn org-view-toggle__btn--active' : 'org-view-toggle__btn'}
+                            title={level === 1 ? 'Collapse all' : level === depth ? 'Expand all' : `Show ${level} levels`}
+                            onClick={() => setCollapsed(level === depth ? new Set() : collapsedForLevel(roots, level))}>
+                            {level === depth ? 'All' : level}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <OrgChartTree
                     roots={roots}
                     people={people}
@@ -285,12 +325,13 @@ export default function OrgChartsPanel({ stakeholders, initialChartId }: { stake
                     canDrop={(target) => (dragging ? canReportTo(members, dragging, target) : false)}
                     hasManager={(ref) => managerOf(members, ref) !== null}
                     onSelect={setSelected}
-                    onToggle={(ref) => setCollapsed((c) => { const n = new Set(c); if (n.has(ref)) n.delete(ref); else n.add(ref); return n; })}
+                    onToggle={(ref) => { const n = new Set(collapsed); if (n.has(ref)) n.delete(ref); else n.add(ref); setCollapsed(n); }}
                     onDragStart={setDragging}
                     onDragEnd={() => setDragging(null)}
                     onDrop={(ref, target) => { setDragging(null); place(ref, target); }}
                     onAction={handleAction}
                   />
+                  </>
                 )}
                 <p style={{ margin: '20px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                   Drag a card onto someone to make them their manager. Select a card and click <strong>+</strong> to add a direct report, or open <strong>Add people</strong> to add under it.
