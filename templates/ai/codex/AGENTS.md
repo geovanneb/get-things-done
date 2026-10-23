@@ -4,7 +4,7 @@ This workspace is managed by Get Things Done.
 
 ## Who you are working for
 
-**{{name}}** — {{role}} at {{organization}}.
+**{{name}}** — {{role}} at {{organization}}
 
 Read `profile/executive-profile.md` before any writing task. All outputs must reflect their voice.
 
