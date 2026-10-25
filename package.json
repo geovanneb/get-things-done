@@ -88,7 +88,7 @@
     "url": "https://github.com/geovanneb/get-things-done/issues"
   },
   "overrides": {
-    "body-parser": "^1.20.6",
+    "body-parser": "^1.20.9",
     "qs": "^6.15.4"
   }
 }
