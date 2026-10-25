@@ -21,6 +21,22 @@ const port = 3900 + Math.floor(Math.random() * 90);
 const base = `http://127.0.0.1:${port}`;
 const env = { ...process.env, HOME: home, USERPROFILE: home };
 
+// Node 20's fetch can reuse a keep-alive socket the server has just closed:
+// the demo seed runs in its own process for longer than the server's 5-second
+// idle timeout, so the connection this script opened earlier is gone by the
+// time it asks again. Newer Node versions retry this themselves. Retry a GET
+// once in that case; anything else still fails as it should.
+const nativeFetch = globalThis.fetch;
+globalThis.fetch = async (url, init = {}) => {
+  try {
+    return await nativeFetch(url, init);
+  } catch (err) {
+    const closed = ['UND_ERR_SOCKET', 'ECONNRESET'].includes(err?.cause?.code);
+    if (!closed || (init.method ?? 'GET').toUpperCase() !== 'GET') throw err;
+    return nativeFetch(url, init);
+  }
+};
+
 let failures = 0;
 function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  ${detail}` : ''}`);
@@ -362,7 +378,7 @@ try {
   const log = await (await fetch(`${base}/api/workspace/git/log`)).json();
   check('git log shows the commit', log[0]?.message === 'Smoke test commit', `log=${JSON.stringify(log[0] ?? null)}`);
 } catch (err) {
-  check('smoke test ran to the end', false, String(err));
+  check('smoke test ran to the end', false, `${err}${err?.cause ? ` (cause: ${err.cause.code ?? ''} ${err.cause.message ?? err.cause})` : ''}`);
 } finally {
   server.kill();
   fs.rmSync(tmp, { recursive: true, force: true });
