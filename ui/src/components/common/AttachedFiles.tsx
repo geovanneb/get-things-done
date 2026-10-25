@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import { apiGet } from '@/utils/api';
+import { groupByFolder } from '@/utils/attachedFiles';
 
 interface AttachedFile { name: string; size: number; modified: string; type: string; removable?: boolean; }
 
@@ -32,12 +33,15 @@ const iconButton: React.CSSProperties = {
  * Files kept next to a template or a context note: open one in a new tab, download it, attach or remove.
  * Opening uses the browser's own viewer (PDF, HTML, images, text); other types download.
  * Subfolders (e.g. assets/, source/) are listed read-only: attach and remove act on the top level only.
+ * Each subfolder starts collapsed, showing its name and file count; clicking it shows its files.
  */
 export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFilesProps) {
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set());
   const inputRef = useRef<HTMLInputElement>(null);
+  const reduceMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => {
     apiGet<AttachedFile[]>(baseUrl)
@@ -45,21 +49,20 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
       .catch(() => setLoading(false));
   }, [baseUrl]);
 
+  // Another template or note: its folders start collapsed again.
+  useEffect(() => { setOpenFolders(new Set()); }, [baseUrl]);
+
+  const toggleFolder = (folder: string) => setOpenFolders((prev) => {
+    const next = new Set(prev);
+    if (next.has(folder)) next.delete(folder); else next.add(folder);
+    return next;
+  });
+
   // Names can include subfolders ("assets/logo.png"); encode each part, keep the slashes.
   const fileUrl = (name: string) => `${baseUrl}/${name.split('/').map(encodeURIComponent).join('/')}`;
 
   // Top-level files first (they can be removed here), then one group per subfolder (read-only here).
-  const groups = useMemo(() => {
-    const out: Array<{ folder: string; items: AttachedFile[] }> = [];
-    for (const f of files) {
-      const slash = f.name.lastIndexOf('/');
-      const folder = slash === -1 ? '' : f.name.slice(0, slash);
-      const last = out[out.length - 1];
-      if (last && last.folder === folder) last.items.push(f);
-      else out.push({ folder, items: [f] });
-    }
-    return out;
-  }, [files]);
+  const groups = useMemo(() => groupByFolder(files), [files]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -111,25 +114,33 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>No files attached.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {groups.map((g) => (
-            <div key={g.folder || '.'} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {g.folder && (
-                <div title="Files in subfolders can be opened and downloaded here; change them in the workspace folder"
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}>
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M1.5 4.5a1 1 0 0 1 1-1h3.6l1.4 1.5h5.9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-10.9a1 1 0 0 1-1-1V4.5Z" stroke="currentColor" strokeWidth="1.2" />
-                  </svg>
-                  {g.folder}/ · {g.items.length}
-                </div>
-              )}
-              {g.items.map((f) => (
-                <FileRow key={f.name} file={f} url={fileUrl(f.name)}
-                  label={g.folder ? f.name.slice(g.folder.length + 1) : f.name}
-                  onRemove={g.folder || f.removable === false ? undefined : () => handleDelete(f.name)}
-                  note={!g.folder && f.removable === false ? 'This name can only be changed or removed in the workspace folder' : undefined} />
-              ))}
-            </div>
-          ))}
+          {groups.map((g) => {
+            const open = !g.folder || openFolders.has(g.folder);
+            return (
+              <div key={g.folder || '.'} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {g.folder && (
+                  <button type="button" onClick={() => toggleFolder(g.folder)} aria-expanded={open}
+                    title={`${open ? 'Hide' : 'Show'} the ${g.items.length} file${g.items.length === 1 ? '' : 's'} directly in ${g.folder}/. Files in subfolders can be opened and downloaded here; change them in the workspace folder`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, maxWidth: '100%', marginTop: 4, padding: '2px 0', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}>
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+                      style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : 'none', transition: reduceMotion ? undefined : 'transform 120ms ease' }}>
+                      <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+                      <path d="M1.5 4.5a1 1 0 0 1 1-1h3.6l1.4 1.5h5.9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-10.9a1 1 0 0 1-1-1V4.5Z" stroke="currentColor" strokeWidth="1.2" />
+                    </svg>
+                    <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{g.folder}/ · {g.items.length}</span>
+                  </button>
+                )}
+                {open && g.items.map((f) => (
+                  <FileRow key={f.name} file={f} url={fileUrl(f.name)}
+                    label={g.folder ? f.name.slice(g.folder.length + 1) : f.name}
+                    onRemove={g.folder || f.removable === false ? undefined : () => handleDelete(f.name)}
+                    note={!g.folder && f.removable === false ? 'This name can only be changed or removed in the workspace folder' : undefined} />
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test:agent-floor": "tsx src/components/agentic/engine/simulation.test.ts",
-    "test:org-chart": "tsx src/utils/orgChart.test.ts"
+    "test:org-chart": "tsx src/utils/orgChart.test.ts",
+    "test:files": "tsx src/utils/attachedFiles.test.ts"
   },
   "dependencies": {
     "date-fns": "^3.6.0",
