@@ -215,7 +215,7 @@ function TaskItem({ task, isLast }: TaskItemProps) {
 
       {/* Title link */}
       <Link
-        to={`/board/task/${task.slug}`}
+        to={`/board/task/${encodeURIComponent(task.id)}`}
         style={{
           flex: 1,
           fontSize: 'var(--text-base)',
@@ -282,7 +282,7 @@ export default function StakeholderDetailView() {
       try {
         const [sk, taskList, orgPositions] = await Promise.all([
           apiGet<Stakeholder>(`/api/stakeholders/${id}`),
-          apiGet<Task[]>(`/api/tasks?stakeholder=${id}`),
+          apiGet<Task[]>(`/api/tasks?stakeholder_ref=${encodeURIComponent(id!)}`),
           apiGet<OrgPosition[]>(`/api/org-charts?stakeholder=${encodeURIComponent(id!)}`).catch(() => []),
         ]);
         if (cancelled) return;
