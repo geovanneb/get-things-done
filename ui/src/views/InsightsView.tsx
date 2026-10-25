@@ -7,6 +7,7 @@ import BarList from '@/components/insights/BarList';
 import AttentionList from '@/components/insights/AttentionList';
 import FlowChart from '@/components/insights/FlowChart';
 import TurnaroundChart from '@/components/insights/TurnaroundChart';
+import ActivityCalendar from '@/components/insights/calendar/ActivityCalendar';
 import WindowFilter, { type WindowValue } from '@/components/insights/WindowFilter';
 import { EMPHASIS, SERIES, rampStep } from '@/components/insights/palette';
 import { formatDays, formatHours, formatRate } from '@/components/insights/format';
@@ -165,6 +166,10 @@ export default function InsightsView() {
       >
         <AttentionList items={data.attention} />
       </Panel>
+
+      {/* Full width: a year is 53 columns. It answers "when", the frame for the
+          "who" and "what" panels below, and follows the same window filter. */}
+      <ActivityCalendar window={window} windowLabel={windowLabel} />
 
       <div style={GRID_TWO_COL}>
         <Panel

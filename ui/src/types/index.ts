@@ -248,6 +248,60 @@ export interface InsightsData {
   turnaround_buckets: Array<{ label: string; count: number }>;
 }
 
+/** What happened to a task on one calendar day. Mirrors the server type. */
+export type InsightsCalendarEvent = 'created' | 'completed' | 'ran' | 'due';
+
+/** One local day in the activity calendar. */
+export interface InsightsCalendarDay {
+  /** Local date, `YYYY-MM-DD`. */
+  date: string;
+  created: number;
+  completed: number;
+  runs: number;
+  due: number;
+  /** Due this day, still open, already late. */
+  overdue: number;
+  /** created + completed + runs. */
+  activity: number;
+  task_count: number;
+  top_tasks: Array<{ id: string; title: string }>;
+  top_stakeholders: Array<{ ref: string; name: string }>;
+  /** 24 hourly activity counts; only for ranges of 31 days or less. */
+  by_hour?: number[];
+}
+
+export interface InsightsCalendar {
+  generated_at: string;
+  /** The Insights filter window this covers. `null` means all time. */
+  window_days: number | null;
+  from: string;
+  to: string;
+  today: string;
+  days: InsightsCalendarDay[];
+}
+
+export interface InsightsCalendarDayDetail {
+  generated_at: string;
+  date: string;
+  totals: Pick<
+    InsightsCalendarDay,
+    'created' | 'completed' | 'runs' | 'due' | 'overdue' | 'activity'
+  >;
+  tasks: Array<{
+    id: string;
+    title: string;
+    status: TaskStatus;
+    priority: Priority;
+    events: InsightsCalendarEvent[];
+    runs: number;
+    /** Due this day, still open and already late. */
+    overdue: boolean;
+    due_date?: string;
+    stakeholders: string[];
+  }>;
+  stakeholders: Array<{ ref: string; name: string; count: number }>;
+}
+
 export interface KaizenProposal {
   id: string;
   title: string;
