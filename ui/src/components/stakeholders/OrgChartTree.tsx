@@ -126,6 +126,7 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
   const role = chartTitle || person?.role;
   const unitName = unitNames?.get(node.ref);
   const isPh = placeholders?.has(node.ref) ?? false;
+  const openProfile = person && !isPh ? () => onAction(node.ref, 'open') : undefined;
   const menu: Array<[NodeAction, string]> = [
     ['add-report', 'Add a direct report…'],
     ['change-manager', 'Change manager…'],
@@ -176,16 +177,29 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
       aria-expanded={reports > 0 ? !isCollapsed : undefined}
       tabIndex={0}
       onKeyDown={(e) => {
+        // Only the card's own shortcuts: keys pressed on its buttons and menu items act on those controls.
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(isSelected ? null : node.ref); }
         if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); onAction(node.ref, 'remove'); }
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
-        <Avatar name={name} size={compact ? 'sm' : 'md'} initials={person?.avatar_initials} />
+        <span onClick={openProfile ? (e) => { e.stopPropagation(); openProfile(); } : undefined}
+          style={{ display: 'flex', flexShrink: 0, cursor: openProfile ? 'pointer' : undefined }}>
+          <Avatar name={name} size={compact ? 'sm' : 'md'} initials={person?.avatar_initials} />
+        </span>
         <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-          <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: person ? 'var(--color-text)' : 'var(--color-critical)' }}>
-            {person ? name : `${node.ref} (missing)`}
-          </div>
+          {openProfile ? (
+            // Mouse shortcut; keyboard users open the profile from the card menu.
+            <button type="button" tabIndex={-1} className={`org-node__name ${compact ? 'org-node__line' : 'org-node__clamp'}`}
+              title={`Show ${name}'s profile`} onClick={(e) => { e.stopPropagation(); openProfile(); }}>
+              {name}
+            </button>
+          ) : (
+            <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: person ? 'var(--color-text)' : 'var(--color-critical)' }}>
+              {person ? name : `${node.ref} (missing)`}
+            </div>
+          )}
           {(role || (compact && (person?.organization || unitName))) && (
             <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}
               title={chartTitle ? `Title in this chart${person?.role ? ` · profile role: ${person.role}` : ''}` : undefined}>

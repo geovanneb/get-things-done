@@ -6,6 +6,8 @@ import EmptyState from '@/components/common/EmptyState';
 import Input from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
+import Modal from '@/components/common/Modal';
+import StakeholderDetailView from '@/views/StakeholderDetailView';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { useAppDispatch, useAppState } from '@/store';
 import {
@@ -70,6 +72,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
   const [editingChart, setEditingChart] = useState<OrgChart | null>(null);
   const [view, setView] = useState<View>(readView);
   const [selected, setSelected] = useState<string | null>(null);
+  const [profileFor, setProfileFor] = useState<string | null>(null);
   // Explicit collapsed cards for this chart; null = no choice yet (large charts then open at two levels).
   const [collapsedPref, setCollapsedPref] = useState<Set<string> | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -112,6 +115,13 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
       .catch((err) => notifyError(err instanceof Error ? err.message : 'Could not load org charts.'))
       .finally(() => setLoading(false));
   }, [notifyError, initialChartId]);
+
+  // A link to another chart (?chart=ID) while this panel stays mounted selects that chart.
+  const lastRequested = useRef(initialChartId);
+  useEffect(() => {
+    if (initialChartId && initialChartId !== lastRequested.current) setActiveId(initialChartId);
+    lastRequested.current = initialChartId;
+  }, [initialChartId]);
 
   useEffect(() => {
     try { localStorage.setItem(VIEW_KEY, view); } catch { /* storage unavailable */ }
@@ -205,7 +215,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
 
   // Esc: an open dialog handles it first; then full screen closes; then the people panel.
   useEffect(() => {
-    if (picker || formOpen || titleFor || unitFor || unitForm || phForm || makeFor || (!fullscreen && !panelOpen)) return;
+    if (picker || formOpen || titleFor || unitFor || unitForm || phForm || makeFor || profileFor || (!fullscreen && !panelOpen)) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (fullscreen) exitFullscreen();
@@ -213,7 +223,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [panelOpen, fullscreen, picker, formOpen, titleFor, unitFor, unitForm, phForm, makeFor, setPanelOpen, exitFullscreen]);
+  }, [panelOpen, fullscreen, picker, formOpen, titleFor, unitFor, unitForm, phForm, makeFor, profileFor, setPanelOpen, exitFullscreen]);
 
   // Entering full screen: lock page scroll, fit the chart, move focus to "Exit full screen".
   useEffect(() => {
@@ -346,8 +356,15 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
     if (manager && collapsed.has(manager)) { const n = new Set(collapsed); n.delete(manager); applyCollapsed(n); }
   }
 
+  // Closing the profile returns focus to the person's card (the menu item that opened it is gone).
+  function closeProfile() {
+    const ref = profileFor;
+    setProfileFor(null);
+    if (ref) requestAnimationFrame(() => document.querySelector<HTMLElement>(`.org-node[data-ref="${CSS.escape(ref)}"]`)?.focus());
+  }
+
   function handleAction(ref: string, action: NodeAction) {
-    if (action === 'open') navigate(`/stakeholders/${encodeURIComponent(ref)}`);
+    if (action === 'open') setProfileFor(ref);
     else if (action === 'edit-placeholder') setPhForm({ ref, manager: null });
     else if (action === 'make-stakeholder') setMakeFor(ref);
     else if (action === 'link-stakeholder') setPicker({ mode: 'link', ref });
@@ -796,6 +813,19 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
         onClose={() => setPhForm(null)}
         onSave={savePlaceholder}
       />
+
+      <Modal isOpen={profileFor !== null} onClose={closeProfile} title="Profile" size="lg">
+        {profileFor && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button type="button" className="org-link-btn" onClick={() => navigate(`/stakeholders/${encodeURIComponent(profileFor)}`)}>
+                Open full page
+              </button>
+            </div>
+            <StakeholderDetailView stakeholderId={profileFor} embedded onNavigate={() => setProfileFor(null)} />
+          </>
+        )}
+      </Modal>
 
       <MakeStakeholderModal
         isOpen={makeFor !== null}
