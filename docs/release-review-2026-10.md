@@ -62,6 +62,38 @@ not commits to this repository.
 - Node 20.19 and Linux CI results are pending publication of the branch. Dependency
   installation from a clean checkout was not repeated locally for each runtime.
 
+## Browser checks
+
+Run in Chrome on macOS against the built package, on a fictional demo workspace
+(`scripts/seed-demo.mjs`) with an isolated home directory, on its own port.
+
+| Area | Result |
+| --- | --- |
+| Activity calendar | Pass. The 7, 30 and 90 day and all-time windows show the expected day cells and totals; the Completed filter matches the Completed card (6 in 30 days). Hover summary, day details, previous/next day, close, and Next disabled on today all work |
+| Stakeholder links | Pass. Profile page, organization section, direct-report links and related-task links open the right person or task |
+| Nested dialogs | Pass. A profile dialog opened over the full-screen org chart traps Tab and Shift+Tab; Escape closes only the profile and returns focus to the card; a second Escape exits full screen |
+| Collapsed file folders | Pass. On an output template, `assets/`, `assets/icons/` and `source/` start collapsed with a file count (`aria-expanded="false"`); opening one shows only its own files |
+| Context import | Pass. An update created from the dialog with pasted text saves the material and shows the analyze command |
+| Concurrent uploads | Pass. Three uploads of `meeting.txt` sent at the same time from the page are kept as `meeting.txt`, `meeting-2.txt` and `meeting-3.txt`, each with its own content |
+| Concurrent decisions | Pass. Two decisions saved at the same time are both kept with their notes. A save racing an approval is applied first, then the approval freezes it |
+| Review in the UI | Pass. "Change my selection" returns an approved update to review with its decisions; clearing the selection autosaves and keeps reviewer notes |
+| Date validation | Pass. `2026-02-30` is rejected with 400 and the stored date is unchanged |
+
+Destructive actions that use the browser's native confirm were exercised with the
+confirm stubbed in the page. Screen readers, responsive layouts and other browsers
+were not tested.
+
+Issues found, all present before this release and left for separate PRs:
+
+- **Task dialog has no focus trap.** Shift+Tab moves focus to the board behind it.
+  It renders its own dialog instead of the shared `Modal`; v0.3.0 behaves the same.
+- **Status label mismatch.** The stakeholder profile shows "In Review" while the rest
+  of the app shows "Needs Review" for the same status.
+- **Org charts tab is not in the URL.** Browser Back from a task returns to the
+  Individuals tab instead of Org charts.
+- `gtd stop` reported that the demo server did not exit cleanly and force-stopped it
+  after the session. Not investigated further.
+
 ## Performance observations
 
 Local warm-process samples on Node 26, one warm-up followed by five measurements:
@@ -85,11 +117,8 @@ persistence fix does not add caching or suppress the warning.
 
 ## Remaining release gates and engineering risks
 
-- Browser interaction, responsive layout, focus trapping and assistive technology
-  were **not validated**: the in-app browser was unavailable and Chrome automation
-  failed to start its app-server. Manually exercise calendar filters/day navigation,
-  stakeholder profile/task links, nested dialogs, collapsed file folders and context
-  import/review before release.
+- The browser checks above passed. Responsive layout and assistive technology were
+  not validated, and the task dialog focus trap is a known gap (see above).
 - Run CI on the published head and confirm mergeability before marking the PR ready.
 - Concurrent external writers remain outside this fix. Optimistic version checks
   and UI reconciliation of autosaves with live refreshes need separate integration
@@ -104,4 +133,4 @@ persistence fix does not add caching or suppress the warning.
 The code retains the project's service/route separation and shared persistence
 utilities, with tests demonstrating the defects and fixes. This review is not a
 penetration test or a claim that every feature is defect-free. Release readiness
-still depends on the browser checks and CI above.
+still depends on CI above.
