@@ -124,8 +124,10 @@ for (const [title, status, priority, task_type, created, done, due, stakeholders
   });
   const patch = { status, task_type, preferred_agent: 'executive-report-writer', created_at: daysAgo(created) };
   if (status !== 'backlog' && status !== 'ready') patch.start_date = daysAgo(created, 10);
-  if (done !== null) patch.done_date = daysAgo(done, 15);
   await api('PUT', `/api/tasks/${t.id}`, patch);
+  // Moving a task to Done stamps today's date, so the real finish date has to
+  // be written in a second update, once the task is already done.
+  if (done !== null) await api('PUT', `/api/tasks/${t.id}`, { done_date: daysAgo(done, 15) });
 
   if (status === 'done' || status === 'in_review' || status === 'in_progress') {
     const dir = path.join(workspace.path, 'tasks', 'active', t.id, 'executions');
@@ -133,6 +135,67 @@ for (const [title, status, priority, task_type, created, done, due, stakeholders
     const ran = new Date(done !== null ? now - done * DAY : now - DAY);
     const stamp = ran.toISOString().replace(/[:.]/g, '-');
     fs.writeFileSync(path.join(dir, `${stamp}.md`), `---\nagent: executive-report-writer\nstarted_at: '${ran.toISOString()}'\ncompleted_at: '${new Date(ran.getTime() + 25 * 60 * 1000).toISOString()}'\n---\n\nDrafted ${title.toLowerCase()}.\n`);
+  }
+}
+
+// A year of finished, archived work, so the Insights activity calendar has a
+// real rhythm to show: busy Tuesdays, quiet weekends, heavier quarter ends and
+// a slow August. Archived tasks stay off the board. A fixed seed keeps the
+// demo the same on every run.
+let seed = 7;
+const random = () => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+const pick = (list) => list[Math.floor(random() * list.length)];
+const WEEKDAY_LOAD = [0.05, 0.8, 1.4, 1.1, 1.0, 0.6, 0.1];
+const MONTH_LOAD = [0.9, 1.0, 1.5, 1.0, 1.0, 1.5, 0.9, 0.5, 1.5, 1.1, 1.0, 1.3];
+const historyWork = [
+  ['Weekly ops summary for the CEO', 'Priya', 'recurring'],
+  ['Carrier performance review', 'Daniel', 'supply-chain'],
+  ['Monthly cost report', 'Marcus', 'finance'],
+  ['Customer escalation follow-up', 'Sofia', 'customers'],
+  ['Board pre-read', 'Hana', 'board'],
+  ['Partner volume check-in notes', 'Leo', 'partners'],
+  ['Hiring plan update', 'Priya', 'people'],
+  ['Warehouse throughput analysis', 'Daniel', 'operations'],
+  ['Budget variance memo', 'Marcus', 'finance'],
+  ['Support backlog review', 'Sofia', 'customers'],
+];
+const localStamp = (date, hour, minute = 0) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute).toISOString();
+
+let history = 0;
+for (let ago = 365; ago >= 45; ago--) {
+  const date = new Date(now - ago * DAY);
+  const load = 0.55 * WEEKDAY_LOAD[date.getDay()] * MONTH_LOAD[date.getMonth()];
+  const count = Math.floor(load + random());
+  for (let i = 0; i < count; i++) {
+    const [title, who, tag] = pick(historyWork);
+    const createdHour = 8 + Math.floor(random() * 4);
+    const turnaround = random() < 0.6 ? 0 : 1 + Math.floor(random() * 3);
+    const finished = new Date(date.getTime() + turnaround * DAY);
+    const t = await api('POST', '/api/tasks', {
+      title, priority: pick(['low', 'medium', 'medium', 'high']), tags: [tag],
+      objective: `${title}.`, description: `${title}.`, stakeholders: [S(who, 'audience', true)],
+    });
+    await api('PUT', `/api/tasks/${t.id}`, {
+      status: 'done', task_type: 'ad_hoc', created_at: localStamp(date, createdHour, 10),
+    });
+    await api('PUT', `/api/tasks/${t.id}`, { done_date: localStamp(finished, 16 + Math.floor(random() * 3), 30) });
+
+    const dir = path.join(workspace.path, 'tasks', 'active', t.id, 'executions');
+    fs.mkdirSync(dir, { recursive: true });
+    const runs = random() < 0.75 ? 1 : 2;
+    for (let r = 0; r < runs; r++) {
+      const ran = new Date(localStamp(finished, Math.min(17, createdHour + 1 + r * 2 + Math.floor(random() * 3)), 5));
+      const stamp = ran.toISOString().replace(/[:.]/g, '-');
+      fs.writeFileSync(path.join(dir, `${stamp}.md`), `---\nagent: executive-report-writer\nstarted_at: '${ran.toISOString()}'\n---\n\nDrafted ${title.toLowerCase()}.\n`);
+    }
+    await api('POST', `/api/tasks/${t.id}/archive`);
+    history++;
   }
 }
 
@@ -158,4 +221,4 @@ applied_at: null
 Captured after the Q2 report review.
 `);
 
-console.log(`Seeded ${people.length} stakeholders, ${notes.length} context notes and ${tasks.length} tasks into ${workspace.path}`);
+console.log(`Seeded ${people.length} stakeholders, ${notes.length} context notes, ${tasks.length} tasks and ${history} archived tasks into ${workspace.path}`);
