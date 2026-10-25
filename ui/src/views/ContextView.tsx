@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
 import Modal from '@/components/common/Modal';
@@ -8,7 +9,12 @@ import AttachedFiles from '@/components/common/AttachedFiles';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
 import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api';
 import { formatRelativeDate } from '@/utils/format';
-import type { ContextNote } from '@/types';
+import { useApi } from '@/hooks/useApi';
+import { useAppDispatch, useDataVersion } from '@/store';
+import ImportUpdateModal from '@/components/context-updates/ImportUpdateModal';
+import UpdatesList from '@/components/context-updates/UpdatesList';
+import UpdateDetail from '@/components/context-updates/UpdateDetail';
+import type { ContextNote, ContextUpdate } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -255,11 +261,15 @@ function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
 
 interface SidebarProps {
   notes: ContextNote[];
-  activeCategory: Category;
+  activeCategory: Category | null;
   onSelect: (cat: Category) => void;
+  updatesActive: boolean;
+  /** Updates waiting on the user: an analysis to run, proposals to review, or an apply to run. */
+  updatesWaiting: number;
+  onSelectUpdates: () => void;
 }
 
-function Sidebar({ notes, activeCategory, onSelect }: SidebarProps) {
+function Sidebar({ notes, activeCategory, onSelect, updatesActive, updatesWaiting, onSelectUpdates }: SidebarProps) {
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
     for (const note of notes) {
@@ -295,6 +305,29 @@ function Sidebar({ notes, activeCategory, onSelect }: SidebarProps) {
           );
         })}
       </nav>
+
+      {/* Below the library: material that may change it. Its own group, so raw input never looks like context. */}
+      <div style={{ borderTop: '1px solid var(--color-border)', padding: '12px 0 16px' }}>
+        <div style={{ padding: '0 16px 6px', fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+          Updates
+        </div>
+        <button onClick={onSelectUpdates} aria-current={updatesActive ? 'page' : undefined}
+          aria-label={updatesWaiting > 0 ? `Import and review, ${updatesWaiting} waiting on you` : 'Import and review'}
+          title="Import meetings, decks or photos, and review the context changes an agent proposes"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '8px 16px', border: 'none', background: updatesActive ? 'var(--color-accent-subtle)' : 'transparent', color: updatesActive ? 'var(--color-accent)' : 'var(--color-text)', fontWeight: updatesActive ? 600 : 400, fontSize: 'var(--text-sm)', cursor: 'pointer', textAlign: 'left' }}
+          onMouseEnter={(e) => { if (!updatesActive) e.currentTarget.style.background = 'var(--color-surface-hover)'; }}
+          onMouseLeave={(e) => { if (!updatesActive) e.currentTarget.style.background = 'transparent'; }}>
+          <span>Import &amp; review</span>
+          {updatesWaiting > 0 && (
+            <span aria-hidden="true" style={{ minWidth: 20, height: 20, padding: '0 5px', borderRadius: 99, background: 'var(--color-warning)', color: 'var(--color-text-on-accent)', fontSize: 'var(--text-xs)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              {updatesWaiting > 99 ? '99+' : updatesWaiting}
+            </span>
+          )}
+        </button>
+        <p style={{ margin: '4px 16px 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.4 }}>
+          Bring in meetings, decks and photos. An agent proposes changes; you approve.
+        </p>
+      </div>
     </div>
   );
 }
@@ -304,6 +337,15 @@ function Sidebar({ notes, activeCategory, onSelect }: SidebarProps) {
 // ---------------------------------------------------------------------------
 
 export default function ContextView() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { id: updateId } = useParams<{ id?: string }>();
+  const showUpdates = location.pathname.startsWith('/context/updates');
+  const updatesVersion = useDataVersion('context-updates');
+  const { data: updates, refetch: refetchUpdates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
+  const updatesWaiting = (updates ?? []).filter((u) => ['ready', 'in_review', 'approved'].includes(u.status)).length;
+  const [importOpen, setImportOpen] = useState(false);
+  const dispatch = useAppDispatch();
   const [notes, setNotes] = useState<ContextNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -365,29 +407,56 @@ export default function ContextView() {
 
   if (loading) return <LoadingSpinner text="Loading context notes..." />;
 
-  const categoryTitle = activeCategory === 'All' ? 'All Notes' : activeCategory;
+  const categoryTitle = showUpdates ? 'Context updates' : activeCategory === 'All' ? 'All Notes' : activeCategory;
+
+  const handleImported = (update: ContextUpdate, uploadErrors: string[]) => {
+    setImportOpen(false);
+    refetchUpdates();
+    if (uploadErrors.length) {
+      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: `Saved, but some files did not upload: ${uploadErrors.join('; ')}` } });
+    }
+    navigate(`/context/updates/${update.id}`);
+  };
 
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-      <Sidebar notes={notes} activeCategory={activeCategory} onSelect={(cat) => { setActiveCategory(cat); setSearch(''); }} />
+      <Sidebar notes={notes} activeCategory={showUpdates ? null : activeCategory}
+        onSelect={(cat) => { setActiveCategory(cat); setSearch(''); if (showUpdates) navigate('/context'); }}
+        updatesActive={showUpdates} updatesWaiting={updatesWaiting} onSelectUpdates={() => navigate('/context/updates')} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: '1px solid var(--color-border)', gap: 12, flexShrink: 0, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h1 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, margin: 0, color: 'var(--color-text)' }}>{categoryTitle}</h1>
-            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 22, height: 22, padding: '0 6px', borderRadius: 99, background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontSize: 'var(--text-xs)', fontWeight: 600 }}>
-              {filtered.length}
-            </span>
+            {!showUpdates && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 22, height: 22, padding: '0 6px', borderRadius: 99, background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+                {filtered.length}
+              </span>
+            )}
           </div>
           {/* Wraps the button under the search when the list area is narrow, instead of cutting it off */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
-            <Input value={search} onChange={(v) => setSearch(v)} placeholder="Search notes..." aria-label="Search notes"
-              style={{ flex: '0 1 200px', minWidth: 140 }} />
-            <Button variant="primary" onClick={openCreate}>+ New Note</Button>
+            {!showUpdates && (
+              <Input value={search} onChange={(v) => setSearch(v)} placeholder="Search notes..." aria-label="Search notes"
+                style={{ flex: '0 1 200px', minWidth: 140 }} />
+            )}
+            <Button variant={showUpdates ? 'primary' : 'secondary'} onClick={() => setImportOpen(true)}
+              title="Upload a transcript, deck, photo or any file that may change your context">
+              Import update
+            </Button>
+            {!showUpdates && <Button variant="primary" onClick={openCreate}>+ New Note</Button>}
           </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        {showUpdates && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+            {updateId
+              ? <UpdateDetail key={updateId} id={updateId} onBack={() => navigate('/context/updates')} />
+              : <UpdatesList updates={updates ?? []} onOpen={(id) => navigate(`/context/updates/${id}`)} onImport={() => setImportOpen(true)} />}
+          </div>
+        )}
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: showUpdates ? 'none' : undefined }}>
           {error && (
             <div style={{ padding: '10px 14px', marginBottom: 16, background: 'var(--color-critical-subtle)', color: 'var(--color-critical)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)' }}>
               {error}
@@ -413,6 +482,8 @@ export default function ContextView() {
           )}
         </div>
       </div>
+
+      <ImportUpdateModal isOpen={importOpen} onClose={() => setImportOpen(false)} onCreated={handleImported} />
 
       <NoteModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}
         initial={selectedNote} mode={modalMode} onSaved={handleSaved} />

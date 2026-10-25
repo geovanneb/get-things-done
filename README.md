@@ -231,6 +231,23 @@ Agents scan the whole library, not just what a task lists. Put the strategy deck
 summary, the risk register, the org chart, the acronyms your company invented. This
 is the memory you stop having to repeat.
 
+**Keeping it true: Context > Updates.** Meetings, decks and photos change what is
+true. Import them under **Context > Import & review** (any file type, or paste a
+transcript), then run the command the dashboard shows:
+
+```
+/gtd-context-analyze CU-2026-0001
+```
+
+The agent reads the material against your whole context and stakeholders, and
+proposes only the changes that matter: durable, consequential, new, grounded in the
+material and not older than what is there. It also lists what it considered and left
+out, so you can trust the filter. You review each proposal as a before and after
+diff, tick what you accept (with an optional note such as "keep the old title"),
+approve, and run `/gtd-context-apply CU-2026-0001`. Only accepted changes are
+written. The update is then done: its record stays, and the uploaded materials are
+deleted so the workspace does not grow.
+
 ### 4. Output templates — `outputs/templates/`
 
 What "finished" looks like. Each template declares a format, required sections and a
@@ -372,7 +389,7 @@ my-workspace/
 │
 ├── .claude/                   Claude Code integration
 │   ├── agents/                4 specialist agents
-│   ├── commands/              /gtd-task, /gtd-kaizen
+│   ├── commands/              /gtd-task, /gtd-kaizen, /gtd-context-analyze, /gtd-context-apply
 │   ├── skills/                5 curated skills
 │   └── settings.json          Tool permissions (read-wide, write-narrow)
 │
@@ -393,6 +410,7 @@ my-workspace/
 ├── context/                   Your knowledge library
 │   ├── company/  organization/  strategy/  programs/
 │   └── decisions/  risks/  glossary/  situation/
+├── context-updates/           Imported material and what it changed
 │
 ├── outputs/templates/         What "finished" looks like
 ├── kaizen/                    Improvement proposals
@@ -420,7 +438,7 @@ outputs/templates/plain-text, executive-document, executive-deck
 **Yours** — created through the dashboard or by hand, never touched:
 
 ```
-tasks/    stakeholders/    context/    kaizen/    workflows/
+tasks/    stakeholders/    context/    context-updates/    kaizen/    workflows/
 profile/executive-profile.md
 outputs/templates/<anything you made>
 .claude/skills/<anything you installed from the marketplace>

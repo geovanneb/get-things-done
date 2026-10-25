@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ContextUpdate",
+  "description": "Frontmatter of context-updates/CU-YYYY-NNNN/update.md. Mirrors what server/src/services/contextUpdateService.ts reads and writes; /gtd-context-analyze and /gtd-context-apply refer to this file. The body holds the executive's notes for the analysis.",
+  "type": "object",
+  "required": ["id", "type", "title", "status", "source_date", "created_at"],
+  "definitions": {
+    "proposal": {
+      "type": "object",
+      "required": ["id", "action", "target", "title", "rationale"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^P-\\d{2,3}$", "description": "Also the draft file name: proposals/<id>.md holds the full proposed content of the target."},
+        "action": {"type": "string", "enum": ["create", "update"]},
+        "target": {"type": "string", "pattern": "^(context/(company|organization|strategy|programs|decisions|risks|glossary|situation)|stakeholders/(people|groups|org-charts))/[^\\\\]+\\.md$", "description": "Workspace-relative path of the file to create or update."},
+        "category": {"type": "string", "description": "Context category, or people, groups or org-charts."},
+        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+        "rationale": {"type": "string", "minLength": 1, "description": "Why the change matters for future work, and what differs from the current file."},
+        "evidence": {"type": "string", "description": "Where the fact appears in the materials, e.g. a file and timestamp or slide number."},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "decision": {"anyOf": [{"type": "string", "enum": ["accepted", "rejected"]}, {"type": "null"}], "description": "Set by the executive in the dashboard, never by the analysis."},
+        "reviewer_note": {"type": "string", "description": "The executive's instruction for the apply step, e.g. 'keep the old title'."},
+        "outcome": {"type": "string", "enum": ["applied", "merged", "failed", "skipped"], "description": "Set by the apply step."},
+        "outcome_note": {"type": "string"}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "id": {"type": "string", "pattern": "^CU-\\d{4}-\\d{4}$"},
+    "type": {"type": "string", "enum": ["context-update"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "status": {
+      "type": "string",
+      "enum": ["ready", "analyzing", "in_review", "approved", "applying", "done"],
+      "description": "ready (material saved) > analyzing (agent) > in_review (executive) > approved > applying (agent) > done."
+    },
+    "source_date": {"type": "string", "format": "date", "description": "The date the material is from, not the upload date."},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "analyzed_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+    "approved_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+    "applied_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]},
+    "summary": {"type": "string", "description": "What the material is and what changes, in two to four sentences."},
+    "materials": {
+      "type": "array",
+      "description": "Kept by the dashboard. Stays as the record after the files themselves are deleted.",
+      "items": {"type": "object", "properties": {"name": {"type": "string"}, "size": {"type": "number"}, "type": {"type": "string"}}}
+    },
+    "proposals": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/proposal"}},
+    "skipped": {
+      "type": "array",
+      "description": "What the analysis considered and did not propose, so the executive can trust the filter.",
+      "items": {"type": "object", "required": ["topic", "reason"], "properties": {"topic": {"type": "string"}, "reason": {"type": "string"}}}
+    },
+    "unread": {
+      "type": "array",
+      "items": {"type": "object", "required": ["name", "reason"], "properties": {"name": {"type": "string"}, "reason": {"type": "string"}}}
+    }
+  },
+  "additionalProperties": true
+}

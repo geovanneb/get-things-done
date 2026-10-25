@@ -3,6 +3,7 @@
     "allow": [
       "Read(**)",
       "Write(tasks/**)",
+      "Write(context-updates/**)",
       "Write(.situation-board/logs/**)",
       "Bash(git status)",
       "Bash(git log)",

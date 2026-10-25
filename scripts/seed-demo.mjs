@@ -221,4 +221,63 @@ applied_at: null
 Captured after the Q2 report review.
 `);
 
+// A context update waiting for review: what /gtd-context-analyze leaves behind.
+const update = await api('POST', '/api/context-updates', {
+  title: 'Weekly logistics sync',
+  source_date: inDays(-1),
+  notes: 'Sofia ran the meeting. The carrier contract is signed; the volume split is still a target.',
+  text: 'Sofia: The contract with the second carrier was signed on Monday.\nSofia: Target is 40% of outbound volume on the new carrier by end of Q1.\nDaniel: Lunch order for Friday, please send it by noon.\nSofia: We are calling the new routing setup "Dual Lane" internally.\n',
+});
+{
+  const dir = path.join(workspace.path, 'context-updates', update.id);
+  const riskRel = 'context/risks/single-freight-carrier-dependency/note.md';
+  const risk = fs.readFileSync(path.join(workspace.path, riskRel), 'utf-8');
+  fs.mkdirSync(path.join(dir, 'proposals'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'proposals', 'P-01.md'), risk.replace(
+    'A second carrier is being evaluated.',
+    'A second carrier was signed on ' + inDays(-3) + '. Target: 40% of outbound volume on it by end of Q1. Until then the dependency remains.',
+  ));
+  const stamp = new Date().toISOString();
+  fs.writeFileSync(path.join(dir, 'proposals', 'P-02.md'), `---
+schema_version: '1.0'
+id: CTX-dual-lane
+type: context
+category: glossary
+title: Dual Lane
+relevance: recommended
+created_at: '${stamp}'
+updated_at: '${stamp}'
+---
+
+**Dual Lane**: internal name for routing outbound freight across two carriers instead of one.
+`);
+  const file = path.join(dir, 'update.md');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf-8')
+    .replace('status: ready', `status: in_review\nanalyzed_at: '${new Date(Date.now() + 60_000).toISOString()}'\nsummary: |\n  A weekly logistics sync. The second carrier contract is signed, which changes the carrier risk.\n  One new internal term is worth adding to the glossary.`)
+    .replace('proposals: []', `proposals:
+  - id: P-01
+    action: update
+    target: ${riskRel}
+    category: risks
+    title: Record the signed second carrier
+    rationale: |
+      The risk note still says the carrier is "being evaluated". The contract is signed, so the risk is
+      now about the migration pace, not the lack of an alternative.
+    evidence: pasted-text.md, line 1 and 2
+    confidence: high
+  - id: P-02
+    action: create
+    target: context/glossary/dual-lane/note.md
+    category: glossary
+    title: Add "Dual Lane" to the glossary
+    rationale: New internal name agents will meet in logistics updates.
+    evidence: pasted-text.md, line 4
+    confidence: medium
+skipped:
+  - topic: Friday lunch order
+    reason: Transient logistics, not context
+  - topic: 40% volume target as a strategy change
+    reason: Already covered by the FY27 operating plan; recorded on the risk note instead`));
+}
+
 console.log(`Seeded ${people.length} stakeholders, ${notes.length} context notes, ${tasks.length} tasks and ${history} archived tasks into ${workspace.path}`);

@@ -402,3 +402,50 @@ export interface OrgPosition {
   direct_reports: OrgPersonSummary[];
   peers: OrgPersonSummary[];
 }
+
+// ---------------------------------------------------------------------------
+// Context updates (context-updates/CU-YYYY-NNNN/update.md)
+// ---------------------------------------------------------------------------
+
+export type ContextUpdateStatus = 'ready' | 'analyzing' | 'in_review' | 'approved' | 'applying' | 'done';
+
+export interface ContextUpdateProposal {
+  id: string;
+  action: 'create' | 'update';
+  target: string;
+  title: string;
+  category: string;
+  rationale: string;
+  evidence: string;
+  confidence: 'high' | 'medium' | 'low' | '';
+  decision: 'accepted' | 'rejected' | null;
+  reviewer_note: string;
+  outcome: string;
+  outcome_note: string;
+  /** Detail only. */
+  current?: string | null;
+  proposed?: string | null;
+  target_exists?: boolean;
+  stale?: boolean;
+  problem?: string | null;
+}
+
+export interface ContextUpdate {
+  id: string;
+  title: string;
+  status: ContextUpdateStatus;
+  source_date: string;
+  created_at: string;
+  updated_at: string;
+  analyzed_at: string | null;
+  approved_at: string | null;
+  applied_at: string | null;
+  summary: string;
+  notes: string;
+  materials: { name: string; size: number; type: string }[];
+  proposals: ContextUpdateProposal[];
+  skipped: { topic: string; reason: string }[];
+  unread: { name: string; reason: string }[];
+  /** Detail only: the files still in materials/. */
+  material_files?: { name: string; size: number; modified: string; type: string }[];
+}

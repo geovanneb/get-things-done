@@ -13,6 +13,7 @@ export function scopeForPath(filePath: string): DataScope {
   if (p.includes('/tasks/')) return 'tasks';
   if (p.includes('/stakeholders/')) return 'stakeholders';
   if (p.includes('/outputs/')) return 'outputs';
+  if (p.includes('/context-updates/')) return 'context-updates';
   if (p.includes('/context/')) return 'context';
   if (p.includes('/kaizen/')) return 'kaizen';
   if (p.includes('/profile/')) return 'profile';

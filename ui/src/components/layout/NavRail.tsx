@@ -1,12 +1,16 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAppState } from '../../store';
+import { useAppState, useDataVersion } from '../../store';
+import { useApi } from '../../hooks/useApi';
+import type { ContextUpdate } from '../../types';
 
 interface NavItem {
   path: string;
   label: string;
   icon: React.ReactNode;
   badge?: number;
+  /** Spoken and shown on hover instead of the bare number. */
+  badgeLabel?: string;
   dot?: boolean;
 }
 
@@ -145,6 +149,10 @@ const NAV_WIDTH_COLLAPSED = '60px';
 export default function NavRail() {
   const { workspace, validationCount, agenticVisualMode } = useAppState();
   const location = useLocation();
+  // Proposals waiting for review are the one context state that needs the user; the badge leads to them.
+  const updatesVersion = useDataVersion('context-updates');
+  const { data: contextUpdates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
+  const toReview = (contextUpdates ?? []).filter((u) => u.status === 'in_review').length;
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
     try {
       return localStorage.getItem(NAV_COLLAPSE_KEY) === '1';
@@ -177,7 +185,7 @@ export default function NavRail() {
     { path: '/board', label: 'Board', icon: <IconBoard /> },
     { path: '/stakeholders', label: 'Stakeholders', icon: <IconPeople /> },
     { path: '/outputs', label: 'Outputs', icon: <IconFile /> },
-    { path: '/context', label: 'Context', icon: <IconBook /> },
+    { path: '/context', label: 'Context', icon: <IconBook />, badge: toReview, badgeLabel: `${toReview} context update${toReview === 1 ? '' : 's'} to review` },
     { path: '/agents', label: 'Agents & Skills', icon: <IconAgent /> },
     { path: '/insights', label: 'Insights', icon: <IconChart /> },
     { path: '/kaizen', label: 'Kaizen', icon: <IconKaizen /> },
@@ -325,7 +333,8 @@ function NavRailItem({ item, currentPath, collapsed }: { item: NavItem; currentP
       <NavLink
         to={item.path}
         aria-current={isActive ? 'page' : undefined}
-        title={collapsed ? item.label : undefined}
+        aria-label={item.badge && item.badgeLabel ? `${item.label}, ${item.badgeLabel}` : undefined}
+        title={item.badge && item.badgeLabel ? `${item.label}: ${item.badgeLabel}` : collapsed ? item.label : undefined}
         style={{
           display: 'flex',
           alignItems: 'center',

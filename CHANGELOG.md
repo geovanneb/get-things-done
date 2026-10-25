@@ -8,6 +8,16 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Context updates.** Import meeting transcripts, decks, photos, spreadsheets or any
+  file under Context > Import & review. `/gtd-context-analyze` proposes only the
+  context and stakeholder changes that matter, each with a reason, evidence and
+  confidence, plus what it left out and why. Review each proposal as a diff, accept
+  or reject it individually, approve, and `/gtd-context-apply` writes only what you
+  accepted. Finished updates keep their record and delete the materials. Codex and
+  Copilot get the same steps in their workspace instructions. (#73)
+
 ## [0.3.0] - 2026-10-23
 
 ### Security
