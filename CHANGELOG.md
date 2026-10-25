@@ -8,6 +8,8 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-25
+
 ### Added
 
 - **Context updates.** Import meeting transcripts, decks, photos, spreadsheets or any
@@ -16,7 +18,50 @@ minor versions may include breaking changes.
   confidence, plus what it left out and why. Review each proposal as a diff, accept
   or reject it individually, approve, and `/gtd-context-apply` writes only what you
   accepted. Finished updates keep their record and delete the materials. Codex and
-  Copilot get the same steps in their workspace instructions. (#73)
+  Copilot get the same steps in their workspace instructions. Updates live in a new
+  `context-updates/` folder that task agents do not read as context. (#73, #74)
+- **Activity calendar on Insights.** A heatmap of how busy each day was, following
+  the 7 / 30 / 90 days / All time filter: an hour-by-day grid for 7 days, a month
+  grid for 30, small month calendars for 90 and one strip per year for all time.
+  Switch between activity, completed, created and agent runs, hover a day for the
+  breakdown, click it for the tasks and stakeholders involved. Callouts name the
+  busiest day, weekday and month and the longest streak. Fully keyboard
+  accessible. Backed by new `GET /api/insights/calendar` and
+  `GET /api/insights/calendar/day/:date` endpoints. (#70, #71, #72)
+- **Open a person's profile from the org chart.** Clicking a name or avatar on a card
+  opens their profile in a dialog over the chart, with "Open full page". (#67)
+- Subfolders in a template's or note's file list start collapsed, showing their file
+  count. (#63)
+
+### Changed
+
+- **Agent instructions** (Claude Code, Codex, Copilot) and workspace scaffolding
+  cover context updates: new `/gtd-context-analyze` and `/gtd-context-apply`
+  commands, a `context-update.schema.json` schema, and Claude Code may write to
+  `context-updates/**`. Run `gtd upgrade` in an existing workspace to get them; an
+  edited `CLAUDE.md` or `settings.json` gets the new version as `.new`. (#74)
+- Dialogs keep focus inside while open, return it on close, and only the topmost
+  dialog closes on Escape. Org chart card shortcuts act only when the card itself
+  has focus. (#67)
+- Dependencies: multer 2.x (#64), React Router 7 (#69), body-parser 1.20.9 with a
+  security fix (#68).
+
+### Fixed
+
+- **Insights now counts archived tasks**, so numbers go up for workspaces with
+  archived work, and "All time" no longer starts in 1970 because of run logs
+  without a timestamp. (#71)
+- The stakeholder page lists only that person's tasks (it listed every task), and
+  its task links open the task instead of "Task not found". (#66)
+- Org chart card menus: Enter opens the menu and Delete inside it no longer removes
+  the person. (#67)
+- A cancelled upload is no longer logged as a server error, and a file of exactly
+  the size limit is accepted. (#64)
+- The Codex `AGENTS.md` no longer adds a second full stop after an organization
+  name that ends with one (for example "Example Inc."). (#65)
+- Context updates: concurrent uploads with the same name no longer replace each
+  other, concurrent review saves no longer overwrite each other's decisions, and
+  impossible dates such as `2026-02-30` are rejected. (#75)
 
 ## [0.3.0] - 2026-10-23
 
@@ -201,7 +246,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/geovanneb/get-things-done/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/geovanneb/get-things-done/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/geovanneb/get-things-done/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/geovanneb/get-things-done/compare/v0.1.1...v0.1.2
