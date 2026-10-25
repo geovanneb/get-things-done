@@ -7,6 +7,10 @@ import { fileInside, listFolderFiles, saveAttachment, topLevelName, FolderFile }
 
 const workspaceService = new WorkspaceService();
 
+// Shared across service instances. Serializes this server's read-modify-write operations,
+// including filename reservation; external agents/processes still need coordination.
+const pendingUpdates = new Map<string, Promise<void>>();
+
 /**
  * Context updates: raw material (transcripts, slides, images, spreadsheets) that may change the context.
  *
@@ -106,7 +110,9 @@ function nullableStr(value: unknown): string | null {
 }
 
 function isDateOnly(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 /** An update id from a request. Strict, because it becomes a folder name. */
@@ -208,6 +214,20 @@ export class ContextUpdateService {
     return path.join(this.rootDir(), updateId(id));
   }
 
+  private async serialized<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const key = this.updateDir(id);
+    const previous = pendingUpdates.get(key) ?? Promise.resolve();
+    const result = previous.then(operation);
+    // A failed request must not prevent the next request from running.
+    const settled = result.then(() => {}, () => {});
+    pendingUpdates.set(key, settled);
+    try {
+      return await result;
+    } finally {
+      if (pendingUpdates.get(key) === settled) pendingUpdates.delete(key);
+    }
+  }
+
   private async read(id: string): Promise<{ update: ContextUpdate; data: Record<string, unknown>; file: string }> {
     const dir = this.updateDir(id);
     const file = path.join(dir, 'update.md');
@@ -251,14 +271,16 @@ export class ContextUpdateService {
   }
 
   async get(id: string): Promise<ContextUpdateDetail> {
-    const { update } = await this.read(id);
-    const dir = this.updateDir(id);
-    // The apply command deletes these itself, but an agent may lack permission to remove folders.
-    // A done update never needs them again, so the dashboard finishes the cleanup.
-    if (update.status === 'done') await this.cleanup(id);
-    const proposals = await Promise.all(update.proposals.map((p) => this.proposalDetail(dir, update, p)));
-    const material_files = await listFolderFiles(path.join(dir, 'materials'));
-    return { ...update, proposals, material_files };
+    return this.serialized(id, async () => {
+      const { update } = await this.read(id);
+      const dir = this.updateDir(id);
+      // The apply command deletes these itself, but an agent may lack permission to remove folders.
+      // A done update never needs them again, so the dashboard finishes the cleanup.
+      if (update.status === 'done') await this.cleanup(id);
+      const proposals = await Promise.all(update.proposals.map((p) => this.proposalDetail(dir, update, p)));
+      const material_files = await listFolderFiles(path.join(dir, 'materials'));
+      return { ...update, proposals, material_files };
+    });
   }
 
   private async proposalDetail(dir: string, update: ContextUpdate, p: UpdateProposal): Promise<ProposalDetail> {
@@ -359,35 +381,41 @@ export class ContextUpdateService {
   }
 
   async edit(id: string, input: { title?: unknown; source_date?: unknown; notes?: unknown }): Promise<ContextUpdate> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['ready'], 'edit the details');
-    const patch: Record<string, unknown> = {};
-    if (typeof input.title === 'string' && input.title.trim()) patch['title'] = input.title.trim().slice(0, 200);
-    if (input.source_date !== undefined) {
-      if (typeof input.source_date !== 'string' || !isDateOnly(input.source_date)) throw httpError(400, 'Invalid source_date: use YYYY-MM-DD');
-      patch['source_date'] = input.source_date;
-    }
-    const body = typeof input.notes === 'string' ? input.notes.slice(0, MAX_NOTE * 5) : update.notes;
-    await this.write(file, data, body, patch);
-    return (await this.read(id)).update;
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['ready'], 'edit the details');
+      const patch: Record<string, unknown> = {};
+      if (typeof input.title === 'string' && input.title.trim()) patch['title'] = input.title.trim().slice(0, 200);
+      if (input.source_date !== undefined) {
+        if (typeof input.source_date !== 'string' || !isDateOnly(input.source_date)) throw httpError(400, 'Invalid source_date: use YYYY-MM-DD');
+        patch['source_date'] = input.source_date;
+      }
+      const body = typeof input.notes === 'string' ? input.notes.slice(0, MAX_NOTE * 5) : update.notes;
+      await this.write(file, data, body, patch);
+      return (await this.read(id)).update;
+    });
   }
 
   async addMaterial(id: string, originalName: string, buffer: Buffer): Promise<FolderFile> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['ready'], 'add material');
-    const dir = path.join(this.updateDir(id), 'materials');
-    await fsp.mkdir(dir, { recursive: true });
-    const saved = await saveAttachment(dir, await uniqueName(dir, originalName), buffer, 'update.md');
-    await this.write(file, data, update.notes, { materials: await this.materialList(this.updateDir(id)) });
-    return saved;
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['ready'], 'add material');
+      const dir = path.join(this.updateDir(id), 'materials');
+      await fsp.mkdir(dir, { recursive: true });
+      const saved = await saveAttachment(dir, await uniqueName(dir, originalName), buffer, 'update.md');
+      await this.write(file, data, update.notes, { materials: await this.materialList(this.updateDir(id)) });
+      return saved;
+    });
   }
 
   async removeMaterial(id: string, name: string): Promise<void> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['ready'], 'remove material');
-    const dir = path.join(this.updateDir(id), 'materials');
-    await fsp.unlink(await fileInside(dir, topLevelName(name)));
-    await this.write(file, data, update.notes, { materials: await this.materialList(this.updateDir(id)) });
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['ready'], 'remove material');
+      const dir = path.join(this.updateDir(id), 'materials');
+      await fsp.unlink(await fileInside(dir, topLevelName(name)));
+      await this.write(file, data, update.notes, { materials: await this.materialList(this.updateDir(id)) });
+    });
   }
 
   async materialPath(id: string, name: string): Promise<string> {
@@ -397,31 +425,33 @@ export class ContextUpdateService {
 
   /** Saves the checkboxes and notes while the user reviews, so leaving the page loses nothing. */
   async saveDecisions(id: string, input: unknown): Promise<ContextUpdate> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['in_review'], 'change decisions');
-    const decisions = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-    const known = new Set(update.proposals.map((p) => p.id));
-    for (const key of Object.keys(decisions)) {
-      if (!known.has(key)) throw httpError(400, `Invalid proposal id: ${key}`);
-    }
-    const proposals = this.rawProposals(data).map((raw, i) => {
-      const p = normalizeProposal(raw, i);
-      const change = decisions[p.id] as Record<string, unknown> | undefined;
-      if (!change || typeof change !== 'object') return raw;
-      const next = { ...(raw as Record<string, unknown>) };
-      if ('decision' in change) {
-        const d = change['decision'];
-        if (d !== 'accepted' && d !== 'rejected' && d !== null) throw httpError(400, 'Invalid decision: use accepted, rejected or null');
-        next['decision'] = d;
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['in_review'], 'change decisions');
+      const decisions = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+      const known = new Set(update.proposals.map((p) => p.id));
+      for (const key of Object.keys(decisions)) {
+        if (!known.has(key)) throw httpError(400, `Invalid proposal id: ${key}`);
       }
-      if ('reviewer_note' in change) {
-        if (typeof change['reviewer_note'] !== 'string') throw httpError(400, 'Invalid reviewer_note');
-        next['reviewer_note'] = change['reviewer_note'].slice(0, MAX_NOTE) || undefined;
-      }
-      return next;
+      const proposals = this.rawProposals(data).map((raw, i) => {
+        const p = normalizeProposal(raw, i);
+        const change = decisions[p.id] as Record<string, unknown> | undefined;
+        if (!change || typeof change !== 'object') return raw;
+        const next = { ...(raw as Record<string, unknown>) };
+        if ('decision' in change) {
+          const d = change['decision'];
+          if (d !== 'accepted' && d !== 'rejected' && d !== null) throw httpError(400, 'Invalid decision: use accepted, rejected or null');
+          next['decision'] = d;
+        }
+        if ('reviewer_note' in change) {
+          if (typeof change['reviewer_note'] !== 'string') throw httpError(400, 'Invalid reviewer_note');
+          next['reviewer_note'] = change['reviewer_note'].slice(0, MAX_NOTE) || undefined;
+        }
+        return next;
+      });
+      await this.write(file, data, update.notes, { proposals: this.clean(proposals) });
+      return (await this.read(id)).update;
     });
-    await this.write(file, data, update.notes, { proposals: this.clean(proposals) });
-    return (await this.read(id)).update;
   }
 
   private rawProposals(data: Record<string, unknown>): unknown[] {
@@ -437,25 +467,29 @@ export class ContextUpdateService {
 
   /** Freezes the selection: everything not accepted is rejected, and the apply command may run. */
   async approve(id: string): Promise<ContextUpdate> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['in_review'], 'approve');
-    if (!update.proposals.some((p) => p.decision === 'accepted')) {
-      throw httpError(400, 'Invalid approval: select at least one proposal, or close the update without changes');
-    }
-    const proposals = this.rawProposals(data).map((raw, i) => {
-      const p = normalizeProposal(raw, i);
-      return p.decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), decision: 'rejected' };
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['in_review'], 'approve');
+      if (!update.proposals.some((p) => p.decision === 'accepted')) {
+        throw httpError(400, 'Invalid approval: select at least one proposal, or close the update without changes');
+      }
+      const proposals = this.rawProposals(data).map((raw, i) => {
+        const p = normalizeProposal(raw, i);
+        return p.decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), decision: 'rejected' };
+      });
+      await this.write(file, data, update.notes, { status: 'approved', approved_at: new Date().toISOString(), proposals: proposals });
+      return (await this.read(id)).update;
     });
-    await this.write(file, data, update.notes, { status: 'approved', approved_at: new Date().toISOString(), proposals: proposals });
-    return (await this.read(id)).update;
   }
 
   /** Back from approved to review, before the apply command has started. */
   async backToReview(id: string): Promise<ContextUpdate> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['approved'], 'go back to review');
-    await this.write(file, data, update.notes, { status: 'in_review', approved_at: null });
-    return (await this.read(id)).update;
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['approved'], 'go back to review');
+      await this.write(file, data, update.notes, { status: 'in_review', approved_at: null });
+      return (await this.read(id)).update;
+    });
   }
 
   /**
@@ -463,24 +497,28 @@ export class ContextUpdateService {
    * The old proposals are discarded: the next analysis must see all material at once.
    */
   async reopen(id: string): Promise<ContextUpdate> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['analyzing', 'in_review', 'approved'], 'reopen');
-    await fsp.rm(path.join(this.updateDir(id), 'proposals'), { recursive: true, force: true });
-    await this.write(file, data, update.notes, {
-      status: 'ready', proposals: [], skipped: undefined, unread: undefined, summary: undefined,
-      analyzed_at: undefined, approved_at: undefined,
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['analyzing', 'in_review', 'approved'], 'reopen');
+      await fsp.rm(path.join(this.updateDir(id), 'proposals'), { recursive: true, force: true });
+      await this.write(file, data, update.notes, {
+        status: 'ready', proposals: [], skipped: undefined, unread: undefined, summary: undefined,
+        analyzed_at: undefined, approved_at: undefined,
+      });
+      return (await this.read(id)).update;
     });
-    return (await this.read(id)).update;
   }
 
   /** Done without changing any context file. Keeps the record, deletes materials and drafts. */
   async close(id: string): Promise<ContextUpdate> {
-    const { update, data, file } = await this.read(id);
-    this.requireStatus(update, ['in_review', 'approved'], 'close');
-    const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
-    await this.cleanup(id);
-    await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals });
-    return (await this.read(id)).update;
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['in_review', 'approved'], 'close');
+      const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
+      await this.cleanup(id);
+      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals });
+      return (await this.read(id)).update;
+    });
   }
 
   private async cleanup(id: string): Promise<void> {
@@ -490,9 +528,11 @@ export class ContextUpdateService {
   }
 
   async remove(id: string): Promise<void> {
-    const { update } = await this.read(id);
-    // Applying may have written some files already; deleting the record would hide what happened.
-    this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
-    await fsp.rm(this.updateDir(id), { recursive: true, force: true });
+    return this.serialized(id, async () => {
+      const { update } = await this.read(id);
+      // Applying may have written some files already; deleting the record would hide what happened.
+      this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
+      await fsp.rm(this.updateDir(id), { recursive: true, force: true });
+    });
   }
 }

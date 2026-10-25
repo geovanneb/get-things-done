@@ -241,6 +241,19 @@ try {
     const created = await (await json('POST', '/api/context-updates', { title: 'Fictional steering committee', source_date: '2026-10-20', text: 'Transcript of a fictional meeting' })).json();
     check('a context update is created as ready, with pasted text saved as material',
       /^CU-\d{4}-\d{4}$/.test(created.id) && created.status === 'ready' && created.materials.some((m) => m.name === 'pasted-text.md'), JSON.stringify(created).slice(0, 200));
+    const invalidDate = await json('POST', '/api/context-updates', { source_date: '2026-02-30' });
+    check('context updates reject impossible source dates', invalidDate.status === 400);
+    const parallelUploads = await Promise.all(['first', 'second'].map(async (content) => {
+      const upload = new FormData();
+      upload.append('file', new Blob([content]), 'meeting.txt');
+      const response = await fetch(`${base}/api/context-updates/${created.id}/materials`, { method: 'POST', body: upload });
+      return { status: response.status, file: await response.json() };
+    }));
+    const uploadedContents = await Promise.all(parallelUploads.map(async ({ file }) =>
+      (await fetch(`${base}/api/context-updates/${created.id}/materials/${file.name}`)).text()));
+    check('simultaneous material uploads keep distinct names and contents',
+      parallelUploads.every((r) => r.status === 201) && new Set(parallelUploads.map((r) => r.file.name)).size === 2
+      && uploadedContents.join(',') === 'first,second');
     const form = new FormData();
     form.append('file', new Blob(['slide text']), 'deck.txt');
     const up = await fetch(`${base}/api/context-updates/${created.id}/materials`, { method: 'POST', body: form });
@@ -265,14 +278,20 @@ try {
       JSON.stringify(detail.proposals?.[0] ?? detail).slice(0, 200));
     const late = await fetch(`${base}/api/context-updates/${created.id}/materials`, { method: 'POST', body: form });
     check('material cannot be added while proposals are under review', late.status === 409, `status=${late.status}`);
-    await json('PUT', `/api/context-updates/${created.id}/decisions`, { decisions: { 'P-01': { decision: 'accepted' } } });
+    await Promise.all([
+      json('PUT', `/api/context-updates/${created.id}/decisions`, { decisions: { 'P-01': { decision: 'accepted' } } }),
+      json('PUT', `/api/context-updates/${created.id}/decisions`, { decisions: { 'P-01': { reviewer_note: 'Keep the definition' } } }),
+    ]);
+    const reviewed = await (await fetch(`${base}/api/context-updates/${created.id}`)).json();
+    check('simultaneous review saves keep the decision and reviewer note',
+      reviewed.proposals[0].decision === 'accepted' && reviewed.proposals[0].reviewer_note === 'Keep the definition');
     const approved = await (await json('POST', `/api/context-updates/${created.id}/approve`)).json();
     check('approving locks the selection', approved.status === 'approved' && approved.proposals[0].decision === 'accepted');
     await json('POST', `/api/context-updates/${created.id}/back-to-review`);
     const before = fs.readFileSync(path.join(ws, target), 'utf-8');
     const closed = await (await json('POST', `/api/context-updates/${created.id}/close`)).json();
     check('closing without changes keeps the record, deletes the materials and leaves the context alone',
-      closed.status === 'done' && closed.materials.length === 2 && !fs.existsSync(path.join(dir, 'materials'))
+      closed.status === 'done' && closed.materials.length === 4 && !fs.existsSync(path.join(dir, 'materials'))
       && fs.readFileSync(path.join(ws, target), 'utf-8') === before);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
