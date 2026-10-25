@@ -106,6 +106,13 @@ function isoOrUndefined(value: string | undefined): string | undefined {
 }
 
 /**
+ * Stand-in timestamp for a run log with no time in its name or frontmatter.
+ * It sorts such runs first, but it is not a date: anything that places runs
+ * in time must skip it, or the run lands on 1 January 1970.
+ */
+export const UNKNOWN_TIMESTAMP = new Date(0).toISOString();
+
+/**
  * Read every execution log for a task, oldest first.
  *
  * Log frontmatter is not uniform in the wild — some runs record
@@ -138,7 +145,7 @@ export async function readExecutions(
       path: filePath,
       filename,
       timestamp:
-        completedAt ?? timestampFromFilename(filename, startedAt ?? new Date(0).toISOString()),
+        completedAt ?? timestampFromFilename(filename, startedAt ?? UNKNOWN_TIMESTAMP),
     };
     if (startedAt) record.started_at = startedAt;
     if (completedAt) record.completed_at = completedAt;

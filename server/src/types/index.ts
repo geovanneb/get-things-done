@@ -383,3 +383,67 @@ export interface InsightsData {
   /** Turnaround histogram over ordered buckets. */
   turnaround_buckets: Array<{ label: string; count: number }>;
 }
+
+/** What happened to a task on one calendar day. */
+export type InsightsCalendarEvent = 'created' | 'completed' | 'ran' | 'due';
+
+/** One local calendar day in the activity calendar. */
+export interface InsightsCalendarDay {
+  /** Local date, `YYYY-MM-DD`. */
+  date: string;
+  created: number;
+  completed: number;
+  /** Agent runs (execution logs). */
+  runs: number;
+  /** Tasks due this day, finished or not. */
+  due: number;
+  /** Tasks due this day that are still open and already late. */
+  overdue: number;
+  /** created + completed + runs: the default "how busy was it" number. */
+  activity: number;
+  /** Distinct tasks with any event this day, due dates included. */
+  task_count: number;
+  /** Up to three tasks with the most events this day. */
+  top_tasks: Array<{ id: string; title: string }>;
+  /** Up to three stakeholders those tasks were for, most frequent first. */
+  top_stakeholders: Array<{ ref: string; name: string }>;
+  /** Activity per local hour (24 entries). Only sent for ranges of 31 days or less. */
+  by_hour?: number[];
+}
+
+export interface InsightsCalendar {
+  generated_at: string;
+  /** The Insights filter window this covers. `null` means all time. */
+  window_days: number | null;
+  from: string;
+  to: string;
+  /** The server's local today, so the UI highlights the same day the counts use. */
+  today: string;
+  /** Every day in the range, oldest first, including empty ones. */
+  days: InsightsCalendarDay[];
+}
+
+/** Everything the pinned day panel shows. */
+export interface InsightsCalendarDayDetail {
+  generated_at: string;
+  date: string;
+  totals: Pick<
+    InsightsCalendarDay,
+    'created' | 'completed' | 'runs' | 'due' | 'overdue' | 'activity'
+  >;
+  tasks: Array<{
+    id: string;
+    title: string;
+    status: TaskStatus;
+    priority: Priority;
+    events: InsightsCalendarEvent[];
+    /** Agent runs on this day. */
+    runs: number;
+    /** Due this day, still open and already late. */
+    overdue: boolean;
+    due_date?: string;
+    /** Resolved stakeholder names. */
+    stakeholders: string[];
+  }>;
+  stakeholders: Array<{ ref: string; name: string; count: number }>;
+}

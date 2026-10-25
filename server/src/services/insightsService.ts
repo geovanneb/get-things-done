@@ -13,7 +13,7 @@ import { TaskService } from './taskService';
 import { WorkspaceService } from './workspace';
 import { StakeholderService } from './stakeholderService';
 import { OutputService } from './outputService';
-import { readExecutions } from './executionLog';
+import { readExecutions, UNKNOWN_TIMESTAMP } from './executionLog';
 import { isAwaitingReview, isDone, isOpen } from './taskStatus';
 
 const taskService = new TaskService();
@@ -115,9 +115,10 @@ function round(value: number, places = 1): number {
 }
 
 /** Task with the extra frontmatter the workspace actually carries. */
-type RawTask = Task & Record<string, unknown>;
+export type RawTask = Task & Record<string, unknown>;
 
-interface TaskFacts {
+/** What Insights derives about one task. Shared with the activity calendar. */
+export interface TaskFacts {
   task: RawTask;
   status: TaskStatus;
   createdAt: Date | null;
@@ -127,6 +128,8 @@ interface TaskFacts {
   lastExecutionAt: Date | null;
   /** How many agent runs the task took. */
   runs: number;
+  /** When each agent run happened, oldest first. */
+  runTimes: Date[];
   /** Last sign of life: newest execution, else `updated_at`. */
   lastActivityAt: Date | null;
   stakeholderRefs: string[];
@@ -152,9 +155,8 @@ export class InsightsService {
     const now = new Date();
     const since = windowDays === null ? null : new Date(now.getTime() - windowDays * DAY_MS);
 
-    const tasks = await this.loadTasks();
     const workspacePath = workspaceService.getWorkspacePath();
-    const facts = await Promise.all(tasks.map((task) => this.factsFor(task, workspacePath)));
+    const facts = await this.loadFacts();
 
     const inWindow = (date: Date | null): boolean =>
       date !== null && (since === null || date >= since);
@@ -242,12 +244,21 @@ export class InsightsService {
     return value === null ? null : round(value, 2);
   }
 
+  /** Facts for every active and archived task. */
+  async loadFacts(): Promise<TaskFacts[]> {
+    const tasks = await this.loadTasks();
+    const workspacePath = workspaceService.getWorkspacePath();
+    return Promise.all(tasks.map((task) => this.factsFor(task, workspacePath)));
+  }
+
   /** Active plus archived tasks, de-duplicated by id. */
   private async loadTasks(): Promise<RawTask[]> {
     let tasks: Task[] = [];
     try {
       tasks = await taskService.listTasks();
-      const archived = await taskService.listTasks({ status: 'archived' }).catch(() => []);
+      // Archived tasks live in their own folder, so a status filter on the
+      // active list would never find them.
+      const archived = await taskService.listArchivedTasks().catch(() => []);
       const seen = new Set(tasks.map((t) => t.id));
       for (const t of archived) {
         if (!seen.has(t.id)) tasks.push(t);
@@ -266,10 +277,14 @@ export class InsightsService {
     const createdAt = parseDate(task.created_at);
     const updatedAt = parseDate(task.updated_at);
 
-    const lastExecution = executions
+    // A run with no recorded time still counts as a run, but it has no day or
+    // hour, so it is left out of anything that places runs in time.
+    const runTimes = executions
+      .filter((e) => e.timestamp !== UNKNOWN_TIMESTAMP)
       .map((e) => parseDate(e.timestamp))
       .filter((d): d is Date => d !== null)
-      .sort((a, b) => b.getTime() - a.getTime())[0];
+      .sort((a, b) => a.getTime() - b.getTime());
+    const lastExecution = runTimes[runTimes.length - 1];
 
     // When the task finished, in order of how much the source can be trusted:
     //
@@ -304,6 +319,7 @@ export class InsightsService {
       completedAt,
       lastExecutionAt: lastExecution ?? null,
       runs: executions.length,
+      runTimes,
       lastActivityAt: lastExecution ?? updatedAt,
       stakeholderRefs: stakeholders.length > 0 ? stakeholders : task.stakeholder_refs ?? [],
       templateRefs: deliverables

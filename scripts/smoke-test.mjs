@@ -85,6 +85,19 @@ try {
   const insights = await (await fetch(`${base}/api/insights`)).json();
   check('insights count work waiting on review', insights.summary?.awaiting_review === 1);
 
+  const calendar = await (await fetch(`${base}/api/insights/calendar?days=90`)).json();
+  const busiest = (calendar.days ?? []).reduce((best, d) => (d.activity > (best?.activity ?? 0) ? d : best), null);
+  check('activity calendar covers the same 90 days as the filter',
+    calendar.days?.length === 90 && calendar.days?.at(-1)?.date === calendar.today && busiest !== null,
+    `days=${calendar.days?.length} busiest=${busiest?.date}`);
+  const history = await (await fetch(`${base}/api/insights/calendar?days=all`)).json();
+  check('all-time calendar runs from the first activity to today',
+    history.days?.[0]?.activity > 0 && history.days?.at(-1)?.date === history.today, `from=${history.from}`);
+  const calendarDay = busiest ? await (await fetch(`${base}/api/insights/calendar/day/${busiest.date}`)).json() : {};
+  check('calendar day lists the tasks behind the busiest day', (calendarDay.tasks ?? []).length > 0);
+  const badCalendar = await fetch(`${base}/api/insights/calendar?days=14`);
+  check('activity calendar rejects a window the filter does not offer', badCalendar.status === 400);
+
   // Live updates: an agent editing a task file on disk must reach the dashboard over SSE.
   const sse = await fetch(`${base}/api/events`);
   const reader = sse.body.getReader();

@@ -60,13 +60,21 @@ export class TaskService {
   async listTasks(filters?: TaskFilters): Promise<Task[]> {
     const activeDir = this.getActiveDir();
     await fileService.ensureDir(activeDir);
+    return this.readTaskFolders(activeDir, filters);
+  }
 
-    const entries = await fsp.readdir(activeDir, { withFileTypes: true }).catch(() => []);
+  /** Tasks filed away under `tasks/archive/`. The board never shows these; Insights counts them. */
+  async listArchivedTasks(): Promise<Task[]> {
+    return this.readTaskFolders(this.getArchiveDir());
+  }
+
+  private async readTaskFolders(dir: string, filters?: TaskFilters): Promise<Task[]> {
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
     const tasks: Task[] = [];
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const taskFile = path.join(activeDir, entry.name, 'task.md');
+      const taskFile = path.join(dir, entry.name, 'task.md');
       if (!(await fileService.exists(taskFile))) continue;
 
       try {
