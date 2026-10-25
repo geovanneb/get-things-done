@@ -31,6 +31,8 @@ context/                Background knowledge, by category
   company/ organization/ strategy/ programs/
   decisions/ risks/ glossary/ situation/
 outputs/templates/      Output templates: required sections + style guides
+context-updates/        Imported material (transcripts, slides...) and the
+                        record of what it changed in the context
 kaizen/                 Improvement proposals for this workspace
 workflows/              Reserved for multi-step workflow definitions
 ```

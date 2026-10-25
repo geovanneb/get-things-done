@@ -60,6 +60,8 @@ function AppRoutes() {
           <Route path="stakeholders/:id" element={<StakeholderDetailView />} />
           <Route path="outputs" element={<OutputsView />} />
           <Route path="context" element={<ContextView />} />
+          <Route path="context/updates" element={<ContextView />} />
+          <Route path="context/updates/:id" element={<ContextView />} />
           <Route path="agents" element={<AgentsView />} />
           <Route path="insights" element={<InsightsView />} />
           <Route path="kaizen" element={<KaizenView />} />

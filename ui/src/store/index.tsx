@@ -27,6 +27,7 @@ export type DataScope =
   | 'stakeholders'
   | 'outputs'
   | 'context'
+  | 'context-updates'
   | 'kaizen'
   | 'profile'
   | 'other';
@@ -38,6 +39,7 @@ const initialVersions: DataVersions = {
   stakeholders: 0,
   outputs: 0,
   context: 0,
+  'context-updates': 0,
   kaizen: 0,
   profile: 0,
   other: 0,

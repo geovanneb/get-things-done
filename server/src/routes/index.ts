@@ -2,6 +2,7 @@ import { Express } from 'express';
 import tasksRouter from './tasks';
 import stakeholdersRouter from './stakeholders';
 import contextRouter from './context';
+import contextUpdatesRouter from './contextUpdates';
 import outputsRouter from './outputs';
 import { agentsRouter, skillsRouter } from './agents';
 import profileRouter from './profile';
@@ -18,6 +19,7 @@ export function registerRoutes(app: Express): void {
   app.use('/api/tasks', tasksRouter);
   app.use('/api/stakeholders', stakeholdersRouter);
   app.use('/api/context', contextRouter);
+  app.use('/api/context-updates', contextUpdatesRouter);
   app.use('/api/outputs', outputsRouter);
   app.use('/api/agents', agentsRouter);
   app.use('/api/skills', skillsRouter);

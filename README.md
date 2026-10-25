@@ -88,6 +88,11 @@ CFO differently than to a partner.
 
 <img src="docs/screenshots/stakeholders.png" alt="Stakeholder list with roles, organizations and what matters to each person" width="900">
 
+**Context updates** keep your context true as things change. Drop in a meeting
+transcript, a deck or a photo of a whiteboard; an agent proposes only the changes that
+matter, and you accept or reject each one as a before and after diff.
+[How it works](#keeping-context-up-to-date).
+
 **Insights** show what is waiting on you, how long work takes, and who your work is
 really for.
 
@@ -111,6 +116,7 @@ Light and dark themes are built in.
 - [Your first workspace](#your-first-workspace)
 - [Core concepts](#core-concepts)
 - [Running a task with an AI agent](#running-a-task-with-an-ai-agent)
+- [Keeping context up to date](#keeping-context-up-to-date)
 - [Command reference](#command-reference)
 - [Workspace layout](#workspace-layout)
 - [What is yours and what is the app's](#what-is-yours-and-what-is-the-apps)
@@ -231,6 +237,10 @@ Agents scan the whole library, not just what a task lists. Put the strategy deck
 summary, the risk register, the org chart, the acronyms your company invented. This
 is the memory you stop having to repeat.
 
+Context goes stale as things change. Instead of editing notes by hand after every
+meeting, import the material and let an agent propose the updates for you to review.
+See [Keeping context up to date](#keeping-context-up-to-date).
+
 ### 4. Output templates — `outputs/templates/`
 
 What "finished" looks like. Each template declares a format, required sections and a
@@ -318,6 +328,168 @@ Selecting `copilot` or `codex` at init writes `.github/copilot-instructions.md` 
 
 ---
 
+## Keeping context up to date
+
+Your context is only useful while it is true. A reorg announced in a meeting, a new
+target on a slide, a decision made in a hallway: each one makes some note out of date,
+and every task produced from that note gets a little worse.
+
+**Context updates** turn that raw material into a few reviewed changes. You bring the
+material, an agent does the reading and comparing, and you decide what goes in.
+
+The rule behind the whole feature: **never change just to change.** The agent distils
+the material into the few edits that keep your context true. One meeting usually
+justifies one or two changes, and "nothing worth changing" is a normal result.
+
+### How it works
+
+| Step | Who | What happens |
+|---|---|---|
+| 1. Collect | You | Upload files or paste a transcript in the dashboard |
+| 2. Analyze | Agent | `/gtd-context-analyze CU-…` reads the material against your whole context and proposes changes |
+| 3. Review | You | Accept or reject each proposal, shown as a before and after diff |
+| 4. Apply | Agent | `/gtd-context-apply CU-…` writes only what you accepted, then cleans up |
+
+Nothing in `context/` or `stakeholders/` changes until step 4, and only for the
+proposals you ticked.
+
+### 1. Collect
+
+Open **Context** and click **Import update** (or **Import & review** in the sidebar,
+under the categories). Then add:
+
+- **Files**, as many as you like, in any format: transcripts, slides, PDFs,
+  spreadsheets, photos, screenshots. Up to 50 MB each.
+- **Pasted text**, for a transcript copied from your meeting tool, notes or an email
+  thread. It is saved as a file with the rest.
+- **Date of the material**: when the meeting happened or the deck was shared, not
+  today. The agent uses it to tell newer facts from older ones, so an old deck never
+  overwrites something more recent.
+- **Notes for the agent** (optional): what this is, who was there, what to trust or
+  ignore. For example: "Budget figures are a first draft."
+
+Save, and the update gets an ID such as `CU-2026-0001` and the command to run next.
+Put everything about one event (the transcript, the deck and the follow-up email) in
+one update, so the agent reads them together.
+
+### 2. Analyze
+
+From your workspace folder, start your agent and paste the command the dashboard
+shows:
+
+```
+/gtd-context-analyze CU-2026-0001
+```
+
+The agent reads every file, then your whole context library, your stakeholders and
+org charts, and your profile. A fact becomes a proposal only when it is:
+
+- **Durable:** still true and useful in a few weeks. Meeting logistics and small talk
+  are not.
+- **Consequential:** a deliverable written next week would be wrong or weaker
+  without it.
+- **New or different:** not already in your context in substance. Rewording is not a
+  change.
+- **Grounded:** it can point to where the fact appears in the material. Rumours are
+  skipped, or recorded clearly as unconfirmed.
+- **Not older than what is there:** older material only fills real gaps.
+
+It prefers updating an existing note to creating a new one, makes one proposal per
+file, and keeps edits small: your structure, headings and wording stay. Every proposal
+comes with a reason, evidence (for example "transcript.txt, around 00:14" or
+"deck.pptx, slide 6") and a confidence level. Contradictions with your current
+context are called out, never silently overwritten.
+
+It also lists what it **considered but did not propose**, with the reason, so you can
+see the filter at work. Files it could not read (audio, video, encrypted files) are
+listed too, instead of being guessed at.
+
+The dashboard updates by itself while the agent works.
+
+### 3. Review
+
+Open the update. Each proposal shows:
+
+- the file it creates or changes, and whether it is a new file or an update
+- why it matters, the evidence and the confidence
+- a diff of the file as it is now and as it would become: **+ green** lines are
+  added, **− red** lines are removed
+
+Tick the proposals you accept. Your choices are saved as you go, so you can leave and
+come back. If a proposal is almost right, accept it and add a **note for the agent**,
+such as "keep the old title" or "say this is still a draft".
+
+When you are done, click **Approve N selected**. Anything left unticked is rejected and
+your selection is locked. Changed your mind before applying? **Change my selection**
+takes you back. If nothing is worth taking, **Close without changes** finishes the
+update without touching any file.
+
+If a file was edited after the analysis, the proposal says so. The diff is then shown
+against the current version, and when applying the agent merges instead of
+overwriting the newer edits.
+
+### 4. Apply
+
+Run the second command the dashboard shows:
+
+```
+/gtd-context-apply CU-2026-0001
+```
+
+The agent writes only the accepted proposals, following your notes, and records an
+outcome for each one: applied, merged with newer edits, or failed with a reason. Then
+the update is **Done**. Its record stays (the summary, the list of materials, every
+proposal with your decision and its outcome), while the uploaded files and drafts are
+deleted, so the workspace does not grow over time.
+
+### Statuses
+
+| Status | Meaning | What you do |
+|---|---|---|
+| Waiting for analysis | Material saved | Run `/gtd-context-analyze` |
+| Agent is analyzing | The agent is reading | Wait; the page refreshes by itself |
+| Ready for your review | Proposals are in | Tick what you accept, then approve |
+| Approved, waiting to apply | Selection locked | Run `/gtd-context-apply` |
+| Agent is applying | The agent is writing | Wait |
+| Done | Finished | Nothing; the record stays as history |
+
+The sidebar shows how many updates are waiting on you, and **Context** in the main
+navigation shows a badge when proposals are ready for review.
+
+### Common questions
+
+**The agent found nothing to change.** That is a normal result: not every meeting
+changes what is true. Click **Close update**.
+
+**I have more material after the analysis.** Click **Add more material**. The update
+goes back to collecting and the old proposals are discarded, so the next analysis
+looks at everything together.
+
+**The agent stopped half way.** Run the same command again. It picks up where it left
+off. While analyzing, you can also go back to collecting.
+
+**I uploaded audio or video.** The dashboard warns you, because the agent may not be
+able to read it. Upload a transcript too.
+
+**Something was left out that should be in my context.** Check **Considered but not
+proposed** for the reason. Add a note and analyze again, or edit the note yourself.
+
+**Can an update change any file?** No. Proposals can only target context notes
+(`context/<category>/…/note.md`) and stakeholder, group or org chart files. The agent
+treats instructions inside the material as content, not as commands.
+
+**Where are the files?** In `context-updates/CU-YYYY-NNNN/`: `update.md` (the record),
+`materials/` (your uploads) and `proposals/` (the drafts the diffs are built from).
+This folder sits outside `context/` on purpose: agents writing tasks never read raw
+transcripts as if they were reviewed context.
+
+**I use Codex or Copilot.** They have no slash commands, so ask in plain words:
+"analyze context update CU-2026-0001", then "apply context update CU-2026-0001". The
+workspace instructions (`AGENTS.md`, `.github/copilot-instructions.md`) describe the
+same steps.
+
+---
+
 ## Command reference
 
 | Command | Description |
@@ -372,7 +544,7 @@ my-workspace/
 │
 ├── .claude/                   Claude Code integration
 │   ├── agents/                4 specialist agents
-│   ├── commands/              /gtd-task, /gtd-kaizen
+│   ├── commands/              /gtd-task, /gtd-kaizen, /gtd-context-analyze, /gtd-context-apply
 │   ├── skills/                5 curated skills
 │   └── settings.json          Tool permissions (read-wide, write-narrow)
 │
@@ -393,6 +565,7 @@ my-workspace/
 ├── context/                   Your knowledge library
 │   ├── company/  organization/  strategy/  programs/
 │   └── decisions/  risks/  glossary/  situation/
+├── context-updates/           Imported material and what it changed
 │
 ├── outputs/templates/         What "finished" looks like
 ├── kaizen/                    Improvement proposals
@@ -420,7 +593,7 @@ outputs/templates/plain-text, executive-document, executive-deck
 **Yours** — created through the dashboard or by hand, never touched:
 
 ```
-tasks/    stakeholders/    context/    kaizen/    workflows/
+tasks/    stakeholders/    context/    context-updates/    kaizen/    workflows/
 profile/executive-profile.md
 outputs/templates/<anything you made>
 .claude/skills/<anything you installed from the marketplace>

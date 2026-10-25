@@ -230,6 +230,54 @@ try {
     fs.rmSync(path.join(tplDir, 'logo.txt'), { force: true });
   }
 
+  // Context updates: import material, simulate the analysis command, review, close.
+  {
+    check('gtd init writes the context update commands',
+      ['gtd-context-analyze.md', 'gtd-context-apply.md'].every((f) => fs.existsSync(path.join(ws, '.claude', 'commands', f)))
+      && fs.existsSync(path.join(ws, 'context-updates')) && fs.existsSync(path.join(ws, '.schemas', 'context-update.schema.json')));
+    const json = (method, url, body) => fetch(`${base}${url}`, {
+      method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const created = await (await json('POST', '/api/context-updates', { title: 'Fictional steering committee', source_date: '2026-10-20', text: 'Transcript of a fictional meeting' })).json();
+    check('a context update is created as ready, with pasted text saved as material',
+      /^CU-\d{4}-\d{4}$/.test(created.id) && created.status === 'ready' && created.materials.some((m) => m.name === 'pasted-text.md'), JSON.stringify(created).slice(0, 200));
+    const form = new FormData();
+    form.append('file', new Blob(['slide text']), 'deck.txt');
+    const up = await fetch(`${base}/api/context-updates/${created.id}/materials`, { method: 'POST', body: form });
+    check('material uploads to a context update', up.status === 201);
+    const escape = await fetch(`${base}/api/context-updates/${created.id}/materials/..%2Fupdate.md`);
+    check('material downloads cannot leave the materials folder', escape.status === 400, `status=${escape.status}`);
+    const badId = await fetch(`${base}/api/context-updates/..%2Fcontext`);
+    check('a context update id that is not CU-YYYY-NNNN is refused', badId.status === 400, `status=${badId.status}`);
+
+    // What /gtd-context-analyze writes.
+    const dir = path.join(ws, 'context-updates', created.id);
+    const [note] = await (await fetch(`${base}/api/context`)).json();
+    const target = path.relative(ws, note.path).split(path.sep).join('/');
+    const md = fs.readFileSync(path.join(dir, 'update.md'), 'utf-8');
+    fs.writeFileSync(path.join(dir, 'update.md'), md.replace('status: ready', `status: in_review\nanalyzed_at: '${new Date(Date.now() + 5000).toISOString()}'\nsummary: Fictional summary.`)
+      .replace('proposals: []', `proposals:\n  - id: P-01\n    action: update\n    target: ${target}\n    title: Refresh the note\n    rationale: A fictional reason`));
+    fs.mkdirSync(path.join(dir, 'proposals'));
+    fs.writeFileSync(path.join(dir, 'proposals', 'P-01.md'), 'Proposed content\n');
+    const detail = await (await fetch(`${base}/api/context-updates/${created.id}`)).json();
+    check('review shows the proposal with current and proposed content',
+      detail.status === 'in_review' && detail.proposals[0]?.proposed === 'Proposed content\n' && typeof detail.proposals[0]?.current === 'string' && !detail.proposals[0]?.problem,
+      JSON.stringify(detail.proposals?.[0] ?? detail).slice(0, 200));
+    const late = await fetch(`${base}/api/context-updates/${created.id}/materials`, { method: 'POST', body: form });
+    check('material cannot be added while proposals are under review', late.status === 409, `status=${late.status}`);
+    await json('PUT', `/api/context-updates/${created.id}/decisions`, { decisions: { 'P-01': { decision: 'accepted' } } });
+    const approved = await (await json('POST', `/api/context-updates/${created.id}/approve`)).json();
+    check('approving locks the selection', approved.status === 'approved' && approved.proposals[0].decision === 'accepted');
+    await json('POST', `/api/context-updates/${created.id}/back-to-review`);
+    const before = fs.readFileSync(path.join(ws, target), 'utf-8');
+    const closed = await (await json('POST', `/api/context-updates/${created.id}/close`)).json();
+    check('closing without changes keeps the record, deletes the materials and leaves the context alone',
+      closed.status === 'done' && closed.materials.length === 2 && !fs.existsSync(path.join(dir, 'materials'))
+      && fs.readFileSync(path.join(ws, target), 'utf-8') === before);
+    const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
+    check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
+  }
+
   // @-mentions in a task's Objective (picker, execution package, archived tasks, validation).
   const cands = await (await fetch(`${base}/api/mentions?q=`)).json();
   const kinds = new Set(cands.map((c) => c.type));

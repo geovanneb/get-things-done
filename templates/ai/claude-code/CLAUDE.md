@@ -22,8 +22,16 @@ context/                  Context notes — each note in its own subfolder
   decisions/<slug>/note.md
   risks/<slug>/note.md
 outputs/templates/        Output templates (required sections + style guides)
+context-updates/          Raw material waiting to be distilled into context (not context itself)
+  CU-YYYY-NNNN/
+    update.md             Status, proposals and the executive's decisions
+    materials/            Uploaded files (deleted when the update is done)
+    proposals/P-NN.md     Proposed content of one context or stakeholder file
 .schemas/                 JSON Schemas for all file types
 ```
+
+`context-updates/` holds unreviewed raw material. Never use it as a source for a task:
+only `context/` and `stakeholders/` are the reviewed truth.
 
 ## Before starting any task
 
@@ -158,6 +166,19 @@ Placeholder format: `[PLACEHOLDER: <description of what is needed> - responsible
 - Check the task's `confidentiality` field before handling or outputting any information
 - `confidential` and `restricted` tasks: do not include actual data in execution logs, only reference file paths
 
+## Context updates
+
+The executive imports material (transcripts, slides, photos, spreadsheets) under
+**Context > Updates** in the dashboard. Two commands turn it into reviewed changes:
+
+- `/gtd-context-analyze <CU-ID>`: read the material and the whole context, and propose
+  only the changes that matter. Writes proposals; never touches context files.
+- `/gtd-context-apply <CU-ID>`: apply only the proposals the executive accepted, then
+  delete the materials and keep the record.
+
+Follow the command files in `.claude/commands/` exactly. The rule behind both: never
+change just to change. Distil the material into the few edits that keep the context true.
+
 ## Schema references
 
 All frontmatter structures are documented in `.schemas/`. Refer to these when creating new files:
@@ -166,6 +187,7 @@ All frontmatter structures are documented in `.schemas/`. Refer to these when cr
 - Stakeholders: `.schemas/stakeholder.schema.json`
 - Org charts: `.schemas/org-chart.schema.json`
 - Context notes: `.schemas/context.schema.json`
+- Context updates: `.schemas/context-update.schema.json`
 - Output templates: `.schemas/output-template.schema.json`
 - Executive profile: `.schemas/profile.schema.json`
 - Execution manifests: `.schemas/execution-manifest.schema.json`
