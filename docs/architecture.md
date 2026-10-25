@@ -81,6 +81,10 @@ The October 2026 review of main at `f8587ef` found and addressed:
 | Aborted UI requests could change current loading state | Ignore state updates after cancellation |
 | No server regression suite and advisory CI was report-only | Server tests in npm test, import boundary check and blocking audit |
 
+For the subsequent release review, current dependency audit, performance samples
+and context-update concurrency fix, see [the October release review](release-review-2026-10.md).
+The findings and validation below describe the earlier snapshot.
+
 Remaining engineering work should be separate, measured changes:
 
 - Add runtime request schemas consistently across all endpoints; the current checks

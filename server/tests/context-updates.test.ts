@@ -189,3 +189,52 @@ test('a done update left with materials by the agent is cleaned up when opened',
   await assert.rejects(fsp.access(path.join(ws, 'context-updates', id, 'materials')));
   await assert.rejects(fsp.access(path.join(ws, 'context-updates', id, 'proposals')));
 });
+
+test('simultaneous uploads preserve both files and the complete material inventory', async (t) => {
+  await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({});
+  const saved = await Promise.all([
+    service.addMaterial(id, 'meeting.txt', Buffer.from('first meeting')),
+    new ContextUpdateService().addMaterial(id, 'meeting.txt', Buffer.from('second meeting')),
+  ]);
+  assert.equal(new Set(saved.map((f) => f.name)).size, 2);
+  const contents = await Promise.all(saved.map(async (f) => fsp.readFile(await service.materialPath(id, f.name), 'utf8')));
+  assert.deepEqual(contents, ['first meeting', 'second meeting']);
+  assert.equal((await service.get(id)).materials.length, 2);
+});
+
+test('simultaneous review choices survive and approval waits for the preceding save', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({});
+  await analyze(ws, id, [
+    { id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md' },
+    { id: 'P-02', action: 'create', target: 'context/glossary/term/note.md' },
+  ], { 'P-01.md': 'a', 'P-02.md': 'b' });
+  await Promise.all([
+    service.saveDecisions(id, { 'P-01': { decision: 'accepted' } }),
+    new ContextUpdateService().saveDecisions(id, { 'P-02': { decision: 'accepted' } }),
+  ]);
+  assert.deepEqual((await service.get(id)).proposals.map((p) => p.decision), ['accepted', 'accepted']);
+  await Promise.all([
+    service.saveDecisions(id, { 'P-02': { reviewer_note: 'Preserve the definition' } }),
+    service.approve(id),
+  ]);
+  const approved = await service.get(id);
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.proposals[1]!.reviewer_note, 'Preserve the definition');
+  await assert.rejects(service.saveDecisions(id, { 'P-01': { decision: null } }), /Cannot change decisions/);
+  assert.equal((await service.backToReview(id)).status, 'in_review', 'a failed mutation must release the queue');
+});
+
+test('source dates reject impossible calendar days without changing the record', async (t) => {
+  await workspace(t);
+  const service = new ContextUpdateService();
+  for (const source_date of ['2026-02-29', '2026-02-30', '2026-04-31']) {
+    await assert.rejects(service.create({ source_date }), /source_date/);
+  }
+  const update = await service.create({ source_date: '2024-02-29' });
+  await assert.rejects(service.edit(update.id, { source_date: '2026-02-30' }), /source_date/);
+  assert.equal((await service.get(update.id)).source_date, '2024-02-29');
+});
