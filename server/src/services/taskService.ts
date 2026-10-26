@@ -7,6 +7,12 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 
 const fileService = new FileService();
+
+/**
+ * Optional fields from `.schemas/task.schema.json` that `createTask` used to omit: it builds the task
+ * field by field, so a field not handled there or listed here is dropped on create (update keeps it).
+ */
+const OPTIONAL_CREATE_FIELDS = ['slug', 'task_type', 'contexts', 'preferred_agent', 'confidentiality', 'review_date', 'estimated_hours'] as const;
 const workspaceService = new WorkspaceService();
 
 interface TaskFilters {
@@ -222,6 +228,9 @@ If the executive comes back with feedback on a task that is already \`in_review\
       created_at: now,
       updated_at: now,
     };
+    for (const key of OPTIONAL_CREATE_FIELDS) {
+      if (rawData[key] !== undefined && rawData[key] !== null) task[key] = rawData[key];
+    }
 
     const { path: _path, body: _body, ...fields } = task;
     // .schemas/task.schema.json requires schema_version and type; write them like every other
