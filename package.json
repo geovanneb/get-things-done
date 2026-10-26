@@ -72,7 +72,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
-    "concurrently": "^8.2.2",
+    "concurrently": "^10.0.6",
     "typescript": "^5.4.3"
   },
   "engines": {
