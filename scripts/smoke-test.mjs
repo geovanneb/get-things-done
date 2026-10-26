@@ -156,6 +156,22 @@ try {
   check('completing a task again replaces a stale done_date', Boolean(recompleted.done_date) && recompleted.done_date !== stale,
     `done_date=${recompleted.done_date}`);
 
+  // Creating a task through the API keeps the optional schema fields it is given (they used to be dropped).
+  const contextRef = (await (await fetch(`${base}/api/context`)).json())[0]?.id;
+  const fields = {
+    title: 'Smoke task with optional fields', slug: 'smoke-optional-fields', task_type: 'analysis',
+    contexts: [{ ref: contextRef, relevance: 'required' }], confidentiality: 'confidential',
+    review_date: '2026-12-01', estimated_hours: 0,
+  };
+  const createdTask = await (await fetch(`${base}/api/tasks`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields),
+  })).json();
+  const readBack = await (await fetch(`${base}/api/tasks/${createdTask.id}`)).json();
+  const kept = (t) => t.slug === fields.slug && t.task_type === 'analysis' && t.contexts?.[0]?.ref === contextRef
+    && t.confidentiality === 'confidential' && t.review_date === '2026-12-01' && t.estimated_hours === 0;
+  check('creating a task keeps its optional fields (type, contexts, confidentiality, ...)',
+    Boolean(contextRef) && kept(createdTask) && kept(readBack), JSON.stringify({ ...readBack, body: undefined }).slice(0, 300));
+
   const group = await fetch(`${base}/api/stakeholders`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Smoke group', type: 'groups' }),
   });
