@@ -9,8 +9,56 @@ const ESB_CONFIG_FILE = path.join(ESB_CONFIG_DIR, 'config.json');
 /** Pre-rename location, still read so an un-migrated install keeps working. */
 const LEGACY_CONFIG_FILE = path.join(os.homedir(), '.esb', 'config.json');
 
+/** How many workspaces the switcher remembers. */
+const MAX_RECENT = 8;
+
+interface RecentEntry {
+  path: string;
+  last_opened: string;
+}
+
 interface EsbConfig {
   workspace_path?: string;
+  /** Newest first. Lets the dashboard switch between workspaces in one click. */
+  recent_workspaces?: RecentEntry[];
+}
+
+export interface RecentWorkspace {
+  path: string;
+  name: string;
+  current: boolean;
+  /** False when the folder is gone or no longer holds a workspace. */
+  available: boolean;
+  last_opened: string | null;
+}
+
+function readConfigFile(): EsbConfig {
+  if (!fs.existsSync(ESB_CONFIG_FILE)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(ESB_CONFIG_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function writeConfigFile(config: EsbConfig): void {
+  fs.mkdirSync(ESB_CONFIG_DIR, { recursive: true });
+  fs.writeFileSync(ESB_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+function samePath(a: string, b: string): boolean {
+  return path.resolve(a) === path.resolve(b);
+}
+
+/** The `name:` line of a workspace.yaml, or null when there is none. */
+function readWorkspaceName(workspacePath: string): string | null {
+  try {
+    const raw = fs.readFileSync(path.join(workspacePath, 'workspace.yaml'), 'utf-8');
+    const line = raw.split('\n').find((l) => l.startsWith('name:'));
+    return line ? line.replace('name:', '').trim().replace(/^["']|["']$/g, '') : null;
+  } catch {
+    return null;
+  }
 }
 
 export class WorkspaceService {
@@ -32,26 +80,47 @@ export class WorkspaceService {
   }
 
   setWorkspacePath(workspacePath: string): void {
-    if (!fs.existsSync(ESB_CONFIG_DIR)) {
-      fs.mkdirSync(ESB_CONFIG_DIR, { recursive: true });
-    }
-
-    let existing: EsbConfig = {};
-    if (fs.existsSync(ESB_CONFIG_FILE)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(ESB_CONFIG_FILE, 'utf-8'));
-      } catch {
-        // ignore
-      }
-    }
-
-    const updated: EsbConfig = { ...existing, workspace_path: workspacePath };
-    fs.writeFileSync(ESB_CONFIG_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+    const existing = readConfigFile();
+    writeConfigFile({ ...existing, workspace_path: workspacePath, recent_workspaces: withRecent(existing.recent_workspaces, workspacePath) });
 
     // `gtd start` passes the path via env, which would otherwise keep winning over the config file.
     if (process.env['ESB_WORKSPACE_PATH']) {
       process.env['ESB_WORKSPACE_PATH'] = workspacePath;
     }
+  }
+
+  /** Puts a workspace at the top of the recent list, e.g. the one `gtd start` opened. */
+  rememberWorkspace(workspacePath: string): void {
+    const existing = readConfigFile();
+    writeConfigFile({ ...existing, recent_workspaces: withRecent(existing.recent_workspaces, workspacePath) });
+  }
+
+  /** The current workspace first, then the others most recently opened first. */
+  listRecentWorkspaces(): RecentWorkspace[] {
+    let current: string | null = null;
+    try { current = this.getWorkspacePath(); } catch { /* not configured yet */ }
+    const entries = readConfigFile().recent_workspaces ?? [];
+    const list: RecentWorkspace[] = [];
+    const describe = (p: string, lastOpened: string | null): RecentWorkspace => ({
+      path: p,
+      name: readWorkspaceName(p) ?? path.basename(p),
+      current: current !== null && samePath(p, current),
+      available: this.isExistingWorkspace(p),
+      last_opened: lastOpened,
+    });
+    if (current) list.push(describe(current, entries.find((e) => samePath(e.path, current!))?.last_opened ?? null));
+    for (const e of entries) {
+      if (typeof e?.path !== 'string' || list.some((w) => samePath(w.path, e.path))) continue;
+      list.push(describe(e.path, e.last_opened ?? null));
+    }
+    return list;
+  }
+
+  /** Drops a workspace from the recent list. The folder itself is not touched. */
+  forgetWorkspace(workspacePath: string): void {
+    const existing = readConfigFile();
+    const recent = (existing.recent_workspaces ?? []).filter((e) => !samePath(e.path, workspacePath));
+    writeConfigFile({ ...existing, recent_workspaces: recent });
   }
 
   /** Expands a leading `~` and returns an absolute path. */
@@ -150,4 +219,9 @@ export class WorkspaceService {
       return false;
     }
   }
+}
+
+function withRecent(recent: RecentEntry[] | undefined, workspacePath: string): RecentEntry[] {
+  const others = (Array.isArray(recent) ? recent : []).filter((e) => typeof e?.path === 'string' && !samePath(e.path, workspacePath));
+  return [{ path: workspacePath, last_opened: new Date().toISOString() }, ...others].slice(0, MAX_RECENT);
 }

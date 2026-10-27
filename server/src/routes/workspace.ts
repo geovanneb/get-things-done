@@ -186,6 +186,27 @@ router.post('/switch', async (req: Request, res: Response) => {
   res.json({ message: 'Workspace changed', initialized: !isWorkspace, config: { ...config, git_enabled } });
 });
 
+// GET /api/workspace/recent — workspaces opened on this machine, for one-click switching
+router.get('/recent', async (_req: Request, res: Response) => {
+  res.json(workspaceService.listRecentWorkspaces());
+});
+
+// POST /api/workspace/recent/forget — remove one from that list (the folder stays on disk)
+router.post('/recent/forget', async (req: Request, res: Response) => {
+  const { path: rawPath } = req.body ?? {};
+  if (!rawPath || typeof rawPath !== 'string') {
+    res.status(400).json({ error: 'Missing workspace path.' });
+    return;
+  }
+  const workspacePath = workspaceService.resolveUserPath(rawPath);
+  if (workspaceService.listRecentWorkspaces().some((w) => w.current && path.resolve(w.path) === workspacePath)) {
+    res.status(400).json({ error: 'The workspace you are in cannot be removed from the list.' });
+    return;
+  }
+  workspaceService.forgetWorkspace(workspacePath);
+  res.json(workspaceService.listRecentWorkspaces());
+});
+
 // POST /api/workspace/pick-folder — native folder picker on the machine running the server
 router.post('/pick-folder', async (req: Request, res: Response) => {
   try {

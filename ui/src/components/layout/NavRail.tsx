@@ -1,4 +1,5 @@
 import React from 'react';
+import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppState, useDataVersion } from '../../store';
 import { useApi } from '../../hooks/useApi';
@@ -158,7 +159,7 @@ const NAV_WIDTH_EXPANDED = '242px';
 const NAV_WIDTH_COLLAPSED = '60px';
 
 export default function NavRail() {
-  const { workspace, validationCount, agenticVisualMode } = useAppState();
+  const { validationCount, agenticVisualMode } = useAppState();
   const location = useLocation();
   // Proposals waiting for review are the one context state that needs the user; the badge leads to them.
   const updatesVersion = useDataVersion('context-updates');
@@ -194,6 +195,7 @@ export default function NavRail() {
       : validationCount.warnings > 0
       ? 'var(--color-warning)'
       : 'var(--color-success)';
+  const healthLabel = `Workspace health: ${validationCount.errors > 0 ? 'errors' : validationCount.warnings > 0 ? 'warnings' : 'good'}`;
 
   const navItems: NavItem[] = [
     { path: '/situation', label: 'Situation', icon: <IconSituation /> },
@@ -240,40 +242,14 @@ export default function NavRail() {
           flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: collapsed ? 'center' : 'flex-start' }}>
-          {!collapsed && (
-            <>
-              <span
-                aria-label={`Workspace health: ${validationCount.errors > 0 ? 'errors' : validationCount.warnings > 0 ? 'warnings' : 'good'}`}
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: healthColor,
-                  flexShrink: 0,
-                }}
-              />
-              <span
-                className="truncate"
-                style={{
-                  fontSize: 'var(--text-sm)',
-                  fontWeight: 600,
-                  color: 'var(--nav-text-active)',
-                  flex: 1,
-                }}
-                title={workspace?.name}
-              >
-                {workspace?.name ?? 'Workspace'}
-              </span>
-            </>
-          )}
+        <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: collapsed ? 6 : 4 }}>
+          <WorkspaceSwitcher collapsed={collapsed} healthColor={healthColor} healthLabel={healthLabel} />
 
           <button
             onClick={toggleCollapsed}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             style={{
-              position: 'relative',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -291,27 +267,8 @@ export default function NavRail() {
             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--nav-text)'; }}
           >
             <IconCollapse collapsed={collapsed} />
-            {collapsed && (
-              <span
-                aria-label={`Workspace health: ${validationCount.errors > 0 ? 'errors' : validationCount.warnings > 0 ? 'warnings' : 'good'}`}
-                style={{
-                  position: 'absolute',
-                  top: 1,
-                  right: 1,
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: healthColor,
-                }}
-              />
-            )}
           </button>
         </div>
-        {!collapsed && (
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--nav-text)', marginTop: 2, paddingLeft: 16 }}>
-            Get Things Done
-          </div>
-        )}
       </div>
 
       {/* Main nav items */}

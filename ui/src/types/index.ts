@@ -351,6 +351,15 @@ export interface WorkspaceConfig {
   git_enabled: boolean;
 }
 
+/** A workspace opened on this machine before, as listed by `GET /api/workspace/recent`. */
+export interface RecentWorkspace {
+  path: string;
+  name: string;
+  current: boolean;
+  available: boolean;
+  last_opened: string | null;
+}
+
 export interface OrgChartMember {
   /** Stakeholder id, or `P-<n>` for a chart-local placeholder. */
   ref: string;

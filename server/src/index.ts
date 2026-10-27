@@ -120,6 +120,8 @@ server.listen(PORT, HOST, () => {
     const workspacePath = workspaceService.getWorkspacePath();
     console.log(`Watching workspace: ${workspacePath}`);
     watcherService.start(workspacePath);
+    // A workspace chosen with `gtd init` or `gtd use` shows up in the dashboard's switcher too.
+    try { workspaceService.rememberWorkspace(workspacePath); } catch { /* the config folder is not writable: not fatal */ }
   } catch {
     console.log('Workspace not configured yet. File watcher not started.');
     console.log('Use POST /api/workspace/init to configure your workspace.');

@@ -8,6 +8,7 @@ import Toggle from '@/components/common/Toggle';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppState, useAppDispatch } from '@/store';
+import { useSearchParams } from 'react-router-dom';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
 import type { ThemeMode, TextSize } from '@/utils/theme';
 import type { WorkspaceConfig, GitStatus, ValidationResult } from '@/types';
@@ -631,6 +632,14 @@ export default function SettingsView() {
     setChangeError(null);
     setShowChangeModal(true);
   };
+
+  // "Open another folder..." in the sidebar's workspace switcher lands here with ?change=1.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (!config || searchParams.get('change') !== '1') return;
+    openChangeModal();
+    setSearchParams({}, { replace: true });
+  }, [config, searchParams]);
 
   const handleBrowse = async () => {
     setPicking(true);
