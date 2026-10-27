@@ -34,8 +34,28 @@ outputs/templates/      Output templates: required sections + style guides
 context-updates/        Imported material (transcripts, slides...) and the
                         record of what it changed in the context
 kaizen/                 Improvement proposals for this workspace
+routines/               Schedules that create recurring tasks (RT-NNNN.md)
 workflows/              Reserved for multi-step workflow definitions
 ```
+
+## Routines
+
+Routines put recurring tasks on your backlog by themselves (Routines in the
+dashboard). They are checked whenever the dashboard is running, and when it starts
+again they catch up on runs missed while the computer was off. To run them without
+the dashboard, call `gtd routines run` (for example from your system scheduler).
+Schedules use the server machine's local time. Run the scheduler on only one machine
+if you synchronize the workspace: file sync does not coordinate simultaneous runs.
+The "all" catch-up policy creates at most the latest 12 missed tasks per check.
+Keep `.situation-board/routines/state.json`: it records check times and reserves deleted
+routine IDs so their existing tasks stay associated with the original routine.
+Keep `.situation-board/routines/receipts.jsonl` too: it records every task a routine
+created, so a task you delete is not created again.
+
+A task title can use `{{date}}` (the scheduled run date) and `{{due_date}}`, both written
+as YYYY-MM-DD. The due date counts from the scheduled run, even when the run is caught up
+later. The objective is copied into each task as written, @-mentions included. To skip a
+long absence, set "Pause until" on the routine: runs before that day are not created.
 
 ## App-provided vs. yours
 

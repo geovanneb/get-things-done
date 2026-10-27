@@ -8,6 +8,7 @@ import { openCommand } from './commands/open';
 import { useCommand } from './commands/use';
 import { statusCommand } from './commands/status';
 import { upgradeCommand } from './commands/upgrade';
+import { routinesCommand } from './commands/routines';
 import { migrateLegacyConfig } from './utils/paths';
 
 function readVersion(): string {
@@ -35,6 +36,7 @@ program.addCommand(openCommand);
 program.addCommand(statusCommand);
 program.addCommand(upgradeCommand);
 program.addCommand(useCommand);
+program.addCommand(routinesCommand);
 
 // @inquirer/prompts throws ExitPromptError on Ctrl+C or when stdin closes.
 // Exit quietly instead of printing a stack trace at the user.

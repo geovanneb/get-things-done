@@ -231,6 +231,18 @@ If the executive comes back with feedback on a task that is already \`in_review\
     for (const key of OPTIONAL_CREATE_FIELDS) {
       if (rawData[key] !== undefined && rawData[key] !== null) task[key] = rawData[key];
     }
+    // Set by routines, so a scheduled occurrence never produces a second task. Request bodies are not
+    // typed at runtime: only well-formed pairs are kept, as the task schema requires.
+    const routineRef = rawData['routine_ref'];
+    const occurrence = rawData['routine_occurrence'];
+    if (routineRef !== undefined || occurrence !== undefined) {
+      if (typeof routineRef !== 'string' || !/^RT-\d{4}$/.test(routineRef)
+        || typeof occurrence !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(occurrence)) {
+        throw Object.assign(new Error('Invalid routine_ref/routine_occurrence: set both, as RT-NNNN and YYYY-MM-DDTHH:MM'), { statusCode: 400 });
+      }
+      task['routine_ref'] = routineRef;
+      task['routine_occurrence'] = occurrence;
+    }
 
     const { path: _path, body: _body, ...fields } = task;
     // .schemas/task.schema.json requires schema_version and type; write them like every other

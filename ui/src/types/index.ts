@@ -37,6 +37,9 @@ export interface Task {
   }>;
   contexts: string[];
   preferred_agent?: string;
+  /** Set when a routine created the task. */
+  routine_ref?: string;
+  routine_occurrence?: string;
   skills: string[];
   estimated_hours?: number;
   body?: string;
@@ -448,4 +451,75 @@ export interface ContextUpdate {
   unread: { name: string; reason: string }[];
   /** Detail only: the files still in materials/. */
   material_files?: { name: string; size: number; modified: string; type: string }[];
+}
+
+/* ---- Routines ------------------------------------------------------------ */
+
+export type RoutineWeekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
+export interface RoutineSchedule {
+  frequency: 'daily' | 'weekly' | 'monthly';
+  interval: number;
+  weekdays: RoutineWeekday[];
+  month_day: number | null;
+  month_week: number | null;
+  month_weekday: RoutineWeekday | null;
+  time: string;
+  starts_on: string;
+  ends_on: string | null;
+}
+
+export interface RoutineTaskTemplate {
+  title: string;
+  status: 'backlog' | 'ready';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  tags: string[];
+  stakeholders: { ref: string; role: string; key: boolean }[];
+  deliverables: { id: string; format?: string; template_ref?: string; status: 'pending' }[];
+  due_offset_days: number | null;
+  task_type: string;
+  contexts: { ref: string; relevance?: string }[];
+  preferred_agent: string | null;
+  confidentiality: string | null;
+  body: string;
+}
+
+export interface Routine {
+  id: string;
+  title: string;
+  enabled: boolean;
+  schedule: RoutineSchedule;
+  catch_up: 'latest' | 'all' | 'skip';
+  paused_until: string | null;
+  task: RoutineTaskTemplate;
+  created_at: string;
+  updated_at: string;
+  summary: string;
+  next_run_at: string | null;
+  state: {
+    checked_at?: string;
+    last_run_at?: string;
+    last_status?: 'ok' | 'error';
+    last_message?: string;
+    last_task_id?: string;
+  };
+  problem?: string;
+}
+
+export interface RoutineRun {
+  routine_id: string;
+  routine_title: string;
+  trigger: 'startup' | 'timer' | 'cli' | 'scheduler' | 'manual';
+  at: string;
+  status: 'ok' | 'error';
+  occurrences: string[];
+  skipped: string[];
+  caught_up?: string[];
+  created: string[];
+  message: string;
+}
+
+export interface RoutinePreview {
+  summary: string;
+  next_runs: { at: string; due_date: string | null }[];
 }

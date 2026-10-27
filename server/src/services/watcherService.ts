@@ -25,8 +25,10 @@ export class WatcherService {
       ignored: (filePath, stats) => {
         if (/node_modules|\.git(\/|$)|\.tmp$/.test(filePath)) return true;
         if (skipDirs.some((dir) => filePath === dir || filePath.startsWith(dir + path.sep))) return true;
-        // Only Markdown files matter; directories must pass so their contents are watched.
-        return Boolean(stats?.isFile()) && !filePath.endsWith('.md');
+        // Only Markdown files matter, plus the routine run state: a failed run writes no task, and the
+        // dashboard must still show it. Directories must pass so their contents are watched.
+        const routineState = filePath.endsWith(path.join('.situation-board', 'routines', 'state.json'));
+        return Boolean(stats?.isFile()) && !filePath.endsWith('.md') && !routineState;
       },
       persistent: true,
       ignoreInitial: true,

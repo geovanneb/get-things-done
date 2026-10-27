@@ -9,6 +9,7 @@ import { registerRoutes } from './routes';
 import { localRequestGuard, allowedOrigins } from './middleware/localRequestGuard';
 import { errorHandler } from './middleware/errorHandler';
 import { watcherService } from './services/watcherService';
+import { routineScheduler } from './services/routineScheduler';
 import { WorkspaceService } from './services/workspace';
 import { FileWatchEvent } from './types';
 
@@ -123,6 +124,9 @@ server.listen(PORT, HOST, () => {
     console.log('Workspace not configured yet. File watcher not started.');
     console.log('Use POST /api/workspace/init to configure your workspace.');
   }
+
+  // Runs even without a workspace yet: each tick reads the current workspace path.
+  routineScheduler.start();
 });
 
 // Graceful shutdown
@@ -136,8 +140,9 @@ const shutdown = (): void => {
   }
   sseClients.clear();
 
-  // Stop file watcher
+  // Stop file watcher and routine checks
   watcherService.stop();
+  routineScheduler.stop();
 
   server.close((err) => {
     if (err) {

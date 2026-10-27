@@ -44,3 +44,7 @@ export function getTemplatesPath(): string {
 export function getBundledScaffoldPath(): string {
   return path.join(getPackageRoot(), 'dist', 'server', 'services', 'scaffold.js');
 }
+
+export function getBundledRoutineServicePath(): string {
+  return path.join(getPackageRoot(), 'dist', 'server', 'services', 'routineService.js');
+}

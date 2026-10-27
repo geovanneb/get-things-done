@@ -14,6 +14,7 @@ const VIEW_LABELS: Record<string, string> = {
   '/agents': 'Agents & Skills',
   '/insights': 'Insights',
   '/kaizen': 'Kaizen',
+  '/routines': 'Routines',
   '/agent-floor': 'Agent Floor',
   '/profile': 'Profile',
   '/settings': 'Settings',
