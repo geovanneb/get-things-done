@@ -8,6 +8,81 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
+### Added
+
+- **Routines put recurring tasks on the backlog.** A routine is a schedule plus a
+  task template (`routines/RT-NNNN.md`). When it comes due, a task lands on the
+  backlog with its title, objective, priority, stakeholders, outputs, type, context
+  notes, preferred agent and a due date counted from the scheduled run. Schedules
+  cover daily, weekly, monthly by date or by "first/last weekday", and every N days,
+  weeks or months. Routines can be paused, or paused until a date. (#93)
+  - Routines catch up when the computer was asleep or off: they are checked when the
+    server starts, every minute while the dashboard runs, and on
+    `gtd routines run` from a terminal or a system scheduler. Each routine decides
+    what to do with missed runs: create only the latest (default), create all (at
+    most 12), or skip. Late runs are marked "caught up" in the history.
+  - No duplicates on one machine: a deleted task is not recreated, and the server
+    and the CLI never run routines at the same time. With a workspace synced
+    between machines, run the scheduler on one of them.
+  - New **Routines** page with Run now, pause, edit, delete and run history, an
+    editor with schedule presets and a preview of the next 5 runs, and a repeat
+    icon on board cards for tasks a routine created.
+  - New `gtd routines run` and `gtd routines list` commands.
+- **Switch between recent workspaces from the sidebar.** The current workspace sits
+  at the top of the sidebar with its name, a colored initial and the end of its
+  path. Click it to switch to another workspace opened on this machine in one
+  click, remove one from the list (the folder is never touched), or open another
+  folder. The browser tab title names the workspace. Backed by
+  `GET /api/workspace/recent` and `POST /api/workspace/recent/forget`. (#95)
+- **"Waiting on you".** Nav items show a dot with a count when something needs you
+  (tasks in Needs Review, context updates waiting on you, open kaizen proposals,
+  failing routines, workspace validation errors): amber when it is your move, red
+  when something is broken. Situation lists them in a "Waiting on you" panel. (#97)
+- **Attach files when creating a task.** The New Task dialog has a Files drop zone.
+  If an upload fails, the task is still created and a warning lists the files. (#94)
+- **Kaizen commands are easy to copy.** Every open proposal shows its
+  `/gtd-kaizen ID` command with a Copy button, and with two or more open proposals
+  an **Apply all** box copies one command with every open ID. (#98)
+
+### Changed
+
+- **Context updates make the next command hard to miss.** After approving, the
+  page scrolls to the apply command and focuses its Copy button. While an update
+  waits on a command, a bar at the bottom shows the step with a **Copy command**
+  button, and the status labels name the action ("Run the analyze command",
+  "Approved: run the apply command"). (#96)
+- **The task objective saves with the task.** The Objective section no longer has
+  its own Save: "Save changes" in the header saves everything, and the inline links
+  are now Done and Discard. (#94)
+- **Agent instructions** (Claude Code, Codex, Copilot) and workspace scaffolding
+  cover routines: a new `routines/` folder, a `routine.schema.json` schema, and
+  `routine_ref` / `routine_occurrence` in the task schema. `/gtd-kaizen` in Claude
+  Code now takes several IDs, applies them in order and stops to ask when two
+  proposals clash. Run `gtd upgrade` in an existing workspace to get them; an
+  edited file gets the new version as `.new`. (#93, #98)
+- Search and task filtering include the task objective (the Markdown body). (#99)
+- On Node 20, search uses the built-in JavaScript fallback instead of the native
+  SQLite module, which needs Node 22 or newer and could crash. (#99)
+- Dependencies: Vite 8 (#92), react-markdown 10 (#91), uuid 14 (#88),
+  concurrently 10 (#90), `@types/better-sqlite3` 9 (#89).
+
+### Fixed
+
+- **Creating a task keeps all its fields.** Contexts, task type, confidentiality,
+  preferred agent, review date, estimated hours and slug were dropped on create
+  (they were kept on update). (#78)
+- **Tasks created at the same moment no longer overwrite each other**, for example
+  a routine and a manual create getting the same task ID. (#99)
+- **Switching workspace mid-operation stays safe.** A task, routine run or search
+  in progress finishes in the workspace it started in, instead of writing to or
+  reading from the new one. After a switch, the dashboard opens Situation instead
+  of a detail page that does not exist in the new workspace. (#99)
+- A routine with invalid markers no longer leaves an empty task folder behind. (#99)
+- The Kaizen page updates when an agent changes a proposal, and shows an error
+  when a rejection fails. (#99)
+
 ## [0.4.0] - 2026-10-25
 
 ### Added
@@ -246,7 +321,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/geovanneb/get-things-done/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/geovanneb/get-things-done/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/geovanneb/get-things-done/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/geovanneb/get-things-done/compare/v0.1.2...v0.2.0
