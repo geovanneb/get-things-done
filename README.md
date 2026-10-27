@@ -446,10 +446,10 @@ deleted, so the workspace does not grow over time.
 
 | Status | Meaning | What you do |
 |---|---|---|
-| Waiting for analysis | Material saved | Run `/gtd-context-analyze` |
+| Run the analyze command | Material saved | Run `/gtd-context-analyze` |
 | Agent is analyzing | The agent is reading | Wait; the page refreshes by itself |
 | Ready for your review | Proposals are in | Tick what you accept, then approve |
-| Approved, waiting to apply | Selection locked | Run `/gtd-context-apply` |
+| Approved: run the apply command | Selection locked | Run `/gtd-context-apply` |
 | Agent is applying | The agent is writing | Wait |
 | Done | Finished | Nothing; the record stays as history |
 
