@@ -1,18 +1,15 @@
 import React from 'react';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAppState, useDataVersion } from '../../store';
-import { useApi } from '../../hooks/useApi';
-import type { ContextUpdate, Routine } from '../../types';
+import { useAppState } from '../../store';
+import { usePendingActions, TONE_COLOR, type PendingAction } from '../../hooks/usePendingActions';
 
 interface NavItem {
   path: string;
   label: string;
   icon: React.ReactNode;
-  badge?: number;
-  /** Spoken and shown on hover instead of the bare number. */
-  badgeLabel?: string;
-  dot?: boolean;
+  /** Something here waits on the user: shown as a dot with its count. */
+  pending?: PendingAction;
 }
 
 function IconSituation() {
@@ -161,14 +158,7 @@ const NAV_WIDTH_COLLAPSED = '60px';
 export default function NavRail() {
   const { validationCount, agenticVisualMode } = useAppState();
   const location = useLocation();
-  // Proposals waiting for review are the one context state that needs the user; the badge leads to them.
-  const updatesVersion = useDataVersion('context-updates');
-  const { data: contextUpdates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
-  const toReview = (contextUpdates ?? []).filter((u) => u.status === 'in_review').length;
-  // Routines only need the user when one is broken or its last run failed.
-  const routinesVersion = useDataVersion('routines');
-  const { data: routines } = useApi<Routine[]>('/api/routines', [routinesVersion]);
-  const routineProblems = (routines ?? []).filter((r) => r.problem || r.state?.last_status === 'error').length;
+  const pending = usePendingActions();
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
     try {
       return localStorage.getItem(NAV_COLLAPSE_KEY) === '1';
@@ -200,10 +190,10 @@ export default function NavRail() {
   const navItems: NavItem[] = [
     { path: '/situation', label: 'Situation', icon: <IconSituation /> },
     { path: '/board', label: 'Board', icon: <IconBoard /> },
-    { path: '/routines', label: 'Routines', icon: <IconRepeat />, badge: routineProblems, badgeLabel: `${routineProblems} routine${routineProblems === 1 ? '' : 's'} need${routineProblems === 1 ? 's' : ''} attention` },
+    { path: '/routines', label: 'Routines', icon: <IconRepeat /> },
     { path: '/stakeholders', label: 'Stakeholders', icon: <IconPeople /> },
     { path: '/outputs', label: 'Outputs', icon: <IconFile /> },
-    { path: '/context', label: 'Context', icon: <IconBook />, badge: toReview, badgeLabel: `${toReview} context update${toReview === 1 ? '' : 's'} to review` },
+    { path: '/context', label: 'Context', icon: <IconBook /> },
     { path: '/agents', label: 'Agents & Skills', icon: <IconAgent /> },
     { path: '/insights', label: 'Insights', icon: <IconChart /> },
     { path: '/kaizen', label: 'Kaizen', icon: <IconKaizen /> },
@@ -218,6 +208,10 @@ export default function NavRail() {
     { path: '/profile', label: 'Profile', icon: <IconPerson /> },
     { path: '/settings', label: 'Settings', icon: <IconGear /> },
   ];
+
+  for (const item of [...navItems, ...bottomItems]) {
+    item.pending = pending.find((p) => p.navPath === item.path);
+  }
 
   return (
     <nav
@@ -306,8 +300,8 @@ function NavRailItem({ item, currentPath, collapsed }: { item: NavItem; currentP
       <NavLink
         to={item.path}
         aria-current={isActive ? 'page' : undefined}
-        aria-label={item.badge && item.badgeLabel ? `${item.label}, ${item.badgeLabel}` : undefined}
-        title={item.badge && item.badgeLabel ? `${item.label}: ${item.badgeLabel}` : collapsed ? item.label : undefined}
+        aria-label={item.pending ? `${item.label}, ${item.pending.label}` : undefined}
+        title={item.pending ? `${item.label}: ${item.pending.label}` : collapsed ? item.label : undefined}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -344,41 +338,24 @@ function NavRailItem({ item, currentPath, collapsed }: { item: NavItem; currentP
             {item.label}
           </span>
         )}
-        {!collapsed && item.badge !== undefined && item.badge > 0 && (
-          <span
-            style={{
-              background: 'var(--color-critical)',
-              color: 'white',
-              borderRadius: 10,
-              padding: '1px 6px',
-              fontSize: 'var(--text-xs)',
-              fontWeight: 600,
-              lineHeight: '16px',
-            }}
-          >
-            {item.badge}
+        {!collapsed && item.pending && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--nav-text-active)' }}>
+            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: TONE_COLOR[item.pending.tone] }} />
+            {item.pending.count}
           </span>
         )}
-        {!collapsed && item.dot && (
+        {collapsed && item.pending && (
           <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'var(--color-warning)',
-            }}
-          />
-        )}
-        {collapsed && item.badge !== undefined && item.badge > 0 && (
-          <span
+            aria-hidden="true"
             style={{
               position: 'absolute',
-              top: 4,
-              right: 4,
+              top: 6,
+              right: 8,
               width: 7,
               height: 7,
               borderRadius: '50%',
-              background: 'var(--color-critical)',
+              background: TONE_COLOR[item.pending.tone],
+              boxShadow: '0 0 0 2px var(--nav-bg)',
             }}
           />
         )}
