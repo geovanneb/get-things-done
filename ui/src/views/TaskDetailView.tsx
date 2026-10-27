@@ -38,11 +38,18 @@ function SidebarField({ label, children }: { label: string; children: React.Reac
 }
 
 /* ---- Inline-editable text ----------------------------------------- */
-function MarkdownSection({ label, content, onSave, mentions }: { label: string; content: string; onSave?: (v: string) => void; mentions?: boolean }) {
+// Edits go straight into the task draft, so the header's "Save changes" saves them
+// with everything else. "Done" only switches back to the rendered view.
+function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { label: string; content: string; onChange: (v: string) => void; closeSignal?: number; mentions?: boolean }) {
   const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(content);
+  const [original, setOriginal] = useState(content);
 
-  useEffect(() => { setVal(content); }, [content]);
+  // The task was saved: show the rendered text again.
+  useEffect(() => { setEditing(false); }, [closeSignal]);
+
+  const linkStyle: React.CSSProperties = {
+    fontSize: 'var(--text-xs)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
+  };
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -50,32 +57,24 @@ function MarkdownSection({ label, content, onSave, mentions }: { label: string; 
         <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           {label}
         </h3>
-        {onSave && (
-          <button
-            onClick={() => {
-              if (editing) { onSave(val); setEditing(false); }
-              else setEditing(true);
-            }}
-            style={{
-              fontSize: 'var(--text-xs)',
-              color: 'var(--color-accent)',
-              border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
-            }}
-          >
-            {editing ? 'Save' : 'Edit'}
-          </button>
-        )}
-        {editing && (
-          <button
-            onClick={() => { setVal(content); setEditing(false); }}
-            style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
-          >
-            Cancel
+        {editing ? (
+          <>
+            <button onClick={() => setEditing(false)} style={{ ...linkStyle, color: 'var(--color-accent)' }}>Done</button>
+            <button
+              onClick={() => { onChange(original); setEditing(false); }}
+              style={{ ...linkStyle, color: 'var(--color-text-muted)' }}
+            >
+              Discard
+            </button>
+          </>
+        ) : (
+          <button onClick={() => { setOriginal(content); setEditing(true); }} style={{ ...linkStyle, color: 'var(--color-accent)' }}>
+            Edit
           </button>
         )}
       </div>
       {editing ? (
-        <MarkdownEditor value={val} onChange={setVal} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, template, context note or task' : undefined} />
+        <MarkdownEditor value={content} onChange={onChange} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, template, context note or task' : undefined} />
       ) : (
         <MarkdownView content={content} />
       )}
@@ -142,7 +141,7 @@ function nextDeliverableId(deliverables: Task['deliverables']): string {
   return `DEL-${String(next).padStart(2, '0')}`;
 }
 
-function WorkTab({ task, onFieldChange }: { task: Task; onFieldChange: (field: string, value: unknown) => void }) {
+function WorkTab({ task, onFieldChange, savedCount }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number }) {
   const { data: allStakeholders } = useApi<Stakeholder[]>('/api/stakeholders');
 
   const saveField = (field: string) => (value: unknown) => onFieldChange(field, value);
@@ -172,7 +171,7 @@ function WorkTab({ task, onFieldChange }: { task: Task; onFieldChange: (field: s
     <div style={{ display: 'flex', gap: 24, flex: 1, minHeight: 0 }}>
       {/* Main */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 4 }}>
-        <MarkdownSection label="Objective" content={task.body ?? ''} onSave={saveField('body')} mentions />
+        <MarkdownSection label="Objective" content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
 
         {/* Deliverables */}
         <div style={{ marginBottom: 24 }}>
@@ -336,6 +335,7 @@ export default function TaskDetailView() {
   const [tab, setTab] = useState<TaskTab>('work');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [savedCount, setSavedCount] = useState(0);
 
   // Re-read the task when it changes on disk (agent updating status, deliverables)
   const tasksVersion = useDataVersion('tasks');
@@ -376,6 +376,7 @@ export default function TaskDetailView() {
     try {
       await apiPut(`/api/tasks/${id}`, localTask);
       editingRef.current = false;
+      setSavedCount((n) => n + 1);
       refetch();
       refetchTasks();
     } catch {
@@ -587,7 +588,7 @@ export default function TaskDetailView() {
         {/* Tab content */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '20px' }}>
           {tab === 'work' && (
-            <WorkTab task={localTask} onFieldChange={handleFieldChange} />
+            <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} />
           )}
           {tab === 'files' && id && (
             <FilesTab taskId={id} />

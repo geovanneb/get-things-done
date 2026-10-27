@@ -172,6 +172,16 @@ try {
   check('creating a task keeps its optional fields (type, contexts, confidentiality, ...)',
     Boolean(contextRef) && kept(createdTask) && kept(readBack), JSON.stringify({ ...readBack, body: undefined }).slice(0, 300));
 
+  // The New Task modal uploads the files picked before saving right after the task is created.
+  {
+    const form = new FormData();
+    form.append('file', new Blob(['fictional brief']), 'brief.txt');
+    const up = await fetch(`${base}/api/tasks/${createdTask.id}/files`, { method: 'POST', body: form });
+    const listed = await (await fetch(`${base}/api/tasks/${createdTask.id}/files`)).json();
+    check('a new task accepts files right after it is created',
+      up.status === 201 && Array.isArray(listed) && listed.some((f) => f.name === 'brief.txt'), `${up.status} ${JSON.stringify(listed).slice(0, 200)}`);
+  }
+
   // Routines: a schedule that puts a task on the backlog, from the dashboard and from the CLI.
   {
     const post = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });

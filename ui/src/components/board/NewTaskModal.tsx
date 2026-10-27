@@ -8,13 +8,32 @@ import { selectStyle, dateInputStyle, textareaStyle, sectionLabelStyle } from '@
 import { apiPost } from '@/utils/api';
 import { formatStatusLabel, formatPriorityLabel } from '@/utils/format';
 import MentionTextarea from '../common/MentionTextarea';
+import { DropZone } from '@/components/context-updates/ImportUpdateModal';
+import { formatBytes } from '@/components/context-updates/shared';
 import type { Task, Stakeholder } from '@/types';
+
+const MAX_FILE = 50 * 1024 * 1024;
+
+/** Uploads one file to a task; resolves to an error message, or null when it worked. */
+async function uploadTaskFile(taskId: string, file: File): Promise<string | null> {
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/files`, { method: 'POST', body: form });
+    if (res.ok) return null;
+    const body = await res.json().catch(() => null) as { message?: string; error?: string } | null;
+    return `${file.name}: ${body?.message ?? body?.error ?? `upload failed (${res.status})`}`;
+  } catch {
+    return `${file.name}: upload failed`;
+  }
+}
 
 interface NewTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultStatus?: Task['status'];
-  onCreated?: (task: Task) => void;
+  /** `uploadErrors` lists the files that could not be attached; the task itself was created. */
+  onCreated?: (task: Task, uploadErrors: string[]) => void;
 }
 
 interface FormState {
@@ -64,6 +83,9 @@ export default function NewTaskModal({
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState('');
   const [selectedStakeholders, setSelectedStakeholders] = React.useState<Stakeholder[]>([]);
+  // Files picked before the task exists; they are uploaded right after it is created.
+  const [files, setFiles] = React.useState<File[]>([]);
+  const [progress, setProgress] = React.useState('');
 
   React.useEffect(() => {
     if (isOpen) {
@@ -71,6 +93,8 @@ export default function NewTaskModal({
       setTitleError('');
       setSaveError('');
       setSelectedStakeholders([]);
+      setFiles([]);
+      setProgress('');
     }
   }, [isOpen, defaultStatus]);
 
@@ -104,12 +128,22 @@ export default function NewTaskModal({
     setField('deliverables', form.deliverables.filter((_, i) => i !== index));
   };
 
+  const addFiles = (incoming: File[]) => {
+    setFiles((prev) => [...prev, ...incoming.filter((f) => !prev.some((p) => p.name === f.name && p.size === f.size))]);
+  };
+
+  const tooBig = files.filter((f) => f.size > MAX_FILE);
+
   const validate = (): boolean => {
     if (!form.title.trim()) {
       setTitleError('Title is required.');
       return false;
     }
     setTitleError('');
+    if (tooBig.length) {
+      setSaveError(`Remove files over 50 MB: ${tooBig.map((f) => f.name).join(', ')}`);
+      return false;
+    }
     return true;
   };
 
@@ -140,12 +174,19 @@ export default function NewTaskModal({
         contexts: [],
       };
       const created = await apiPost<Task>('/api/tasks', payload);
-      onCreated?.(created);
+      const uploadErrors: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        setProgress(`Uploading ${i + 1} of ${files.length}...`);
+        const failed = await uploadTaskFile(created.id, files[i]!);
+        if (failed) uploadErrors.push(failed);
+      }
+      onCreated?.(created, uploadErrors);
       onClose();
     } catch (err: any) {
       setSaveError(err?.message ?? 'Failed to create task. Please try again.');
     } finally {
       setSaving(false);
+      setProgress('');
     }
   };
 
@@ -259,6 +300,11 @@ export default function NewTaskModal({
                   {saveError}
                 </span>
               )}
+              {progress && (
+                <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  {progress}
+                </span>
+              )}
               <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
                 Cancel
               </Button>
@@ -295,6 +341,24 @@ export default function NewTaskModal({
                 label="Output type"
                 emptyText="No outputs defined yet."
               />
+            </div>
+
+            {/* Files: attached right after the task is created */}
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ ...sectionLabelStyle, marginBottom: 8 }}>Files</h3>
+              <DropZone onFiles={addFiles} compact />
+              {files.length > 0 && (
+                <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {files.map((f) => (
+                    <li key={`${f.name}-${f.size}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                      <span style={{ fontSize: 'var(--text-xs)', color: f.size > MAX_FILE ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
+                      <button type="button" aria-label={`Remove ${f.name}`} disabled={saving} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 4px', fontSize: 'var(--text-base)' }}>×</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
 
