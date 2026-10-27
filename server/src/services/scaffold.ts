@@ -95,6 +95,32 @@ function sha256(buf: Buffer | string): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
+/** Sorts object keys and array items, so two JSON values compare equal when only their order differs. */
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => JSON.stringify(canonicalJson(item))).sort();
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(obj).sort().map((key) => [key, canonicalJson(obj[key])]));
+  }
+  return value;
+}
+
+/**
+ * True when both buffers are JSON holding the same data in a different order or layout
+ * (an editor or a hand merge rewrote it). Such a file is kept as it is, so nothing is lost.
+ */
+function isEquivalentJson(relPath: string, a: Buffer, b: Buffer): boolean {
+  if (path.extname(relPath).toLowerCase() !== '.json') return false;
+  try {
+    const left = JSON.stringify(canonicalJson(JSON.parse(a.toString('utf-8'))));
+    return left === JSON.stringify(canonicalJson(JSON.parse(b.toString('utf-8'))));
+  } catch {
+    return false;
+  }
+}
+
 function isTextFile(name: string): boolean {
   return TEXT_EXTENSIONS.has(path.extname(name).toLowerCase()) || name in TEMPLATE_NAME_MAP;
 }
@@ -397,8 +423,9 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
       continue;
     }
 
-    const currentHash = sha256(fs.readFileSync(destPath));
-    if (currentHash === nextHash) {
+    const currentContent = fs.readFileSync(destPath);
+    const currentHash = sha256(currentContent);
+    if (currentHash === nextHash || isEquivalentJson(relPath, currentContent, nextContent)) {
       result.unchanged.push(relPath);
       continue;
     }
