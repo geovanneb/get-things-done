@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { searchService } from '../services/searchService';
+import { SearchService } from '../services/searchService';
 
 const router = Router();
 
@@ -15,15 +15,16 @@ router.get('/', async (req: Request, res: Response) => {
 
   const types = typesParam ? typesParam.split(',').map((t) => t.trim()) : undefined;
 
-  // Try to build index (no-op if already built - fast path via SQLite)
+  // The index connection belongs to this request, so a workspace switch cannot replace it
+  // while collection is awaiting filesystem reads. It is closed on success and failure.
+  const searchService = new SearchService();
   try {
     await searchService.buildIndex();
-  } catch {
-    // Proceed with potentially stale index
+    const results = await searchService.search(q, types);
+    res.json({ results, count: results.length, query: q });
+  } finally {
+    searchService.reset();
   }
-
-  const results = await searchService.search(q, types);
-  res.json({ results, count: results.length, query: q });
 });
 
 export default router;

@@ -468,3 +468,22 @@ test('tasks created through the API only keep well-formed routine markers', asyn
   const ok = await tasks.createTask({ title: 'x', routine_ref: 'RT-0001', routine_occurrence: '2026-11-02T08:00' } as never);
   assert.equal(ok['routine_occurrence'], '2026-11-02T08:00');
 });
+
+
+test('an in-flight routine stays in its original workspace after a switch', async (t) => {
+  const first = await workspace(t);
+  const second = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-rt-other-'));
+  t.after(() => fsp.rm(second, { recursive: true, force: true }));
+  const service = new RoutineService();
+  const routine = await service.create(biweeklyPrep, local('2026-10-25T12:00'));
+  const original = TaskService.prototype.createTask;
+  t.mock.method(TaskService.prototype, 'createTask', async function (this: TaskService, data: Parameters<TaskService['createTask']>[0]) {
+    process.env.ESB_WORKSPACE_PATH = second;
+    return original.call(this, data);
+  });
+  const run = await service.runNow(routine.id, local('2026-10-26T10:00'));
+  assert.equal(run.created.length, 1);
+  assert.ok(await fsp.stat(path.join(first, 'tasks', 'active', run.created[0]!, 'task.md')));
+  assert.deepEqual(await fsp.readdir(second), [], 'tasks and receipts must not leak into the newly selected workspace');
+  assert.match(await fsp.readFile(path.join(first, '.situation-board', 'routines', 'receipts.jsonl'), 'utf-8'), /RT-0001/);
+});

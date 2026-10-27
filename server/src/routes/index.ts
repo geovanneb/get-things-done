@@ -1,4 +1,5 @@
 import { Express } from 'express';
+import { WorkspaceService, withWorkspacePath } from '../services/workspace';
 import tasksRouter from './tasks';
 import stakeholdersRouter from './stakeholders';
 import contextRouter from './context';
@@ -17,6 +18,12 @@ import orgChartsRouter from './orgCharts';
 import routinesRouter from './routines';
 
 export function registerRoutes(app: Express): void {
+  app.use('/api', (_req, _res, next) => {
+    let workspacePath: string;
+    try { workspacePath = new WorkspaceService().getWorkspacePath(); }
+    catch { next(); return; } // Setup routes must also work before a workspace is selected.
+    withWorkspacePath(workspacePath, next);
+  });
   app.use('/api/tasks', tasksRouter);
   app.use('/api/stakeholders', stakeholdersRouter);
   app.use('/api/context', contextRouter);

@@ -45,6 +45,12 @@ let sqliteCtor: DatabaseCtor | null | undefined;
 
 function loadSqlite(): DatabaseCtor | null {
   if (sqliteCtor !== undefined) return sqliteCtor;
+  // better-sqlite3 13 requires Node 22+. A shared install may still contain its native
+  // binary on Node 20, where loading it can crash the process instead of throwing.
+  if (Number(process.versions.node.split('.')[0]) < 22) {
+    sqliteCtor = null;
+    return null;
+  }
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     sqliteCtor = require('better-sqlite3') as DatabaseCtor;
@@ -124,7 +130,7 @@ export class SearchService {
     try {
       const tasks = await taskService.listTasks();
       for (const t of tasks) {
-        rows.push({ id: t.id, type: 'task', title: t.title, body: [t.description, t.objective, t.tags.join(' ')].filter(Boolean).join(' '), status: t.status, path: t.path || null });
+        rows.push({ id: t.id, type: 'task', title: t.title, body: [t.description, t.objective, t.body, t.tags.join(' ')].filter(Boolean).join(' '), status: t.status, path: t.path || null });
       }
     } catch { /* no tasks yet */ }
 

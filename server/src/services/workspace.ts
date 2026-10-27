@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -11,6 +12,13 @@ const LEGACY_CONFIG_FILE = path.join(os.homedir(), '.esb', 'config.json');
 
 /** How many workspaces the switcher remembers. */
 const MAX_RECENT = 8;
+
+// Keep an operation on one workspace across awaits, even if another request switches folders.
+const operationWorkspace = new AsyncLocalStorage<{ path: string }>();
+
+export function withWorkspacePath<T>(workspacePath: string, fn: () => T): T {
+  return operationWorkspace.run({ path: workspacePath }, fn);
+}
 
 interface RecentEntry {
   path: string;
@@ -63,6 +71,8 @@ function readWorkspaceName(workspacePath: string): string | null {
 
 export class WorkspaceService {
   getWorkspacePath(): string {
+    const scoped = operationWorkspace.getStore();
+    if (scoped) return scoped.path;
     const envPath = process.env['ESB_WORKSPACE_PATH'];
     if (envPath) return envPath;
 
@@ -82,6 +92,9 @@ export class WorkspaceService {
   setWorkspacePath(workspacePath: string): void {
     const existing = readConfigFile();
     writeConfigFile({ ...existing, workspace_path: workspacePath, recent_workspaces: withRecent(existing.recent_workspaces, workspacePath) });
+
+    const scoped = operationWorkspace.getStore();
+    if (scoped) scoped.path = workspacePath;
 
     // `gtd start` passes the path via env, which would otherwise keep winning over the config file.
     if (process.env['ESB_WORKSPACE_PATH']) {

@@ -117,7 +117,8 @@ export class TaskService {
             const matches =
               task.title?.toLowerCase().includes(q) ||
               task.description?.toLowerCase().includes(q) ||
-              task.objective?.toLowerCase().includes(q);
+              task.objective?.toLowerCase().includes(q) ||
+              task.body?.toLowerCase().includes(q);
             if (!matches) continue;
           }
         }
@@ -192,6 +193,17 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async createTask(data: Partial<Task>): Promise<Task> {
+    const rawData = data as Record<string, unknown>;
+    // Set by routines, so a scheduled occurrence never produces a second task. Request bodies are not
+    // typed at runtime: only well-formed pairs are kept, as the task schema requires.
+    const routineRef = rawData['routine_ref'];
+    const occurrence = rawData['routine_occurrence'];
+    if (routineRef !== undefined || occurrence !== undefined) {
+      if (typeof routineRef !== 'string' || !/^RT-\d{4}$/.test(routineRef)
+        || typeof occurrence !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(occurrence)) {
+        throw Object.assign(new Error('Invalid routine_ref/routine_occurrence: set both, as RT-NNNN and YYYY-MM-DDTHH:MM'), { statusCode: 400 });
+      }
+    }
     const id = await this.generateTaskId();
     const now = new Date().toISOString();
     const taskDir = path.join(this.getActiveDir(), topLevelName(id));
@@ -202,7 +214,6 @@ If the executive comes back with feedback on a task that is already \`in_review\
     await fileService.ensureDir(path.join(taskDir, 'executions'));
     await fileService.ensureDir(path.join(taskDir, 'notes'));
 
-    const rawData = data as Record<string, unknown>;
     const incomingStakeholders = Array.isArray(rawData['stakeholders'])
       ? (rawData['stakeholders'] as { ref: string; role: string; key?: boolean }[])
       : [];
@@ -231,15 +242,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     for (const key of OPTIONAL_CREATE_FIELDS) {
       if (rawData[key] !== undefined && rawData[key] !== null) task[key] = rawData[key];
     }
-    // Set by routines, so a scheduled occurrence never produces a second task. Request bodies are not
-    // typed at runtime: only well-formed pairs are kept, as the task schema requires.
-    const routineRef = rawData['routine_ref'];
-    const occurrence = rawData['routine_occurrence'];
-    if (routineRef !== undefined || occurrence !== undefined) {
-      if (typeof routineRef !== 'string' || !/^RT-\d{4}$/.test(routineRef)
-        || typeof occurrence !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(occurrence)) {
-        throw Object.assign(new Error('Invalid routine_ref/routine_occurrence: set both, as RT-NNNN and YYYY-MM-DDTHH:MM'), { statusCode: 400 });
-      }
+    if (routineRef !== undefined) {
       task['routine_ref'] = routineRef;
       task['routine_occurrence'] = occurrence;
     }
@@ -351,8 +354,17 @@ If the executive comes back with feedback on a task that is already \`in_review\
       }
     }
 
-    const nextSeq = String(maxSeq + 1).padStart(4, '0');
-    return `${prefix}${nextSeq}`;
+    // mkdir without recursive is an exclusive reservation shared by CLI and server writers.
+    // A scan alone lets simultaneous manual and scheduled tasks overwrite the same task.md.
+    for (;;) {
+      const id = `${prefix}${String(++maxSeq).padStart(4, '0')}`;
+      try {
+        await fsp.mkdir(path.join(activeDir, id));
+        return id;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+    }
   }
 
   async listTaskFiles(id: string): Promise<Array<{ name: string; size: number; modified: string; type: string }>> {
