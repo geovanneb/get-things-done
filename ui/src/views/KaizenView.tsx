@@ -5,6 +5,7 @@ import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
 import MarkdownView from '../components/common/MarkdownView';
+import { CommandBox } from '../components/context-updates/shared';
 import { formatRelativeTime } from '../utils/format';
 
 /* ---- Status helpers -------------------------------------------------- */
@@ -14,56 +15,30 @@ const STATUS_CONFIG: Record<KaizenProposal['status'], { label: string; color: st
   rejected: { label: 'Rejected', color: 'var(--color-text-muted)', badgeVariant: 'default' },
 };
 
-/* ---- Copy button ------------------------------------------------------ */
-function CopyIdButton({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(id).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
-  };
-
+/* ---- ID chip ---------------------------------------------------------- */
+function IdChip({ id }: { id: string }) {
   return (
-    <button
-      onClick={handleCopy}
-      title="Copy ID for /gtd-kaizen command"
+    <span
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
         padding: '2px 8px',
         border: '1px solid var(--color-border)',
         borderRadius: 'var(--radius-sm)',
-        background: copied ? 'color-mix(in oklch, var(--color-success) 12%, transparent)' : 'var(--color-bg)',
-        color: copied ? 'var(--color-success)' : 'var(--color-text-muted)',
+        background: 'var(--color-bg)',
+        color: 'var(--color-text-muted)',
         fontSize: 'var(--text-xs)',
         fontFamily: 'var(--font-mono)',
         fontWeight: 600,
-        cursor: 'pointer',
-        transition: 'all 0.15s ease',
         whiteSpace: 'nowrap',
       }}
     >
-      {copied ? (
-        <>
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
-            <path d="M2 5.5L4.5 8L9 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Copied
-        </>
-      ) : (
-        <>
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
-            <rect x="3.5" y="3.5" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.2" />
-            <path d="M1.5 7.5V1.5h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
-          {id}
-        </>
-      )}
-    </button>
+      {id}
+    </span>
   );
+}
+
+/** Applies several proposals in one agent run: `/gtd-kaizen` takes the IDs space-separated. */
+function kaizenCommand(ids: string[]): string {
+  return `/gtd-kaizen ${ids.join(' ')}`;
 }
 
 /* ---- Kaizen card ------------------------------------------------------ */
@@ -100,7 +75,7 @@ function KaizenCard({ proposal, onRefetch }: { proposal: KaizenProposal; onRefet
       <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-            <CopyIdButton id={proposal.id} />
+            <IdChip id={proposal.id} />
             <Badge variant={cfg.badgeVariant as 'warning'} size="sm">{cfg.label}</Badge>
             <span
               style={{
@@ -159,6 +134,43 @@ function KaizenCard({ proposal, onRefetch }: { proposal: KaizenProposal; onRefet
         {proposal.root_cause.split('\n')[0]}
       </div>
 
+      {/* Open proposals: the command to apply it, always in view */}
+      {proposal.status === 'proposed' && (
+        <div style={{ padding: '0 16px 14px', display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+            <CommandBox command={kaizenCommand([proposal.id])} label="Run in Claude Code to apply" />
+          </div>
+          <button
+            onClick={handleReject}
+            disabled={rejecting}
+            style={{
+              height: 36,
+              padding: '0 14px',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              color: 'var(--color-text-muted)',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 500,
+              cursor: rejecting ? 'not-allowed' : 'pointer',
+              opacity: rejecting ? 0.5 : 1,
+              whiteSpace: 'nowrap',
+              transition: 'color 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-critical)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-critical)';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-muted)';
+              (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border)';
+            }}
+          >
+            {rejecting ? 'Rejecting...' : 'Reject'}
+          </button>
+        </div>
+      )}
+
       {/* Expanded detail */}
       {expanded && (
         <div
@@ -204,53 +216,6 @@ function KaizenCard({ proposal, onRefetch }: { proposal: KaizenProposal; onRefet
             </div>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div
-              style={{
-                flex: 1,
-                padding: '10px 14px',
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: 'var(--text-xs)',
-                color: 'var(--color-text-muted)',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>To apply: </span>
-              /gtd-kaizen {proposal.id}
-            </div>
-
-            {proposal.status === 'proposed' && (
-              <button
-                onClick={handleReject}
-                disabled={rejecting}
-                style={{
-                  padding: '6px 14px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'transparent',
-                  color: 'var(--color-text-muted)',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 600,
-                  cursor: rejecting ? 'not-allowed' : 'pointer',
-                  opacity: rejecting ? 0.5 : 1,
-                  whiteSpace: 'nowrap',
-                  transition: 'color 0.15s, border-color 0.15s',
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-danger, #e53e3e)';
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-danger, #e53e3e)';
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-muted)';
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border)';
-                }}
-              >
-                {rejecting ? 'Rejecting...' : 'Reject'}
-              </button>
-            )}
-          </div>
         </div>
       )}
     </article>
@@ -299,8 +264,8 @@ export default function KaizenView() {
       <div>
         <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, margin: 0 }}>Kaizen proposals</h1>
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginTop: 4, marginBottom: 0 }}>
-          Self-improvement proposals created after follow-up corrections. Copy an ID and run{' '}
-          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>/gtd-kaizen ID</code> to apply.
+          Self-improvement proposals created after follow-up corrections. Copy a proposal's command, or apply them
+          all at once, and run it in Claude Code.
         </p>
       </div>
 
@@ -313,6 +278,26 @@ export default function KaizenView() {
             </h2>
             <Badge variant="warning" size="sm">{proposed.length}</Badge>
           </div>
+          {proposed.length > 1 && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: '12px 16px',
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-md)',
+              }}
+            >
+              <CommandBox
+                command={kaizenCommand(proposed.map((p) => p.id))}
+                label={`Apply all ${proposed.length} open proposals in one run`}
+              />
+              <p style={{ margin: '6px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                Reject the ones you do not want first. The agent applies the rest one by one and asks if two of them
+                clash.
+              </p>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {proposed.map((p) => <KaizenCard key={p.id} proposal={p} onRefetch={refetch} />)}
           </div>
