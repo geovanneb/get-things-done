@@ -180,6 +180,13 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
           {formatPriorityLabel(task.priority)}
         </Badge>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{task.task_type}</span>
+        {task.routine_ref && (
+          <span title={`Created by routine ${task.routine_ref}`} aria-label={`Created by routine ${task.routine_ref}`} style={{ display: 'inline-flex', color: 'var(--color-text-muted)' }}>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.5 7V6a2.5 2.5 0 0 1 2.5-2.5h7.5M10.5 1.5l2 2-2 2M13.5 9v1a2.5 2.5 0 0 1-2.5 2.5H3.5M5.5 14.5l-2-2 2-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        )}
         {showTaskIds && <span
           style={{
             marginLeft: 'auto',

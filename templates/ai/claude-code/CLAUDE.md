@@ -27,11 +27,19 @@ context-updates/          Raw material waiting to be distilled into context (not
     update.md             Status, proposals and the executive's decisions
     materials/            Uploaded files (deleted when the update is done)
     proposals/P-NN.md     Proposed content of one context or stakeholder file
+routines/                 RT-NNNN.md schedules that create recurring tasks
 .schemas/                 JSON Schemas for all file types
 ```
 
 `context-updates/` holds unreviewed raw material. Never use it as a source for a task:
 only `context/` and `stakeholders/` are the reviewed truth.
+
+Tasks with `routine_ref` were created by a routine (`routines/RT-NNNN.md`, a schedule plus a task
+template). Work on them like any other task, and never change `routine_ref` or `routine_occurrence`:
+they stop the routine creating the same task twice. Create or edit a routine only when the user asks,
+following `.schemas/routine.schema.json`; the dashboard picks up the change on its next check.
+In a routine's task title, `{{date}}` is the scheduled run date and `{{due_date}}` the due date
+(both YYYY-MM-DD); the routine body is copied into each task as written.
 
 ## Before starting any task
 

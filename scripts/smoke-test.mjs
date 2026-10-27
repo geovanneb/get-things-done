@@ -172,6 +172,52 @@ try {
   check('creating a task keeps its optional fields (type, contexts, confidentiality, ...)',
     Boolean(contextRef) && kept(createdTask) && kept(readBack), JSON.stringify({ ...readBack, body: undefined }).slice(0, 300));
 
+  // Routines: a schedule that puts a task on the backlog, from the dashboard and from the CLI.
+  {
+    const post = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+    check('gtd init creates the routines folder and schema',
+      fs.existsSync(path.join(ws, 'routines')) && fs.existsSync(path.join(ws, '.schemas', 'routine.schema.json')));
+    const schedule = { frequency: 'weekly', interval: 2, weekdays: ['mon'], time: '08:00', starts_on: '2026-10-26' };
+    const preview = await (await post('/api/routines/preview', { schedule, due_offset_days: 2 })).json();
+    check('a routine schedule previews as a sentence with the next runs',
+      preview.summary === 'Every 2 weeks on Monday at 08:00' && preview.next_runs?.length === 5, JSON.stringify(preview).slice(0, 200));
+    const routineRes = await post('/api/routines', {
+      schedule, task: { title: 'Prepare steering sync ({{due_date}})', priority: 'high', due_offset_days: 2, body: 'Fictional prep.' },
+    });
+    const routine = await routineRes.json();
+    check('a routine is created with a summary and a next run', routineRes.status === 201 && routine.id === 'RT-0001' && Boolean(routine.next_run_at),
+      `status=${routineRes.status}`);
+    const run = await (await post(`/api/routines/${routine.id}/run`)).json();
+    const created = run.created?.[0] ? await (await fetch(`${base}/api/tasks/${run.created[0]}`)).json() : {};
+    check('run now puts the task on the backlog, linked to its routine',
+      created.routine_ref === routine.id && created.status === 'backlog' && /^Prepare steering sync \(\d{4}-\d{2}-\d{2}\)$/.test(created.title ?? ''),
+      JSON.stringify(run));
+    const fieldsRoutine = await (await post('/api/routines', {
+      schedule, paused_until: '2099-01-01',
+      task: { title: 'Smoke routine fields', task_type: 'presentation', preferred_agent: 'meeting-prep', confidentiality: 'internal', body: 'See [@TASK-2026-0001](/tasks/active/TASK-2026-0001/task.md).' },
+    })).json();
+    const fieldsRun = await (await post(`/api/routines/${fieldsRoutine.id}/run`)).json();
+    const fieldsTask = fieldsRun.created?.[0] ? await (await fetch(`${base}/api/tasks/${fieldsRun.created[0]}`)).json() : {};
+    check('a routine task keeps its type, agent, confidentiality and mention links; a pause moves the next run',
+      fieldsTask.task_type === 'presentation' && fieldsTask.preferred_agent === 'meeting-prep' && fieldsTask.confidentiality === 'internal'
+        && String(fieldsTask.body).includes('[@TASK-2026-0001](/tasks/active/TASK-2026-0001/task.md)')
+        && fieldsRoutine.next_run_at >= '2099-01-01', JSON.stringify({ ...fieldsTask, body: undefined }).slice(0, 300));
+    const badId = await fetch(`${base}/api/routines/..%2Fworkspace`);
+    const badSchedule = await post('/api/routines', { schedule: { frequency: 'hourly' }, task: { title: 'x' } });
+    check('routine ids and schedules are validated', badId.status === 400 && badSchedule.status === 400, `${badId.status}/${badSchedule.status}`);
+    const badOffset = await post('/api/routines/preview', { schedule, due_offset_days: 366 });
+    check('routine previews reject invalid due offsets', badOffset.status === 400, String(badOffset.status));
+    fs.writeFileSync(path.join(ws, 'routines', 'RT-0009.md'), '---\nschedule: broken\n---\n');
+    const deletedBroken = await fetch(`${base}/api/routines/RT-0009`, { method: 'DELETE' });
+    check('broken routines can be deleted through the API', deletedBroken.status === 204
+      && !fs.existsSync(path.join(ws, 'routines', 'RT-0009.md')), String(deletedBroken.status));
+    const history = await (await fetch(`${base}/api/routines/history`)).json();
+    check('the run history lists the run', history.some((r) => r.routine_id === routine.id && r.trigger === 'manual'));
+    const cli = execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'routines', 'list'], { env, encoding: 'utf8' });
+    const cliRun = execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'routines', 'run'], { env, encoding: 'utf8' });
+    check('gtd routines list and run work without the dashboard', cli.includes('RT-0001') && cliRun.includes('No routine is due'), cli + cliRun);
+  }
+
   const group = await fetch(`${base}/api/stakeholders`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Smoke group', type: 'groups' }),
   });

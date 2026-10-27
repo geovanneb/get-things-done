@@ -58,6 +58,7 @@ export const WORKSPACE_DIRS = [
   'context-updates',
   'profile',
   'kaizen',
+  'routines',
   'workflows',
   '.claude/agents',
   '.claude/commands',
@@ -65,6 +66,7 @@ export const WORKSPACE_DIRS = [
   '.situation-board/cache',
   '.situation-board/logs',
   '.situation-board/trash',
+  '.situation-board/routines',
 ];
 
 export const MANIFEST_RELATIVE_PATH = path.join('.situation-board', 'app-manifest.json');
@@ -227,6 +229,7 @@ export function writeWorkspaceYaml(workspacePath: string, workspaceName: string)
     '  context_updates: context-updates',
     '  profile: profile',
     '  kaizen: kaizen',
+    '  routines: routines',
     '  agents: .claude/agents',
     '  skills: .claude/skills',
     '  cache: .situation-board/cache',

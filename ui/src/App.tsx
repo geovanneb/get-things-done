@@ -14,6 +14,7 @@ import InsightsView from './views/InsightsView';
 import ProfileView from './views/ProfileView';
 import SettingsView from './views/SettingsView';
 import KaizenView from './views/KaizenView';
+import RoutinesView from './views/RoutinesView';
 import AgentFloorView from './views/AgentFloorView';
 import { useLiveEvents } from './hooks/useLiveEvents';
 import { apiGet } from './utils/api';
@@ -65,6 +66,7 @@ function AppRoutes() {
           <Route path="agents" element={<AgentsView />} />
           <Route path="insights" element={<InsightsView />} />
           <Route path="kaizen" element={<KaizenView />} />
+          <Route path="routines" element={<RoutinesView />} />
           <Route path="agent-floor" element={<AgentFloorView />} />
           <Route path="profile" element={<ProfileView />} />
           <Route path="settings" element={<SettingsView />} />

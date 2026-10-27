@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppState, useDataVersion } from '../../store';
 import { useApi } from '../../hooks/useApi';
-import type { ContextUpdate } from '../../types';
+import type { ContextUpdate, Routine } from '../../types';
 
 interface NavItem {
   path: string;
@@ -104,6 +104,17 @@ function IconKaizen() {
   );
 }
 
+function IconRepeat() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2.5 7V6a2.5 2.5 0 0 1 2.5-2.5h7.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M10.5 1.5l2 2-2 2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13.5 9v1a2.5 2.5 0 0 1-2.5 2.5H3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M5.5 14.5l-2-2 2-2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconArcade() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -153,6 +164,10 @@ export default function NavRail() {
   const updatesVersion = useDataVersion('context-updates');
   const { data: contextUpdates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
   const toReview = (contextUpdates ?? []).filter((u) => u.status === 'in_review').length;
+  // Routines only need the user when one is broken or its last run failed.
+  const routinesVersion = useDataVersion('routines');
+  const { data: routines } = useApi<Routine[]>('/api/routines', [routinesVersion]);
+  const routineProblems = (routines ?? []).filter((r) => r.problem || r.state?.last_status === 'error').length;
   const [collapsed, setCollapsed] = React.useState<boolean>(() => {
     try {
       return localStorage.getItem(NAV_COLLAPSE_KEY) === '1';
@@ -183,6 +198,7 @@ export default function NavRail() {
   const navItems: NavItem[] = [
     { path: '/situation', label: 'Situation', icon: <IconSituation /> },
     { path: '/board', label: 'Board', icon: <IconBoard /> },
+    { path: '/routines', label: 'Routines', icon: <IconRepeat />, badge: routineProblems, badgeLabel: `${routineProblems} routine${routineProblems === 1 ? '' : 's'} need${routineProblems === 1 ? 's' : ''} attention` },
     { path: '/stakeholders', label: 'Stakeholders', icon: <IconPeople /> },
     { path: '/outputs', label: 'Outputs', icon: <IconFile /> },
     { path: '/context', label: 'Context', icon: <IconBook />, badge: toReview, badgeLabel: `${toReview} context update${toReview === 1 ? '' : 's'} to review` },

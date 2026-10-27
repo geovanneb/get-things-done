@@ -2,3 +2,4 @@
 .situation-board/logs/
 node_modules/
 *.log
+.situation-board/routines/run.lock

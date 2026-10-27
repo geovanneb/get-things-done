@@ -18,8 +18,18 @@ stakeholders/org-charts/  ORG-NNNN.md reporting lines for one company or organiz
 context/                  Context notes (company, strategy, risks, etc.)
 outputs/templates/        Output format templates
 context-updates/          Imported material waiting for review (not context)
+routines/                 RT-NNNN.md schedules that create recurring tasks
 .schemas/                 JSON schema references
 ```
+
+## Routines
+
+Tasks with `routine_ref` were created by a routine (`routines/RT-NNNN.md`, a schedule plus a task
+template). Work on them like any other task, and never change `routine_ref` or `routine_occurrence`:
+they stop the routine creating the same task twice. Create or edit a routine only when the user asks,
+following `.schemas/routine.schema.json`; the dashboard picks up the change on its next check.
+In a routine's task title, `{{date}}` is the scheduled run date and `{{due_date}}` the due date
+(both YYYY-MM-DD); the routine body is copied into each task as written.
 
 ## Task workflow
 

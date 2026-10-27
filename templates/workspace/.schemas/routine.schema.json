@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Routine",
+  "description": "Frontmatter of routines/RT-NNNN.md. Mirrors what server/src/services/routineService.ts reads and writes. The Markdown body is the body of every task the routine creates.",
+  "type": "object",
+  "required": ["schema_version", "type", "id", "title", "schedule", "task"],
+  "properties": {
+    "schema_version": {"type": "string", "enum": ["1.0"]},
+    "type": {"type": "string", "enum": ["routine"]},
+    "id": {"type": "string", "pattern": "^RT-\\d{4}$"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "enabled": {"type": "boolean", "description": "false pauses the routine. Switching it back on does not create the runs missed while paused."},
+    "schedule": {
+      "type": "object",
+      "required": ["frequency", "starts_on"],
+      "properties": {
+        "frequency": {"type": "string", "enum": ["daily", "weekly", "monthly"]},
+        "interval": {"type": "integer", "minimum": 1, "maximum": 99, "description": "Every N days, weeks or months. Default 1."},
+        "weekdays": {"type": "array", "items": {"type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}, "description": "Weekly only."},
+        "month_day": {"type": "integer", "minimum": -1, "maximum": 31, "description": "Monthly by date: 1-31, or -1 for the last day. Short months use their last day."},
+        "month_week": {"type": "integer", "minimum": -1, "maximum": 4, "description": "Monthly by weekday: 1-4, or -1 for the last (with month_weekday)."},
+        "month_weekday": {"type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]},
+        "time": {"type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$", "description": "Local time, 24-hour. Default 09:00."},
+        "starts_on": {"type": "string", "format": "date"},
+        "ends_on": {"type": "string", "format": "date"}
+      }
+    },
+    "catch_up": {"type": "string", "enum": ["latest", "all", "skip"], "description": "Runs missed while the computer was off: create only the latest (default), all of them (at most 12), or none."},
+    "paused_until": {"type": "string", "format": "date", "description": "Runs before this day are skipped (not caught up later). The routine resumes on its own on this day."},
+    "task": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1, "maxLength": 200, "description": "May use {{date}} (the scheduled run date) and {{due_date}}, both written as YYYY-MM-DD."},
+        "task_type": {"type": "string", "enum": ["quarterly_report", "presentation", "memo", "decision_brief", "analysis", "strategy", "ad_hoc", "review", "communication"], "description": "Default ad_hoc."},
+        "contexts": {"type": "array", "items": {"type": "object", "required": ["ref"], "properties": {"ref": {"type": "string"}, "relevance": {"type": "string", "enum": ["required", "recommended", "optional"]}}}},
+        "preferred_agent": {"type": "string"},
+        "confidentiality": {"type": "string", "enum": ["public", "internal", "confidential", "restricted"]},
+        "status": {"type": "string", "enum": ["backlog", "ready"]},
+        "priority": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "stakeholders": {"type": "array", "items": {"type": "object", "required": ["ref"], "properties": {"ref": {"type": "string", "pattern": "^STK-\\d{4}$"}, "role": {"type": "string"}, "key": {"type": "boolean"}}}},
+        "deliverables": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "format": {"type": "string"}, "template_ref": {"type": "string"}, "status": {"type": "string"}}}},
+        "due_offset_days": {"type": "integer", "minimum": 0, "maximum": 365, "description": "Due date = scheduled run date + this many days, also when the run was caught up later. Omit for no due date."}
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}
