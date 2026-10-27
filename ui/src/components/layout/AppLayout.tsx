@@ -43,8 +43,11 @@ export default function AppLayout() {
         isOpen={newTaskModal.open}
         defaultStatus={newTaskModal.defaultStatus}
         onClose={() => dispatch({ type: 'CLOSE_NEW_TASK_MODAL' })}
-        onCreated={(task) => {
+        onCreated={(task, uploadErrors) => {
           dispatch({ type: 'CLOSE_NEW_TASK_MODAL' });
+          if (uploadErrors.length) {
+            dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: `Task created, but some files did not upload: ${uploadErrors.join('; ')}` } });
+          }
           // Tell any open task list to pick the new card up right away.
           dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
           navigate(`/board/task/${task.id}`);
