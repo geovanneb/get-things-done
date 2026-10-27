@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Button from '@/components/common/Button';
 import { Textarea } from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
@@ -11,7 +11,7 @@ import { formatRelativeDate } from '@/utils/format';
 import type { ContextUpdate, ContextUpdateProposal } from '@/types';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
-import { CommandBox, HelpBox, STATUS_META, StatusPill, StepIndicator, formatBytes, sectionLabel } from './shared';
+import { CommandBox, HelpBox, STATUS_META, StatusPill, StepIndicator, copyText, formatBytes, sectionLabel } from './shared';
 
 const card: React.CSSProperties = {
   background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 16,
@@ -141,6 +141,24 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const dispatch = useAppDispatch();
   const [decisions, setDecisions] = useState<Decisions>({});
   const [busy, setBusy] = useState<string | null>(null);
+  // The status the user last copied a command for, so the bar can confirm it and say what happens next.
+  const [copiedFor, setCopiedFor] = useState<string | null>(null);
+  const nextRef = useRef<HTMLElement>(null);
+  const copyRef = useRef<HTMLButtonElement>(null);
+  const prevStatus = useRef<string | null>(null);
+
+  // Right after approving, the apply command is the one step left and it sits at the top of the page,
+  // out of sight of the approve bar. Bring it into view and put focus on its Copy button.
+  useEffect(() => {
+    const status = data?.status ?? null;
+    if (prevStatus.current === 'in_review' && status === 'approved') {
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      nextRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+      copyRef.current?.focus({ preventScroll: true });
+    }
+    if (prevStatus.current !== status) setCopiedFor(null);
+    prevStatus.current = status;
+  }, [data?.status]);
 
   const notify = (type: 'success' | 'error' | 'info', message: string) => dispatch({ type: 'ADD_NOTIFICATION', payload: { type, message } });
 
@@ -162,6 +180,9 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const u = data;
   const meta = STATUS_META[u.status];
   const reviewing = u.status === 'in_review';
+  // Steps where nothing moves until the user runs a command in the agent.
+  const command = u.status === 'ready' ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
+  const copied = copiedFor === u.status;
   const selectable = u.proposals.filter((p) => !p.problem);
   const acceptedCount = u.proposals.filter((p) => decisions[p.id]?.decision === 'accepted').length;
 
@@ -240,7 +261,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const materials = u.status === 'done' ? u.materials.map((m) => ({ ...m, modified: '' })) : (u.material_files ?? []);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 980, paddingBottom: reviewing ? 80 : 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 980, paddingBottom: reviewing || command ? 80 : 0 }}>
       <div>
         <button type="button" onClick={onBack} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-sm)' }}>
           ← All updates
@@ -261,13 +282,17 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       <div style={card}><StepIndicator status={u.status} /></div>
 
       {/* What to do next: always one clear action. */}
-      <section aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
+      <section ref={nextRef} aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
         <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{meta.next}</div>
         {(u.status === 'ready' || u.status === 'analyzing') && (
-          <CommandBox command={`/gtd-context-analyze ${u.id}`} label="Run in Claude Code to analyze" />
+          <CommandBox ref={u.status === 'ready' ? copyRef : undefined} command={`/gtd-context-analyze ${u.id}`} emphasis={u.status === 'ready'}
+            label={u.status === 'ready' ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Run in Claude Code to analyze'}
+            onCopied={() => setCopiedFor(u.status)} />
         )}
         {(u.status === 'approved' || u.status === 'applying') && (
-          <CommandBox command={`/gtd-context-apply ${u.id}`} label="Run in Claude Code to apply your accepted changes" />
+          <CommandBox ref={u.status === 'approved' ? copyRef : undefined} command={`/gtd-context-apply ${u.id}`} emphasis={u.status === 'approved'}
+            label={u.status === 'approved' ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Run in Claude Code to apply your accepted changes'}
+            onCopied={() => setCopiedFor(u.status)} />
         )}
         {(u.status === 'analyzing' || u.status === 'applying') && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
@@ -380,6 +405,9 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{acceptedCount} of {u.proposals.length} selected</span>
               <Button variant="ghost" size="sm" onClick={() => void selectAll(true)}>Select all</Button>
               <Button variant="ghost" size="sm" onClick={() => void selectAll(false)}>Clear</Button>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                After approving, you copy one command to apply.
+              </span>
             </>
           )}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -395,6 +423,23 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               </Button>
             )}
           </span>
+        </div>
+      )}
+
+      {/* Waiting on a command: keep the step in view wherever the user has scrolled. */}
+      {command && (
+        <div role="region" aria-label="Your next step" style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1.5px solid var(--color-accent)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md, 0 -2px 12px rgba(0,0,0,0.08))' }}>
+          <span aria-live="polite" style={{ flex: '1 1 260px', minWidth: 0, fontSize: 'var(--text-sm)', lineHeight: 1.45 }}>
+            {copied ? (
+              <><strong style={{ color: 'var(--color-success)' }}>Copied.</strong> Paste it into Claude Code and press Enter. This page updates by itself when the agent starts.</>
+            ) : (
+              <><strong>{u.status === 'ready' ? 'Your turn:' : 'Last step:'}</strong> run <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{command.split(' ')[0]}</code> in Claude Code
+                {u.status === 'ready' ? ' so the agent can analyze the material.' : ' to write the accepted changes. Nothing changes in your context until you do.'}</>
+            )}
+          </span>
+          <Button variant={copied ? 'secondary' : 'primary'} onClick={() => void copyText(command).then((ok) => { if (ok) setCopiedFor(u.status); })}>
+            {copied ? 'Copy again' : 'Copy command'}
+          </Button>
         </div>
       )}
     </div>

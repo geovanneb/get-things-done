@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { forwardRef, useState } from 'react';
 import type { ContextUpdateStatus } from '@/types';
 
 /** What each status means to the user, and what they should do next. */
 export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: string; subtle: string; step: number; next: string }> = {
   ready: {
-    label: 'Waiting for analysis', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 1,
+    label: 'Run the analyze command', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 1,
     next: 'Materials are saved. Copy the command below and run it in Claude Code. The agent reads everything and proposes changes; nothing in your context changes yet.',
   },
   analyzing: {
@@ -16,7 +16,7 @@ export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: st
     next: 'Check each proposal and tick the ones you accept. Unticked proposals are rejected. When you are done, approve the selection.',
   },
   approved: {
-    label: 'Approved, waiting to apply', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 3,
+    label: 'Approved: run the apply command', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 3,
     next: 'Your selection is locked. Copy the command below and run it in Claude Code to write the accepted changes into your context.',
   },
   applying: {
@@ -75,31 +75,51 @@ export function StepIndicator({ status }: { status: ContextUpdateStatus }) {
   );
 }
 
-/** The slash command to paste into the agent, with a copy button. */
-export function CommandBox({ command, label }: { command: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* clipboard unavailable: the command stays selectable */ }
-  };
-  return (
-    <div>
-      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 6 }}>{label}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <code style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', color: 'var(--color-text)', overflowX: 'auto', whiteSpace: 'nowrap', userSelect: 'all' }}>
-          {command}
-        </code>
-        <button type="button" onClick={copy} aria-label={`Copy ${command}`}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, height: 36, padding: '0 12px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', background: copied ? 'var(--color-success-subtle)' : 'var(--color-surface)', color: copied ? 'var(--color-success)' : 'var(--color-text)', fontSize: 'var(--text-sm)', fontWeight: 500, cursor: 'pointer' }}>
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-    </div>
-  );
+/** Copies `text`; resolves to false when the clipboard is unavailable (the command stays selectable). */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
+
+/**
+ * The slash command to paste into the agent, with a copy button. `emphasis` marks it as the one thing
+ * the user still has to do: accent frame and a primary Copy button. The ref points at the Copy button,
+ * so a page can move focus there once the step becomes due.
+ */
+export const CommandBox = forwardRef<HTMLButtonElement, { command: string; label: string; emphasis?: boolean; onCopied?: () => void }>(
+  function CommandBox({ command, label, emphasis = false, onCopied }, ref) {
+    const [copied, setCopied] = useState(false);
+    const copy = async () => {
+      if (!(await copyText(command))) return;
+      setCopied(true);
+      onCopied?.();
+      setTimeout(() => setCopied(false), 1500);
+    };
+    return (
+      <div style={emphasis ? { padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--color-accent-subtle)', border: '1.5px solid var(--color-accent)' } : undefined}>
+        <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: emphasis ? 'var(--color-accent)' : 'var(--color-text-secondary)', marginBottom: 6 }}>{label}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <code style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', color: 'var(--color-text)', overflowX: 'auto', whiteSpace: 'nowrap', userSelect: 'all' }}>
+            {command}
+          </code>
+          <button ref={ref} type="button" onClick={copy} aria-label={`Copy ${command}`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, height: 36, padding: '0 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)', fontWeight: emphasis ? 600 : 500, cursor: 'pointer',
+              border: `1px solid ${copied ? 'var(--color-border)' : emphasis ? 'var(--color-accent)' : 'var(--color-border)'}`,
+              background: copied ? 'var(--color-success-subtle)' : emphasis ? 'var(--color-accent)' : 'var(--color-surface)',
+              color: copied ? 'var(--color-success)' : emphasis ? 'var(--color-text-on-accent)' : 'var(--color-text)',
+            }}>
+            {copied ? 'Copied' : emphasis ? 'Copy command' : 'Copy'}
+          </button>
+        </div>
+      </div>
+    );
+  },
+);
 
 /** A short explanation box. Tone sets the color: info for guidance, warning for things to check. */
 export function HelpBox({ title, children, tone = 'info' }: { title?: string; children: React.ReactNode; tone?: 'info' | 'warning' | 'critical' }) {
