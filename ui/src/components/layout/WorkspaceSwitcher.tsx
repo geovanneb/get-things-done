@@ -126,8 +126,8 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
         setError(res.status === 409 ? `${target.name} is no longer a workspace. Open it from Settings to set it up again.` : body.error || `HTTP ${res.status}`);
         return;
       }
-      // Every view caches data from the old workspace, so a full reload is the simplest reset.
-      window.location.reload();
+      // Reset cached data and leave entity URLs whose IDs belong to the previous workspace.
+      window.location.assign('/situation');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not switch workspace.');
     } finally {

@@ -53,3 +53,31 @@ test('createTask does not add optional fields that were not given or are null', 
     assert.equal(key in data, false, key);
   }
 });
+
+
+test('concurrent manual and routine task creation reserves distinct folders', async (t) => {
+  await workspace(t);
+  const service = new TaskService();
+  const titles = Array.from({ length: 12 }, (_, i) => `Concurrent task ${i}`);
+  const created = await Promise.all(titles.map((title) => service.createTask({ title })));
+  assert.equal(new Set(created.map((task) => task.id)).size, titles.length);
+  assert.deepEqual((await service.listTasks()).map((task) => task.title).sort(), titles.sort());
+});
+
+test('invalid routine markers leave no task folders behind', async (t) => {
+  const ws = await workspace(t);
+  await assert.rejects(new TaskService().createTask({ title: 'Invalid', routine_ref: '../bad' }), /Invalid routine_ref/);
+  assert.deepEqual(await fsp.readdir(path.join(ws, 'tasks', 'active')), []);
+});
+
+test('task objectives saved as Markdown remain searchable', async (t) => {
+  await workspace(t);
+  const service = new TaskService();
+  const task = await service.createTask({ title: 'Review brief', body: 'Investigate the fictional zephyrbrief initiative.' });
+  assert.deepEqual((await service.listTasks({ search: 'zephyrbrief' })).map((row) => row.id), [task.id]);
+  const { SearchService } = await import('../src/services/searchService');
+  const search = new SearchService();
+  t.after(() => search.reset());
+  await search.buildIndex();
+  assert.deepEqual((await search.search('zephyrbrief')).map((row) => row.id), [task.id]);
+});

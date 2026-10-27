@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useApi } from '../hooks/useApi';
+import { useDataVersion } from '../store';
+import { apiPatch } from '../utils/api';
 import { KaizenProposal } from '../types';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
@@ -45,17 +47,17 @@ function kaizenCommand(ids: string[]): string {
 function KaizenCard({ proposal, onRefetch }: { proposal: KaizenProposal; onRefetch: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const cfg = STATUS_CONFIG[proposal.status] ?? STATUS_CONFIG.proposed;
 
   const handleReject = async () => {
     setRejecting(true);
+    setError(null);
     try {
-      await fetch(`/api/kaizen/${proposal.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'rejected' }),
-      });
+      await apiPatch(`/api/kaizen/${encodeURIComponent(proposal.id)}`, { status: 'rejected' });
       onRefetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reject the proposal.');
     } finally {
       setRejecting(false);
     }
@@ -171,6 +173,8 @@ function KaizenCard({ proposal, onRefetch }: { proposal: KaizenProposal; onRefet
         </div>
       )}
 
+      {error && <p role="alert" style={{ padding: '0 16px', color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</p>}
+
       {/* Expanded detail */}
       {expanded && (
         <div
@@ -242,9 +246,10 @@ function Section({ title, body }: { title: string; body: string }) {
 
 /* ---- Main view -------------------------------------------------------- */
 export default function KaizenView() {
-  const { data, loading, refetch } = useApi<KaizenProposal[]>('/api/kaizen');
+  const { data, loading, error, refetch } = useApi<KaizenProposal[]>('/api/kaizen', [useDataVersion('kaizen')]);
 
   if (loading) return <LoadingSpinner text="Loading kaizen proposals..." />;
+  if (error && !data) return <div role="alert" style={{ padding: 24, color: 'var(--color-critical)' }}>{error}</div>;
   if (!data) {
     return (
       <EmptyState

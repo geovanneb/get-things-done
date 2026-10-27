@@ -159,7 +159,7 @@ try {
   // Creating a task through the API keeps the optional schema fields it is given (they used to be dropped).
   const contextRef = (await (await fetch(`${base}/api/context`)).json())[0]?.id;
   const fields = {
-    title: 'Smoke task with optional fields', slug: 'smoke-optional-fields', task_type: 'analysis',
+    title: 'Smoke task with optional fields', body: 'Fictional zephyrbrief objective.', slug: 'smoke-optional-fields', task_type: 'analysis',
     contexts: [{ ref: contextRef, relevance: 'required' }], confidentiality: 'confidential',
     review_date: '2026-12-01', estimated_hours: 0,
   };
@@ -171,6 +171,34 @@ try {
     && t.confidentiality === 'confidential' && t.review_date === '2026-12-01' && t.estimated_hours === 0;
   check('creating a task keeps its optional fields (type, contexts, confidentiality, ...)',
     Boolean(contextRef) && kept(createdTask) && kept(readBack), JSON.stringify({ ...readBack, body: undefined }).slice(0, 300));
+
+  const objectiveSearch = await (await fetch(`${base}/api/search?q=zephyrbrief`)).json();
+  const objectiveFilter = await (await fetch(`${base}/api/tasks?search=zephyrbrief`)).json();
+  check('Markdown task objectives remain searchable',
+    objectiveSearch.results.some((task) => task.id === createdTask.id)
+    && objectiveFilter.some((task) => task.id === createdTask.id));
+
+  // Scheduled and manual creates can arrive together; neither may overwrite the other.
+  {
+    const titles = Array.from({ length: 8 }, (_, i) => `Concurrent smoke task ${i}`);
+    const created = await Promise.all(titles.map(async (title) => {
+      const res = await fetch(`${base}/api/tasks`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+      });
+      return { ok: res.status === 201, task: await res.json() };
+    }));
+    const saved = await (await fetch(`${base}/api/tasks`)).json();
+    check('concurrent task creates keep distinct IDs and all task bodies',
+      created.every((r) => r.ok) && new Set(created.map((r) => r.task.id)).size === titles.length
+      && titles.every((title) => saved.some((task) => task.title === title)));
+    const before = fs.readdirSync(path.join(ws, 'tasks', 'active'));
+    const invalid = await fetch(`${base}/api/tasks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Invalid routine marker', routine_ref: '../bad' }),
+    });
+    check('invalid routine markers return 400 without creating task folders', invalid.status === 400
+      && JSON.stringify(fs.readdirSync(path.join(ws, 'tasks', 'active'))) === JSON.stringify(before));
+  }
 
   // The New Task modal uploads the files picked before saving right after the task is created.
   {

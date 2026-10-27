@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import * as fsp from 'fs/promises';
-import { WorkspaceService } from './workspace';
+import { WorkspaceService, withWorkspacePath } from './workspace';
 import { TaskService } from './taskService';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
@@ -377,7 +377,8 @@ export class RoutineService {
   }
 
   private serialized<T>(fn: () => Promise<T>): Promise<T> {
-    const result = inProcess.then(fn);
+    const workspacePath = workspaceService.getWorkspacePath();
+    const result = inProcess.then(() => withWorkspacePath(workspacePath, fn));
     inProcess = result.then(() => {}, () => {});
     return result;
   }
