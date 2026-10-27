@@ -4,6 +4,7 @@ import { useApi } from '../hooks/useApi';
 import { SituationData } from '../types';
 import Avatar from '../components/common/Avatar';
 import { useStakeholderNames } from '../hooks/useStakeholderNames';
+import { usePendingActions, TONE_COLOR, type PendingAction } from '../hooks/usePendingActions';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
@@ -56,6 +57,46 @@ function MetricCard({
         <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 3 }}>{label}</div>
       </div>
     </div>
+  );
+}
+
+/* ---- Waiting on you ---------------------------------------------- */
+// Steps only the user can take (review, run a command, fix a routine): the same ones the nav marks with a dot.
+function WaitingOnYou({ items }: { items: PendingAction[] }) {
+  return (
+    <section
+      aria-labelledby="waiting-heading"
+      style={{
+        background: 'var(--color-surface)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 'var(--radius-lg)',
+        padding: '14px 16px',
+      }}
+    >
+      <h2 id="waiting-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 10px' }}>
+        Waiting on you
+      </h2>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8 }}>
+        {items.map((item) => (
+          <li key={item.navPath}>
+            <Link
+              to={item.to}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', height: '100%',
+                border: '1px solid var(--color-border)', borderLeft: `3px solid ${TONE_COLOR[item.tone]}`,
+                borderRadius: 'var(--radius-md)', background: 'var(--color-bg)',
+                color: 'var(--color-text)', textDecoration: 'none', fontSize: 'var(--text-sm)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-hover)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-bg)'; }}
+            >
+              <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
+              <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>→</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -222,6 +263,7 @@ function ProgressBar({ value }: { value: number }) {
 export default function SituationView() {
   const { data, loading } = useApi<SituationData>('/api/situation');
   const navigate = useNavigate();
+  const pending = usePendingActions();
 
   if (loading) return <LoadingSpinner text="Loading situation..." />;
   if (!data) {
@@ -286,6 +328,8 @@ export default function SituationView() {
           }
         />
       </div>
+
+      {pending.length > 0 && <WaitingOnYou items={pending} />}
 
       {/* Main grid: one column, two from 1,000 px of content width (see .situation__grid in index.css) */}
       <div className="situation__grid">
