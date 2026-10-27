@@ -685,6 +685,11 @@ gtd use ~/other-workspace
 gtd start
 ```
 
+In the dashboard, click the workspace name at the top of the sidebar. It lists the
+workspaces you opened on this machine (kept in `recent_workspaces` in the config file),
+so switching back is one click. **Open another folder...** adds a new one. Removing an
+entry from the list never touches the folder.
+
 ---
 
 ## Troubleshooting
