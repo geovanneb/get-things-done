@@ -1,3 +1,4 @@
+import * as path from 'path';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import { Task, Stakeholder, ValidationResult } from '../types';
@@ -139,6 +140,12 @@ export class ValidationService {
       tasks = await taskService.listTasks();
     } catch {
       results.push({ level: 'warning', rule: 'workspace', message: 'Could not read tasks directory' });
+    }
+
+    // A task.md that cannot be parsed is missing from the board, so say which one and why.
+    for (const file of await taskService.listUnreadableTaskFiles()) {
+      const folder = path.basename(path.dirname(file.path));
+      results.push({ level: 'error', rule: 'unreadable_file', message: `Task ${folder} is hidden from the board: its task.md cannot be read (${file.error})`, path: file.path });
     }
 
     let stakeholders: Stakeholder[] = [];
