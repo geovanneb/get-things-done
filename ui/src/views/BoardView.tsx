@@ -292,7 +292,7 @@ function KanbanCol({
       }}
       style={{
         flex: '1 1 0',
-        minWidth: 0,
+        minWidth: 240,
         display: 'flex',
         flexDirection: 'column',
         background: dragOver ? 'var(--color-accent-subtle)' : 'var(--color-bg)',
@@ -609,7 +609,7 @@ export default function BoardView() {
         {loading && <LoadingSpinner text="Loading tasks..." />}
 
         {!loading && tab === 'kanban' && (
-          <div style={{ flex: 1, display: 'flex', gap: 14, padding: '16px 20px', overflow: 'hidden', minHeight: 0 }}>
+          <div style={{ flex: 1, display: 'flex', gap: 14, padding: '16px 20px', overflowX: 'auto', overflowY: 'hidden', minHeight: 0 }}>
             {KANBAN_COLUMNS.map((col) => (
               <KanbanCol
                 key={col.id}

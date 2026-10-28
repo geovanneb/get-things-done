@@ -20,11 +20,15 @@ function file(): string {
 async function readAll(): Promise<Record<string, number>> {
   try {
     const parsed = JSON.parse(await fsp.readFile(file(), 'utf-8')) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>)
-      .filter(([, v]) => typeof v === 'number' && Number.isInteger(v) && v > 0)) as Record<string, number>;
-  } catch {
-    return {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+      || Object.entries(parsed).some(([key, value]) => !/^(TASK|CU)-\d{4}$/.test(key)
+        || typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)) {
+      throw new Error('invalid reservation data');
+    }
+    return parsed as Record<string, number>;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new Error(`ID reservations cannot be read: ${(err as Error).message}`, { cause: err });
   }
 }
 

@@ -159,13 +159,22 @@ export default function NavRail() {
   const { validationCount, agenticVisualMode } = useAppState();
   const location = useLocation();
   const pending = usePendingActions();
-  const [collapsed, setCollapsed] = React.useState<boolean>(() => {
+  const [preferredCollapsed, setCollapsed] = React.useState<boolean>(() => {
     try {
       return localStorage.getItem(NAV_COLLAPSE_KEY) === '1';
     } catch {
       return false;
     }
   });
+
+  const [narrow, setNarrow] = React.useState(() => window.matchMedia('(max-width: 900px)').matches);
+  React.useEffect(() => {
+    const query = window.matchMedia('(max-width: 900px)');
+    const changed = () => setNarrow(query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  }, []);
+  const collapsed = narrow || preferredCollapsed;
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -240,11 +249,12 @@ export default function NavRail() {
           <WorkspaceSwitcher collapsed={collapsed} healthColor={healthColor} healthLabel={healthLabel} />
 
           <button
+            hidden={narrow}
             onClick={toggleCollapsed}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             style={{
-              display: 'flex',
+              display: narrow ? 'none' : 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               width: 28,
@@ -300,7 +310,7 @@ function NavRailItem({ item, currentPath, collapsed }: { item: NavItem; currentP
       <NavLink
         to={item.path}
         aria-current={isActive ? 'page' : undefined}
-        aria-label={item.pending ? `${item.label}, ${item.pending.label}` : undefined}
+        aria-label={item.pending ? `${item.label}, ${item.pending.label}` : item.label}
         title={item.pending ? `${item.label}: ${item.pending.label}` : collapsed ? item.label : undefined}
         style={{
           display: 'flex',

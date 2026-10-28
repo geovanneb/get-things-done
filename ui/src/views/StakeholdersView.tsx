@@ -401,8 +401,8 @@ function TabBar({ active, peopleCt, groupsCt, onChange }: TabBarProps) {
 // ---------------------------------------------------------------------------
 
 export default function StakeholdersView() {
-  const [params] = useSearchParams();
-  const [tab, setTab] = useState<TabType>(params.get('tab') === 'charts' ? 'charts' : params.get('tab') === 'groups' ? 'groups' : 'people');
+  const [params, setParams] = useSearchParams();
+  const tab: TabType = params.get('tab') === 'charts' ? 'charts' : params.get('tab') === 'groups' ? 'groups' : 'people';
   const [people, setPeople] = useState<Stakeholder[]>([]);
   const [groups, setGroups] = useState<Stakeholder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -475,7 +475,7 @@ export default function StakeholdersView() {
             active={tab}
             peopleCt={people.length}
             groupsCt={groups.length}
-            onChange={(t) => { setTab(t); setSearch(''); }}
+            onChange={(t) => { setParams((previous) => { const next = new URLSearchParams(previous); next.set('tab', t); return next; }); setSearch(''); }}
           />
         )}
         {tab === 'charts' ? <div style={{ flex: 1 }} /> : <>

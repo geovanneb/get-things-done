@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import { RoutineService } from '../src/services/routineService';
 import { TaskService } from '../src/services/taskService';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
-import { CLEANUP_ORIGIN, defaultSettings, parseSettings } from '../src/services/systemCleanupService';
+import { CLEANUP_ORIGIN, defaultSettings, parseSettings, SystemCleanupService } from '../src/services/systemCleanupService';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
@@ -238,4 +238,166 @@ test('accepted removals move the note folder to the trash, and are held back whe
   const held = await cu.get(merge.id);
   assert.equal(held.proposals[1]!.outcome, 'skipped');
   assert.ok(await exists(path.join(ws, 'context/programs/alpha-2/note.md')), 'the copy is kept when the merge did not land');
+});
+
+
+test('cleanup never deletes through a symlinked parent directory', async (t) => {
+  const ws = await workspace(t);
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-cleanup-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  await fsp.mkdir(path.join(outside, 'TASK-2026-0009'));
+  const file = path.join(outside, 'TASK-2026-0009/task.md');
+  await fsp.writeFile(file, stringifyMarkdown('', { id: 'TASK-2026-0009', status: 'archived', updated_at: '2020-01-01' }));
+  await fsp.rmdir(path.join(ws, 'tasks/archive'));
+  await fsp.symlink(outside, path.join(ws, 'tasks/archive'));
+  const service = new RoutineService();
+  await service.updateSystemCleanup({ memory_review: { enabled: false }, rules: { archived_tasks: { enabled: true, action: 'delete' } } });
+  const run = await service.runSystemCleanupNow();
+  assert.equal(run.status, 'error');
+  assert.ok(await exists(file), 'external task must survive');
+});
+
+test('date-prefixed hand-written trash entries are never purged', async (t) => {
+  const ws = await workspace(t);
+  const file = path.join(ws, '.situation-board/trash/2020-01-01T00-00-00-000Z-important.md');
+  await fsp.writeFile(file, 'Fictional manually retained file');
+  const service = new RoutineService();
+  await service.updateSystemCleanup({ memory_review: { enabled: false }, rules: { trash: { enabled: true } } });
+  await service.runSystemCleanupNow();
+  assert.ok(await exists(file));
+});
+
+test('cleanup rechecks a task age after planning', async (t) => {
+  const ws = await workspace(t);
+  const id = 'TASK-2026-0001';
+  await task(ws, 'active', id, { status: 'done', done_date: '2020-01-01' });
+  const service = new SystemCleanupService();
+  const settings = parseSettings({ memory_review: { enabled: false }, rules: { completed_tasks: { enabled: true, action: 'delete' } } });
+  await service.writeSettings(settings);
+  const plan = service.plan.bind(service);
+  service.plan = async (...args) => {
+    const result = await plan(...args);
+    await task(ws, 'active', id, { status: 'done', done_date: '2026-10-28' });
+    return result;
+  };
+  const result = await service.runNow(local('2026-10-28T10:00'));
+  assert.equal(result.cleaned.length, 0);
+  assert.ok(await exists(path.join(ws, 'tasks/active', id)));
+});
+
+test('settings read errors other than a missing file stop cleanup', async (t) => {
+  const ws = await workspace(t);
+  await fsp.mkdir(path.join(ws, '.situation-board/routines/system-cleanup.json'), { recursive: true });
+  await assert.rejects(new SystemCleanupService().readSettings(), /cannot be read/);
+});
+
+test('accepted removals wait for positive confirmation that the merged content was applied', async (t) => {
+  const ws = await workspace(t);
+  for (const outcome of [undefined, 'skipped']) {
+    await note(ws, 'programs', 'source', 'Source', 'Fictional source content that must survive.');
+    const cu = new ContextUpdateService();
+    const update = await cu.create({ title: 'Fictional incomplete merge' });
+    const file = path.join(ws, 'context-updates', update.id, 'update.md');
+    const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+    await fsp.writeFile(file, stringifyMarkdown(parsed.content, { ...parsed.data, status: 'done', proposals: [
+      { id: 'P-01', action: 'update', target: 'context/programs/destination/note.md', decision: 'accepted', ...(outcome ? { outcome } : {}) },
+      { id: 'P-02', action: 'remove', target: 'context/programs/source/note.md', decision: 'accepted' },
+    ] }));
+    const result = await cu.get(update.id);
+    assert.equal(result.proposals[1]!.outcome, 'skipped');
+    assert.ok(await exists(path.join(ws, 'context/programs/source/note.md')));
+  }
+});
+
+test('a removal goes ahead when the other accepted change was merged', async (t) => {
+  const ws = await workspace(t);
+  await note(ws, 'programs', 'source', 'Source', 'Fictional source content.');
+  const cu = new ContextUpdateService();
+  const update = await cu.create({ title: 'Fictional finished merge' });
+  const file = path.join(ws, 'context-updates', update.id, 'update.md');
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+  await fsp.writeFile(file, stringifyMarkdown(parsed.content, { ...parsed.data, status: 'done', proposals: [
+    { id: 'P-01', action: 'update', target: 'context/programs/destination/note.md', decision: 'accepted', outcome: 'merged' },
+    { id: 'P-02', action: 'remove', target: 'context/programs/source/note.md', decision: 'accepted' },
+  ] }));
+  const result = await cu.get(update.id);
+  assert.equal(result.proposals[1]!.outcome, 'applied');
+  assert.ok(!(await exists(path.join(ws, 'context/programs/source/note.md'))));
+});
+
+test('a removal never follows a note symlink to another workspace folder', async (t) => {
+  const ws = await workspace(t);
+  await note(ws, 'programs', 'source', 'Source', 'Fictional source.');
+  await note(ws, 'programs', 'destination', 'Destination', 'Fictional destination.');
+  const source = path.join(ws, 'context/programs/source/note.md');
+  await fsp.unlink(source);
+  await fsp.symlink(path.join(ws, 'context/programs/destination/note.md'), source);
+  const cu = new ContextUpdateService();
+  const update = await cu.create({ title: 'Fictional linked note' });
+  const file = path.join(ws, 'context-updates', update.id, 'update.md');
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+  await fsp.writeFile(file, stringifyMarkdown(parsed.content, { ...parsed.data, status: 'done', proposals: [
+    { id: 'P-01', action: 'remove', target: 'context/programs/source/note.md', decision: 'accepted' },
+  ] }));
+  const result = await cu.get(update.id);
+  assert.equal(result.proposals[0]!.outcome, 'failed');
+  assert.ok(await exists(path.join(ws, 'context/programs/destination/note.md')));
+});
+
+test('a symlinked trash destination cannot receive workspace content', async (t) => {
+  const ws = await workspace(t);
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-trash-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  await fsp.rmdir(path.join(ws, '.situation-board/trash'));
+  await fsp.symlink(outside, path.join(ws, '.situation-board/trash'));
+  await task(ws, 'archive', 'TASK-2026-0001', { status: 'archived', updated_at: '2020-01-01' });
+  const service = new RoutineService();
+  await service.updateSystemCleanup({ memory_review: { enabled: false }, rules: { archived_tasks: { enabled: true, action: 'trash' } } });
+  assert.equal((await service.runSystemCleanupNow()).status, 'error');
+  assert.ok(await exists(path.join(ws, 'tasks/archive/TASK-2026-0001/task.md')));
+  assert.deepEqual(await fsp.readdir(outside), []);
+});
+
+test('corrupt ID reservations stop cleanup and new IDs instead of reusing old links', async (t) => {
+  const ws = await workspace(t);
+  await fsp.writeFile(path.join(ws, '.situation-board/reserved-ids.json'), '{broken');
+  const id = `TASK-${new Date().getFullYear()}-0001`;
+  await task(ws, 'archive', id, { status: 'archived', updated_at: '2020-01-01' });
+  const service = new RoutineService();
+  await service.updateSystemCleanup({ memory_review: { enabled: false }, rules: { archived_tasks: { enabled: true, action: 'delete' } } });
+  const result = await service.runSystemCleanupNow();
+  assert.equal(result.status, 'error');
+  assert.ok(await exists(path.join(ws, 'tasks/archive', id)));
+  await assert.rejects(new TaskService().createTask({ title: 'Fictional new task' } as never), /reservations/);
+});
+
+test('a newly rejected old kaizen proposal starts retention when rejected', async (t) => {
+  const ws = await workspace(t);
+  const { KaizenService } = await import('../src/services/kaizenService');
+  await write(ws, 'kaizen/KAIZEN-2026-001.md', { id: 'KAIZEN-2026-001', title: 'Fictional proposal', status: 'proposed', created_at: '2020-01-01' });
+  await new KaizenService().updateKaizen('KAIZEN-2026-001', { status: 'rejected' });
+  const service = new RoutineService();
+  await service.updateSystemCleanup({ memory_review: { enabled: false }, rules: { kaizen: { enabled: true, action: 'delete' } } });
+  await service.runSystemCleanupNow();
+  assert.ok(await exists(path.join(ws, 'kaizen/KAIZEN-2026-001.md')));
+  const raw = parseMarkdown(await fsp.readFile(path.join(ws, 'kaizen/KAIZEN-2026-001.md'), 'utf8'));
+  assert.equal(raw.data['title'], 'Fictional proposal');
+  assert.ok(raw.data['rejected_at']);
+});
+
+
+test('kaizen updates preserve YAML-sensitive titles and extra frontmatter', async (t) => {
+  const ws = await workspace(t);
+  const { KaizenService } = await import('../src/services/kaizenService');
+  const file = path.join(ws, 'kaizen/KAIZEN-2026-001.md');
+  await write(ws, 'kaizen/KAIZEN-2026-001.md', { id: 'KAIZEN-2026-001', title: 'Fictional: proposal', status: 'proposed', created_at: '2020-01-01', custom: 'preserved' }, 'Fictional body.');
+  const service = new KaizenService();
+  const before = await fsp.readFile(file, 'utf8');
+  await assert.rejects(service.updateKaizen('KAIZEN-2026-001', { status: 'invalid' } as never), /Invalid/);
+  assert.equal(await fsp.readFile(file, 'utf8'), before);
+  await service.updateKaizen('KAIZEN-2026-001', { status: 'rejected' });
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf8'));
+  assert.equal(parsed.data['title'], 'Fictional: proposal');
+  assert.equal(parsed.data['custom'], 'preserved');
+  assert.match(parsed.content, /Fictional body/);
 });

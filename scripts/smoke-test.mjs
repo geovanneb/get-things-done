@@ -303,6 +303,9 @@ try {
       fs.readFileSync(path.join(ws, '.gitignore'), 'utf8').includes('.situation-board/trash/'));
     const badRule = await send('PUT', '/api/routines/system-cleanup', { rules: { kaizen: { enabled: true, action: 'archive' } } });
     check('system cleanup settings are validated', badRule.status === 400, String(badRule.status));
+    const invalidKaizen = await send('PATCH', '/api/kaizen/KZN-001', { status: 'invalid' });
+    check('kaizen rejects invalid statuses', invalidKaizen.status === 400, String(invalidKaizen.status));
+
 
     const note = path.join(ws, 'context', 'glossary', 'smoke-term');
     fs.mkdirSync(note, { recursive: true });
@@ -319,6 +322,13 @@ try {
         && fs.readdirSync(path.join(ws, 'tasks', 'active')).sort().join(',') === tasksBefore, JSON.stringify(run).slice(0, 300));
     const again = await (await send('POST', '/api/routines/system-cleanup/run')).json();
     check('a second run waits for the open review instead of opening another', !again.context_update && /still open/.test(again.message), again.message);
+    const manualTrash = path.join(ws, '.situation-board/trash/2020-01-01T00-00-00-000Z-manual.md');
+    fs.mkdirSync(path.dirname(manualTrash), { recursive: true });
+    fs.writeFileSync(manualTrash, 'Fictional manually retained file');
+    await send('PUT', '/api/routines/system-cleanup', { memory_review: { enabled: false }, rules: { trash: { enabled: true } } });
+    const trashRun = await send('POST', '/api/routines/system-cleanup/run');
+    check('cleanup preserves date-prefixed manual trash files', trashRun.status === 201 && fs.existsSync(manualTrash));
+    await send('PUT', '/api/routines/system-cleanup', { memory_review: { enabled: true }, rules: { trash: { enabled: false } } });
     await fetch(`${base}/api/context-updates/${run.context_update}`, { method: 'DELETE' });
     fs.rmSync(note, { recursive: true, force: true });
   }

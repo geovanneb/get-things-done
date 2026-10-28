@@ -147,10 +147,10 @@ function RunHistory({ runs }: { runs: RoutineRun[] }) {
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' }}>
       {runs.map((run, i) => (
-        <li key={`${run.at}-${run.routine_id}-${i}`} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--color-border)', fontSize: 'var(--text-sm)', alignItems: 'baseline' }}>
+        <li key={`${run.at}-${run.routine_id}-${i}`} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--color-border)', fontSize: 'var(--text-sm)', alignItems: 'baseline' }}>
           <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: run.status === 'ok' ? 'var(--color-success)' : 'var(--color-critical)', alignSelf: 'center' }} />
           <span style={{ width: 150, flexShrink: 0, color: 'var(--color-text-muted)' }}>{formatWhen(run.at)}</span>
-          <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ flex: '1 1 220px', minWidth: 0 }}>
             <strong style={{ fontWeight: 600 }}>{run.routine_title}</strong>{' '}
             <span style={{ color: run.status === 'ok' ? 'var(--color-text-secondary)' : 'var(--color-critical)' }}>
               {run.routine_id === 'SYSTEM-CLEANUP'
@@ -190,8 +190,8 @@ export default function RoutinesView() {
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
-        <div style={{ flex: 1 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 16 }}>
+        <div style={{ flex: '1 1 220px' }}>
           <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, margin: 0 }}>Routines</h1>
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginTop: 4, marginBottom: 0, maxWidth: 640 }}>
             Recurring tasks that land on your backlog by themselves. Routines run while the dashboard is open, and catch up

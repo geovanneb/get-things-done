@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import * as crypto from 'crypto';
+import { workspaceEntry } from '../utils/files';
 
 /**
  * `.situation-board/trash/`: where soft deletes and the previous version of every overwritten file go.
@@ -14,7 +15,8 @@ export function trashDir(workspacePath: string): string {
 
 /** Moves a file or folder into the trash. Returns the trash entry's workspace-relative path. */
 export async function moveToTrash(workspacePath: string, target: string, now = new Date()): Promise<string> {
-  const dir = trashDir(workspacePath);
+  await workspaceEntry(workspacePath, target);
+  const dir = await workspaceEntry(workspacePath, trashDir(workspacePath), true);
   await fsp.mkdir(dir, { recursive: true });
   const stamp = now.toISOString().replace(/[:.]/g, '-');
   const dest = path.join(dir, `${stamp}-${crypto.randomUUID()}-${path.basename(target)}`);
@@ -22,12 +24,12 @@ export async function moveToTrash(workspacePath: string, target: string, now = n
   return path.relative(workspacePath, dest).split(path.sep).join('/');
 }
 
-const ENTRY = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-/;
+const ENTRY = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-.+$/;
 
 /** When a trash entry was trashed, from its name, or null for a name this app did not write. */
 export function trashedAt(name: string): Date | null {
   const m = name.match(ENTRY);
   if (!m) return null;
   const date = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}.${m[7]}Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return Number.isNaN(date.getTime()) || !name.startsWith(date.toISOString().replace(/[:.]/g, '-') + '-') ? null : date;
 }

@@ -70,7 +70,7 @@ function statusLabel(status: Task['status']): string {
     blocked: 'Blocked',
     review: 'Review',
     done: 'Done',
-    in_review: 'In Review',
+    in_review: 'Needs Review',
     approved: 'Approved',
     archived: 'Archived',
   };

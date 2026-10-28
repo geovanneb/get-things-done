@@ -1,24 +1,25 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useAppDispatch } from './store';
 import AppLayout from './components/layout/AppLayout';
-import SituationView from './views/SituationView';
-import BoardView from './views/BoardView';
-import TaskDetailView from './views/TaskDetailView';
-import StakeholdersView from './views/StakeholdersView';
-import StakeholderDetailView from './views/StakeholderDetailView';
-import OutputsView from './views/OutputsView';
-import ContextView from './views/ContextView';
-import AgentsView from './views/AgentsView';
-import InsightsView from './views/InsightsView';
-import ProfileView from './views/ProfileView';
-import SettingsView from './views/SettingsView';
-import KaizenView from './views/KaizenView';
-import RoutinesView from './views/RoutinesView';
-import AgentFloorView from './views/AgentFloorView';
 import { useLiveEvents } from './hooks/useLiveEvents';
 import { apiGet } from './utils/api';
 import { WorkspaceConfig, GitStatus } from './types';
+
+const SituationView = lazy(() => import('./views/SituationView'));
+const BoardView = lazy(() => import('./views/BoardView'));
+const TaskDetailView = lazy(() => import('./views/TaskDetailView'));
+const StakeholdersView = lazy(() => import('./views/StakeholdersView'));
+const StakeholderDetailView = lazy(() => import('./views/StakeholderDetailView'));
+const OutputsView = lazy(() => import('./views/OutputsView'));
+const ContextView = lazy(() => import('./views/ContextView'));
+const AgentsView = lazy(() => import('./views/AgentsView'));
+const InsightsView = lazy(() => import('./views/InsightsView'));
+const ProfileView = lazy(() => import('./views/ProfileView'));
+const SettingsView = lazy(() => import('./views/SettingsView'));
+const KaizenView = lazy(() => import('./views/KaizenView'));
+const RoutinesView = lazy(() => import('./views/RoutinesView'));
+const AgentFloorView = lazy(() => import('./views/AgentFloorView'));
 
 function AppInitializer() {
   const dispatch = useAppDispatch();
@@ -50,6 +51,7 @@ function AppRoutes() {
   return (
     <>
       <AppInitializer />
+      <Suspense fallback={<div role="status" style={{ padding: 24 }}>Loading…</div>}>
       <Routes>
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/situation" replace />} />
@@ -73,6 +75,7 @@ function AppRoutes() {
           <Route path="*" element={<Navigate to="/situation" replace />} />
         </Route>
       </Routes>
+      </Suspense>
     </>
   );
 }
