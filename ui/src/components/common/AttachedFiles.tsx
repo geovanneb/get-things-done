@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import OfficeCheckBadge from '@/components/common/OfficeCheckBadge';
 import { apiGet } from '@/utils/api';
 import { groupByFolder } from '@/utils/attachedFiles';
+import type { OfficeCheck } from '@/types';
 
-interface AttachedFile { name: string; size: number; modified: string; type: string; removable?: boolean; }
+interface AttachedFile { name: string; size: number; modified: string; type: string; removable?: boolean; officeCheck?: OfficeCheck; }
 
 interface AttachedFilesProps {
   /** Collection URL, e.g. `/api/outputs/templates/OUT-x/files`. GET lists, POST uploads, `/<name>` opens, DELETE removes. */
@@ -161,6 +163,7 @@ function FileRow({ file, url, label, onRemove, note }: { file: AttachedFile; url
         onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
         {label}
       </a>
+      <OfficeCheckBadge check={file.officeCheck} />
       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>{(file.size / 1024).toFixed(1)} KB</span>
       <a href={`${url}?download=1`} download={label} title="Download" aria-label={`Download ${file.name}`} style={iconButton}
         onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-accent)'; }}

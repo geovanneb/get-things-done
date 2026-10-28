@@ -338,6 +338,12 @@ export interface GitStatus {
   recent_commits?: Array<{ hash: string; message: string; author: string; date: string }>;
 }
 
+/**
+ * Set by the server on a listed file when an Office file is encrypted (e.g. by a sensitivity label) or not a valid
+ * package, so agents cannot read it. Absent means not checked or nothing found, never "readable".
+ */
+export type OfficeCheck = 'encrypted' | 'unsupported_container';
+
 export interface ValidationResult {
   level: 'error' | 'warning' | 'info';
   rule: string;
@@ -461,7 +467,7 @@ export interface ContextUpdate {
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
   /** Detail only: the files still in materials/. */
-  material_files?: { name: string; size: number; modified: string; type: string }[];
+  material_files?: { name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }[];
 }
 
 /* ---- Routines ------------------------------------------------------------ */

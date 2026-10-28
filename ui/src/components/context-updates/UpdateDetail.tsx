@@ -3,6 +3,7 @@ import Button from '@/components/common/Button';
 import { Textarea } from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
+import OfficeCheckBadge from '@/components/common/OfficeCheckBadge';
 import { useApi } from '@/hooks/useApi';
 import { useAppDispatch, useDataVersion } from '@/store';
 import { apiDelete, apiPost, apiPut } from '@/utils/api';
@@ -268,7 +269,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
   // A finished update still has its files only when the user kept them; otherwise just the record's list.
   const filesGone = u.status === 'done' && !u.keep_materials;
-  const materials = filesGone ? u.materials.map((m) => ({ ...m, modified: '' })) : (u.material_files ?? []);
+  const materials: NonNullable<ContextUpdate['material_files']> = filesGone ? u.materials.map((m) => ({ ...m, modified: '' })) : (u.material_files ?? []);
   const keptSize = materials.reduce((sum, f) => sum + f.size, 0);
   const canChooseKeep = ['ready', 'analyzing', 'in_review', 'approved'].includes(u.status);
   const doneNext = u.keep_materials
@@ -350,6 +351,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               {filesGone
                 ? <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-text-secondary)' }}>{f.name}</span>
                 : <a href={`/api/context-updates/${u.id}/materials/${f.name.split('/').map(encodeURIComponent).join('/')}`} target="_blank" rel="noreferrer" style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-accent)' }}>{f.name}</a>}
+              <OfficeCheckBadge check={f.officeCheck} />
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
               {u.status === 'ready' && (
                 <button type="button" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.name)}

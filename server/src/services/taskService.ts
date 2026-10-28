@@ -1,4 +1,4 @@
-import { saveAttachment, topLevelName } from '../utils/files';
+import { saveAttachment, topLevelName, withOfficeCheck, FolderFile } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
@@ -390,27 +390,27 @@ If the executive comes back with feedback on a task that is already \`in_review\
     }
   }
 
-  async listTaskFiles(id: string): Promise<Array<{ name: string; size: number; modified: string; type: string }>> {
+  async listTaskFiles(id: string): Promise<FolderFile[]> {
     const taskDir = path.join(this.getActiveDir(), topLevelName(id));
     if (!(await fileService.exists(taskDir))) throw new Error(`Task not found: ${id}`);
 
     const entries = await fsp.readdir(taskDir, { withFileTypes: true });
-    const results = [];
+    const results: FolderFile[] = [];
     for (const entry of entries) {
       if (!entry.isFile() || entry.name === 'task.md') continue;
       const filePath = path.join(taskDir, entry.name);
       const stat = await fsp.stat(filePath);
-      results.push({
+      results.push(await withOfficeCheck({
         name: entry.name,
         size: stat.size,
         modified: stat.mtime.toISOString(),
         type: path.extname(entry.name).slice(1).toLowerCase() || 'file',
-      });
+      }, filePath));
     }
     return results.sort((a, b) => b.modified.localeCompare(a.modified));
   }
 
-  async saveTaskFile(id: string, originalName: string, buffer: Buffer): Promise<{ name: string; size: number; modified: string; type: string }> {
+  async saveTaskFile(id: string, originalName: string, buffer: Buffer): Promise<FolderFile> {
     const taskDir = path.join(this.getActiveDir(), topLevelName(id));
     if (!(await fileService.exists(taskDir))) throw new Error(`Task not found: ${id}`);
 

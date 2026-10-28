@@ -11,6 +11,8 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { MentionService } from './mentionService';
 import { orgChartService } from './orgChartService';
+import { listFolderFiles } from '../utils/files';
+import { checkOfficeFile } from '../utils/officeEncryption';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -37,6 +39,28 @@ interface BuildOptions {
   includeTemplate: boolean;
   selectedContextIds?: string[];
   selectedStakeholderRefs?: string[];
+}
+
+/** Folders whose other files the agent is told to load: the task's own folder, and a note's or template's folder. */
+const OWN_FOLDER_FILES = new Set(['task.md', 'note.md', 'output.md']);
+
+/**
+ * Encrypted or broken Office files the agent would meet: the packaged files themselves and every file in the
+ * folders of the task, context notes and template. Listed by path, so the agent can report them up front
+ * instead of failing on them mid-task.
+ */
+async function unreadableFiles(files: ExecutionPackage['files']): Promise<NonNullable<ExecutionPackage['unreadable_files']>> {
+  const found = new Map<string, NonNullable<ExecutionPackage['unreadable_files']>[number]>();
+  for (const f of files) {
+    const check = await checkOfficeFile(f.path);
+    if (check) found.set(f.path, { path: f.path, check });
+    if (!OWN_FOLDER_FILES.has(path.basename(f.path))) continue;
+    const dir = path.dirname(f.path);
+    for (const file of await listFolderFiles(dir)) {
+      if (file.officeCheck) found.set(path.join(dir, file.name), { path: path.join(dir, file.name), check: file.officeCheck });
+    }
+  }
+  return [...found.values()];
 }
 
 export class ExecutionPackageService {
@@ -144,6 +168,7 @@ export class ExecutionPackageService {
     files.push(...unique);
 
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+    const unreadable = await unreadableFiles(files);
     const pkg: ExecutionPackage = {
       id: uuidv4(),
       task_id: taskId,
@@ -154,13 +179,14 @@ export class ExecutionPackageService {
       permissions: ['read', 'write'],
       command: '',
       total_size_bytes: totalSize,
+      ...(unreadable.length > 0 && { unreadable_files: unreadable }),
     };
 
     pkg.command = this.generateCommand(pkg);
     return pkg;
   }
 
-  async getPackagePreview(taskId: string): Promise<{ estimatedTokens: number; files: { path: string; type: string; size: number; hash: string }[]; command: string }> {
+  async getPackagePreview(taskId: string): Promise<{ estimatedTokens: number; files: ExecutionPackage['files']; command: string; unreadable_files?: ExecutionPackage['unreadable_files'] }> {
     const pkg = await this.buildPackage(taskId, {
       includeStakeholders: true,
       includeContext: true,
@@ -175,6 +201,7 @@ export class ExecutionPackageService {
       estimatedTokens,
       files: pkg.files,
       command: pkg.command,
+      ...(pkg.unreadable_files && { unreadable_files: pkg.unreadable_files }),
     };
   }
 
