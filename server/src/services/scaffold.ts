@@ -146,12 +146,15 @@ export function ensureWorkspaceDirs(workspacePath: string): void {
   }
 }
 
+/**
+ * Fills the profile placeholders only. `{{date}}` and `{{due_date}}` are routine title
+ * placeholders, so the instructions and schemas must show them as written.
+ */
 function interpolate(content: string, vars: Record<string, string>): string {
   return content
     .replace(/\{\{name\}\}/g, vars['name'] || '')
     .replace(/\{\{role\}\}/g, vars['role'] || '')
-    .replace(/\{\{organization\}\}/g, vars['organization'] || '')
-    .replace(/\{\{date\}\}/g, new Date().toISOString().split('T')[0] ?? '');
+    .replace(/\{\{organization\}\}/g, vars['organization'] || '');
 }
 
 /** The exact bytes a template file produces for this workspace. */
