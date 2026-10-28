@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
-import { WorkspaceConfig, GitStatus, Task } from '../types';
+import { WorkspaceConfig, GitStatus, Task, NewTaskDraft } from '../types';
 import {
   ThemeMode,
   AccentName,
@@ -76,7 +76,7 @@ interface AppState {
   isSearchOpen: boolean;
   activeView: string;
   notifications: Notification[];
-  newTaskModal: { open: boolean; defaultStatus: Task['status'] };
+  newTaskModal: { open: boolean; defaultStatus: Task['status']; draft?: NewTaskDraft };
   /** Bumped whenever a slice of data changes, so views can refetch. */
   dataVersions: DataVersions;
   /** Experimental: show the Agent Floor visualisation in the nav. */
@@ -98,6 +98,7 @@ type Action =
   | { type: 'ADD_NOTIFICATION'; payload: Omit<Notification, 'id' | 'timestamp'> }
   | { type: 'REMOVE_NOTIFICATION'; payload: string }
   | { type: 'OPEN_NEW_TASK_MODAL'; payload?: Task['status'] }
+  | { type: 'OPEN_NEW_TASK_DRAFT'; payload: NewTaskDraft }
   | { type: 'CLOSE_NEW_TASK_MODAL' }
   | { type: 'DATA_CHANGED'; payload: DataScope }
   | { type: 'SET_AGENTIC_VISUAL_MODE'; payload: boolean }
@@ -155,6 +156,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case 'OPEN_NEW_TASK_MODAL':
       return { ...state, newTaskModal: { open: true, defaultStatus: action.payload ?? 'backlog' } };
+    case 'OPEN_NEW_TASK_DRAFT':
+      return { ...state, newTaskModal: { open: true, defaultStatus: 'backlog', draft: action.payload } };
     case 'CLOSE_NEW_TASK_MODAL':
       return { ...state, newTaskModal: { ...state.newTaskModal, open: false } };
     case 'SET_AGENTIC_VISUAL_MODE':

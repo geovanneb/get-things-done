@@ -6,11 +6,12 @@ import DeliverableList from '@/components/task-form/DeliverableList';
 import { DeliverableItem } from '@/components/task-form/DeliverableRow';
 import { selectStyle, dateInputStyle, textareaStyle, sectionLabelStyle } from '@/components/task-form/styles';
 import { apiPost } from '@/utils/api';
+import { useApi } from '@/hooks/useApi';
 import { formatStatusLabel, formatPriorityLabel } from '@/utils/format';
 import MentionTextarea from '../common/MentionTextarea';
 import { DropZone } from '@/components/context-updates/ImportUpdateModal';
 import { formatBytes } from '@/components/context-updates/shared';
-import type { Task, Stakeholder } from '@/types';
+import type { Task, Stakeholder, NewTaskDraft, ClaudeAgent } from '@/types';
 
 const MAX_FILE = 50 * 1024 * 1024;
 
@@ -32,6 +33,8 @@ interface NewTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultStatus?: Task['status'];
+  /** Starting values, applied each time the form opens. */
+  draft?: NewTaskDraft;
   /** `uploadErrors` lists the files that could not be attached; the task itself was created. */
   onCreated?: (task: Task, uploadErrors: string[]) => void;
 }
@@ -43,15 +46,17 @@ interface FormState {
   due_date: string;
   objective: string;
   deliverables: DeliverableItem[];
+  preferred_agent: string;
 }
 
-const defaultForm = (defaultStatus?: Task['status']): FormState => ({
-  title: '',
+const defaultForm = (defaultStatus?: Task['status'], draft?: NewTaskDraft): FormState => ({
+  title: draft?.title ?? '',
   status: defaultStatus ?? 'backlog',
   priority: 'medium',
   due_date: '',
-  objective: '',
-  deliverables: [],
+  objective: draft?.objective ?? '',
+  deliverables: (draft?.deliverables ?? []).map((d, i) => ({ ...d, id: `DEL-${String(i + 1).padStart(2, '0')}` })),
+  preferred_agent: draft?.preferred_agent ?? '',
 });
 
 function SidebarField({ label, children }: { label: string; children: React.ReactNode }) {
@@ -76,9 +81,10 @@ export default function NewTaskModal({
   isOpen,
   onClose,
   defaultStatus,
+  draft,
   onCreated,
 }: NewTaskModalProps) {
-  const [form, setForm] = React.useState<FormState>(() => defaultForm(defaultStatus));
+  const [form, setForm] = React.useState<FormState>(() => defaultForm(defaultStatus, draft));
   const [titleError, setTitleError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState('');
@@ -86,17 +92,18 @@ export default function NewTaskModal({
   // Files picked before the task exists; they are uploaded right after it is created.
   const [files, setFiles] = React.useState<File[]>([]);
   const [progress, setProgress] = React.useState('');
+  const { data: agents } = useApi<ClaudeAgent[]>('/api/agents');
 
   React.useEffect(() => {
     if (isOpen) {
-      setForm(defaultForm(defaultStatus));
+      setForm(defaultForm(defaultStatus, draft));
       setTitleError('');
       setSaveError('');
-      setSelectedStakeholders([]);
+      setSelectedStakeholders(draft?.stakeholders ?? []);
       setFiles([]);
       setProgress('');
     }
-  }, [isOpen, defaultStatus]);
+  }, [isOpen, defaultStatus, draft]);
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -148,7 +155,7 @@ export default function NewTaskModal({
   };
 
   const handleSave = async () => {
-    if (!validate()) return;
+    if (saving || !validate()) return;
     setSaving(true);
     setSaveError('');
     try {
@@ -159,6 +166,7 @@ export default function NewTaskModal({
         task_type: 'ad_hoc',
         due_date: form.due_date || undefined,
         tags: [],
+        preferred_agent: form.preferred_agent || undefined,
         stakeholders: selectedStakeholders.map((s) => ({
           ref: s.id,
           role: 'stakeholder',
@@ -395,6 +403,21 @@ export default function NewTaskModal({
                 onChange={(e) => setField('due_date', e.target.value)}
                 style={{ ...dateInputStyle, width: '100%' }}
               />
+            </SidebarField>
+
+            <SidebarField label="Preferred agent">
+              <select
+                aria-label="Preferred agent"
+                value={form.preferred_agent}
+                onChange={(e) => setField('preferred_agent', e.target.value)}
+                style={{ ...selectStyle, width: '100%', padding: '6px 10px', fontSize: 'var(--text-sm)', borderRadius: 'var(--radius-md)' }}
+              >
+                <option value="">No preference</option>
+                {form.preferred_agent && !(agents ?? []).some((a) => a.name === form.preferred_agent) && (
+                  <option value={form.preferred_agent}>{form.preferred_agent}</option>
+                )}
+                {(agents ?? []).map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
+              </select>
             </SidebarField>
 
             <StakeholderPicker

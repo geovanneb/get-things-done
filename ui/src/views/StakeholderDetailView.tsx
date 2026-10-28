@@ -9,7 +9,9 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiGet } from '@/utils/api';
 import { formatDate, formatRelativeDate } from '@/utils/format';
-import type { OrgPersonSummary, OrgPosition, Stakeholder, Task } from '@/types';
+import { useAppDispatch } from '@/store';
+import { meetingPrepDraft } from '@/utils/meetingPrep';
+import type { ClaudeAgent, OrgPersonSummary, OrgPosition, OutputTemplate, Stakeholder, Task } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -278,6 +280,23 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const dispatch = useAppDispatch();
+
+  /** Opens the New task form filled in for preparing a meeting with this person. */
+  async function prepareMeeting(person: Stakeholder) {
+    setPreparing(true);
+    try {
+      const [templates, agents] = await Promise.all([
+        apiGet<OutputTemplate[]>('/api/outputs/templates').catch(() => []),
+        apiGet<ClaudeAgent[]>('/api/agents').catch(() => []),
+      ]);
+      onNavigate?.();
+      dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: meetingPrepDraft(person, templates, agents) });
+    } finally {
+      setPreparing(false);
+    }
+  }
 
   useEffect(() => {
     if (!id) return;
@@ -454,6 +473,10 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
               ))}
           </div>
         </div>
+
+        <Button variant="secondary" size="sm" loading={preparing} onClick={() => void prepareMeeting(stakeholder)} style={{ flexShrink: 0 }}>
+          Prepare meeting
+        </Button>
       </div>
 
       {/* Organization */}
