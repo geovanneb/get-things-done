@@ -834,6 +834,9 @@ workspace files, with a chokidar watcher pushing changes over SSE. `ui/` is Reac
 Vite, served statically by the server in production. `templates/` holds everything
 scaffolded into a new workspace.
 
+**HTTP API.** Agents and scripts can use the same local API as the dashboard. Every
+route is listed, with examples, in the [API reference](docs/api.md).
+
 `server/src/services/scaffold.ts` is the single source of truth for creating and
 upgrading workspaces. The CLI loads its compiled output at runtime so `gtd init` and
 the server's `POST /api/workspace/init` can never disagree.
