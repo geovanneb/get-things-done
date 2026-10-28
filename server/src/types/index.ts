@@ -186,6 +186,8 @@ export interface ExecutionPackage {
   permissions: string[];
   command: string;
   total_size_bytes: number;
+  /** Office files in the package or its folders that agents cannot read: encrypted (e.g. by a sensitivity label) or not a valid package. */
+  unreadable_files?: { path: string; check: 'encrypted' | 'unsupported_container' }[];
 }
 
 export interface ValidationResult {

@@ -3,6 +3,7 @@ import { promises as fsp } from 'fs';
 import { Response } from 'express';
 import { atomicWrite } from './atomicWrite';
 import { buildZip } from './zip';
+import { checkOfficeFile, OfficeCheck } from './officeEncryption';
 
 /**
  * Resolves `relative` inside `dir` and returns the absolute path of an existing file.
@@ -41,6 +42,14 @@ export interface FolderFile {
   name: string; size: number; modified: string; type: string;
   /** False when the dashboard cannot remove this file: it is in a subfolder, or its name is refused by topLevelName. */
   removable?: boolean;
+  /** Set when an Office file is encrypted or not a valid package, so agents cannot read it. Absent means not checked or nothing found. */
+  officeCheck?: OfficeCheck;
+}
+
+/** `file` with its Office check added when there is something to report. */
+export async function withOfficeCheck<T extends object>(file: T, fullPath: string): Promise<T & { officeCheck?: OfficeCheck }> {
+  const officeCheck = await checkOfficeFile(fullPath);
+  return officeCheck ? { ...file, officeCheck } : file;
 }
 
 const MAX_DEPTH = 4;
@@ -67,13 +76,13 @@ export async function listFolderFiles(dir: string, exclude: string[] = []): Prom
       }
       if (!entry.isFile() || (!prefix && exclude.includes(entry.name))) continue;
       const stat = await fsp.stat(full);
-      (prefix ? nested : top).push({
+      (prefix ? nested : top).push(await withOfficeCheck({
         name: rel,
         size: stat.size,
         modified: stat.mtime.toISOString(),
         type: path.extname(entry.name).slice(1).toLowerCase() || 'file',
         removable: !prefix && isTopLevelName(entry.name),
-      });
+      }, full));
     }
   }
   // A file created outside the app can have a name the app refuses to change (e.g. "draft." or "a:b").
@@ -161,5 +170,5 @@ export async function saveAttachment(dir: string, originalName: string, buffer: 
   const target = path.join(dir, name);
   await atomicWrite(target, buffer);
   const stat = await fsp.stat(target);
-  return { name, size: stat.size, modified: stat.mtime.toISOString(), type: path.extname(name).slice(1).toLowerCase() || 'file' };
+  return withOfficeCheck({ name, size: stat.size, modified: stat.mtime.toISOString(), type: path.extname(name).slice(1).toLowerCase() || 'file' }, target);
 }

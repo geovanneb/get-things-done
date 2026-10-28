@@ -3,11 +3,12 @@ import ReactDOM from 'react-dom';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useDataVersion } from '../store';
-import { Task, Stakeholder } from '../types';
+import { Task, Stakeholder, OfficeCheck } from '../types';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import MarkdownView from '../components/common/MarkdownView';
+import OfficeCheckBadge from '../components/common/OfficeCheckBadge';
 import MarkdownEditor from '../components/common/MarkdownEditor';
 import StakeholderPicker from '../components/task-form/StakeholderPicker';
 import DeliverableList from '../components/task-form/DeliverableList';
@@ -239,7 +240,7 @@ function WorkTab({ task, onFieldChange, savedCount }: { task: Task; onFieldChang
 /* ---- Context package tab ------------------------------------------ */
 /* ---- Files tab ----------------------------------------------------- */
 function FilesTab({ taskId }: { taskId: string }) {
-  const { data: files, loading, refetch } = useApi<Array<{ name: string; size: number; modified: string; type: string }>>(`/api/tasks/${taskId}/files`);
+  const { data: files, loading, refetch } = useApi<Array<{ name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }>>(`/api/tasks/${taskId}/files`);
   const [uploading, setUploading] = useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -299,6 +300,7 @@ function FilesTab({ taskId }: { taskId: string }) {
                 <path d="M9 1.5V5.5h4" stroke="currentColor" strokeWidth="1.2" />
               </svg>
               <span style={{ flex: 1, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+              <OfficeCheckBadge check={f.officeCheck} />
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>
                 {(f.size / 1024).toFixed(1)} KB
               </span>

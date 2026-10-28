@@ -210,6 +210,27 @@ try {
       up.status === 201 && Array.isArray(listed) && listed.some((f) => f.name === 'brief.txt'), `${up.status} ${JSON.stringify(listed).slice(0, 200)}`);
   }
 
+  // An Office file agents cannot read is reported on upload, in the list, by validation and in the execution package,
+  // also when an agent wrote it straight into the task folder. (Encrypted packages are covered by the server tests.)
+  {
+    const form = new FormData();
+    form.append('file', new Blob(['not an office file']), 'broken.docx');
+    const saved = await (await fetch(`${base}/api/tasks/${createdTask.id}/files`, { method: 'POST', body: form })).json();
+    fs.writeFileSync(path.join(ws, 'tasks', 'active', createdTask.id, 'deliverables', 'agent.xlsx'), '');
+    const listed = await (await fetch(`${base}/api/tasks/${createdTask.id}/files`)).json();
+    const issues = await (await fetch(`${base}/api/workspace/validate`)).json();
+    const unreadable = (await (await fetch(`${base}/api/tasks/${createdTask.id}/execution-package/preview`)).json()).unreadable_files ?? [];
+    const names = unreadable.map((f) => path.basename(f.path)).sort().join(',');
+    check('an unreadable Office file is flagged on upload, in the file list, by validation and in the execution package',
+      saved.officeCheck === 'unsupported_container' && listed.find((f) => f.name === 'broken.docx')?.officeCheck === 'unsupported_container'
+        && listed.find((f) => f.name === 'brief.txt')?.officeCheck === undefined
+        && issues.some((i) => i.rule === 'unreadable_office_file' && i.level === 'warning' && i.path.endsWith('agent.xlsx'))
+        && names === 'agent.xlsx,broken.docx',
+      JSON.stringify({ saved, names, issues: issues.filter((i) => i.rule === 'unreadable_office_file') }).slice(0, 400));
+    fs.rmSync(path.join(ws, 'tasks', 'active', createdTask.id, 'broken.docx'));
+    fs.rmSync(path.join(ws, 'tasks', 'active', createdTask.id, 'deliverables', 'agent.xlsx'));
+  }
+
   // Routines: a schedule that puts a task on the backlog, from the dashboard and from the CLI.
   {
     const post = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });

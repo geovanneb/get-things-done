@@ -8,6 +8,7 @@ import { MentionService } from './mentionService';
 import { OrgChartService, findLoop, findUnitLoop, isPlaceholder } from './orgChartService';
 import { OutputService } from './outputService';
 import { isDone, isOpen } from './taskStatus';
+import { listFolderFiles } from '../utils/files';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -193,6 +194,18 @@ export class ValidationService {
       for (const m of mentionService.extractMentions(task.body)) {
         if (!(await mentionService.resolve(m.href))) {
           results.push({ level: 'warning', rule: 'broken_mention', message: `Task ${task.id} mentions a missing file: @${m.label} (${m.href})`, path: task.path });
+        }
+      }
+
+      // Office files agents cannot read, including ones an agent itself saved in the task folder.
+      if (task.path && !isDone(task.status)) {
+        const dir = path.dirname(task.path);
+        for (const f of await listFolderFiles(dir, ['task.md'])) {
+          if (!f.officeCheck) continue;
+          const problem = f.officeCheck === 'encrypted'
+            ? 'is encrypted (for example by a sensitivity label), so agents cannot read it'
+            : 'is not a valid Office file, so agents cannot read it';
+          results.push({ level: 'warning', rule: 'unreadable_office_file', message: `Task ${task.id}: ${f.name} ${problem}`, path: path.join(dir, f.name) });
         }
       }
     }
