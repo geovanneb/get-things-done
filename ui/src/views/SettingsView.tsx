@@ -8,10 +8,12 @@ import Toggle from '@/components/common/Toggle';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppState, useAppDispatch } from '@/store';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useApi } from '@/hooks/useApi';
+import { cleanupSummary } from '@/components/routines/SystemCleanup';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
 import type { ThemeMode, TextSize } from '@/utils/theme';
-import type { WorkspaceConfig, GitStatus, ValidationResult } from '@/types';
+import type { WorkspaceConfig, GitStatus, ValidationResult, SystemCleanup } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -286,6 +288,28 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (next: typ
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** Retention lives with the routine that enforces it; Settings only says where, and what it does now. */
+function CleanupPointer() {
+  const { data, error } = useApi<SystemCleanup>('/api/routines/system-cleanup', []);
+  return (
+    <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.5, maxWidth: '62ch' }}>
+      <p style={{ margin: 0 }}>
+        The built-in <strong style={{ fontWeight: 600 }}>System cleanup</strong> routine reviews your memory and, only for the rules
+        you turn on, archives or removes old finished items and empties the trash.
+      </p>
+      {data && (
+        <p style={{ margin: '8px 0 0' }}>
+          Now: {data.settings.enabled ? `${data.summary}.` : 'paused.'} {data.settings.memory_review.enabled ? 'Memory review on.' : 'Memory review off.'} {cleanupSummary(data.settings)}
+        </p>
+      )}
+      {error && <p role="alert" style={{ margin: '8px 0 0', color: 'var(--color-critical)' }}>{error}</p>}
+      <p style={{ margin: '8px 0 0' }}>
+        <Link to="/routines#system-cleanup" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>Change it under Routines</Link>
+      </p>
     </div>
   );
 }
@@ -909,6 +933,10 @@ export default function SettingsView() {
       </SectionCard>
 
       {/* Section 3: Appearance */}
+      <SectionCard title="Cleanup and retention">
+        <CleanupPointer />
+      </SectionCard>
+
       <SectionCard title="Appearance">
         <FieldRow label="Theme">
           <SegmentedControl

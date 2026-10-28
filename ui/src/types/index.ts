@@ -438,7 +438,7 @@ export type ContextUpdateStatus = 'ready' | 'analyzing' | 'in_review' | 'approve
 
 export interface ContextUpdateProposal {
   id: string;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'remove';
   target: string;
   title: string;
   category: string;
@@ -472,6 +472,9 @@ export interface ContextUpdate {
   materials: { name: string; size: number; type: string }[];
   /** The user keeps materials/ after the update is done, until they release it. */
   keep_materials: boolean;
+  /** Who opened it: 'system-cleanup' for the weekly memory review, null for an import. */
+  origin: string | null;
+  kind: string | null;
   proposals: ContextUpdateProposal[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
@@ -543,6 +546,53 @@ export interface RoutineRun {
   caught_up?: string[];
   created: string[];
   message: string;
+  /** System cleanup: the memory review it opened. */
+  context_update?: string;
+  /** System cleanup: what it archived, trashed or deleted. */
+  cleaned?: { type: CleanupRuleType; id: string; action: CleanupAction }[];
+}
+
+/* ---- System cleanup (the built-in routine) -------------------------------- */
+
+export type CleanupRuleType = 'completed_tasks' | 'archived_tasks' | 'context_updates' | 'kaizen' | 'trash';
+export type CleanupAction = 'archive' | 'trash' | 'delete';
+
+export interface CleanupRule { enabled: boolean; older_than_days: number; action: CleanupAction }
+
+export interface CleanupSettings {
+  enabled: boolean;
+  schedule: RoutineSchedule;
+  memory_review: { enabled: boolean; stale_after_days: number };
+  rules: Record<CleanupRuleType, CleanupRule>;
+  keep_tag: string;
+  max_items_per_run: number;
+  updated_at: string | null;
+}
+
+export interface SystemCleanup {
+  id: 'SYSTEM-CLEANUP';
+  title: string;
+  settings: CleanupSettings;
+  defaults: CleanupSettings;
+  summary: string;
+  next_run_at: string | null;
+  state: { checked_at?: string; last_run_at?: string; last_status?: 'ok' | 'error'; last_message?: string; last_context_update?: string };
+  open_review: string | null;
+}
+
+export interface CleanupItem { type: CleanupRuleType; id: string; title: string; path: string; age_days: number; action: CleanupAction }
+
+export interface CleanupPreview {
+  plan: { items: CleanupItem[]; counts: Record<CleanupRuleType, number>; deferred: number };
+  memory: {
+    notes: number;
+    stakeholders: number;
+    duplicates: { reason: string; paths: string[] }[];
+    stale: { path: string; title: string; updated_at: string; age_days: number }[];
+    thin: { path: string; title: string }[];
+    unreadable: { path: string; reason: string }[];
+  } | null;
+  open_review: string | null;
 }
 
 export interface RoutinePreview {

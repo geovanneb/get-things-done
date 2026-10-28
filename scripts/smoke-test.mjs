@@ -292,6 +292,37 @@ try {
     check('gtd routines list and run work without the dashboard', cli.includes('RT-0001') && cliRun.includes('No routine is due'), cli + cliRun);
   }
 
+  // System cleanup: the built-in routine. By default weekly, suggestions only.
+  {
+    const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+    const job = await (await fetch(`${base}/api/routines/system-cleanup`)).json();
+    check('system cleanup defaults to weekly, memory review on and no file rule',
+      job.summary === 'Every Monday at 09:00' && job.settings?.enabled === true && job.settings.memory_review.enabled === true
+        && Object.values(job.settings.rules).every((r) => r.enabled === false), JSON.stringify(job).slice(0, 300));
+    check('the workspace .gitignore keeps the trash out of git',
+      fs.readFileSync(path.join(ws, '.gitignore'), 'utf8').includes('.situation-board/trash/'));
+    const badRule = await send('PUT', '/api/routines/system-cleanup', { rules: { kaizen: { enabled: true, action: 'archive' } } });
+    check('system cleanup settings are validated', badRule.status === 400, String(badRule.status));
+
+    const note = path.join(ws, 'context', 'glossary', 'smoke-term');
+    fs.mkdirSync(note, { recursive: true });
+    fs.writeFileSync(path.join(note, 'note.md'), '---\nid: CTX-smoke-term\ntype: context\ntitle: Smoke term\ncategory: glossary\n---\nA fictional term.\n');
+    const tasksBefore = fs.readdirSync(path.join(ws, 'tasks', 'active')).sort().join(',');
+    const preview = await (await send('POST', '/api/routines/system-cleanup/preview')).json();
+    check('a system cleanup preview lists no file by default', preview.plan?.items?.length === 0 && preview.memory?.notes >= 1, JSON.stringify(preview).slice(0, 300));
+    const runRes = await send('POST', '/api/routines/system-cleanup/run');
+    const run = await runRes.json();
+    const review = run.context_update ? await (await fetch(`${base}/api/context-updates/${run.context_update}`)).json() : {};
+    check('run now opens a memory review tagged as coming from system cleanup, and touches no task',
+      runRes.status === 201 && review.origin === 'system-cleanup' && review.kind === 'memory-review'
+        && review.material_files?.some((f) => f.name === 'memory-scan.md')
+        && fs.readdirSync(path.join(ws, 'tasks', 'active')).sort().join(',') === tasksBefore, JSON.stringify(run).slice(0, 300));
+    const again = await (await send('POST', '/api/routines/system-cleanup/run')).json();
+    check('a second run waits for the open review instead of opening another', !again.context_update && /still open/.test(again.message), again.message);
+    await fetch(`${base}/api/context-updates/${run.context_update}`, { method: 'DELETE' });
+    fs.rmSync(note, { recursive: true, force: true });
+  }
+
   const group = await fetch(`${base}/api/stakeholders`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Smoke group', type: 'groups' }),
   });

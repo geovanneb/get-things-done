@@ -9,9 +9,11 @@ import { fileInside } from '../utils/files';
 import {
   Schedule, ScheduleError, addDays, describeSchedule, isDateOnly, localDate, nextOccurrences, occurrencesBetween, parseSchedule,
 } from './routineSchedule';
+import { CleanupRunResult, CleanupView, SYSTEM_CLEANUP_ID, SYSTEM_CLEANUP_TITLE, SystemCleanupService, parseSettings } from './systemCleanupService';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
+const systemCleanup = new SystemCleanupService();
 
 /**
  * Routines: things that should happen on a schedule, such as a task that has to be on the
@@ -30,6 +32,9 @@ const taskService = new TaskService();
  * Each created task records its routine and occurrence (`routine_ref`, `routine_occurrence`).
  * Runs check those markers before creating tasks; a local lock coordinates this engine's writers.
  * File synchronization between machines is not a distributed lock: run the scheduler on one host.
+ *
+ * The built-in System cleanup job (systemCleanupService.ts) runs on the same triggers and under the
+ * same lock, after the user's routines, and records its runs in the same history.
  */
 
 export const CATCH_UP_POLICIES = ['latest', 'all', 'skip'] as const;
@@ -118,6 +123,10 @@ export interface RoutineRun {
   caught_up?: string[];
   created: string[];
   message: string;
+  /** System cleanup: the memory review it opened. */
+  context_update?: string;
+  /** System cleanup: what it archived, trashed or deleted (at most 100 listed). */
+  cleaned?: CleanupRunResult['cleaned'];
 }
 
 interface StateFile {
@@ -732,8 +741,59 @@ export class RoutineService {
     }
 
     if (stateChanged) await this.writeState(state);
+    try {
+      const result = await systemCleanup.runIfDue(now);
+      if (result?.did_something) runs.push(this.cleanupRun(result, trigger, now));
+    } catch (err) {
+      // Unreadable settings: the Routines page shows the problem; the user's routines still ran.
+      if (trigger !== 'timer') console.error(`[routines] System cleanup: ${(err as Error).message}`);
+    }
     await this.appendRuns(runs);
     return runs;
+  }
+
+  private cleanupRun(result: CleanupRunResult, trigger: RunTrigger, now: Date): RoutineRun {
+    return {
+      routine_id: SYSTEM_CLEANUP_ID, routine_title: SYSTEM_CLEANUP_TITLE, trigger, at: now.toISOString(), status: result.status,
+      occurrences: [occurrenceKey(now)], skipped: [], created: [], message: result.message,
+      ...(result.context_update ? { context_update: result.context_update } : {}),
+      ...(result.cleaned.length ? { cleaned: result.cleaned } : {}),
+    };
+  }
+
+  // ---- system cleanup ------------------------------------------------------------
+
+  async systemCleanup(now = new Date()): Promise<CleanupView> {
+    return systemCleanup.view(now);
+  }
+
+  /** Under the run lock, so settings never change halfway through a run. */
+  async updateSystemCleanup(input: unknown, now = new Date()): Promise<CleanupView> {
+    return this.mutate(() => systemCleanup.update(input, now));
+  }
+
+  /**
+   * What a run would do now, for the saved settings or a draft from the editor. Nothing is changed and
+   * no memory review is opened.
+   */
+  async previewSystemCleanup(draft: unknown, now = new Date()) {
+    const settings = draft === undefined || draft === null ? await systemCleanup.readSettings() : parseSettings(draft, await systemCleanup.readSettings());
+    const [plan, scan, open] = await Promise.all([
+      systemCleanup.plan(settings, now),
+      settings.memory_review.enabled ? systemCleanup.scanMemory(settings, now) : Promise.resolve(null),
+      systemCleanup.openReview(),
+    ]);
+    return { plan, memory: scan, open_review: open };
+  }
+
+  async runSystemCleanupNow(now = new Date()): Promise<RoutineRun> {
+    const result = await this.serialized(async () => this.withLock(async () => {
+      const run = this.cleanupRun(await systemCleanup.runNow(now), 'manual', now);
+      await this.appendRuns([run]);
+      return run;
+    }));
+    if (!result) throw httpError(409, 'Another routine run is in progress; try again in a moment');
+    return result;
   }
 
   /** Creates the routine's task right now, whatever the schedule says. */

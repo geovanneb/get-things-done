@@ -123,6 +123,11 @@ export class KaizenService {
   }
 
   async listKaizen(): Promise<KaizenProposal[]> {
+    return (await this.listKaizenFiles()).map((f) => f.proposal);
+  }
+
+  /** Every readable proposal with its file name, which the frontmatter id does not always match. */
+  async listKaizenFiles(): Promise<{ filename: string; proposal: KaizenProposal }[]> {
     const dir = this.kaizenDir();
     let entries: string[] = [];
     try {
@@ -132,12 +137,12 @@ export class KaizenService {
       return [];
     }
 
-    const proposals: KaizenProposal[] = [];
+    const out: { filename: string; proposal: KaizenProposal }[] = [];
     for (const filename of entries) {
       const p = await this.readKaizenFile(path.join(dir, filename));
-      if (p) proposals.push(p);
+      if (p) out.push({ filename, proposal: p });
     }
-    return proposals;
+    return out;
   }
 
   async getKaizen(id: string): Promise<KaizenProposal | null> {

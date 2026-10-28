@@ -8,9 +8,10 @@ import Button from '@/components/common/Button';
 import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
 import RoutineEditor from '@/components/routines/RoutineEditor';
+import { SystemCleanupCard, SystemCleanupEditor } from '@/components/routines/SystemCleanup';
 import { apiDelete, apiPatch, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
-import type { Routine, RoutineRun } from '@/types';
+import type { Routine, RoutineRun, SystemCleanup } from '@/types';
 
 const TRIGGER_LABEL: Record<RoutineRun['trigger'], string> = {
   startup: 'Dashboard started',
@@ -152,7 +153,9 @@ function RunHistory({ runs }: { runs: RoutineRun[] }) {
           <span style={{ flex: 1, minWidth: 0 }}>
             <strong style={{ fontWeight: 600 }}>{run.routine_title}</strong>{' '}
             <span style={{ color: run.status === 'ok' ? 'var(--color-text-secondary)' : 'var(--color-critical)' }}>
-              {run.created.length > 0
+              {run.routine_id === 'SYSTEM-CLEANUP'
+                ? <>{run.message}{run.context_update && <> <Link to={`/context/updates/${run.context_update}`} style={{ color: 'var(--color-accent)' }}>Open {run.context_update}</Link></>}</>
+                : run.created.length > 0
                 ? <>created {run.created.map((id, j) => <React.Fragment key={id}>{j > 0 && ', '}<Link to={`/board/task/${id}`} style={{ color: 'var(--color-accent)' }}>{id}</Link></React.Fragment>)}</>
                 : run.message}
               {run.created.length > 0 && run.skipped.length > 0 && ` (${run.skipped.length} missed run${run.skipped.length === 1 ? '' : 's'} skipped)`}
@@ -175,10 +178,12 @@ export default function RoutinesView() {
   const tasksVersion = useDataVersion('tasks');
   const { data: routines, loading, error, refetch } = useApi<Routine[]>('/api/routines', [routinesVersion, tasksVersion]);
   const { data: runs, refetch: refetchRuns } = useApi<RoutineRun[]>('/api/routines/history?limit=30', [routinesVersion, tasksVersion]);
+  const { data: cleanup, error: cleanupError, refetch: refetchCleanup } = useApi<SystemCleanup>('/api/routines/system-cleanup', [routinesVersion, useDataVersion('context-updates')]);
+  const [cleanupOpen, setCleanupOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Routine | null>(null);
   const [editorOpen, setEditorOpen] = React.useState(false);
 
-  const refresh = React.useCallback(() => { refetch(); refetchRuns(); }, [refetch, refetchRuns]);
+  const refresh = React.useCallback(() => { refetch(); refetchRuns(); refetchCleanup(); }, [refetch, refetchRuns, refetchCleanup]);
   const openEditor = (routine: Routine | null) => { setEditing(routine); setEditorOpen(true); };
 
   if (loading && !routines) return <LoadingSpinner text="Loading routines..." />;
@@ -198,6 +203,12 @@ export default function RoutinesView() {
       </div>
 
       {error && <div role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</div>}
+
+      <section aria-labelledby="built-in">
+        <h2 id="built-in" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 12px' }}>Built-in</h2>
+        {cleanupError && <div role="alert" style={{ ...cardStyle, borderColor: 'var(--color-critical)', color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>System cleanup does not run: {cleanupError}</div>}
+        {cleanup && <SystemCleanupCard job={cleanup} onEdit={() => setCleanupOpen(true)} onChanged={refresh} />}
+      </section>
 
       <section aria-labelledby="your-routines">
         <h2 id="your-routines" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 12px' }}>Your routines</h2>
@@ -224,6 +235,7 @@ export default function RoutinesView() {
         <RunHistory runs={runs ?? []} />
       </section>
 
+      <SystemCleanupEditor isOpen={cleanupOpen} job={cleanup ?? null} onClose={() => setCleanupOpen(false)} onSaved={refresh} />
       <RoutineEditor isOpen={editorOpen} routine={editing} onClose={() => setEditorOpen(false)} onSaved={refresh} />
     </div>
   );

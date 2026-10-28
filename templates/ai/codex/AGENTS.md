@@ -101,13 +101,22 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
 4. Write the full proposed file to `proposals/P-NN.md` (never to the target). Targets
    must be `context/<category>/<slug>/note.md` or `stakeholders/{people,groups,org-charts}/<ID>.md`.
 5. In `update.md` keep the body and existing fields, and set `status: in_review`,
-   `analyzed_at`, `summary`, `proposals` (id, action create/update, target, category,
+   `analyzed_at`, `summary`, `proposals` (id, action create/update/remove, target, category,
    title, rationale, evidence, confidence), `skipped` (topic, reason) and `unread`.
-   Do not set `decision`.
+   Do not set `decision`. A `remove` has no draft: the dashboard moves the file to the
+   trash after approval.
+6. **Memory review** (`kind: memory-review`, opened by the weekly System cleanup job,
+   material `materials/memory-scan.md`): there is no new material. Review the whole
+   context and stakeholders for duplicates, facts in the wrong place, obsolete notes,
+   contradictions and notes probably out of date. Merge a duplicate with an `update`
+   of the note that stays plus a `remove` of the other; move a fact with two updates;
+   remove an obsolete note, naming the links to it that will break. Do not guess newer
+   facts for an old note: list it under `skipped`. Never change `origin` or `kind`.
 
 **"Apply context update CU-...":**
 1. Only when `status` is `approved` (or `applying`, to resume). Set `status: applying`.
-2. For each proposal with `decision: accepted`: write `proposals/<id>.md` to the target
+2. For each proposal with `decision: accepted` except `action: remove` (leave those to
+   the dashboard, with no outcome): write `proposals/<id>.md` to the target
    as reviewed. If the target changed after `analyzed_at`, merge instead of overwriting
    newer content. Follow `reviewer_note` when set. Set `updated_at` on each file. Record
    `outcome` (applied, merged, failed) and `outcome_note` on the proposal.

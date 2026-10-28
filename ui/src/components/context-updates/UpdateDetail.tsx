@@ -12,7 +12,7 @@ import { formatRelativeDate } from '@/utils/format';
 import type { ContextUpdate, ContextUpdateProposal } from '@/types';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
-import { CommandBox, HelpBox, STATUS_META, StatusPill, StepIndicator, copyText, formatBytes, sectionLabel } from './shared';
+import { CommandBox, HelpBox, OriginBadge, STATUS_META, StatusPill, StepIndicator, copyText, formatBytes, sectionLabel } from './shared';
 
 const card: React.CSSProperties = {
   background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 16,
@@ -40,12 +40,16 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
   onToggle: (accepted: boolean) => void;
   onNote: (note: string) => void;
 }) {
-  const [showDiff, setShowDiff] = useState(true);
+  const [showDiff, setShowDiff] = useState(proposal.action !== 'remove');
   const [note, setNote] = useState(decision.reviewer_note);
   useEffect(() => setNote(decision.reviewer_note), [decision.reviewer_note]);
 
   const accepted = decision.decision === 'accepted';
-  const stats = useMemo(() => (proposal.proposed != null ? diffStats(diffLines(proposal.current ?? null, proposal.proposed)) : null), [proposal.current, proposal.proposed]);
+  const removal = proposal.action === 'remove';
+  // A removal shows the current file going away: every line removed.
+  const after = removal ? (proposal.current != null ? '' : null) : proposal.proposed ?? null;
+  const stats = useMemo(() => (after != null ? diffStats(diffLines(proposal.current ?? null, after)) : null), [proposal.current, after]);
+  const ACTION = { create: { label: 'New file', bg: 'var(--color-info-subtle)', fg: 'var(--color-info)' }, update: { label: 'Update', bg: 'var(--color-accent-subtle)', fg: 'var(--color-accent)' }, remove: { label: 'Remove', bg: 'var(--color-critical-subtle)', fg: 'var(--color-critical)' } }[proposal.action];
   const confidence = CONFIDENCE[proposal.confidence];
   const blocked = !!proposal.problem;
   const checkboxId = `accept-${proposal.id}`;
@@ -63,8 +67,8 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
             <label htmlFor={reviewing ? checkboxId : undefined} style={{ fontWeight: 600, fontSize: 'var(--text-base)', cursor: reviewing ? 'pointer' : 'default' }}>
               {proposal.title || proposal.target}
             </label>
-            <span style={{ padding: '1px 6px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-xs)', fontWeight: 600, background: proposal.action === 'create' ? 'var(--color-info-subtle)' : 'var(--color-accent-subtle)', color: proposal.action === 'create' ? 'var(--color-info)' : 'var(--color-accent)' }}>
-              {proposal.action === 'create' ? 'New file' : 'Update'}
+            <span style={{ padding: '1px 6px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-xs)', fontWeight: 600, background: ACTION.bg, color: ACTION.fg }}>
+              {ACTION.label}
             </span>
             {proposal.category && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{proposal.category}</span>}
             {confidence && <span title={confidence.hint} style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: confidence.color }}>{confidence.label}</span>}
@@ -87,22 +91,31 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
               <span style={{ fontWeight: 600 }}>Evidence: </span>{proposal.evidence}
             </div>
           )}
-          {proposal.outcome_note && <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>Agent: </span>{proposal.outcome_note}</div>}
+          {proposal.outcome_note && <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>{removal ? 'Dashboard: ' : 'Agent: '}</span>{proposal.outcome_note}</div>}
 
           {proposal.problem && <HelpBox tone="critical">{proposal.problem}</HelpBox>}
+          {removal && reviewing && !proposal.problem && (
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+              If you accept, the dashboard moves this file{proposal.target.startsWith('context/') ? ' and its folder' : ''} to the trash
+              (<code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>.situation-board/trash/</code>) once the
+              update is done. Links to it stop working.
+            </div>
+          )}
           {proposal.stale && (
             <HelpBox tone="warning" title="This file changed after the analysis">
-              {proposal.action === 'create' && proposal.target_exists
+              {removal
+                ? 'Someone edited it since the agent looked. Removing it now would also remove those edits.'
+                : proposal.action === 'create' && proposal.target_exists
                 ? 'A file now exists at this path. The diff below is against it. If you accept, the agent merges instead of overwriting.'
                 : 'Someone edited it since the agent looked. The diff below is against the current version, so it may show more than the proposal meant. If you accept, the agent keeps the newer edits and merges.'}
             </HelpBox>
           )}
 
-          {proposal.proposed != null && (
+          {after != null && (
             <div>
               <button type="button" onClick={() => setShowDiff((v) => !v)} aria-expanded={showDiff}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: 0, marginBottom: 6, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-accent)' }}>
-                {showDiff ? 'Hide changes' : 'Show changes'}
+                {removal ? (showDiff ? 'Hide what goes' : 'Show what goes') : showDiff ? 'Hide changes' : 'Show changes'}
                 {stats && (
                   <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                     <span style={{ color: 'var(--color-success)' }}>+{stats.added}</span>{' '}
@@ -110,11 +123,11 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
                   </span>
                 )}
               </button>
-              {showDiff && <DiffView before={proposal.current ?? null} after={proposal.proposed} />}
+              {showDiff && <DiffView before={proposal.current ?? null} after={after} />}
             </div>
           )}
 
-          {reviewing && accepted && (
+          {reviewing && accepted && !removal && (
             <div>
               <div style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
                 Note for the agent (optional)
@@ -186,6 +199,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const copied = copiedFor === u.status;
   const selectable = u.proposals.filter((p) => !p.problem);
   const acceptedCount = u.proposals.filter((p) => decisions[p.id]?.decision === 'accepted').length;
+  // Removals are done by the dashboard on approval; only creates and updates need the apply command.
+  const onlyRemovals = acceptedCount > 0 && u.proposals.every((p) => decisions[p.id]?.decision !== 'accepted' || p.action === 'remove');
 
   const run = async (label: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(label);
@@ -285,12 +300,13 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
           <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 700 }}>{u.title}</h2>
           <StatusPill status={u.status} />
+          <OriginBadge origin={u.origin} />
           <span style={{ marginLeft: 'auto' }}>
             {u.status !== 'applying' && <Button variant="ghost" size="sm" onClick={remove}>Delete</Button>}
           </span>
         </div>
         <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · material from {u.source_date || 'unknown date'} · imported {formatRelativeDate(u.created_at)}
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {u.kind === 'memory-review' ? 'review of your existing memory' : <>material from {u.source_date || 'unknown date'}</>} · {u.origin === 'system-cleanup' ? 'opened by System cleanup' : 'imported'} {formatRelativeDate(u.created_at)}
           {u.applied_at && <> · finished {formatRelativeDate(u.applied_at)}</>}
         </div>
       </div>
@@ -441,7 +457,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               <Button variant="ghost" size="sm" onClick={() => void selectAll(true)}>Select all</Button>
               <Button variant="ghost" size="sm" onClick={() => void selectAll(false)}>Clear</Button>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                After approving, you copy one command to apply.
+                {onlyRemovals ? 'Approving moves the selected files to the trash right away.' : 'After approving, you copy one command to apply.'}
               </span>
             </>
           )}
@@ -452,8 +468,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             </Button>
             {u.proposals.length > 0 && (
               <Button variant="primary" disabled={acceptedCount === 0} loading={busy === 'approve'}
-                title={acceptedCount === 0 ? 'Tick at least one proposal, or close without changes' : 'Lock your selection and get the apply command'}
-                onClick={() => run('approve', () => apiPost(`/api/context-updates/${u.id}/approve`), 'Approved. Run the apply command to write the changes.')}>
+                title={acceptedCount === 0 ? 'Tick at least one proposal, or close without changes' : onlyRemovals ? 'Move the selected files to the trash and finish this update' : 'Lock your selection and get the apply command'}
+                onClick={() => run('approve', () => apiPost(`/api/context-updates/${u.id}/approve`), onlyRemovals ? 'Approved. The files are in the trash.' : 'Approved. Run the apply command to write the changes.')}>
                 Approve {acceptedCount > 0 ? acceptedCount : ''} selected
               </Button>
             )}

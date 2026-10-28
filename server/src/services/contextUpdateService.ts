@@ -1,9 +1,11 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { WorkspaceService } from './workspace';
+import { reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
+import { moveToTrash } from './trash';
 
 const workspaceService = new WorkspaceService();
 
@@ -23,6 +25,13 @@ const pendingUpdates = new Map<string, Promise<void>>();
  * treat a raw transcript as distilled context.
  *
  * Status flow: ready -> analyzing -> in_review -> approved -> applying -> done.
+ *
+ * A proposal creates, updates or removes one file. Agents may not delete files, so the dashboard carries
+ * out accepted removals itself: it moves the file (a context note with its whole folder) to the trash once
+ * the update is done, or straight away when removals are all that was accepted.
+ *
+ * `origin` says who opened the update. Only the server sets it (the weekly memory review writes
+ * `system-cleanup`); an import from the dashboard has none.
  * The agent commands (/gtd-context-analyze, /gtd-context-apply) move analyzing/in_review and applying/done;
  * the dashboard moves everything else.
  */
@@ -45,7 +54,7 @@ export interface UpdateMaterial { name: string; size: number; type: string }
 
 export interface UpdateProposal {
   id: string;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'remove';
   target: string;
   title: string;
   category: string;
@@ -73,6 +82,10 @@ export interface ContextUpdate {
   materials: UpdateMaterial[];
   /** The user's choice: materials/ stays after the update is done, until they release it. Never set by an agent. */
   keep_materials: boolean;
+  /** Who opened this update: 'system-cleanup' for the memory review, null for an import by the user. */
+  origin: string | null;
+  /** What the analysis is about: 'memory-review' reviews the existing memory instead of new material. */
+  kind: string | null;
   proposals: UpdateProposal[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
@@ -144,7 +157,7 @@ function normalizeProposal(raw: unknown, index: number): UpdateProposal {
   const confidence = ['high', 'medium', 'low'].includes(str(p['confidence'])) ? str(p['confidence']) as UpdateProposal['confidence'] : '';
   return {
     id: str(p['id']) || `P-${String(index + 1).padStart(2, '0')}`,
-    action: p['action'] === 'create' ? 'create' : 'update',
+    action: p['action'] === 'create' ? 'create' : p['action'] === 'remove' ? 'remove' : 'update',
     target: str(p['target']),
     title: str(p['title']),
     category: str(p['category']),
@@ -189,6 +202,8 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     notes: body,
     materials,
     keep_materials: data['keep_materials'] === true,
+    origin: nullableStr(data['origin']),
+    kind: nullableStr(data['kind']),
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
@@ -279,11 +294,58 @@ export class ContextUpdateService {
       const dir = this.updateDir(id);
       // The apply command deletes these itself, but an agent may lack permission to remove folders.
       // A done update never needs them again, so the dashboard finishes the cleanup.
-      if (update.status === 'done') await this.cleanup(id, update.keep_materials);
-      const proposals = await Promise.all(update.proposals.map((p) => this.proposalDetail(dir, update, p)));
+      if (update.status === 'done') {
+        await this.cleanup(id, update.keep_materials);
+        await this.finishRemovals(id);
+      }
+      const { update: current } = await this.read(id);
+      const proposals = await Promise.all(current.proposals.map((p) => this.proposalDetail(dir, current, p)));
       const material_files = await listFolderFiles(path.join(dir, 'materials'));
-      return { ...update, proposals, material_files };
+      return { ...current, proposals, material_files };
     });
+  }
+
+  /**
+   * Moves the target of every accepted removal to the trash, once. A context note goes with its folder,
+   * so its attachments are not left behind. When another accepted change failed, removals are held back:
+   * a merge that did not land would otherwise lose the text of the note being merged away.
+   */
+  private async finishRemovals(id: string): Promise<void> {
+    const { update, data, file } = await this.read(id);
+    if (update.status !== 'done') return;
+    const pending = update.proposals.filter((p) => p.action === 'remove' && p.decision === 'accepted' && !p.outcome);
+    if (pending.length === 0) return;
+    const otherFailed = update.proposals.some((p) => p.action !== 'remove' && p.decision === 'accepted' && p.outcome === 'failed');
+    const ws = workspaceService.getWorkspacePath();
+    const results = new Map<string, { outcome: string; outcome_note: string }>();
+    for (const p of pending) {
+      if (otherFailed) {
+        results.set(p.id, { outcome: 'skipped', outcome_note: 'Kept: another accepted change failed, so removing this file could lose information.' });
+        continue;
+      }
+      const target = proposalTarget(p.target);
+      if (!target) { results.set(p.id, { outcome: 'failed', outcome_note: 'The target is not a context note or stakeholder file.' }); continue; }
+      try {
+        const full = await fileInside(ws, target);
+        const parts = target.split('/');
+        // context/<category>/<slug>/note.md: the note is its folder.
+        const isNoteFolder = parts[0] === 'context' && parts.length === 4 && parts[3] === 'note.md';
+        const what = isNoteFolder ? path.dirname(full) : full;
+        if (isNoteFolder && (await fsp.lstat(what)).isSymbolicLink()) throw new Error('traversal');
+        const moved = await moveToTrash(ws, what);
+        results.set(p.id, { outcome: 'applied', outcome_note: `Moved to ${moved}` });
+      } catch (err) {
+        const gone = (err as NodeJS.ErrnoException).code === 'ENOENT' || /not found|not a file/i.test((err as Error).message ?? '');
+        results.set(p.id, gone
+          ? { outcome: 'applied', outcome_note: 'The file was already gone.' }
+          : { outcome: 'failed', outcome_note: `Could not move it to the trash: ${(err as Error).message}` });
+      }
+    }
+    const proposals = this.rawProposals(data).map((raw, i) => {
+      const r = results.get(normalizeProposal(raw, i).id);
+      return r ? { ...(raw as Record<string, unknown>), ...r } : raw;
+    });
+    await this.write(file, data, update.notes, { proposals });
   }
 
   private async proposalDetail(dir: string, update: ContextUpdate, p: UpdateProposal): Promise<ProposalDetail> {
@@ -304,6 +366,13 @@ export class ContextUpdateService {
     } catch (err) {
       if ((err as Error).message?.includes('traversal')) return { ...detail, problem: 'The target points outside the workspace.' };
       if (p.action === 'update') detail.stale = true; // the file was removed since the analysis
+    }
+
+    if (p.action === 'remove') {
+      // Nothing to draft: the "after" of a removal is no file. Shown as the current content going away.
+      if (!detail.target_exists && update.status !== 'done') detail.problem = 'This file is already gone, so there is nothing to remove.';
+      if (!['in_review', 'approved'].includes(update.status)) detail.stale = false;
+      return detail;
     }
 
     // The draft only exists until the update is done; afterwards the record keeps the decision, not the text.
@@ -332,10 +401,19 @@ export class ContextUpdateService {
       const n = parseInt(e.slice(prefix.length), 10);
       if (!Number.isNaN(n) && n > max) max = n;
     }
+    // Ids of updates the cleanup job removed stay taken.
+    max = Math.max(max, await reservedSequence(prefix));
     return `${prefix}${String(max + 1).padStart(4, '0')}`;
   }
 
-  async create(input: { title?: unknown; source_date?: unknown; notes?: unknown; text?: unknown }): Promise<ContextUpdate> {
+  /**
+   * `system` is for the server's own jobs, never for a request body: it tags the update with its origin
+   * and kind, and names the saved text.
+   */
+  async create(
+    input: { title?: unknown; source_date?: unknown; notes?: unknown; text?: unknown },
+    system?: { origin: string; kind: string; textName: string },
+  ): Promise<ContextUpdate> {
     const title = typeof input.title === 'string' ? input.title.trim().slice(0, 200) : '';
     const sourceDate = typeof input.source_date === 'string' && input.source_date ? input.source_date : new Date().toISOString().slice(0, 10);
     if (!isDateOnly(sourceDate)) throw httpError(400, 'Invalid source_date: use YYYY-MM-DD');
@@ -359,7 +437,7 @@ export class ContextUpdateService {
     await fsp.mkdir(path.join(dir, 'materials'));
 
     if (text.trim()) {
-      await saveAttachment(path.join(dir, 'materials'), 'pasted-text.md', Buffer.from(text, 'utf-8'), 'update.md');
+      await saveAttachment(path.join(dir, 'materials'), system?.textName ?? 'pasted-text.md', Buffer.from(text, 'utf-8'), 'update.md');
     }
 
     const now = new Date().toISOString();
@@ -368,6 +446,7 @@ export class ContextUpdateService {
       id,
       type: 'context-update',
       title: title || `Update ${sourceDate}`,
+      ...(system ? { origin: system.origin, kind: system.kind } : {}),
       status: 'ready',
       source_date: sourceDate,
       created_at: now,
@@ -480,7 +559,17 @@ export class ContextUpdateService {
         const p = normalizeProposal(raw, i);
         return p.decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), decision: 'rejected' };
       });
-      await this.write(file, data, update.notes, { status: 'approved', approved_at: new Date().toISOString(), proposals: proposals });
+      const now = new Date().toISOString();
+      // Removals are carried out here, not by the agent. With nothing else accepted there is nothing to run.
+      const onlyRemovals = update.proposals.every((p) => p.decision !== 'accepted' || p.action === 'remove');
+      if (onlyRemovals) {
+        const closed = proposals.map((raw, i) => normalizeProposal(raw, i).decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), outcome: 'skipped' });
+        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed });
+        await this.cleanup(id, update.keep_materials);
+        await this.finishRemovals(id);
+      } else {
+        await this.write(file, data, update.notes, { status: 'approved', approved_at: now, proposals: proposals });
+      }
       return (await this.read(id)).update;
     });
   }
