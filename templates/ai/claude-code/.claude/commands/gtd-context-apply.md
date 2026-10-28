@@ -58,11 +58,13 @@ When every accepted proposal has an outcome:
    and `updated_at`. Give each rejected proposal `outcome: skipped`. Keep everything
    else: the summary, the `materials` list and the proposals are the record of what
    happened.
-2. Delete `context-updates/$ARGUMENTS/materials/` and
-   `context-updates/$ARGUMENTS/proposals/`. The record stays; the raw material and
-   drafts go, so the workspace does not grow over time. Delete nothing else. If you
-   are not allowed to delete folders, leave them: the dashboard removes them the next
-   time it opens a finished update.
+2. Delete `context-updates/$ARGUMENTS/proposals/`. Delete
+   `context-updates/$ARGUMENTS/materials/` too, unless `update.md` has
+   `keep_materials: true`: then the executive chose to keep the original files, so
+   leave that folder alone. The record stays; the drafts (and usually the raw
+   material) go, so the workspace does not grow over time. Delete nothing else, and
+   never change `keep_materials`. If you are not allowed to delete folders, leave
+   them: the dashboard removes them the next time it opens a finished update.
 3. Read `update.md` back and confirm the frontmatter parses.
 
 ## Step 4: Report

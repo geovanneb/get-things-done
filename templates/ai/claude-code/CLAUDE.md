@@ -25,7 +25,7 @@ outputs/templates/        Output templates (required sections + style guides)
 context-updates/          Raw material waiting to be distilled into context (not context itself)
   CU-YYYY-NNNN/
     update.md             Status, proposals and the executive's decisions
-    materials/            Uploaded files (deleted when the update is done)
+    materials/            Uploaded files (deleted when the update is done, unless kept)
     proposals/P-NN.md     Proposed content of one context or stakeholder file
 routines/                 RT-NNNN.md schedules that create recurring tasks
 .schemas/                 JSON Schemas for all file types
@@ -182,7 +182,8 @@ The executive imports material (transcripts, slides, photos, spreadsheets) under
 - `/gtd-context-analyze <CU-ID>`: read the material and the whole context, and propose
   only the changes that matter. Writes proposals; never touches context files.
 - `/gtd-context-apply <CU-ID>`: apply only the proposals the executive accepted, then
-  delete the materials and keep the record.
+  delete the drafts and keep the record. The materials go too, unless the executive set
+  `keep_materials: true` in the dashboard.
 
 Follow the command files in `.claude/commands/` exactly. The rule behind both: never
 change just to change. Distil the material into the few edits that keep the context true.

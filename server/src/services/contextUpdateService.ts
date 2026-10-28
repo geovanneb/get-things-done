@@ -16,7 +16,7 @@ const pendingUpdates = new Map<string, Promise<void>>();
  *
  *   context-updates/CU-YYYY-NNNN/
  *     update.md        record: frontmatter (status, proposals, decisions) + the user's notes as the body
- *     materials/       uploaded files, deleted when the update is done
+ *     materials/       uploaded files, deleted when the update is done unless the user keeps them
  *     proposals/P-NN.md  the full proposed content of one target file, deleted when done
  *
  * The folder sits outside context/ on purpose: agents scan context/ for every task and must never
@@ -71,6 +71,8 @@ export interface ContextUpdate {
   summary: string;
   notes: string;
   materials: UpdateMaterial[];
+  /** The user's choice: materials/ stays after the update is done, until they release it. Never set by an agent. */
+  keep_materials: boolean;
   proposals: UpdateProposal[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
@@ -186,6 +188,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     summary: str(data['summary']),
     notes: body,
     materials,
+    keep_materials: data['keep_materials'] === true,
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
@@ -276,7 +279,7 @@ export class ContextUpdateService {
       const dir = this.updateDir(id);
       // The apply command deletes these itself, but an agent may lack permission to remove folders.
       // A done update never needs them again, so the dashboard finishes the cleanup.
-      if (update.status === 'done') await this.cleanup(id);
+      if (update.status === 'done') await this.cleanup(id, update.keep_materials);
       const proposals = await Promise.all(update.proposals.map((p) => this.proposalDetail(dir, update, p)));
       const material_files = await listFolderFiles(path.join(dir, 'materials'));
       return { ...update, proposals, material_files };
@@ -509,21 +512,39 @@ export class ContextUpdateService {
     });
   }
 
-  /** Done without changing any context file. Keeps the record, deletes materials and drafts. */
+  /** Done without changing any context file. Keeps the record, deletes the drafts, and the materials unless they are kept. */
   async close(id: string): Promise<ContextUpdate> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review', 'approved'], 'close');
       const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
-      await this.cleanup(id);
+      await this.cleanup(id, update.keep_materials);
       await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals });
       return (await this.read(id)).update;
     });
   }
 
-  private async cleanup(id: string): Promise<void> {
+  /**
+   * Keeps the original material after the update is done, or releases it. A kept transcript costs disk
+   * space, not agent context: agents never read context-updates/ as task input. Released material of a
+   * done update is deleted at once; it cannot be kept again because it is gone.
+   */
+  async keepMaterials(id: string, keep: unknown): Promise<ContextUpdate> {
+    if (typeof keep !== 'boolean') throw httpError(400, 'Invalid keep: use true or false');
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      // While applying, the agent may be deleting the folder; the choice must be made before or after.
+      if (keep) this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved'], 'keep the materials');
+      else this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'release the materials');
+      await this.write(file, data, update.notes, { keep_materials: keep || undefined });
+      if (!keep && update.status === 'done') await this.cleanup(id, false);
+      return (await this.read(id)).update;
+    });
+  }
+
+  private async cleanup(id: string, keepMaterials: boolean): Promise<void> {
     const dir = this.updateDir(id);
-    await fsp.rm(path.join(dir, 'materials'), { recursive: true, force: true });
+    if (!keepMaterials) await fsp.rm(path.join(dir, 'materials'), { recursive: true, force: true });
     await fsp.rm(path.join(dir, 'proposals'), { recursive: true, force: true });
   }
 

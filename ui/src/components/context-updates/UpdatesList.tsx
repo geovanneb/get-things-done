@@ -7,14 +7,14 @@ import { HelpBox, StatusPill, sectionLabel } from './shared';
 const GROUPS: { title: string; hint: string; statuses: ContextUpdateStatus[] }[] = [
   { title: 'Waiting on you', hint: 'Run a command, or review proposals.', statuses: ['in_review', 'ready', 'approved'] },
   { title: 'Agent working', hint: 'These update by themselves.', statuses: ['analyzing', 'applying'] },
-  { title: 'History', hint: 'What each update changed. Materials were deleted when it finished.', statuses: ['done'] },
+  { title: 'History', hint: 'What each update changed. Materials were deleted when it finished, unless you kept them.', statuses: ['done'] },
 ];
 
 function summaryLine(u: ContextUpdate): string {
   const files = `${u.materials.length} file${u.materials.length === 1 ? '' : 's'}`;
   if (u.status === 'ready' || u.status === 'analyzing') return files;
   const accepted = u.proposals.filter((p) => p.decision === 'accepted').length;
-  if (u.status === 'done') return `${files} · ${accepted} of ${u.proposals.length} change${u.proposals.length === 1 ? '' : 's'} applied`;
+  if (u.status === 'done') return `${files}${u.keep_materials ? ' (kept)' : ''} · ${accepted} of ${u.proposals.length} change${u.proposals.length === 1 ? '' : 's'} applied`;
   return `${files} · ${u.proposals.length} proposal${u.proposals.length === 1 ? '' : 's'}`;
 }
 

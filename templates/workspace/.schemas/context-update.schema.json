@@ -43,9 +43,10 @@
     "summary": {"type": "string", "description": "What the material is and what changes, in two to four sentences."},
     "materials": {
       "type": "array",
-      "description": "Kept by the dashboard. Stays as the record after the files themselves are deleted.",
+      "description": "Kept by the dashboard. Stays as the record after the files themselves are deleted (or while keep_materials holds them).",
       "items": {"type": "object", "properties": {"name": {"type": "string"}, "size": {"type": "number"}, "type": {"type": "string"}}}
     },
+    "keep_materials": {"type": "boolean", "description": "Set by the executive in the dashboard, never by an agent. When true, the apply step and closing keep materials/; only the executive releases it."},
     "proposals": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/proposal"}},
     "skipped": {
       "type": "array",
