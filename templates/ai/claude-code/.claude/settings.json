@@ -2,26 +2,26 @@
   "permissions": {
     "allow": [
       "Read(**)",
-      "Write(tasks/**)",
-      "Write(context-updates/**)",
-      "Write(.situation-board/logs/**)",
+      "Edit(/tasks/**)",
+      "Edit(/context-updates/**)",
+      "Edit(/.situation-board/logs/**)",
       "Bash(git status)",
       "Bash(git log)",
       "Bash(git diff)",
       "WebSearch(*)"
     ],
     "ask": [
-      "Write(stakeholders/**)",
-      "Write(context/**)",
-      "Write(outputs/**)"
+      "Edit(/stakeholders/**)",
+      "Edit(/context/**)",
+      "Edit(/outputs/**)"
     ],
     "deny": [
       "Bash(git push*)",
       "Bash(git reset --hard*)",
       "Bash(rm -rf*)",
-      "Write(.claude/**)",
-      "Write(profile/**)",
-      "Write(.schemas/**)"
+      "Edit(/.claude/**)",
+      "Edit(/profile/**)",
+      "Edit(/.schemas/**)"
     ]
   }
 }
