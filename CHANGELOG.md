@@ -8,11 +8,13 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-28
+
 ### Added
 
 - **System cleanup, a built-in routine.** It sits at the top of the Routines page and
   runs on the same triggers and lock as your routines (dashboard, `gtd routines run`).
-  By default it runs every Monday at 09:00 and only suggests; it moves no file.
+  By default it runs every Monday at 09:00 and only suggests; it moves no file. (#116)
   - **Memory review:** scans context notes and stakeholders for likely duplicates,
     empty notes and notes not updated in 180 days, and opens a context update tagged
     `origin: system-cleanup`, `kind: memory-review`, shown with a **System cleanup**
@@ -29,29 +31,65 @@ minor versions may include breaking changes.
 - **Context update proposals can remove a file.** The dashboard moves the target (a
   context note with its folder) to the trash after approval; agents never delete. When
   removals are all you accepted, approving finishes the update straight away. A removal
-  is held back when another accepted change of the same update failed.
+  is held back when another accepted change of the same update failed. (#116)
+- **Prepare a meeting from a stakeholder's page.** A **Prepare meeting** button on a
+  stakeholder's page (and in the org chart profile dialog) opens the New task form
+  already filled in: a "Prepare: meeting with <name>" title, an objective to complete,
+  the person as stakeholder, a Meeting brief output and the `meeting-prep` agent.
+  Everything stays editable and nothing runs until you save. (#113)
+- **Keep a context update's original files.** A "Keep the original files after this
+  update finishes" option keeps the imported materials through apply, close and
+  cleanup until you release them. Drafts in `proposals/` are still deleted. Backed by
+  `PUT /api/context-updates/:id/keep-materials`. (#104)
+- **Encrypted Office files are flagged up front.** Word, Excel and PowerPoint files
+  protected by a sensitivity label or a password are detected on upload, in file
+  lists, in the execution package and as a validation warning, instead of failing
+  when an agent tries to read them. Nothing is decrypted; legacy `.doc/.xls/.ppt` and
+  PDFs are not checked. (#106)
+
+### Changed
+
+- Dependencies: qs 6.17 (#114).
+- For contributors: ESLint and Prettier with `npm run lint` in CI (#120), a reference
+  for the local HTTP API in `docs/api.md` (#119), unit tests for task status and
+  validation (#118). The README explains how Get Things Done differs from other AI
+  memory tools and links the demo video (#105, #115).
 
 ### Fixed
 
+- **The Claude Code write limits now apply.** The workspace settings used
+  `Write(path)` rules, which Claude Code never matches, so agents could write to
+  `.claude/`, `profile/` and `.schemas/` and edit stakeholders, context and outputs
+  without asking. The rules are now `Edit(/folder/**)`. Run `gtd upgrade` to get
+  them; an edited settings file gets the new version as `.new`. (#112)
+- **A task whose file cannot be read is reported.** A `task.md` with broken
+  frontmatter (for example a duplicated YAML key) was silently hidden from the board.
+  Workspace validation now lists it as an error with the parser's message. (#103)
+- `gtd init` and `gtd upgrade` no longer replace the `{{date}}` routine placeholder
+  in scaffolded instructions with the current date. Workspaces already upgraded to
+  0.5.0 are repaired by the next `gtd upgrade`. (#101)
+- `gtd upgrade` no longer reports a JSON file as edited, or writes a `.new` copy, when
+  it only differs in key order or layout. (#102)
+- `npm run build` works on Windows without WSL. (#117)
 - Cleanup rejects symlinks in parent directories and trash destinations, rechecks
   eligibility before removal, and preserves manually named trash entries. Unreadable
-  settings and corrupt ID reservations stop destructive work.
-- Context removals wait until every accepted merge/create is confirmed as applied
-  or merged.
-  Rejected kaizen retention starts at rejection; status changes preserve quoted
-  titles and extra frontmatter through the shared Markdown writer.
+  settings and corrupt ID reservations stop destructive work. (#121)
+- Context removals wait until every accepted merge or create is confirmed as applied
+  or merged. (#121)
+- Rejected kaizen retention starts at rejection, and status changes preserve quoted
+  titles and extra frontmatter through the shared Markdown writer. (#121)
 - Task dialogs trap keyboard focus. Stakeholder tabs survive browser Back, review
   status labels are consistent, and narrow windows keep navigation and content usable.
+  (#121)
 - Dashboard routes load on demand, and large memory comparisons yield to HTTP/SSE
-  processing instead of blocking the server for the whole comparison.
-
+  processing instead of blocking the server for the whole comparison. (#121)
 - The workspace `.gitignore` now excludes `.situation-board/trash/`, as the README
-  already said. `gtd upgrade` updates it unless you edited it.
+  already said. `gtd upgrade` updates it unless you edited it. (#116)
 - Ids of tasks and context updates removed by the cleanup stay reserved
   (`.situation-board/reserved-ids.json`), so a new task never reuses an id that old
-  links, routine receipts or the run history still point at.
+  links, routine receipts or the run history still point at. (#116)
 - The file watcher ignores the trash folder, so moving many files there does not
-  flood the dashboard with refreshes.
+  flood the dashboard with refreshes. (#116)
 
 ## [0.5.0] - 2026-10-27
 
@@ -366,7 +404,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/geovanneb/get-things-done/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/geovanneb/get-things-done/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/geovanneb/get-things-done/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/geovanneb/get-things-done/compare/v0.2.0...v0.3.0
