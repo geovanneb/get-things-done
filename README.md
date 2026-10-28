@@ -9,9 +9,13 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](https://nodejs.org)
 
+[![Get Things Done demo](https://img.youtube.com/vi/v0GaoY16CU0/maxresdefault.jpg)](https://youtu.be/v0GaoY16CU0)
+
+<sub>Watch the 40-second demo on YouTube.</sub>
+
 <img src="docs/screenshots/board.png" alt="The Get Things Done kanban board with tasks in Backlog, In Progress, Needs Review and Done" width="900">
 
-<sub>All names, companies and numbers in these screenshots are fictional.</sub>
+<sub>All names, companies and numbers in this video and these screenshots are fictional.</sub>
 
 </div>
 
