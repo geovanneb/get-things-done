@@ -74,6 +74,29 @@ export class TaskService {
     return this.readTaskFolders(this.getArchiveDir());
   }
 
+  /**
+   * Active task files that cannot be parsed (e.g. a duplicated YAML key). The board skips them,
+   * so validation reports them instead of letting the task disappear without a trace.
+   */
+  async listUnreadableTaskFiles(): Promise<{ path: string; error: string }[]> {
+    const dir = this.getActiveDir();
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    const unreadable: { path: string; error: string }[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const taskFile = path.join(dir, entry.name, 'task.md');
+      if (!(await fileService.exists(taskFile))) continue;
+      try {
+        await fileService.readMarkdown<Task>(taskFile);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        unreadable.push({ path: taskFile, error: (message.split('\n')[0] ?? message).replace(/:\s*$/, '') });
+      }
+    }
+    return unreadable;
+  }
+
   private async readTaskFolders(dir: string, filters?: TaskFilters): Promise<Task[]> {
     const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
     const tasks: Task[] = [];
