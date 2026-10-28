@@ -55,6 +55,67 @@ gtd start
 
 ---
 
+## Why it is different
+
+<div align="center">
+<img src="docs/images/why-get-things-done.png" alt="Typical AI memory keeps facts about you in a vendor's cloud, leaves your stakeholders out and gives a different shape every run. Get Things Done keeps your profile, your stakeholders' expectations, your context and your output templates in a folder on your machine, works with Claude Code, Codex, Copilot or a local model, and produces the same structure every run for you to review." width="900">
+</div>
+
+AI memory is everywhere now. Chat apps remember your conversations. Memory layers
+remember facts about your users. Note tools plugged in over MCP hand your notes to an
+agent. Every one of them answers the same question: **who are you?**
+
+That is only half of the job. Your work is not judged by you. It is judged by a CEO
+who hates surprises, a CFO who wants the number in the first line, and a board that
+reads for risk. An assistant that only knows you writes a good memo for you, and the
+wrong memo for them.
+
+Get Things Done is built around the other half.
+
+**It knows who your work is for.** Every stakeholder has a file: their role, their
+influence and what actually matters to them. Org charts show who reports to whom.
+Before an agent writes anything, it reads every person on the task and pitches the
+result at the most senior reader. No mainstream memory tool models this, and it is
+the part that decides whether your work lands.
+
+**It knows what "finished" looks like.** Ask an AI the same thing twice and you get
+two different shapes. That is fine for brainstorming and painful for real work.
+Output templates fix the format, the sections and the style of the things you deliver
+again and again. Your weekly update looks like your weekly update, every week, no
+matter which agent wrote it.
+
+**Your memory stays yours.** Everything is plain Markdown in a folder on your disk:
+not in a vendor's account, not behind an API, not quietly rewritten in the background.
+You choose the agent and the model: Claude Code, Codex, Copilot, or a local model so
+nothing leaves your machine at all. Switch tomorrow and you lose nothing.
+
+**You stay in charge.** The agent never marks its own work done. It logs what it did
+and what it assumed, and it leaves a clear placeholder instead of inventing a number.
+When a meeting changes the facts, the update arrives as a diff you accept or reject,
+never as a silent edit.
+
+| | Chat app memory | Memory layers | Notes over MCP | **Get Things Done** |
+|---|:---:|:---:|:---:|:---:|
+| Remembers you and your context | ✅ | ✅ | ✅ | ✅ |
+| Knows what each stakeholder expects | ❌ | ❌ | ❌ | ✅ |
+| Defines what a finished deliverable looks like | ❌ | ❌ | ❌ | ✅ |
+| Memory is readable files on your disk | ❌ | ❌ | ✅ | ✅ |
+| Works with any agent, including local models | ❌ | Via SDK | Via MCP | ✅ No plugin |
+| You approve every change to memory | ❌ | ❌ | ❌ | ✅ |
+
+<sub>Chat app memory: ChatGPT, Claude.ai. Memory layers: Mem0, Zep, Letta.
+Notes over MCP: Basic Memory, Obsidian MCP servers. Based on their public
+documentation as of October 2026; corrections are welcome.</sub>
+
+> Other tools give your AI a memory. Get Things Done gives it a job description, a
+> list of people to win over, and a definition of done.
+
+When you use a cloud model, the agent sends what a task needs to that provider while
+it runs, as any AI tool does. Your workspace itself never moves: no sync, no account,
+no telemetry.
+
+---
+
 ## Why files, not another app
 
 Every SaaS task tool is a walled garden with an API you have to beg for. This is a
