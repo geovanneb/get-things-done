@@ -568,6 +568,12 @@ input, textarea, select {
   max-height: 70vh;
   overflow-y: auto;
 }
+/* Stack context navigation when a second sidebar would leave no room for the content. */
+@media (max-width: 600px) {
+  .context-layout { flex-direction: column; }
+  .context-navigation { width: 100% !important; height: auto !important; max-height: 180px; }
+}
+
 @media (max-width: 900px) {
   .org-layout { grid-template-columns: minmax(0, 1fr); }
   .org-layout__body { grid-template-columns: minmax(0, 1fr); }

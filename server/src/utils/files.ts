@@ -22,6 +22,28 @@ export async function fileInside(dir: string, relative: string): Promise<string>
   return realFull!;
 }
 
+/**
+ * Destructive operations must use the lexical entry, never a symlink's resolved target.
+ * Reject links in every component below the workspace (whose own path may be an alias).
+ * Missing tails are allowed only when preparing a destination directory.
+ */
+export async function workspaceEntry(workspace: string, target: string, allowMissing = false): Promise<string> {
+  const base = path.resolve(workspace);
+  const full = path.resolve(target);
+  if (!full.startsWith(base + path.sep)) throw new Error('Invalid path traversal');
+  let current = base;
+  for (const part of path.relative(base, full).split(path.sep)) {
+    current = path.join(current, part);
+    try {
+      if ((await fsp.lstat(current)).isSymbolicLink()) throw new Error('Invalid path traversal: symbolic link');
+    } catch (err) {
+      if (allowMissing && (err as NodeJS.ErrnoException).code === 'ENOENT') return full;
+      throw err;
+    }
+  }
+  return full;
+}
+
 /** Sends a file to open in the browser, or as a download when `download` is true. */
 export function sendFile(res: Response, fullPath: string, download: boolean): void {
   // Attachments are untrusted documents, even when opened from the dashboard.

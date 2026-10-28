@@ -16,6 +16,7 @@
     "proposed_fix": {"type": "string", "minLength": 1, "description": "The concrete change to a harness file that prevents recurrence."},
     "files_affected": {"type": "array", "items": {"type": "string"}, "description": "Workspace-relative paths to change."},
     "created_at": {"type": "string", "format": "date-time"},
+    "rejected_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}], "description": "When the dashboard rejected the proposal; retention starts here."},
     "applied_at": {"anyOf": [{"type": "string", "format": "date-time"}, {"type": "null"}]}
   },
   "additionalProperties": true

@@ -13,7 +13,7 @@ is built the way it is, what it could collide with, and what risk remains.
 | Finished tasks | Off (30 days, archive) | Archive, trash or delete done tasks still on the board. |
 | Archived tasks | Off (365 days, trash) | Trash or delete. |
 | Finished context updates | Off (90 days, trash) | Only `done`; kept materials and pending removals are skipped. |
-| Closed kaizen | Off (90 days, trash) | Only `applied` or `rejected`. |
+| Closed kaizen | Off (90 days, trash) | Only `applied` with `applied_at`, or `rejected` with `rejected_at`. Legacy records without a closing date stay untouched. |
 | Trash | Off (30 days) | Permanently deletes entries the app named, by the time in the name. |
 
 ## UX decisions and where they come from
@@ -49,7 +49,7 @@ is built the way it is, what it could collide with, and what risk remains.
 | Insights | Insights counts archived tasks; removing them changes history. | Rules are opt-in, the archived-task default is 365 days, and the UI says Insights stop counting removed tasks. |
 | Mentions | Links to a removed note or task break. | The analyze command must name inbound links in a removal's rationale; the UI warns that links stop working. |
 | Agent permissions | Agents may not delete (`rm -rf` denied, Edit-only writes). | `remove` proposals are carried out by the dashboard, never by the apply command. |
-| Merges | Update A (merge) fails, remove B succeeds: B's facts are lost. | Removals are held back when another accepted change of the same update failed. |
+| Merges | Update A (merge) fails, remove B succeeds: B's facts are lost. | Removals are held back unless every other accepted create/update was confirmed as applied or merged. |
 | Context update flow | A removal-only approval would wait for an apply command with nothing to do. | Approving removals only finishes the update directly. |
 | Concurrency | CLI and server could both run cleanup; settings could change mid-run. | Same lock as routines; settings writes take the lock too. Items are re-checked just before acting (a task reopened since the plan is skipped). |
 | Watcher | Moving hundreds of files into the trash would flood SSE refreshes. | The watcher ignores `.situation-board/trash/`. |

@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
@@ -353,16 +354,7 @@ export default function TaskDetailView() {
 
   const close = useCallback(() => navigate('/board'), [navigate]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        const tag = (document.activeElement as HTMLElement)?.tagName;
-        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') close();
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [close]);
+  const panelRef = useDialogFocus(true, close, true);
 
   const handleFieldChange = useCallback((field: string, value: unknown) => {
     editingRef.current = true;
@@ -432,9 +424,9 @@ export default function TaskDetailView() {
   };
 
   if (loading) return ReactDOM.createPortal(
-    <div role="dialog" aria-modal="true" style={overlayStyle}>
+    <div role="dialog" aria-modal="true" aria-label="Task details" style={overlayStyle}>
       <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }} />
-      <div style={panelStyle}>
+      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
         <LoadingSpinner text="Loading task..." />
       </div>
     </div>,
@@ -442,9 +434,9 @@ export default function TaskDetailView() {
   );
 
   if (!localTask) return ReactDOM.createPortal(
-    <div role="dialog" aria-modal="true" style={overlayStyle}>
+    <div role="dialog" aria-modal="true" aria-label="Task details" style={overlayStyle}>
       <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }} />
-      <div style={panelStyle}>
+      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
         <div style={{ padding: 24, color: 'var(--color-text-muted)' }}>Task not found.</div>
       </div>
     </div>,
@@ -452,7 +444,7 @@ export default function TaskDetailView() {
   );
 
   return ReactDOM.createPortal(
-    <div role="dialog" aria-modal="true" style={overlayStyle}>
+    <div role="dialog" aria-modal="true" aria-label="Task details" style={overlayStyle}>
       {/* Backdrop */}
       <div
         aria-hidden="true"
@@ -461,7 +453,7 @@ export default function TaskDetailView() {
       />
 
       {/* Panel */}
-      <div style={panelStyle}>
+      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
         {/* Header */}
         <div style={{
           padding: '12px 20px',

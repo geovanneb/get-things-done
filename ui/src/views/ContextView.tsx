@@ -282,7 +282,7 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, updatesWaitin
   const items: Category[] = ['All', ...CATEGORIES];
 
   return (
-    <div style={{ width: 220, flexShrink: 0, background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+    <div className="context-navigation" style={{ width: 220, flexShrink: 0, background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '16px 16px 10px', fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
         Context
       </div>
@@ -419,7 +419,7 @@ export default function ContextView() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+    <div className="context-layout" style={{ display: 'flex', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       <Sidebar notes={notes} activeCategory={showUpdates ? null : activeCategory}
         onSelect={(cat) => { setActiveCategory(cat); setSearch(''); if (showUpdates) navigate('/context'); }}
         updatesActive={showUpdates} updatesWaiting={updatesWaiting} onSelectUpdates={() => navigate('/context/updates')} />

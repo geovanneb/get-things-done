@@ -553,7 +553,7 @@ GET /api/mentions/resolve?href=/stakeholders/people/stk-0001.md
 |---|---|---|
 | `GET` | `/api/kaizen` | List improvement proposals |
 | `GET` | `/api/kaizen/:id` | Get one proposal. Returns `404` with `{ "error": "Not found" }` if it does not exist |
-| `PATCH` | `/api/kaizen/:id` | Set `status` (`proposed`, `applied` or `rejected`) and `applied_at` |
+| `PATCH` | `/api/kaizen/:id` | Set `status` (`proposed`, `applied` or `rejected`) and `applied_at`; invalid values return 400. A transition to `rejected` stamps `rejected_at` for retention |
 
 ```text
 GET /api/kaizen

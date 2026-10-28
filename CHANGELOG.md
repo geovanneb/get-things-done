@@ -33,6 +33,18 @@ minor versions may include breaking changes.
 
 ### Fixed
 
+- Cleanup rejects symlinks in parent directories and trash destinations, rechecks
+  eligibility before removal, and preserves manually named trash entries. Unreadable
+  settings and corrupt ID reservations stop destructive work.
+- Context removals wait until every accepted merge/create is confirmed as applied
+  or merged.
+  Rejected kaizen retention starts at rejection; status changes preserve quoted
+  titles and extra frontmatter through the shared Markdown writer.
+- Task dialogs trap keyboard focus. Stakeholder tabs survive browser Back, review
+  status labels are consistent, and narrow windows keep navigation and content usable.
+- Dashboard routes load on demand, and large memory comparisons yield to HTTP/SSE
+  processing instead of blocking the server for the whole comparison.
+
 - The workspace `.gitignore` now excludes `.situation-board/trash/`, as the README
   already said. `gtd upgrade` updates it unless you edited it.
 - Ids of tasks and context updates removed by the cleanup stay reserved

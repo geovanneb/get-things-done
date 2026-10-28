@@ -4,7 +4,7 @@ import { WorkspaceService } from './workspace';
 import { reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
-import { fileInside, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
+import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
 import { moveToTrash } from './trash';
 
 const workspaceService = new WorkspaceService();
@@ -315,18 +315,19 @@ export class ContextUpdateService {
     if (update.status !== 'done') return;
     const pending = update.proposals.filter((p) => p.action === 'remove' && p.decision === 'accepted' && !p.outcome);
     if (pending.length === 0) return;
-    const otherFailed = update.proposals.some((p) => p.action !== 'remove' && p.decision === 'accepted' && p.outcome === 'failed');
+    const otherFailed = update.proposals.some((p) => p.action !== 'remove' && p.decision === 'accepted' && p.outcome !== 'applied' && p.outcome !== 'merged');
     const ws = workspaceService.getWorkspacePath();
     const results = new Map<string, { outcome: string; outcome_note: string }>();
     for (const p of pending) {
       if (otherFailed) {
-        results.set(p.id, { outcome: 'skipped', outcome_note: 'Kept: another accepted change failed, so removing this file could lose information.' });
+        results.set(p.id, { outcome: 'skipped', outcome_note: 'Kept: another accepted change was not confirmed as applied, so removing this file could lose information.' });
         continue;
       }
       const target = proposalTarget(p.target);
       if (!target) { results.set(p.id, { outcome: 'failed', outcome_note: 'The target is not a context note or stakeholder file.' }); continue; }
       try {
-        const full = await fileInside(ws, target);
+        const full = await workspaceEntry(ws, path.join(ws, target));
+        await fileInside(ws, target);
         const parts = target.split('/');
         // context/<category>/<slug>/note.md: the note is its folder.
         const isNoteFolder = parts[0] === 'context' && parts.length === 4 && parts[3] === 'note.md';

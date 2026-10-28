@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import Button from '@/components/common/Button';
@@ -105,17 +106,7 @@ export default function NewTaskModal({
     }
   }, [isOpen, defaultStatus, draft]);
 
-  React.useEffect(() => {
-    if (!isOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        const tag = (document.activeElement as HTMLElement)?.tagName;
-        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') onClose();
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [isOpen, onClose]);
+  const panelRef = useDialogFocus(isOpen, saving ? () => {} : onClose, true);
 
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -231,7 +222,7 @@ export default function NewTaskModal({
         style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }}
       />
 
-      <div style={panelStyle}>
+      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
         {/* Header */}
         <div style={{
           padding: '12px 20px',

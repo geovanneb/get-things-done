@@ -1,4 +1,5 @@
 import { topLevelName } from '../utils/files';
+import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
@@ -16,6 +17,7 @@ export interface KaizenProposal {
   files_affected: string[];
   created_at: string;
   applied_at: string | null;
+  rejected_at: string | null;
   body: string;
 }
 
@@ -92,31 +94,6 @@ function parseFrontmatter(raw: string, source?: string): { meta: Record<string, 
   return { meta, body: match[2].trim() };
 }
 
-function serializeFrontmatter(proposal: KaizenProposal, body: string): string {
-  const filesYaml = proposal.files_affected.length
-    ? `files_affected:\n${proposal.files_affected.map((f) => `  - ${f}`).join('\n')}`
-    : 'files_affected: []';
-
-  return `---
-schema_version: '1.0'
-id: ${proposal.id}
-type: kaizen
-title: ${proposal.title}
-status: ${proposal.status}
-area: ${proposal.area}
-root_cause: |
-${proposal.root_cause.split('\n').map((l) => `  ${l}`).join('\n')}
-proposed_fix: |
-${proposal.proposed_fix.split('\n').map((l) => `  ${l}`).join('\n')}
-${filesYaml}
-created_at: '${proposal.created_at}'
-applied_at: ${proposal.applied_at ? `'${proposal.applied_at}'` : 'null'}
----
-
-${body}
-`;
-}
-
 export class KaizenService {
   private kaizenDir(): string {
     return path.join(workspaceService.getWorkspacePath(), 'kaizen');
@@ -155,10 +132,19 @@ export class KaizenService {
     const proposal = await this.readKaizenFile(file);
     if (!proposal) return null;
 
-    const updated = { ...proposal, ...patch };
+    if (patch.status !== undefined && !['proposed', 'applied', 'rejected'].includes(patch.status)) {
+      throw Object.assign(new Error('Invalid kaizen status'), { statusCode: 400 });
+    }
+    if (patch.applied_at !== undefined && patch.applied_at !== null
+      && (typeof patch.applied_at !== 'string' || !Number.isFinite(Date.parse(patch.applied_at)))) {
+      throw Object.assign(new Error('Invalid applied_at'), { statusCode: 400 });
+    }
+    const updated = { ...proposal, ...patch,
+      ...(patch.status === 'rejected' && proposal.status !== 'rejected' ? { rejected_at: new Date().toISOString() } : {}),
+    };
     const raw = await fsp.readFile(file, 'utf-8');
-    const { body } = parseFrontmatter(raw, path.basename(file));
-    await atomicWrite(file, serializeFrontmatter(updated, body));
+    const { data, content } = parseMarkdown(raw);
+    await atomicWrite(file, stringifyMarkdown(content, { ...data, ...patch, rejected_at: updated.rejected_at }));
     return updated;
   }
 
@@ -176,6 +162,7 @@ export class KaizenService {
         files_affected: Array.isArray(meta['files_affected']) ? (meta['files_affected'] as string[]) : [],
         created_at: String(meta['created_at'] ?? ''),
         applied_at: meta['applied_at'] ? String(meta['applied_at']) : null,
+        rejected_at: meta['rejected_at'] ? String(meta['rejected_at']) : null,
         body,
       };
     } catch {

@@ -5,6 +5,7 @@ import { TaskService } from './taskService';
 import { ContextUpdateService } from './contextUpdateService';
 import { KaizenService } from './kaizenService';
 import { parseMarkdown } from '../utils/markdown';
+import { workspaceEntry } from '../utils/files';
 import { atomicWrite } from '../utils/atomicWrite';
 import { Schedule, ScheduleError, describeSchedule, localDate, nextOccurrences, occurrencesBetween, parseSchedule } from './routineSchedule';
 import { isDone } from './taskStatus';
@@ -248,6 +249,7 @@ function shingles(text: string): Set<string> {
 }
 
 function jaccard(a: Set<string>, b: Set<string>): number {
+  if (Math.min(a.size, b.size) / Math.max(a.size, b.size) < SIMILARITY) return 0;
   let shared = 0;
   const [small, large] = a.size < b.size ? [a, b] : [b, a];
   for (const s of small) if (large.has(s)) shared++;
@@ -263,7 +265,10 @@ export class SystemCleanupService {
 
   async readSettings(): Promise<CleanupSettings> {
     let raw: string;
-    try { raw = await fsp.readFile(path.join(this.dir(), 'system-cleanup.json'), 'utf-8'); } catch { return defaultSettings(); }
+    try { raw = await fsp.readFile(path.join(this.dir(), 'system-cleanup.json'), 'utf-8'); } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return defaultSettings();
+      throw httpError(400, `The system cleanup settings cannot be read: ${(err as Error).message}`);
+    }
     try {
       return parseSettings(JSON.parse(raw));
     } catch (err) {
@@ -449,7 +454,7 @@ export class SystemCleanupService {
     if (settings.rules.kaizen.enabled) {
       for (const { filename, proposal } of await kaizenService.listKaizenFiles().catch(() => [])) {
         if (proposal.status !== 'applied' && proposal.status !== 'rejected') continue;
-        add('kaizen', proposal.id || filename, proposal.title, path.join(ws, 'kaizen', filename), ageDays(when(proposal.applied_at) ?? when(proposal.created_at), now));
+        add('kaizen', proposal.id || filename, proposal.title, path.join(ws, 'kaizen', filename), ageDays(when(proposal.status === 'rejected' ? proposal.rejected_at : proposal.applied_at), now));
       }
     }
     if (settings.rules.trash.enabled) {
@@ -472,29 +477,55 @@ export class SystemCleanupService {
   private async execute(item: CleanupItem, settings: CleanupSettings, now: Date): Promise<boolean> {
     const ws = workspaceService.getWorkspacePath();
     const full = path.join(ws, ...item.path.split('/'));
-    if (!full.startsWith(ws + path.sep)) throw new Error('outside the workspace');
+    await workspaceEntry(ws, full, true);
     const st = await fsp.lstat(full).catch(() => null);
     if (!st) return false;
     // Never follow a link out of the workspace, and never remove what it points at.
     if (st.isSymbolicLink()) throw new Error('is a symbolic link; left alone');
 
+    const oldEnough = (date: Date | null) => {
+      const age = ageDays(date, now);
+      return age !== null && age >= settings.rules[item.type].older_than_days;
+    };
     if (item.type === 'completed_tasks' || item.type === 'archived_tasks') {
       if (!st.isDirectory()) return false;
+      await workspaceEntry(ws, path.join(full, 'task.md'), true);
       const raw = await fsp.readFile(path.join(full, 'task.md'), 'utf-8').catch(() => null);
       if (raw === null) return false;
       const data = obj(parseMarkdown(raw).data);
       if (item.type === 'completed_tasks' && !isDone(String(data['status'] ?? ''))) return false;
       if (settings.keep_tag && Array.isArray(data['tags']) && data['tags'].includes(settings.keep_tag)) return false;
+      const date = item.type === 'completed_tasks'
+        ? when(data['done_date']) ?? when(data['updated_at'])
+        : when(data['updated_at']) ?? when(data['done_date']);
+      if (!oldEnough(date)) return false;
       if (item.action === 'archive') {
+        await workspaceEntry(ws, path.join(ws, 'tasks', 'archive'), true);
         await taskService.archiveTask(item.id);
         return true;
       }
     }
     if (item.type === 'context_updates') {
       if (!(await isRealDir(full))) return false;
-      const u = await contextUpdateService.list().then((all) => all.find((x) => x.id === item.id)).catch(() => undefined);
-      if (!u || u.status !== 'done' || u.keep_materials) return false;
+      const file = await workspaceEntry(ws, path.join(full, 'update.md'), true);
+      const raw = await fsp.readFile(file, 'utf-8').catch(() => null);
+      if (raw === null) return false;
+      const u = obj(parseMarkdown(raw).data);
+      if (u['status'] !== 'done' || u['keep_materials'] === true) return false;
+      if (!oldEnough(when(u['applied_at']) ?? when(u['updated_at']))) return false;
+      if (Array.isArray(u['proposals']) && u['proposals'].some((entry) => {
+        const p = obj(entry);
+        return p['action'] === 'remove' && p['decision'] === 'accepted' && !p['outcome'];
+      })) return false;
     }
+
+    if (item.type === 'kaizen') {
+      if (!st.isFile()) return false;
+      const data = obj(parseMarkdown(await fsp.readFile(full, 'utf-8')).data);
+      if (data['status'] !== 'applied' && data['status'] !== 'rejected') return false;
+      if (!oldEnough(when(data['status'] === 'rejected' ? data['rejected_at'] : data['applied_at']))) return false;
+    }
+    if (item.type === 'trash' && !oldEnough(trashedAt(path.basename(full)))) return false;
 
     // The id stays taken, so a new task or update never inherits links that pointed at this one.
     if (item.type === 'completed_tasks' || item.type === 'archived_tasks' || item.type === 'context_updates') await reserveIds([item.id]);
@@ -573,8 +604,15 @@ export class SystemCleanupService {
     // Mostly the same text under different titles.
     const compared = notes.slice(0, MAX_NOTES_COMPARED).map((n) => ({ ...n, sh: shingles(n.text) })).filter((n) => n.sh.size >= 20);
     const reported = new Set(scan.duplicates.flatMap((d) => d.paths.length === 2 ? [d.paths.slice().sort().join('|')] : []));
+    let yieldAt = Date.now() + 8;
     for (let i = 0; i < compared.length; i++) {
       for (let j = i + 1; j < compared.length; j++) {
+        // The bounded pairwise scan can still take seconds. Let HTTP, SSE and lock
+        // heartbeats run while reviewing a large library.
+        if (Date.now() >= yieldAt) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          yieldAt = Date.now() + 8;
+        }
         const key = [compared[i]!.path, compared[j]!.path].sort().join('|');
         if (reported.has(key)) continue;
         const score = jaccard(compared[i]!.sh, compared[j]!.sh);
