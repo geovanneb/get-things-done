@@ -253,7 +253,7 @@ export class InsightsService {
 
   /** Active plus archived tasks, de-duplicated by id. */
   private async loadTasks(): Promise<RawTask[]> {
-    let tasks: Task[] = [];
+    let tasks: Task[];
     try {
       tasks = await taskService.listTasks();
       // Archived tasks live in their own folder, so a status filter on the
@@ -467,7 +467,7 @@ export class InsightsService {
    */
   private kaizenBars(workspacePath: string, since: Date | null): InsightsBar[] {
     const dir = path.join(workspacePath, 'kaizen');
-    let files: string[] = [];
+    let files: string[];
     try {
       files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
     } catch {

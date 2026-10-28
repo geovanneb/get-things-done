@@ -212,7 +212,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
 
 /** Sanitizes a name the way saveAttachment does, then adds -2, -3... so a second "notes.txt" never replaces the first. */
 async function uniqueName(dir: string, originalName: string): Promise<string> {
-  const safe = path.basename(originalName).replace(/[^\w.\-]/g, '_') || 'file';
+  const safe = path.basename(originalName).replace(/[^\w.-]/g, '_') || 'file';
   const ext = path.extname(safe);
   const stem = safe.slice(0, safe.length - ext.length) || 'file';
   for (let n = 1; n < 1000; n++) {

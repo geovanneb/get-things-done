@@ -48,7 +48,7 @@ function parseFrontmatter(raw: string, source?: string): { meta: Record<string, 
       const block: string[] = [];
       i++;
       while (i < lines.length && (lines[i].startsWith('  ') || lines[i] === '')) {
-        block.push(lines[i].replace(/^  /, ''));
+        block.push(lines[i].replace(/^ {2}/, ''));
         i++;
       }
       meta[key] = block.join('\n').trim();
@@ -81,8 +81,8 @@ function parseFrontmatter(raw: string, source?: string): { meta: Record<string, 
   for (const line of listLines) {
     const listHeader = line.match(/^(\w+):\s*$/);
     if (listHeader) { inList = true; listKey = listHeader[1]; listMeta[listKey] = []; continue; }
-    if (inList && line.match(/^  - /)) {
-      (listMeta[listKey] as string[]).push(line.replace(/^  - /, '').trim());
+    if (inList && line.match(/^ {2}- /)) {
+      (listMeta[listKey] as string[]).push(line.replace(/^ {2}- /, '').trim());
     } else if (inList && !line.startsWith('  ')) {
       inList = false;
     }
@@ -129,7 +129,7 @@ export class KaizenService {
   /** Every readable proposal with its file name, which the frontmatter id does not always match. */
   async listKaizenFiles(): Promise<{ filename: string; proposal: KaizenProposal }[]> {
     const dir = this.kaizenDir();
-    let entries: string[] = [];
+    let entries: string[];
     try {
       const dirEntries = await fsp.readdir(dir);
       entries = dirEntries.filter((f) => f.endsWith('.md')).sort().reverse();

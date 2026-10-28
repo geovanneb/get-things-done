@@ -1,0 +1,11 @@
+# Generated or vendored
+node_modules/
+dist/
+coverage/
+package-lock.json
+
+# Files scaffolded into users' workspaces: their exact text is part of the product.
+templates/
+
+# Prose is written by hand.
+*.md

@@ -125,6 +125,7 @@ async function archiveFiles(dir: string): Promise<string[]> {
         await walk(path.join(current, entry.name), rel, depth + 1);
       } else if (entry.isFile()) {
         // A ZIP entry name must mean the same path on every system: no backslashes, colons or control characters.
+        // eslint-disable-next-line no-control-regex -- matching control characters is the point here
         if (/[\\:\x00-\x1f]/.test(entry.name)) {
           throw new Error(`Invalid: "${rel}" cannot be put in a ZIP; rename it in the workspace folder`);
         }
@@ -163,7 +164,7 @@ export async function zipFolder(dir: string, ownMarkdown: string): Promise<{ nam
 
 /** Save attachments without following an existing file symlink or replacing entity metadata. */
 export async function saveAttachment(dir: string, originalName: string, buffer: Buffer, reserved: string): Promise<FolderFile> {
-  const name = topLevelName(path.basename(originalName).replace(/[^\w.\-]/g, '_'));
+  const name = topLevelName(path.basename(originalName).replace(/[^\w.-]/g, '_'));
   if (name.startsWith('.') || name.toLowerCase() === reserved.toLowerCase()) {
     throw new Error('Invalid attachment name: reserved file');
   }

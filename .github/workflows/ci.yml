@@ -35,6 +35,10 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
+      - name: Lint
+        # Same result on every Node version, so it runs once.
+        if: matrix.node == '22'
+        run: npm run lint
       - run: npm run build
       - run: npm test
       - name: Verify the tarball contents

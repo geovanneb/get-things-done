@@ -39,10 +39,10 @@ function loadService(): InstanceType<RoutineServiceModule['RoutineService']> {
   const modulePath = getBundledRoutineServicePath();
   let mod: RoutineServiceModule;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     mod = require(modulePath) as RoutineServiceModule;
   } catch (err) {
-    throw new Error(`Could not load the routine engine from ${modulePath}. The installation may be incomplete.\n${(err as Error).message}`);
+    throw new Error(`Could not load the routine engine from ${modulePath}. The installation may be incomplete.\n${(err as Error).message}`, { cause: err });
   }
   return new mod.RoutineService();
 }
