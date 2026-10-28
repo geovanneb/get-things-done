@@ -289,6 +289,11 @@ organization. Build them in **Stakeholders → Org charts** by dragging people o
 manager. Agents read the charts for every stakeholder on a task, so a deliverable is
 pitched at the most senior person involved and names the right escalation path.
 
+**Prepare meeting** on a person's page opens the New task form already filled in: the
+person as stakeholder, a **Meeting brief** output and the `meeting-prep` agent (when the
+workspace has them). Add the other attendees, the meeting date and your goal, then save.
+Nothing runs until you start the task.
+
 ### 3. Context — `context/`
 
 Your background knowledge library, filed by category: `company/`, `organization/`,
@@ -305,8 +310,8 @@ See [Keeping context up to date](#keeping-context-up-to-date).
 ### 4. Output templates — `outputs/templates/`
 
 What "finished" looks like. Each template declares a format, required sections and a
-style guide. Three ship by default: **Plain text message**, **Executive document**,
-**Executive deck**. Create your own for the artifacts you produce over and over —
+style guide. Four ship by default: **Plain text message**, **Executive document**,
+**Executive deck** and **Meeting brief**. Create your own for the artifacts you produce over and over —
 your weekly update, your steering committee pack, your board memo.
 
 ### 5. Tasks — `tasks/active/`
@@ -648,7 +653,7 @@ This is worth understanding, because it is what makes upgrades safe.
 ```
 CLAUDE.md    README.md    .gitignore    .schemas/
 .claude/     (agents, commands, skills, settings)
-outputs/templates/plain-text, executive-document, executive-deck
+outputs/templates/plain-text, executive-document, executive-deck, meeting-brief
 ```
 
 **Yours** — created through the dashboard or by hand, never touched:

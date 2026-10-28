@@ -178,6 +178,21 @@ try {
     objectiveSearch.results.some((task) => task.id === createdTask.id)
     && objectiveFilter.some((task) => task.id === createdTask.id));
 
+  // "Prepare meeting" relies on the shipped meeting brief template and meeting-prep agent, and a task that keeps them.
+  {
+    const brief = (await (await fetch(`${base}/api/outputs/templates`)).json()).find((t) => t.slug === 'meeting-brief');
+    const prepAgent = (await (await fetch(`${base}/api/agents`)).json()).some((a) => a.name === 'meeting-prep');
+    const prep = await (await fetch(`${base}/api/tasks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Prepare: meeting with Priya Natarajan', preferred_agent: 'meeting-prep',
+        deliverables: [{ id: 'DEL-01', format: brief?.format, template_ref: brief?.id, status: 'pending' }] }),
+    })).json();
+    const back = await (await fetch(`${base}/api/tasks/${prep.id}`)).json();
+    check('a meeting prep task keeps the meeting brief template and the meeting-prep agent',
+      brief?.format === 'md' && prepAgent && back.preferred_agent === 'meeting-prep' && back.deliverables?.[0]?.template_ref === 'OUT-meeting-brief',
+      JSON.stringify({ brief: brief?.id, prepAgent, agent: back.preferred_agent, deliverables: back.deliverables }));
+  }
+
   // Scheduled and manual creates can arrive together; neither may overwrite the other.
   {
     const titles = Array.from({ length: 8 }, (_, i) => `Concurrent smoke task ${i}`);

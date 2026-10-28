@@ -59,6 +59,15 @@ export interface Stakeholder {
   task_count?: number;
 }
 
+/** Starting values for the New task form, e.g. from "Prepare meeting". Everything stays editable. */
+export interface NewTaskDraft {
+  title?: string;
+  objective?: string;
+  stakeholders?: Stakeholder[];
+  deliverables?: Array<{ template_ref?: string; format?: string }>;
+  preferred_agent?: string;
+}
+
 export interface ContextNote {
   id: string;
   title: string;
