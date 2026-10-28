@@ -646,6 +646,21 @@ Deletes are soft. Removing a file in the dashboard moves it to
 `.situation-board/trash/` with a timestamp, and every overwrite keeps the previous
 version there too.
 
+### Cleanup and retention
+
+A built-in **System cleanup** routine (Routines page, settings in
+`.situation-board/routines/system-cleanup.json`) keeps the workspace tidy. Out of the
+box it runs every Monday at 09:00 and only suggests: it scans your context notes and
+stakeholders for duplicates, empty and old notes, and opens a context update tagged
+**System cleanup**. Run `/gtd-context-analyze` on it, and the agent proposes merges,
+moves and removals for you to approve. Approved removals go to the trash.
+
+It never archives, trashes or deletes a file until you turn a rule on. Per type
+(finished tasks, archived tasks, finished context updates, closed kaizen proposals,
+the trash itself) you choose the age in days and the action: archive, move to trash
+or delete permanently. A preview shows exactly what a run would do before you save.
+Tasks tagged `keep` are never touched, and a run handles at most 200 items.
+
 ---
 
 ## What is yours and what is the app's

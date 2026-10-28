@@ -1,6 +1,6 @@
 import { useAppState, useDataVersion } from '../store';
 import { useApi } from './useApi';
-import type { ContextUpdate, KaizenProposal, Routine, Task } from '../types';
+import type { ContextUpdate, KaizenProposal, Routine, SystemCleanup, Task } from '../types';
 
 /**
  * Something that waits on the user and nobody else. `attention`: the user's move in a normal flow
@@ -29,12 +29,15 @@ export function usePendingActions(): PendingAction[] {
   const { data: tasks } = useApi<Task[]>('/api/tasks', [useDataVersion('tasks')]);
   const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [useDataVersion('context-updates')]);
   const { data: kaizen } = useApi<KaizenProposal[]>('/api/kaizen', [useDataVersion('kaizen')]);
-  const { data: routines } = useApi<Routine[]>('/api/routines', [useDataVersion('routines')]);
+  const routinesVersion = useDataVersion('routines');
+  const { data: routines } = useApi<Routine[]>('/api/routines', [routinesVersion]);
+  const { data: cleanup, error: cleanupError } = useApi<SystemCleanup>('/api/routines/system-cleanup', [routinesVersion]);
 
   const toReview = (tasks ?? []).filter((t) => t.status === 'in_review').length;
   const updatesWaiting = (updates ?? []).filter((u) => u.status === 'in_review' || u.status === 'ready' || u.status === 'approved').length;
   const proposals = (kaizen ?? []).filter((k) => k.status === 'proposed').length;
-  const routineProblems = (routines ?? []).filter((r) => r.problem || r.state?.last_status === 'error').length;
+  const routineProblems = (routines ?? []).filter((r) => r.problem || r.state?.last_status === 'error').length
+    + (cleanupError || cleanup?.state.last_status === 'error' ? 1 : 0);
 
   const all: PendingAction[] = [
     { navPath: '/board', to: '/board', count: toReview, tone: 'attention', label: `${plural(toReview, 'task', 'tasks')} waiting for your review` },

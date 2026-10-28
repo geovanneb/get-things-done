@@ -29,6 +29,26 @@ router.post('/run-due', async (_req: Request, res: Response) => {
   res.json(await service.runDue('manual'));
 });
 
+// GET /api/routines/system-cleanup  the built-in job: settings, schedule, last run
+router.get('/system-cleanup', async (_req: Request, res: Response) => {
+  res.json(await service.systemCleanup());
+});
+
+// PUT /api/routines/system-cleanup  any of the settings; missing ones keep their value
+router.put('/system-cleanup', async (req: Request, res: Response) => {
+  res.json(await service.updateSystemCleanup(body(req)));
+});
+
+// POST /api/routines/system-cleanup/preview  { settings? }  what a run would do now, nothing changed
+router.post('/system-cleanup/preview', async (req: Request, res: Response) => {
+  res.json(await service.previewSystemCleanup(body(req)['settings']));
+});
+
+// POST /api/routines/system-cleanup/run  run it now
+router.post('/system-cleanup/run', async (_req: Request, res: Response) => {
+  res.status(201).json(await service.runSystemCleanupNow());
+});
+
 // POST /api/routines  { title, enabled?, schedule, catch_up?, task }
 router.post('/', async (req: Request, res: Response) => {
   res.status(201).json(await service.create(body(req)));

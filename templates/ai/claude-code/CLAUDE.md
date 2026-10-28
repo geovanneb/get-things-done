@@ -188,6 +188,11 @@ The executive imports material (transcripts, slides, photos, spreadsheets) under
 Follow the command files in `.claude/commands/` exactly. The rule behind both: never
 change just to change. Distil the material into the few edits that keep the context true.
 
+An update with `origin: system-cleanup` and `kind: memory-review` was opened by the
+dashboard's weekly System cleanup job. It has no new material: `/gtd-context-analyze`
+reviews the existing memory for duplicates, misplaced and obsolete notes. Proposals
+may then also `remove` a file; the dashboard does that after approval, never you.
+
 ## Schema references
 
 All frontmatter structures are documented in `.schemas/`. Refer to these when creating new files:

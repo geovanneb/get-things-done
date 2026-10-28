@@ -5,6 +5,7 @@ import { Task, TaskStatus, Priority } from '../types';
 import { DONE_STATUSES } from './taskStatus';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { reservedSequence } from './idReservations';
 
 const fileService = new FileService();
 
@@ -376,6 +377,9 @@ If the executive comes back with feedback on a task that is already \`in_review\
         if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
       }
     }
+
+    // Ids of tasks the cleanup job removed stay taken, so old links never point at a new task.
+    maxSeq = Math.max(maxSeq, await reservedSequence(prefix));
 
     // mkdir without recursive is an exclusive reservation shared by CLI and server writers.
     // A scan alone lets simultaneous manual and scheduled tasks overwrite the same task.md.

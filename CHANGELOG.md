@@ -8,6 +8,39 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **System cleanup, a built-in routine.** It sits at the top of the Routines page and
+  runs on the same triggers and lock as your routines (dashboard, `gtd routines run`).
+  By default it runs every Monday at 09:00 and only suggests; it moves no file.
+  - **Memory review:** scans context notes and stakeholders for likely duplicates,
+    empty notes and notes not updated in 180 days, and opens a context update tagged
+    `origin: system-cleanup`, `kind: memory-review`, shown with a **System cleanup**
+    badge. `/gtd-context-analyze` then proposes merges, moves and removals. One review
+    at a time; none in an empty workspace.
+  - **File cleanup, opt-in per type:** finished tasks, archived tasks, finished context
+    updates, closed kaizen proposals and the trash, each with its own age and action
+    (archive, move to trash, delete permanently). Only finished items, counted from
+    their own date; items without a trustworthy date, symlinks, tasks tagged `keep`
+    and updates whose materials you kept are skipped. At most 200 items per run.
+  - A preview in the settings dialog shows what a run would do, and turning on
+    permanent deletion asks once with the count. Settings also has a "Cleanup and
+    retention" summary that links here.
+- **Context update proposals can remove a file.** The dashboard moves the target (a
+  context note with its folder) to the trash after approval; agents never delete. When
+  removals are all you accepted, approving finishes the update straight away. A removal
+  is held back when another accepted change of the same update failed.
+
+### Fixed
+
+- The workspace `.gitignore` now excludes `.situation-board/trash/`, as the README
+  already said. `gtd upgrade` updates it unless you edited it.
+- Ids of tasks and context updates removed by the cleanup stay reserved
+  (`.situation-board/reserved-ids.json`), so a new task never reuses an id that old
+  links, routine receipts or the run history still point at.
+- The file watcher ignores the trash folder, so moving many files there does not
+  flood the dashboard with refreshes.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added

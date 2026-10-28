@@ -24,6 +24,11 @@ Read `context-updates/$ARGUMENTS/update.md`. If it does not exist, tell the user
 Set `status: analyzing` and `updated_at` to the current ISO 8601 timestamp. The
 dashboard shows this as "Agent is analyzing".
 
+If the frontmatter has `kind: memory-review`, this is not new material: the weekly
+System cleanup job opened it to review the memory that is already here. Follow
+**Memory review** at the end of this file instead of Steps 2 to 5, then continue with
+Step 6. Never change `origin` or `kind`.
+
 ## Step 2: Read the brief
 
 - `title`, and `source_date`: the date the material is from. It decides which facts are
@@ -108,7 +113,8 @@ For each proposal, write the **complete proposed content of the target file** (t
 whole file, frontmatter included) to `context-updates/$ARGUMENTS/proposals/P-NN.md`,
 numbering from `P-01`. Never write to the target itself.
 
-Targets are workspace-relative paths, and only these are accepted:
+For `action: remove` write no draft. Targets are workspace-relative paths, and only
+these are accepted:
 
 - `context/<category>/<slug>/note.md`, where category is one of company, organization,
   strategy, programs, decisions, risks, glossary, situation. For a new note, pick a
@@ -131,7 +137,7 @@ summary: |
   is worth changing, say so plainly.
 proposals:
   - id: P-01
-    action: update            # or create
+    action: update            # or create, or remove (no draft for remove)
     target: context/decisions/<slug>/note.md
     category: decisions       # the context category, or people / groups / org-charts
     title: Short imperative description of the change
@@ -153,6 +159,38 @@ executive does that in the dashboard. If there is nothing worth changing, write
 
 The frontmatter needs both an opening and a closing `---`. Read the file back and
 confirm it parses before you report.
+
+## Memory review (`kind: memory-review`)
+
+The material is `materials/memory-scan.md`: what a quick mechanical scan found
+(possible duplicates, notes not updated for a long time, empty notes). Treat it as a
+list of leads, not as findings. The executive's notes in the body say what to look for.
+
+1. Read the whole `context/` library and `stakeholders/` (people, groups, org-charts),
+   with each file's `updated_at`, and `profile/executive-profile.md` for what matters.
+2. Look for: the same fact or person in two places; a fact filed in the wrong note or
+   category; notes that are obsolete (a finished program, a superseded decision, a
+   person who left) or carry nothing an agent would use; contradictions between notes;
+   notes so old they are probably out of date.
+3. Decide where each piece of information should live, and propose the smallest set
+   of changes that gets it there:
+   - **Merge duplicates:** an `update` of the note that stays, with the other note's
+     unique facts folded in, plus a `remove` of the other note.
+   - **Move a fact:** an `update` of the note that should hold it, and an `update` of
+     the note it leaves (or a `remove`, when nothing else remains in it).
+   - **Obsolete or useless note:** a `remove`. Say in the rationale why nothing in it
+     is still needed, and where its useful parts went, if anywhere.
+   - **Probably out of date:** do not guess the new facts. Propose an `update` only when
+     another file in the workspace states the newer fact; otherwise list it under
+     `skipped` with the reason "Not updated since <date>: check with the executive".
+4. Before a `remove`, search tasks, context and stakeholders for links to that file
+   (`@`-mentions and `contexts:` refs). Name them in the rationale: they will break.
+5. The bar is the same as for new material: change nothing just to change it. A
+   healthy memory gives "nothing worth changing", and that is a good result.
+
+A `remove` proposal has no draft: do not write `proposals/<id>.md` for it. Set
+`action: remove` and the `target`; the dashboard moves the file to the trash after
+the executive approves, so nothing is lost for good.
 
 ## Step 8: Report
 

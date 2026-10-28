@@ -24,6 +24,10 @@ Set `status: applying` and `updated_at` to the current ISO 8601 timestamp.
 
 For every proposal with `decision: accepted`, in order. Ignore every other proposal.
 
+Skip proposals with `action: remove`: do not delete or edit their target, and do not
+set their `outcome`. The dashboard moves those files to the trash once the update is
+done, and only when no other accepted change failed.
+
 1. Check the `target` is a workspace-relative path under `context/<category>/` or
    `stakeholders/people/`, `stakeholders/groups/` or `stakeholders/org-charts/`, ending
    in `.md`. If not, do not write it: set `outcome: failed` with the reason.
@@ -52,7 +56,7 @@ If you notice something else that should change, mention it in your reply.
 
 ## Step 3: Close the update
 
-When every accepted proposal has an outcome:
+When every accepted proposal other than a `remove` has an outcome:
 
 1. In `update.md`, set `status: done`, `applied_at` to the current ISO 8601 timestamp
    and `updated_at`. Give each rejected proposal `outcome: skipped`. Keep everything

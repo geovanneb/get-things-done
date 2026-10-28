@@ -9,8 +9,8 @@
       "type": "object",
       "required": ["id", "action", "target", "title", "rationale"],
       "properties": {
-        "id": {"type": "string", "pattern": "^P-\\d{2,3}$", "description": "Also the draft file name: proposals/<id>.md holds the full proposed content of the target."},
-        "action": {"type": "string", "enum": ["create", "update"]},
+        "id": {"type": "string", "pattern": "^P-\\d{2,3}$", "description": "Also the draft file name: proposals/<id>.md holds the full proposed content of the target (not for remove)."},
+        "action": {"type": "string", "enum": ["create", "update", "remove"], "description": "remove: the dashboard moves the target to the trash once the update is done (a context note with its folder). Remove proposals have no draft and the apply step does not touch them."},
         "target": {"type": "string", "pattern": "^(context/(company|organization|strategy|programs|decisions|risks|glossary|situation)|stakeholders/(people|groups|org-charts))/[^\\\\]+\\.md$", "description": "Workspace-relative path of the file to create or update."},
         "category": {"type": "string", "description": "Context category, or people, groups or org-charts."},
         "title": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -29,6 +29,8 @@
     "id": {"type": "string", "pattern": "^CU-\\d{4}-\\d{4}$"},
     "type": {"type": "string", "enum": ["context-update"]},
     "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "origin": {"type": "string", "description": "Who opened the update. Set by the dashboard only: system-cleanup for the weekly memory review. Absent for material the executive imported. Never set or change it."},
+    "kind": {"type": "string", "enum": ["memory-review"], "description": "memory-review: no new material; review the existing context and stakeholders (see the analyze command). Set by the dashboard only."},
     "status": {
       "type": "string",
       "enum": ["ready", "analyzing", "in_review", "approved", "applying", "done"],

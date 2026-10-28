@@ -20,14 +20,17 @@ export class WatcherService {
     const skipDirs = [
       path.join(workspacePath, '.situation-board', 'cache'),
       path.join(workspacePath, '.situation-board', 'logs'),
+      // Soft deletes and backups: a cleanup run moving many files there must not flood the dashboard.
+      path.join(workspacePath, '.situation-board', 'trash'),
     ];
     this.watcher = watch(workspacePath, {
       ignored: (filePath, stats) => {
         if (/node_modules|\.git(\/|$)|\.tmp$/.test(filePath)) return true;
         if (skipDirs.some((dir) => filePath === dir || filePath.startsWith(dir + path.sep))) return true;
-        // Only Markdown files matter, plus the routine run state: a failed run writes no task, and the
+        // Only Markdown files matter, plus the routine and system cleanup run state: a failed run writes no task, and the
         // dashboard must still show it. Directories must pass so their contents are watched.
-        const routineState = filePath.endsWith(path.join('.situation-board', 'routines', 'state.json'));
+        const routineState = filePath.endsWith(path.join('.situation-board', 'routines', 'state.json'))
+          || filePath.endsWith(path.join('.situation-board', 'routines', 'system-cleanup-state.json'));
         return Boolean(stats?.isFile()) && !filePath.endsWith('.md') && !routineState;
       },
       persistent: true,

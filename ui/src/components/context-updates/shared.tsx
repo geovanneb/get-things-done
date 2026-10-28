@@ -146,3 +146,14 @@ export function hardToRead(name: string): boolean {
 export const sectionLabel: React.CSSProperties = {
   fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px',
 };
+
+/** Marks an update the user did not import: the weekly System cleanup job opened it. */
+export function OriginBadge({ origin }: { origin: string | null }) {
+  if (origin !== 'system-cleanup') return null;
+  return (
+    <span title="Opened by the weekly System cleanup job to review your memory. Set it up under Routines."
+      style={{ display: 'inline-flex', alignItems: 'center', padding: '1px 8px', borderRadius: 'var(--radius-full, 999px)', fontSize: 'var(--text-xs)', fontWeight: 600, background: 'var(--color-info-subtle)', color: 'var(--color-info)', whiteSpace: 'nowrap' }}>
+      System cleanup
+    </span>
+  );
+}

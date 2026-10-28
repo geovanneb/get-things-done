@@ -2,7 +2,7 @@ import Button from '@/components/common/Button';
 import EmptyState from '@/components/common/EmptyState';
 import { formatRelativeDate } from '@/utils/format';
 import type { ContextUpdate, ContextUpdateStatus } from '@/types';
-import { HelpBox, StatusPill, sectionLabel } from './shared';
+import { HelpBox, OriginBadge, StatusPill, sectionLabel } from './shared';
 
 const GROUPS: { title: string; hint: string; statuses: ContextUpdateStatus[] }[] = [
   { title: 'Waiting on you', hint: 'Run a command, or review proposals.', statuses: ['in_review', 'ready', 'approved'] },
@@ -11,6 +11,7 @@ const GROUPS: { title: string; hint: string; statuses: ContextUpdateStatus[] }[]
 ];
 
 function summaryLine(u: ContextUpdate): string {
+  if (u.kind === 'memory-review' && (u.status === 'ready' || u.status === 'analyzing')) return 'review of your existing memory';
   const files = `${u.materials.length} file${u.materials.length === 1 ? '' : 's'}`;
   if (u.status === 'ready' || u.status === 'analyzing') return files;
   const accepted = u.proposals.filter((p) => p.decision === 'accepted').length;
@@ -56,9 +57,10 @@ export default function UpdatesList({ updates, onOpen, onImport }: { updates: Co
                   <span style={{ flex: '1 1 260px', minWidth: 0 }}>
                     <span style={{ display: 'block', fontWeight: 600, fontSize: 'var(--text-base)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.title}</span>
                     <span style={{ display: 'block', marginTop: 2, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                      <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · material from {u.source_date || 'unknown date'} · {summaryLine(u)} · updated {formatRelativeDate(u.updated_at || u.created_at)}
+                      <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span>{u.kind === 'memory-review' ? '' : ` · material from ${u.source_date || 'unknown date'}`} · {summaryLine(u)} · updated {formatRelativeDate(u.updated_at || u.created_at)}
                     </span>
                   </span>
+                  <OriginBadge origin={u.origin} />
                   <StatusPill status={u.status} />
                 </button>
               ))}

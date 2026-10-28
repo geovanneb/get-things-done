@@ -1,5 +1,6 @@
 .situation-board/cache/
 .situation-board/logs/
+.situation-board/trash/
 node_modules/
 *.log
 .situation-board/routines/run.lock
