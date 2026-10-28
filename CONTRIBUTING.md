@@ -136,9 +136,14 @@ npm run dev          # API on :3001, Vite UI on :5173
 Before you push:
 
 ```bash
+npm run lint         # ESLint; CI fails on errors, warnings are allowed for now
 npm run build        # type-checks and builds CLI, server and UI
 npm test             # unit tests + end-to-end smoke test
 ```
+
+Prettier is set up too. Most of the code has not been formatted with it yet, so format only
+the files you changed (`npx prettier --write <files>`) rather than running `npm run format`
+on everything, to keep your PR free of unrelated changes.
 
 The smoke test creates a throwaway workspace in a temp folder with its own HOME,
 starts the built server, seeds fictional data and checks the API. It never touches

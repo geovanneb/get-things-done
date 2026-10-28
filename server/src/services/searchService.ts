@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import type Database from 'better-sqlite3';
 import { SearchResult } from '../types';
 import { WorkspaceService } from './workspace';
@@ -52,7 +53,7 @@ function loadSqlite(): DatabaseCtor | null {
     return null;
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     sqliteCtor = require('better-sqlite3') as DatabaseCtor;
   } catch (err) {
     console.warn(
@@ -94,7 +95,7 @@ export class SearchService {
 
     try {
       const dbPath = this.getDbPath();
-      require('fs').mkdirSync(path.dirname(dbPath), { recursive: true });
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
       this.db = new Ctor(dbPath);
       this.initSchema();
       return this.db;

@@ -52,13 +52,14 @@ function load(): ScaffoldModule {
 
   const scaffoldPath = getBundledScaffoldPath();
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     cached = require(scaffoldPath) as ScaffoldModule;
   } catch (err) {
     throw new Error(
       `Could not load the workspace scaffolder from ${scaffoldPath}. ` +
         `The installation may be incomplete — try reinstalling the package.\n` +
-        (err instanceof Error ? err.message : String(err))
+        (err instanceof Error ? err.message : String(err)),
+      { cause: err }
     );
   }
   return cached;
