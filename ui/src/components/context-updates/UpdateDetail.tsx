@@ -242,7 +242,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   };
 
   const close = () => {
-    if (!window.confirm('Close this update without changing any context file? The record stays; the materials are deleted.')) return;
+    const files = u.keep_materials ? 'the materials are kept until you release them' : 'the materials are deleted';
+    if (!window.confirm(`Close this update without changing any context file? The record stays; ${files}.`)) return;
     void run('close', () => apiPost(`/api/context-updates/${u.id}/close`), 'Closed without changes.');
   };
 
@@ -258,7 +259,21 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     })();
   };
 
-  const materials = u.status === 'done' ? u.materials.map((m) => ({ ...m, modified: '' })) : (u.material_files ?? []);
+  const keepMaterials = (keep: boolean) => run('keep', () => apiPut(`/api/context-updates/${u.id}/keep-materials`, { keep }));
+
+  const releaseMaterials = () => {
+    if (!window.confirm('Delete the kept files of this update? The record stays. This cannot be undone.')) return;
+    void run('keep', () => apiPut(`/api/context-updates/${u.id}/keep-materials`, { keep: false }), 'Files released.');
+  };
+
+  // A finished update still has its files only when the user kept them; otherwise just the record's list.
+  const filesGone = u.status === 'done' && !u.keep_materials;
+  const materials = filesGone ? u.materials.map((m) => ({ ...m, modified: '' })) : (u.material_files ?? []);
+  const keptSize = materials.reduce((sum, f) => sum + f.size, 0);
+  const canChooseKeep = ['ready', 'analyzing', 'in_review', 'approved'].includes(u.status);
+  const doneNext = u.keep_materials
+    ? 'Finished. The record below shows what was proposed and decided. You kept the uploaded materials; release them when you no longer need them.'
+    : meta.next;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 980, paddingBottom: reviewing || command ? 80 : 0 }}>
@@ -283,7 +298,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
       {/* What to do next: always one clear action. */}
       <section ref={nextRef} aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
-        <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{meta.next}</div>
+        <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{u.status === 'done' ? doneNext : meta.next}</div>
         {(u.status === 'ready' || u.status === 'analyzing') && (
           <CommandBox ref={u.status === 'ready' ? copyRef : undefined} command={`/gtd-context-analyze ${u.id}`} emphasis={u.status === 'ready'}
             label={u.status === 'ready' ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Run in Claude Code to analyze'}
@@ -322,11 +337,17 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       <section aria-label="Materials">
         <h3 style={sectionLabel}>Materials · {materials.length}</h3>
         <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {u.status === 'done' && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Deleted when the update finished. Only the list is kept.</p>}
+          {filesGone && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Deleted when the update finished. Only the list is kept.</p>}
+          {u.status === 'done' && u.keep_materials && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              <span style={{ flex: 1, minWidth: 0 }}>Kept at your request · {formatBytes(keptSize)} on disk. Nothing deletes them by age; agents do not read them as task input.</span>
+              <Button variant="secondary" size="sm" loading={busy === 'keep'} onClick={releaseMaterials}>Release files</Button>
+            </div>
+          )}
           {materials.length === 0 && <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No files yet.</p>}
           {materials.map((f) => (
             <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)' }}>
-              {u.status === 'done'
+              {filesGone
                 ? <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-text-secondary)' }}>{f.name}</span>
                 : <a href={`/api/context-updates/${u.id}/materials/${f.name.split('/').map(encodeURIComponent).join('/')}`} target="_blank" rel="noreferrer" style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-accent)' }}>{f.name}</a>}
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
@@ -337,6 +358,18 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             </div>
           ))}
           {u.status === 'ready' && <DropZone onFiles={(files) => void addFiles(files)} compact />}
+          {canChooseKeep && (
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 'var(--text-sm)', cursor: busy === 'keep' ? 'wait' : 'pointer' }}>
+              <input type="checkbox" checked={u.keep_materials} disabled={busy === 'keep'} onChange={(e) => void keepMaterials(e.target.checked)}
+                style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0, accentColor: 'var(--color-accent)' }} />
+              <span>
+                Keep the original files after this update finishes
+                <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  Useful for a recording or deck you may need again. They stay until you release them, and cost disk space, not agent context.
+                </span>
+              </span>
+            </label>
+          )}
           {busy === 'upload' && <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Uploading...</span>}
           {(u.status === 'in_review' || u.status === 'approved') && (
             <div><Button variant="ghost" size="sm" onClick={reopen}>+ Add more material</Button></div>

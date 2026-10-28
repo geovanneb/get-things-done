@@ -112,5 +112,6 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    newer content. Follow `reviewer_note` when set. Set `updated_at` on each file. Record
    `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
 3. Give rejected proposals `outcome: skipped`, set `status: done` and `applied_at`, then
-   delete `materials/` and `proposals/` (the dashboard finishes this if you cannot).
-   Keep `update.md` as the record.
+   delete `proposals/`, and `materials/` unless `update.md` has `keep_materials: true`
+   (the dashboard finishes this if you cannot). Never change `keep_materials`. Keep
+   `update.md` as the record.

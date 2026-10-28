@@ -54,6 +54,11 @@ router.delete('/:id/materials/:name', async (req: Request, res: Response) => {
   res.status(204).send();
 });
 
+// PUT /api/context-updates/:id/keep-materials  { keep: boolean }  keep the files after the update is done, or release them
+router.put('/:id/keep-materials', async (req: Request, res: Response) => {
+  res.json(await service.keepMaterials(param(req, 'id'), body(req)['keep']));
+});
+
 // PUT /api/context-updates/:id/decisions  { decisions: { "P-01": { decision, reviewer_note } } }
 router.put('/:id/decisions', async (req: Request, res: Response) => {
   res.json(await service.saveDecisions(param(req, 'id'), body(req)['decisions']));

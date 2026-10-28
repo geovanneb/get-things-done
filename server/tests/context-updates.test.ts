@@ -190,6 +190,44 @@ test('a done update left with materials by the agent is cleaned up when opened',
   await assert.rejects(fsp.access(path.join(ws, 'context-updates', id, 'proposals')));
 });
 
+test('kept materials survive closing and opening a done update, and go only when the user releases them', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'Transcript of a fictional meeting' });
+  const materials = path.join(ws, 'context-updates', id, 'materials');
+  await assert.rejects(service.keepMaterials(id, 'yes'), /Invalid keep/);
+  assert.equal((await service.keepMaterials(id, true)).keep_materials, true);
+
+  await analyze(ws, id, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md' }], { 'P-01.md': 'New plan\n' });
+  assert.equal((await service.get(id)).keep_materials, true, 'the analysis rewrites update.md but keeps the choice');
+  const closed = await service.close(id);
+  assert.equal(closed.status, 'done');
+  await assert.rejects(fsp.access(path.join(ws, 'context-updates', id, 'proposals')), 'drafts are always deleted');
+
+  // The dashboard's cleanup of a done update must respect the choice too.
+  const detail = await service.get(id);
+  assert.deepEqual(detail.material_files.map((f) => f.name), ['pasted-text.md']);
+  assert.equal(await fsp.readFile(await service.materialPath(id, 'pasted-text.md'), 'utf-8'), 'Transcript of a fictional meeting');
+  await assert.rejects(service.keepMaterials(id, true), /Cannot keep the materials/);
+
+  const released = await service.keepMaterials(id, false);
+  assert.equal(released.keep_materials, false);
+  assert.equal(released.materials.length, 1, 'the record keeps the list');
+  await assert.rejects(fsp.access(materials));
+  assert.equal('keep_materials' in parseMarkdown(await fsp.readFile(path.join(ws, 'context-updates', id, 'update.md'), 'utf-8')).data, false);
+});
+
+test('materials cannot be kept or released while the agent is applying', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'x' });
+  const file = path.join(ws, 'context-updates', id, 'update.md');
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+  await fsp.writeFile(file, stringifyMarkdown(parsed.content, { ...parsed.data, status: 'applying' }));
+  await assert.rejects(service.keepMaterials(id, true), /Cannot keep/);
+  await assert.rejects(service.keepMaterials(id, false), /Cannot release/);
+});
+
 test('simultaneous uploads preserve both files and the complete material inventory', async (t) => {
   await workspace(t);
   const service = new ContextUpdateService();

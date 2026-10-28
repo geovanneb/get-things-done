@@ -393,6 +393,20 @@ try {
     check('closing without changes keeps the record, deletes the materials and leaves the context alone',
       closed.status === 'done' && closed.materials.length === 4 && !fs.existsSync(path.join(dir, 'materials'))
       && fs.readFileSync(path.join(ws, target), 'utf-8') === before);
+    const kept = await (await json('POST', '/api/context-updates', { title: 'Fictional board recording', text: 'Fictional recording transcript' })).json();
+    const badKeep = await json('PUT', `/api/context-updates/${kept.id}/keep-materials`, { keep: 'yes' });
+    await json('PUT', `/api/context-updates/${kept.id}/keep-materials`, { keep: true });
+    const keptDir = path.join(ws, 'context-updates', kept.id);
+    const keptMd = fs.readFileSync(path.join(keptDir, 'update.md'), 'utf-8');
+    fs.writeFileSync(path.join(keptDir, 'update.md'), keptMd.replace('status: ready', 'status: in_review'));
+    await json('POST', `/api/context-updates/${kept.id}/close`);
+    const keptDetail = await (await fetch(`${base}/api/context-updates/${kept.id}`)).json();
+    const keptFile = await fetch(`${base}/api/context-updates/${kept.id}/materials/pasted-text.md`);
+    const released = await json('PUT', `/api/context-updates/${kept.id}/keep-materials`, { keep: false });
+    check('kept materials survive a finished update until the user releases them',
+      badKeep.status === 400 && keptDetail.status === 'done' && keptDetail.keep_materials === true
+      && keptFile.status === 200 && released.status === 200 && !fs.existsSync(path.join(keptDir, 'materials')),
+      `bad=${badKeep.status} file=${keptFile.status} released=${released.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

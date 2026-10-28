@@ -455,6 +455,8 @@ export interface ContextUpdate {
   summary: string;
   notes: string;
   materials: { name: string; size: number; type: string }[];
+  /** The user keeps materials/ after the update is done, until they release it. */
+  keep_materials: boolean;
   proposals: ContextUpdateProposal[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
