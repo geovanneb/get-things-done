@@ -28,7 +28,12 @@ async function startApp(t: { after: (fn: () => void) => void }) {
   registerRoutes(app);
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
-  t.after(() => server.close());
+  // Setup starts the file watcher on the new workspace; stop it so it never keeps the test process alive.
+  const { watcherService } = await import('../src/services/watcherService');
+  t.after(() => {
+    watcherService.stop();
+    server.close();
+  });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
   const post = (url: string, body: unknown) =>
     fetch(`${base}${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });

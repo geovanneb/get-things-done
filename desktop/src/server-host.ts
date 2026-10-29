@@ -40,8 +40,9 @@ function bundledGit(): StartServerOptions['git'] {
 }
 
 async function main(): Promise<void> {
+  // The same layout as the npm package: run `npm run build` in the repo root first when running from source.
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- the path is only known at runtime
-  const { startServer } = require(path.join(root, 'server', 'dist', 'server.js')) as {
+  const { startServer } = require(path.join(root, 'dist', 'server', 'server.js')) as {
     startServer(options: StartServerOptions): Promise<RunningServer>;
   };
 
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
   try {
     running = await startServer({
       port,
-      uiPath: path.join(root, 'ui', 'dist'),
+      uiPath: path.join(root, 'dist', 'ui'),
       templatesPath: path.join(root, 'templates'),
       git: bundledGit(),
     });

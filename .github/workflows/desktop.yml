@@ -1,0 +1,62 @@
+name: Desktop app
+
+# Builds the Mac and Windows installers and starts each packaged app the way a new user would
+# (desktop/scripts/smoke-packaged.mjs). The installers are not signed yet (#123, item 9b): they are
+# build artifacts for testing, not releases.
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-latest is Apple Silicon; the portable git is downloaded for the machine that installs, so each
+        # platform builds on its own runner.
+        os: [macos-latest, windows-latest]
+    env:
+      # Unsigned builds: do not look for signing certificates in the keychain.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm ci --prefix desktop
+      - run: npm run dist --prefix desktop
+      - name: Smoke-test the packaged app
+        run: npm run smoke --prefix desktop
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.os }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 14
