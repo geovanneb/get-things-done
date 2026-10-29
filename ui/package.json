@@ -13,7 +13,8 @@
     "test:calendar": "tsx src/components/insights/calendar/calendarModel.test.ts",
     "test:diff": "tsx src/utils/lineDiff.test.ts",
     "test:meeting-prep": "tsx src/utils/meetingPrep.test.ts",
-    "test:desktop-bridge": "tsx src/utils/desktop.test.ts"
+    "test:desktop-bridge": "tsx src/utils/desktop.test.ts",
+    "test:setup": "tsx src/utils/setup.test.ts"
   },
   "dependencies": {
     "date-fns": "^3.6.0",

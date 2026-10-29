@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { quoteYaml } from '../utils/yamlScalar';
 
 /**
  * Single source of truth for creating and upgrading a workspace.
@@ -229,7 +230,7 @@ export function writeWorkspaceYaml(workspacePath: string, workspaceName: string)
   // `schema_versions` must precede the nested blocks: that parser stays in
   // schema mode until it sees a line with no leading whitespace.
   const content = [
-    `name: "${workspaceName}"`,
+    `name: ${quoteYaml(workspaceName)}`,
     'version: "1.0"',
     `created_at: "${new Date().toISOString()}"`,
     'git_enabled: false',
@@ -278,9 +279,9 @@ export function writeExecutiveProfile(workspacePath: string, profile: WorkspaceP
   const today = new Date().toISOString().split('T')[0];
   const content = [
     '---',
-    `name: "${profile.name}"`,
-    `role: "${profile.role}"`,
-    `organization: "${profile.organization}"`,
+    `name: ${quoteYaml(profile.name)}`,
+    `role: ${quoteYaml(profile.role)}`,
+    `organization: ${quoteYaml(profile.organization)}`,
     `updated_at: "${today}"`,
     '---',
     '',

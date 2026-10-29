@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { WorkspaceConfig } from '../types';
 import { ScaffoldOptions, WorkspaceProfile, scaffoldWorkspace } from './scaffold';
+import { quoteYaml, unquoteYaml } from '../utils/yamlScalar';
 
 const ESB_CONFIG_DIR = path.join(os.homedir(), '.gtd');
 const ESB_CONFIG_FILE = path.join(ESB_CONFIG_DIR, 'config.json');
@@ -63,7 +64,7 @@ function readWorkspaceName(workspacePath: string): string | null {
   try {
     const raw = fs.readFileSync(path.join(workspacePath, 'workspace.yaml'), 'utf-8');
     const line = raw.split('\n').find((l) => l.startsWith('name:'));
-    return line ? line.replace('name:', '').trim().replace(/^["']|["']$/g, '') : null;
+    return line ? unquoteYaml(line.replace('name:', '')) : null;
   } catch {
     return null;
   }
@@ -178,7 +179,7 @@ export class WorkspaceService {
       let inSettingsGit = false;
       for (const line of lines) {
         if (line.startsWith('name:')) {
-          name = line.replace('name:', '').trim().replace(/^["']|["']$/g, '');
+          name = unquoteYaml(line.replace('name:', ''));
         } else if (line.startsWith('git_enabled:')) {
           git_enabled = line.includes('true');
         } else if (line.startsWith('settings:')) {
@@ -217,7 +218,7 @@ export class WorkspaceService {
     }
 
     const raw = fs.readFileSync(workspaceYamlPath, 'utf-8');
-    const updated = raw.replace(/^name:\s*.+$/m, `name: "${newName}"`);
+    const updated = raw.replace(/^name:\s*.+$/m, () => `name: ${quoteYaml(newName)}`);
     fs.writeFileSync(workspaceYamlPath, updated, 'utf-8');
   }
 

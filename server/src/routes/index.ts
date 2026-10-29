@@ -16,6 +16,7 @@ import agentActivityRouter from './agentActivity';
 import mentionsRouter from './mentions';
 import orgChartsRouter from './orgCharts';
 import routinesRouter from './routines';
+import setupRouter from './setup';
 
 export function registerRoutes(app: Express): void {
   app.use('/api', (_req, _res, next) => {
@@ -33,6 +34,7 @@ export function registerRoutes(app: Express): void {
   app.use('/api/skills', skillsRouter);
   app.use('/api/profile', profileRouter);
   app.use('/api/workspace', workspaceRouter);
+  app.use('/api/setup', setupRouter);
   app.use('/api/search', searchRouter);
   app.use('/api/situation', situationRouter);
   app.use('/api/insights', insightsRouter);

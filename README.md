@@ -57,6 +57,9 @@ gtd init
 gtd start
 ```
 
+Prefer clicking to typing? Run `gtd start` without `gtd init`: the dashboard opens a short setup
+screen that creates the workspace for you.
+
 ---
 
 ## Why it is different
