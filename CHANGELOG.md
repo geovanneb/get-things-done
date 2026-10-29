@@ -8,6 +8,49 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Desktop app for Mac and Windows (preview).** The same server, dashboard and templates as
+  `gtd start`, in an app that needs nothing else installed: no Node, no git, no terminal. It
+  keeps running in the tray so routines run on schedule, opens web links in your browser and
+  blocks everything else, and asks where to save downloads. Folder choices and "open the
+  workspace folder" use the system dialogs. A portable git ships inside the app. (#128, #136, #137)
+- **Installers built and tested in CI.** Mac (Apple Silicon and Intel: DMG and ZIP) and Windows
+  (one-click, no admin rights). Each packaged app is started as a new user would, with an empty
+  home folder and no git installed, and must set up a workspace, create a task and use its
+  bundled git. (#139, #141)
+- **Signed releases and automatic updates for the desktop app.** Version tags build signed and
+  notarized Mac installers and attach them to the GitHub release; installed apps update
+  themselves from GitHub Releases. Windows installers are attached as an unsigned preview, without
+  auto-update, until Windows signing is set up. (#142)
+- **First-run setup screen.** Until a workspace is open, the dashboard shows a short setup:
+  create a new workspace or open an existing one, your name and role, and which AI assistants to
+  prepare it for (installed ones are found and preselected). It works in the browser and in the
+  desktop app, so `gtd init` is no longer the only way to start. Before, the dashboard only said
+  "check that the backend is running". (#138)
+
+### Changed
+
+- **Search uses Node's built-in SQLite** (`node:sqlite`, Node 22.13 and newer) instead of the
+  native `better-sqlite3` module, so there is nothing native to install or rebuild and the
+  desktop app gets full-text search. On Node 20 search uses the in-memory scan, as before. (#140)
+- **Git is optional on every computer.** Without a git program, git features are hidden, git
+  routes answer `503` with a clear message, and Settings says git is not installed instead of
+  showing it as active. New `git_installed` field in the workspace and git responses. (#126)
+- For contributors: `server/src/server.ts` exports `startServer()`, so any host (the CLI entry,
+  the desktop app) runs the same server in-process; `gtd start` starts it with the Node that runs
+  the CLI instead of the first `node` on PATH. (#125) Dependencies: Electron 45 (#129),
+  TypeScript 7 for the desktop shell (#130), `@vitejs/plugin-react` 6 (#133), `@types/uuid` 11 (#135).
+
+### Fixed
+
+- **Security headers:** the dashboard is served with a Content Security Policy, and the local
+  API has a generous rate limit. (#127)
+- **Names with quotes** no longer break `workspace.yaml` or the profile (also from `gtd init`),
+  and renaming a workspace keeps `$` characters as typed. (#138)
+- **Windows:** the file watcher ignores `.git` folders, and "Open Claude Code" works for
+  workspace folders with `&` or `%` in their name. (#124)
+
 ## [0.6.0] - 2026-10-28
 
 ### Added
