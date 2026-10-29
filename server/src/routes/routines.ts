@@ -49,6 +49,21 @@ router.post('/system-cleanup/run', async (_req: Request, res: Response) => {
   res.status(201).json(await service.runSystemCleanupNow());
 });
 
+// GET /api/routines/meeting-digest  the built-in digest: settings, schedule, queue, open digest, last run
+router.get('/meeting-digest', async (_req: Request, res: Response) => {
+  res.json(await service.meetingDigest());
+});
+
+// PUT /api/routines/meeting-digest  { enabled?, schedule?, max_meetings? }  missing ones keep their value
+router.put('/meeting-digest', async (req: Request, res: Response) => {
+  res.json(await service.updateMeetingDigest(body(req)));
+});
+
+// POST /api/routines/meeting-digest/run  make a digest now from the queue
+router.post('/meeting-digest/run', async (_req: Request, res: Response) => {
+  res.status(201).json(await service.runMeetingDigestNow());
+});
+
 // POST /api/routines  { title, enabled?, schedule, catch_up?, task }
 router.post('/', async (req: Request, res: Response) => {
   res.status(201).json(await service.create(body(req)));

@@ -305,6 +305,11 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 | `POST` | `/api/context-updates/:id/materials` | Upload material (multipart, field `file`). Returns `201`. For a WebVTT transcript or a Word document (`.docx`) the response names the readable copy written next to it (`transcript`, `transcript_complete`), or says why none was made (`transcript_problem`); the copy is also recorded in the update's `transcripts`. `409` when the same file is already in the update |
 | `GET` | `/api/context-updates/:id/materials/<name>` | Open material in the browser. Add `?download=1` to save it |
 | `DELETE` | `/api/context-updates/:id/materials/:name` | Delete one piece of material. A readable transcript copy recorded for it goes too, unless it was changed. Returns `204` |
+| `GET` | `/api/meeting-queue` | Meetings waiting for the digest, oldest first, and queue folders that cannot be read |
+| `POST` | `/api/meeting-queue` | Start a meeting for the queue. Body: `title`, `meeting_date` (YYYY-MM-DD). Returns `201` with a `draft` |
+| `POST` | `/api/meeting-queue/:id/files` | Add one file to a draft meeting (multipart, field `file`, up to 50 MB; at most 10 files and 100 MB per meeting). `409` for the same file twice. Returns `201` |
+| `POST` | `/api/meeting-queue/:id/queue` | The draft is complete, or a meeting on hold is queued again: the next digest can take it. `409` without a file |
+| `DELETE` | `/api/meeting-queue/:id` | Remove a meeting and its files from the queue. `409` while a digest is being made from it. Returns `204` |
 | `PUT` | `/api/context-updates/:id/keep-materials` | Keep the material after the update is done, or release it. Body: `{ "keep": true }` |
 | `PUT` | `/api/context-updates/:id/decisions` | Save review decisions on proposals: `accepted`, `rejected` or `null`, with an optional `reviewer_note` |
 | `PUT` | `/api/context-updates/:id/meeting-records` | From `in_review`: confirm or reject meeting records, apart from the proposals. Body: `{ "records": { "M-01": { "confirmation": "confirmed", "revision": "<the record's revision>" } } }`, each `confirmed`, `rejected` or `null`. Returns `409` when the record changed since it was loaded, and `400` for a record with `problems` (it can only be rejected) or a duplicate id |
@@ -596,6 +601,9 @@ prefix.
 | `PUT` | `/api/routines/system-cleanup` | Update System cleanup settings |
 | `POST` | `/api/routines/system-cleanup/preview` | What a cleanup run would do now. Optional `settings` to try. Nothing changes |
 | `POST` | `/api/routines/system-cleanup/run` | Run System cleanup now. Returns `201` |
+| `GET` | `/api/routines/meeting-digest` | The Meeting digest job: settings, schedule, last run, the open digest and the meeting queue |
+| `PUT` | `/api/routines/meeting-digest` | Update Meeting digest settings: `enabled`, `schedule`, `max_meetings` (1 to 20) |
+| `POST` | `/api/routines/meeting-digest/run` | Make a digest from the queue now. Returns `201` |
 | `POST` | `/api/routines` | Create a routine: `title`, `schedule`, `task`, and optionally `enabled` and `catch_up`. Returns `201` |
 | `GET` | `/api/routines/:id` | Get one routine |
 | `PATCH` | `/api/routines/:id` | Update any of the create fields |
@@ -635,6 +643,10 @@ POST /api/routines/system-cleanup/preview
 
 POST /api/routines/system-cleanup/run
 → 201 {"routine_id":"SYSTEM-CLEANUP","trigger":"manual","status":"ok","message":"…","context_update":…, …}
+
+POST /api/routines/meeting-digest/run
+→ 201 {"routine_id":"MEETING-DIGEST","trigger":"manual","status":"ok",
+       "message":"Made digest CU-2026-0012 from 2 meetings. Run the analyze command to get proposals.","context_update":"CU-2026-0012", …}
 
 POST /api/routines
 {"title":"Weekly ops summary",

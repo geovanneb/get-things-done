@@ -537,6 +537,8 @@ export interface ContextUpdate {
   /** Who opened it: 'system-cleanup' for the weekly memory review, null for an import. */
   origin: string | null;
   kind: string | null;
+  /** Meeting digest only: which queued meeting each file came from. */
+  digest_meetings?: DigestMeeting[];
   proposals: ContextUpdateProposal[];
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
@@ -641,6 +643,48 @@ export interface SystemCleanup {
   next_run_at: string | null;
   state: { checked_at?: string; last_run_at?: string; last_status?: 'ok' | 'error'; last_message?: string; last_context_update?: string };
   open_review: string | null;
+}
+
+export interface DigestMeeting {
+  id: string;
+  title: string;
+  meeting_date: string;
+  files: { source: string; file: string; sha256: string }[];
+}
+
+export interface QueuedMeeting {
+  id: string;
+  title: string;
+  meeting_date: string;
+  status: 'draft' | 'queued';
+  created_at: string;
+  updated_at: string;
+  queued_at: string | null;
+  files: { name: string; size: number; sha256: string }[];
+  /** Why it waits instead of going into the next digest; queue it again to clear. */
+  held: string | null;
+  in_digest: boolean;
+}
+
+export interface MeetingDigestSettings {
+  enabled: boolean;
+  schedule: RoutineSchedule;
+  max_meetings: number;
+  updated_at: string | null;
+}
+
+export interface MeetingDigest {
+  id: 'MEETING-DIGEST';
+  title: string;
+  settings: MeetingDigestSettings;
+  defaults: MeetingDigestSettings;
+  summary: string;
+  next_run_at: string | null;
+  state: { checked_at?: string; last_run_at?: string; last_status?: 'ok' | 'error'; last_message?: string; last_context_update?: string };
+  open_digest: string | null;
+  queue: QueuedMeeting[];
+  queue_problems: { id: string; reason: string }[];
+  max_meetings_limit: number;
 }
 
 export interface CleanupItem { type: CleanupRuleType; id: string; title: string; path: string; age_days: number; action: CleanupAction }

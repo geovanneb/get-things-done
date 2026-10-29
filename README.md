@@ -733,6 +733,35 @@ or delete permanently. A preview shows exactly what a run would do before you sa
 Tasks tagged `keep` are never touched, nor are context updates whose materials you kept
 or that hold a confirmed meeting record, and a run handles at most 200 items.
 
+### Meeting digest
+
+For meetings, choose **Add to the meeting digest** in the Import dialog instead of
+importing straight away: the transcript or notes go into a queue
+(`context-updates/meeting-queue/`, raw material like every update). A built-in
+**Meeting digest** routine (Routines page, settings in
+`.situation-board/routines/meeting-digest.json`) turns the queued meetings into one
+context update, tagged **Meeting digest**, every working day at 18:00 by default. Run
+`/gtd-context-analyze` on it, and the agent drafts one meeting record per meeting and
+proposes context changes, as for any update. No AI runs by itself.
+
+- A day without queued meetings makes nothing. Missed days (the computer was off) make
+  one digest the next time the dashboard starts; a digest covering several days says
+  so in its title.
+- While a digest waits for your review, no new one starts: meetings wait in the queue
+  instead of piling up as stale digests. **Make digest now** does not wait for the
+  schedule.
+- The oldest meetings go first, at most 10 per digest (up to 20); the rest wait.
+- Each meeting keeps its own date, and the digest records which queued meeting each
+  file came from. A meeting whose file changed since it was queued stays in the queue,
+  with the reason.
+- A meeting leaves the queue only once the digest holds all its files, checked by hash;
+  until then the digest cannot be changed or deleted. If the dashboard stops halfway,
+  the next run finishes or undoes the digest, so no meeting is lost or digested twice.
+  A digest deleted by hand before its meetings left the queue puts them **on hold**:
+  they stay, and go into a digest only after you choose **Queue again**.
+- A meeting removed from the queue, and drafts left half-uploaded for a day, are
+  deleted with their files.
+
 ---
 
 ## What is yours and what is the app's

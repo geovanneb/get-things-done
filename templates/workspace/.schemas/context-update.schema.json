@@ -62,8 +62,23 @@
     "id": {"type": "string", "pattern": "^CU-\\d{4}-\\d{4}$"},
     "type": {"type": "string", "enum": ["context-update"]},
     "title": {"type": "string", "minLength": 1, "maxLength": 200},
-    "origin": {"type": "string", "description": "Who opened the update. Set by the dashboard only: system-cleanup for the weekly memory review. Absent for material the executive imported. Never set or change it."},
-    "kind": {"type": "string", "enum": ["memory-review"], "description": "memory-review: no new material; review the existing context and stakeholders (see the analyze command). Set by the dashboard only."},
+    "origin": {"type": "string", "description": "Who opened the update. Set by the dashboard only: system-cleanup for the weekly memory review, meetings for a meeting digest. Absent for material the executive imported. Never set or change it."},
+    "kind": {"type": "string", "enum": ["memory-review", "daily-digest"], "description": "memory-review: no new material; review the existing context and stakeholders. daily-digest: meetings from the meeting queue, listed in materials/meetings.md; one meeting record per meeting (see the analyze command). Set by the dashboard only."},
+    "digest_meetings": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "Meeting digest only: which queued meeting each file came from. Written by the dashboard; never set or change it.",
+      "items": {
+        "type": "object",
+        "required": ["id", "meeting_date", "files"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^MQ-\\d{4}-\\d{4}$"},
+          "title": {"type": "string"},
+          "meeting_date": {"type": "string", "format": "date"},
+          "files": {"type": "array", "items": {"type": "object", "required": ["file"], "properties": {"source": {"type": "string"}, "file": {"type": "string"}, "sha256": {"type": "string"}}}}
+        }
+      }
+    },
     "status": {
       "type": "string",
       "enum": ["ready", "analyzing", "in_review", "approved", "applying", "done"],

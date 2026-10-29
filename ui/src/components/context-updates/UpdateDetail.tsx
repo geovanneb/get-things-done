@@ -473,7 +473,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
           </span>
         </div>
         <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {u.kind === 'memory-review' ? 'review of your existing memory' : <>material from {u.source_date || 'unknown date'}</>} · {u.origin === 'system-cleanup' ? 'opened by System cleanup' : 'imported'} {formatRelativeDate(u.created_at)}
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {u.kind === 'memory-review' ? 'review of your existing memory' : <>material from {u.source_date || 'unknown date'}</>} · {u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}
           {u.applied_at && <> · finished {formatRelativeDate(u.applied_at)}</>}
         </div>
       </div>

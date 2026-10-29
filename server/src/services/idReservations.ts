@@ -21,7 +21,7 @@ async function readAll(): Promise<Record<string, number>> {
   try {
     const parsed = JSON.parse(await fsp.readFile(file(), 'utf-8')) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
-      || Object.entries(parsed).some(([key, value]) => !/^(TASK|CU)-\d{4}$/.test(key)
+      || Object.entries(parsed).some(([key, value]) => !/^(TASK|CU|MQ)-\d{4}$/.test(key)
         || typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)) {
       throw new Error('invalid reservation data');
     }
@@ -37,12 +37,12 @@ export async function reservedSequence(prefix: string): Promise<number> {
   return (await readAll())[prefix.replace(/-$/, '')] ?? 0;
 }
 
-/** Reserves ids like TASK-2026-0050 or CU-2026-0003. Other shapes are ignored. */
+/** Reserves ids like TASK-2026-0050, CU-2026-0003 or MQ-2026-0007 (a queued meeting). Other shapes are ignored. */
 export async function reserveIds(ids: string[]): Promise<void> {
   const all = await readAll();
   let changed = false;
   for (const id of ids) {
-    const m = id.match(/^((?:TASK|CU)-\d{4})-(\d{4})$/);
+    const m = id.match(/^((?:TASK|CU|MQ)-\d{4})-(\d{4})$/);
     if (!m) continue;
     const seq = Number(m[2]);
     if ((all[m[1]!] ?? 0) < seq) { all[m[1]!] = seq; changed = true; }
