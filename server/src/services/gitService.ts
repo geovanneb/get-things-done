@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { simpleGit, SimpleGit } from 'simple-git';
+// simple-git's own list of guarded variables (GIT_*, EDITOR, PAGER, SSH_ASKPASS...). Same version simple-git pins.
+import { isGitEnvKey, vulnerabilityCheck } from '@simple-git/argv-parser';
 import { GitStatus, GitDiff } from '../types';
 import { WorkspaceService } from './workspace';
 
@@ -20,10 +22,50 @@ export class GitUnavailableError extends Error {
 const RECHECK_MISSING_MS = 60_000;
 let installedCheck: { installed: boolean; checkedAt: number } | null = null;
 
+/** A git program supplied by the host, for example the portable git bundled in the desktop app. */
+export interface GitRuntime {
+  /** Absolute path of the git executable. */
+  binary: string;
+  /** Variables that program needs (GIT_EXEC_PATH and similar). Added on top of the process environment. */
+  env?: Record<string, string>;
+}
+
+let runtime: GitRuntime | null = null;
+
+/** Use this git instead of the `git` on PATH; null goes back to PATH. Set by the host at startup, never per request. */
+export function useGitRuntime(next: GitRuntime | null): void {
+  runtime = next;
+  installedCheck = null;
+}
+
+function createGit(baseDir?: string): SimpleGit {
+  if (!runtime) return baseDir ? simpleGit(baseDir) : simpleGit();
+  const env = runtime.env ?? {};
+  // simple-git refuses variables such as GIT_EXEC_PATH unless their category is allowed. Allow exactly the
+  // categories the host's own variables need (as simple-git classifies them), nothing more.
+  const hostCategories = Object.fromEntries([...vulnerabilityCheck([], env)].map((issue) => [issue.category, true]));
+  const git = simpleGit({
+    ...(baseDir ? { baseDir } : {}),
+    binary: runtime.binary,
+    // Installed apps live in paths with spaces ("Get Things Done.app"), which simple-git refuses by default.
+    // Safe here: the path and the variables come from the host, not from a request.
+    unsafe: { ...hostCategories, allowUnsafeCustomBinary: true },
+    // simple-git drops GIT_* variables unless they are named here; the bundled git needs its own.
+    allowEnvironment: Object.keys(env),
+  });
+  if (!Object.keys(env).length) return git;
+  // Passing an environment makes every variable in it explicit, and simple-git refuses explicit guarded ones.
+  // Without an environment it silently drops the inherited ones (an editor's GIT_EDITOR, EDITOR...), so do the same.
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !isGitEnvKey(key.toLowerCase().trim())),
+  );
+  return git.env({ ...inherited, ...env });
+}
+
 export class GitService {
   private getGit(): SimpleGit {
     const workspacePath = workspaceService.getWorkspacePath();
-    return simpleGit(workspacePath);
+    return createGit(workspacePath);
   }
 
   /** Whether a git program can be run. Git is optional: the dashboard works without it. */
@@ -33,7 +75,7 @@ export class GitService {
     }
     let installed: boolean;
     try {
-      installed = (await simpleGit().version()).installed;
+      installed = (await createGit().version()).installed;
     } catch {
       installed = false;
     }
@@ -132,7 +174,8 @@ export class GitService {
 
   async stageFile(filePath: string): Promise<void> {
     const git = await this.requireGit();
-    await git.add(filePath);
+    // `--` so a file name is never read as an option.
+    await git.raw(['add', '--', filePath]);
   }
 
   async commit(message: string): Promise<void> {
