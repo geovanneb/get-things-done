@@ -527,9 +527,9 @@ export interface ContextUpdate {
   summary: string;
   notes: string;
   materials: { name: string; size: number; type: string }[];
-  /** Readable copies the dashboard made from WebVTT transcripts. */
+  /** Readable copies the dashboard made from WebVTT transcripts (`.transcript.md`) and Word documents (`.text.md`). */
   /** `current` (detail only): both files still match the recorded hashes. */
-  transcripts: { file: string; source: string; complete: boolean; current?: boolean }[];
+  transcripts: { file: string; source: string; complete: boolean; kind?: 'webvtt' | 'docx'; current?: boolean }[];
   /** Transcripts the dashboard could not make a readable copy of, with the reason. */
   transcript_problems: { source: string; reason: string }[];
   /** The user keeps materials/ after the update is done, until they release it. */

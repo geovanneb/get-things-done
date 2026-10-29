@@ -446,6 +446,17 @@ the copy is edited afterwards, the copy is marked outdated and the agent reads t
 original. To make a copy
 again, remove the original and add it again. The same file twice in one update is
 refused.
+
+A **Word document** (`.docx`, for example the Word export of a Teams transcript) gets a
+readable text copy, `<name>.text.md`: the paragraphs of its body as written, speaker
+names included as they appear. Tracked deletions and field instructions are left out
+(a field shows its result), and headers, footers, comments and footnotes are not part
+of the body. Only plain text is taken as complete: a document with tables, pictures,
+embedded objects, text boxes, symbols, alternative or imported content, or anything
+else the reader does not know gets a copy marked incomplete, naming what is missing,
+so the agent reads the original as well. A damaged or ambiguous package or malformed
+XML gets no copy, and an encrypted file (for example one with a sensitivity label) is
+not read: either is saved alone, with the reason shown.
 - **Date of the material**: when the meeting happened or the deck was shared, not
   today. The agent uses it to tell newer facts from older ones, so an old deck never
   overwrites something more recent.

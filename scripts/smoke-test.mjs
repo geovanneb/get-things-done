@@ -537,6 +537,23 @@ try {
       runnerStatus.id === 'claude-code' && typeof runnerStatus.installed === 'boolean' && Array.isArray(runnerStatus.problems)
       && notReady.status === 409 && notApproved.status === 409 && badCommand.status === 400 && noRun === null,
       `installed=${runnerStatus.installed} notReady=${notReady.status} notApproved=${notApproved.status} bad=${badCommand.status}`);
+    // The smallest fictional .docx: one stored (uncompressed) word/document.xml.
+    const docXml = Buffer.from('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Fictional Speaker 0:03</w:t></w:r></w:p><w:p><w:r><w:t>Fictional words.</w:t></w:r></w:p></w:body></w:document>');
+    const docName = Buffer.from('word/document.xml');
+    let docCrc = 0xffffffff;
+    for (const byte of docXml) { docCrc ^= byte; for (let k = 0; k < 8; k++) docCrc = docCrc & 1 ? 0xedb88320 ^ (docCrc >>> 1) : docCrc >>> 1; }
+    docCrc = (docCrc ^ 0xffffffff) >>> 0;
+    const docLocal = Buffer.alloc(30); docLocal.writeUInt32LE(0x04034b50, 0); docLocal.writeUInt32LE(docCrc, 14); docLocal.writeUInt32LE(docXml.length, 18); docLocal.writeUInt32LE(docXml.length, 22); docLocal.writeUInt16LE(docName.length, 26);
+    const docCentral = Buffer.alloc(46); docCentral.writeUInt32LE(0x02014b50, 0); docCentral.writeUInt32LE(docCrc, 16); docCentral.writeUInt32LE(docXml.length, 20); docCentral.writeUInt32LE(docXml.length, 24); docCentral.writeUInt16LE(docName.length, 28);
+    const docEnd = Buffer.alloc(22); docEnd.writeUInt32LE(0x06054b50, 0); docEnd.writeUInt16LE(1, 8); docEnd.writeUInt16LE(1, 10); docEnd.writeUInt32LE(46 + docName.length, 12); docEnd.writeUInt32LE(30 + docName.length + docXml.length, 16);
+    const docForm = new FormData();
+    docForm.append('file', new Blob([Buffer.concat([docLocal, docName, docXml, docCentral, docName, docEnd])]), 'sync.docx');
+    const docUp = await fetch(`${base}/api/context-updates/${vttUpdate.id}/materials`, { method: 'POST', body: docForm });
+    const docSaved = await docUp.json();
+    const docCopy = docSaved.transcript ? await (await fetch(`${base}/api/context-updates/${vttUpdate.id}/materials/${docSaved.transcript}`)).text() : '';
+    check('a Word document gets a readable text copy next to it',
+      docUp.status === 201 && docSaved.transcript === 'sync.text.md' && docSaved.transcript_complete === true && docCopy.includes('  Fictional Speaker 0:03\n  Fictional words.'),
+      `up=${docUp.status} copy=${docSaved.transcript}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }
