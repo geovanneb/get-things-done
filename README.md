@@ -495,6 +495,19 @@ listed too, instead of being guessed at.
 
 The dashboard updates by itself while the agent works.
 
+**Or run it from the dashboard.** If Claude Code is installed and signed in with your
+Claude account, a ready update has **Run analysis with Claude Code**. The dashboard runs
+the same command in the background, with your Claude Code and your Claude plan (no API
+key), under this workspace's own permission rules, as when you run it yourself: with the
+rules the app installs it can write into `context-updates/` and `tasks/`, never into
+`context/`, `stakeholders/` or your profile. Your personal Claude Code settings, hooks
+and MCP servers are left out of the run. Before it starts, the dashboard checks that
+Claude Code is signed in with a Claude plan (not an API account), that the workspace sets
+no API key, and that Claude Code trusts the workspace folder: the first time, open a
+terminal in the workspace folder, run `claude` once and accept "trust this folder". One
+analysis runs at a time, the update is locked while it runs, and **Stop** ends it with
+everything it started.
+
 ### 3. Review
 
 Open the update. Each proposal shows:

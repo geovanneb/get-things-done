@@ -95,6 +95,15 @@ function hasCommand(command: string, dirs: string[]): boolean {
   return dirs.some((dir) => names.some((name) => isExecutable(path.join(dir, name))));
 }
 
+/** The full path of a program, searched like detectAiTools does, or null when it is not installed. */
+export function findCommand(command: string, dirs: string[] = searchDirs()): string | null {
+  const names = process.platform === 'win32'
+    ? (process.env['PATHEXT'] ?? '.EXE;.CMD;.BAT').split(';').filter(Boolean).map((ext) => command + ext)
+    : [command];
+  for (const dir of dirs) for (const name of names) if (isExecutable(path.join(dir, name))) return path.join(dir, name);
+  return null;
+}
+
 /**
  * Which assistants are on this computer. Only looks for the program files; nothing is run.
  * `dirs` and `appExists` are for tests; by default PATH, the usual install folders and the real app folders are used.
