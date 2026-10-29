@@ -20,6 +20,15 @@ updates:
       production-minor:
         dependency-type: production
         update-types: [minor, patch]
+  # The desktop app has its own lockfile, so the web and CLI install never downloads Electron.
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: chore(deps)
   - package-ecosystem: github-actions
     directory: /
     schedule:

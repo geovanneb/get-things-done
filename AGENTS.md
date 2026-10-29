@@ -12,7 +12,7 @@ local ports, how that person works). They are git-ignored by default; never comm
 
 Get Things Done is a local CLI, an Express API and a React dashboard over a folder of
 Markdown files (the "workspace"). `src/cli/` is the `gtd` command, `server/` the API and
-file watcher, `ui/` the dashboard, `templates/` everything scaffolded into a user's
+file watcher, `ui/` the dashboard, `desktop/` the Electron shell of the desktop app, `templates/` everything scaffolded into a user's
 workspace, `scripts/` the demo seed and the smoke test.
 `server/src/services/scaffold.ts` creates and upgrades workspaces.
 

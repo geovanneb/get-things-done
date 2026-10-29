@@ -11,6 +11,7 @@ framework rewrite or a database migration.
 | --- | --- |
 | `src/cli/` | Commands, process lifecycle and local configuration |
 | `server/src/server.ts` | HTTP composition, listener and SSE; `startServer()` for any host (CLI entry, desktop shell) |
+| `desktop/` | Electron shell: starts the server with `startServer()` in a utility process, the window, tray and link rules |
 | `server/src/index.ts` | Process entry: reads env vars, starts the server, handles signals and exit |
 | `server/src/routes/` | HTTP inputs, status codes and response formats |
 | `server/src/services/` | Domain operations and workspace persistence |
