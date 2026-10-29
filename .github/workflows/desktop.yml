@@ -7,9 +7,8 @@ name: Desktop app
 # them, builds are unsigned test builds (the Mac app ad-hoc signed so it starts), kept as workflow artifacts.
 # Release runs (called from release.yml with a tag):
 # - macOS must be signed and notarized, or the release fails and stays a draft.
-# - Windows is signed through SignPath when it is configured. SignPath's free program needs a person to
-#   approve every signing request, so the job waits for that approval. Without SignPath, the Windows
-#   installer is attached unsigned as "unsigned-preview", with no update manifest (no auto-update).
+# - Windows is not signed yet: the installer is attached unsigned as "unsigned-preview", with no update
+#   manifest (no auto-update). SignPath signing comes later (see desktop/README.md).
 on:
   pull_request:
     paths:
@@ -49,8 +48,7 @@ jobs:
   package:
     name: Package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Up to two SignPath approvals of 3 hours each on Windows release runs.
-    timeout-minutes: ${{ inputs.release_tag && matrix.os == 'windows-latest' && 420 || 45 }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -60,7 +58,6 @@ jobs:
     env:
       # Signing turns on per platform when its secrets exist. On pull requests from forks secrets are empty.
       MAC_SIGNING: ${{ (inputs.release_tag != '' || inputs.sign == true) && startsWith(matrix.os, 'macos-') && secrets.MAC_CERT_P12 != '' && 'true' || 'false' }}
-      WIN_SIGNING: ${{ inputs.release_tag != '' && matrix.os == 'windows-latest' && secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -100,7 +97,6 @@ jobs:
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
 
       - name: Build installers
-        if: env.WIN_SIGNING != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -135,89 +131,9 @@ jobs:
           APPLE_API_ISSUER: ${{ env.MAC_SIGNING == 'true' && secrets.APPLE_API_ISSUER || '' }}
 
 
-      # ---- Windows signed through SignPath: app files first, then the installer built from them ----
-      - name: Build the Windows app (unsigned, unpacked)
-        if: env.WIN_SIGNING == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${SIGNPATH_PROJECT_SLUG:?Missing the SIGNPATH_PROJECT_SLUG variable}" "${SIGNPATH_POLICY_SLUG:?Missing the SIGNPATH_POLICY_SLUG variable}"
-          : "${SIGNPATH_PUBLISHER_NAME:?Missing the SIGNPATH_PUBLISHER_NAME variable}"
-          npm pkg set gtdSignedRelease=true --json --prefix desktop
-          npm run build --prefix desktop
-          npm run stage --prefix desktop
-          # The installed app checks that each update is signed by this publisher (the certificate's subject).
-          # electron-builder normally reads it from the certificate it signs with; SignPath signs later.
-          cd desktop && npx electron-builder --dir --win --publish never -c.win.publisherName="$SIGNPATH_PUBLISHER_NAME"
-        env:
-          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          SIGNPATH_POLICY_SLUG: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          SIGNPATH_PUBLISHER_NAME: ${{ vars.SIGNPATH_PUBLISHER_NAME }}
-      - id: unsigned-app
-        if: env.WIN_SIGNING == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-app-unsigned
-          path: desktop/release/win-unpacked
-          if-no-files-found: error
-          retention-days: 2
-      - name: Sign the app files (waits for approval in SignPath)
-        if: env.WIN_SIGNING == 'true'
-        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_APP_CONFIGURATION || 'app' }}
-          github-artifact-id: ${{ steps.unsigned-app.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 10800
-          output-artifact-directory: desktop/release/win-unpacked-signed
-      - name: Build the Windows installer from the signed app
-        if: env.WIN_SIGNING == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd desktop/release
-          rm -rf win-unpacked && mv win-unpacked-signed win-unpacked
-          cd .. && npx electron-builder --prepackaged release/win-unpacked --win nsis --publish never -c.win.publisherName="$SIGNPATH_PUBLISHER_NAME"
-        env:
-          SIGNPATH_PUBLISHER_NAME: ${{ vars.SIGNPATH_PUBLISHER_NAME }}
-      - id: unsigned-installer
-        if: env.WIN_SIGNING == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer-unsigned
-          path: desktop/release/*.exe
-          if-no-files-found: error
-          retention-days: 2
-      - name: Sign the installer (waits for approval in SignPath)
-        if: env.WIN_SIGNING == 'true'
-        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_CONFIGURATION || 'installer' }}
-          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 10800
-          output-artifact-directory: desktop/release/installer-signed
-      - name: Use the signed installer in the update manifest
-        if: env.WIN_SIGNING == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp desktop/release/installer-signed/*.exe desktop/release/
-          rm -rf desktop/release/installer-signed
-          # Signing changes the file, so its hash in latest.yml must be recalculated.
-          node desktop/scripts/win-update-manifest.mjs
-
-      # ---- Windows without SignPath: attached to releases as an unsigned preview ----
+      # ---- Windows: attached to releases as an unsigned preview until Windows signing exists ----
       - name: Mark the unsigned Windows installer as a preview
-        if: inputs.release_tag && matrix.os == 'windows-latest' && env.WIN_SIGNING != 'true'
+        if: inputs.release_tag && matrix.os == 'windows-latest'
         shell: bash
         run: |
           set -euo pipefail
@@ -226,22 +142,18 @@ jobs:
           # No update manifest: an unsigned build never offers or receives updates.
           rm -f latest.yml *.blockmap
 
-      - name: Check the signature
-        if: env.MAC_SIGNING == 'true' || env.WIN_SIGNING == 'true'
+      - name: Check the Mac signature and notarization
+        if: env.MAC_SIGNING == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$RUNNER_OS" = 'macOS' ]; then
-            app="$(ls -d desktop/release/mac*/*.app | head -1)"
-            codesign --verify --deep --strict --verbose=2 "$app"
-            spctl --assess --type execute --verbose "$app"
-            xcrun stapler validate "$app"
-            for dmg in desktop/release/*.dmg; do
-              codesign --verify --strict --verbose=2 "$dmg"
-            done
-          else
-            powershell -Command "Get-Item 'desktop/release/win-unpacked/Get Things Done.exe', 'desktop/release/*.exe' | ForEach-Object { if ((Get-AuthenticodeSignature \$_).Status -ne 'Valid') { exit 1 } }"
-          fi
+          app="$(ls -d desktop/release/mac*/*.app | head -1)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose "$app"
+          xcrun stapler validate "$app"
+          for dmg in desktop/release/*.dmg; do
+            codesign --verify --strict --verbose=2 "$dmg"
+          done
 
       - name: Smoke-test the packaged app
         run: npm run smoke --prefix desktop

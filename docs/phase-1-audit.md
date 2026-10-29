@@ -88,7 +88,7 @@ Before marking Phase 1 complete:
 
 1. Merge reviewed changes only after CI on their final commits passes; keep #141 and release
    plumbing independently reviewable. Neither PR requires the other's source changes.
-2. Configure the Apple account and repository secrets described in `desktop/README.md`. Windows: Azure Trusted Signing is not available to individuals in Japan; SignPath Foundation was chosen. Until it is approved, releases attach the Windows installer as an unsigned preview without auto-update. SignPath's free program needs a manual approval for every signing request, so Windows signing is never unattended.
+2. Configure the Apple account and repository secrets described in `desktop/README.md`. Windows: Azure Trusted Signing is not available to individuals in Japan; SignPath Foundation was chosen. Until it is approved, releases attach the Windows installer as an unsigned preview without auto-update. SignPath's free program needs a manual approval for every signing request, so Windows signing is never unattended. The SignPath step itself is not in the workflow yet: the repository allows only GitHub-owned actions, and a workflow that references SignPath's action does not start at all (seen on #142). It comes in a follow-up together with that allow-list entry, once SignPath approves the project.
 3. Run a signed tag release, verify all installer signatures/notarization and update manifests.
 4. Install on clean Apple Silicon and Intel Macs and Windows 10/11; reach setup and a working
    dashboard without extra runtimes. Confirm the actual Gatekeeper/SmartScreen experience.

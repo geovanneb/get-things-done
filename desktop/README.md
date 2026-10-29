@@ -76,15 +76,15 @@ the Developer ID certificate and notarized; without the secrets below the releas
 a draft. The workflow signs the apps and DMGs, then checks the signature, the stapled notarization
 ticket and the Gatekeeper assessment.
 
-**Windows.** Two modes:
-- *SignPath configured:* the app files are submitted to SignPath, then the NSIS installer built
-  from the signed files, and `scripts/win-update-manifest.mjs` recalculates `latest.yml` for the
-  signed installer. SignPath's free program for open source needs a person to **approve every
-  signing request** in SignPath, so each request waits up to 3 hours for that approval. If it
-  times out, the release stays a draft: approve in SignPath, then re-run the failed job.
-- *Not configured:* the installer is attached unsigned as `…-unsigned-preview.exe`, without an
-  update manifest, and the release notes explain the SmartScreen warning. Preview builds never
-  check for or receive updates.
+**Windows (preview for now).** Windows installers are not signed yet. A release attaches the
+installer as `…-unsigned-preview.exe` without an update manifest, and the release notes explain
+the SmartScreen warning ("More info", then "Run anyway"). Preview builds never check for or
+receive updates. Azure Trusted Signing is not available to individuals in Japan, so Windows
+signing will use SignPath (Foundation program) once it is approved. Its free program needs a
+person to approve every signing request, so Windows signing will never be unattended. Adding it
+needs a follow-up change to this workflow and one repository setting: Actions currently allow only
+GitHub's own actions, and SignPath signs through its own action
+(`signpath/github-action-submit-signing-request`), which must be added to the allowed list.
 
 **Test the Apple setup before tagging:** Actions → *Desktop app* → *Run workflow*, check **sign**.
 The Mac builds are signed, notarized and checked exactly as in a release, and kept as workflow
@@ -99,15 +99,6 @@ Repository **secrets** (Settings → Secrets and variables → Actions). Never c
 | Mac | `APPLE_API_KEY` | App Store Connect API key for notarization (contents of the `.p8` file) |
 | Mac | `APPLE_API_KEY_ID` | That key's ID |
 | Mac | `APPLE_API_ISSUER` | The issuer ID shown above the keys list |
-| Windows | `SIGNPATH_API_TOKEN` | API token of a SignPath CI user allowed to submit to the signing policy |
-
-Repository **variables** for Windows (SignPath): `SIGNPATH_ORGANIZATION_ID`,
-`SIGNPATH_PROJECT_SLUG`, `SIGNPATH_POLICY_SLUG` (the release signing policy) and
-`SIGNPATH_PUBLISHER_NAME` (the exact subject name of the signing certificate; the installed app
-checks that every update is signed by it). Optional: `SIGNPATH_APP_CONFIGURATION` and
-`SIGNPATH_INSTALLER_CONFIGURATION`, the artifact configuration slugs, by default `app` (all
-`.exe` and `.dll` files of the unpacked app, deep) and `installer` (the single setup `.exe`).
-Windows signing turns on when `SIGNPATH_API_TOKEN` and `SIGNPATH_ORGANIZATION_ID` are set.
 
 Apple Silicon uses the `latest-arm64` update channel; Intel Mac and Windows use `latest`, so the
 two Mac manifests cannot overwrite each other. `gtdSignedRelease: true` is embedded only in signed
