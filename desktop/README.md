@@ -66,9 +66,12 @@ npm run smoke --prefix desktop   # start the packaged app as a new user would an
 
 ## Releases and signing
 
-A version tag runs `release.yml`. After build and test verification, the desktop workflow
-(`desktop.yml`) runs in parallel with npm publishing. Installers go to a **draft** GitHub release,
-which becomes public only after both the desktop and npm jobs succeed. The desktop version is set
+A version tag runs `release.yml` in this order: build and test, then the desktop workflow
+(`desktop.yml`), which builds, signs and checks the installers and attaches them to a **draft**
+GitHub release, then npm publishing (after approval in the `npm` environment), and only then the
+release becomes public. npm versions cannot be reused, so nothing reaches npm unless the signed
+installers are ready. If signing fails, npm is untouched: re-run the failed job after fixing the
+setup (secrets, certificates), or release a code fix as the next patch version. The desktop version is set
 from the tag. PR, `main` and manual desktop builds stay unsigned and never receive credentials.
 
 **macOS (required for a release).** Both Mac builds (Apple Silicon and Intel) must be signed with
