@@ -101,6 +101,21 @@ jobs:
           if [ ! -s notes.md ]; then
             echo "::warning::No CHANGELOG.md entry for $VERSION, using generated notes only."
           fi
+      - name: Explain an unsigned Windows preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The desktop job attaches the Windows installer unsigned while Windows signing is not set up.
+          if gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' 2>/dev/null | grep -q -- '-unsigned-preview\.exe$'; then
+            {
+              echo
+              echo '### Windows: preview installer'
+              echo
+              echo 'The Windows installer is not signed yet, so Windows SmartScreen shows "Windows protected your PC".'
+              echo 'Choose **More info**, then **Run anyway**. This version does not update itself; download the next one from this page.'
+              echo 'The Mac installers are signed and notarized by Apple.'
+            } >> notes.md
+          fi
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -66,36 +66,52 @@ npm run smoke --prefix desktop   # start the packaged app as a new user would an
 
 ## Releases and signing
 
-A version tag runs `release.yml`: the reusable desktop workflow starts after build/test verification, in parallel with npm
-publishing. Signed installers are uploaded to a draft GitHub release; the release becomes public
-only after both desktop and npm jobs succeed. Release builds require signing; missing credentials fail the desktop release job instead
-of publishing unsigned installers. PR, main and manual desktop builds remain unsigned, with no
-signing credentials passed to the build. Desktop's version is set from the validated release tag.
+A version tag runs `release.yml`. After build and test verification, the desktop workflow
+(`desktop.yml`) runs in parallel with npm publishing. Installers go to a **draft** GitHub release,
+which becomes public only after both the desktop and npm jobs succeed. The desktop version is set
+from the tag. PR, `main` and manual desktop builds stay unsigned and never receive credentials.
 
-Configure these **repository secrets** before the first desktop release:
+**macOS (required for a release).** Both Mac builds (Apple Silicon and Intel) must be signed with
+the Developer ID certificate and notarized; without the secrets below the release fails and stays
+a draft. The workflow signs the apps and DMGs, then checks the signature, the stapled notarization
+ticket and the Gatekeeper assessment.
+
+**Windows.** Two modes:
+- *SignPath configured:* the app files are submitted to SignPath, then the NSIS installer built
+  from the signed files, and `scripts/win-update-manifest.mjs` recalculates `latest.yml` for the
+  signed installer. SignPath's free program for open source needs a person to **approve every
+  signing request** in SignPath, so each request waits up to 3 hours for that approval. If it
+  times out, the release stays a draft: approve in SignPath, then re-run the failed job.
+- *Not configured:* the installer is attached unsigned as `…-unsigned-preview.exe`, without an
+  update manifest, and the release notes explain the SmartScreen warning. Preview builds never
+  check for or receive updates.
+
+**Test the Apple setup before tagging:** Actions → *Desktop app* → *Run workflow*, check **sign**.
+The Mac builds are signed, notarized and checked exactly as in a release, and kept as workflow
+artifacts; nothing is published to GitHub Releases or npm.
+
+Repository **secrets** (Settings → Secrets and variables → Actions). Never commit any of these.
 
 | Platform | Secret | Value |
 | --- | --- | --- |
-| Mac | `MAC_CERT_P12` | Base64 Developer ID Application certificate with its private key (.p12) |
-| Mac | `MAC_CERT_PASSWORD` | Certificate export password |
-| Mac | `APPLE_API_KEY` | App Store Connect notarization API key (.p8 contents) |
-| Mac | `APPLE_API_KEY_ID` | API key ID |
-| Mac | `APPLE_API_ISSUER` | API issuer ID |
-| Windows | `AZURE_TENANT_ID` | Microsoft Entra tenant ID |
-| Windows | `AZURE_CLIENT_ID` | App registration client ID |
-| Windows | `AZURE_CLIENT_SECRET` | Client secret for an identity permitted to sign with the certificate profile |
+| Mac | `MAC_CERT_P12` | Developer ID Application certificate with its private key, exported as `.p12`, base64-encoded |
+| Mac | `MAC_CERT_PASSWORD` | The `.p12` export password |
+| Mac | `APPLE_API_KEY` | App Store Connect API key for notarization (contents of the `.p8` file) |
+| Mac | `APPLE_API_KEY_ID` | That key's ID |
+| Mac | `APPLE_API_ISSUER` | The issuer ID shown above the keys list |
+| Windows | `SIGNPATH_API_TOKEN` | API token of a SignPath CI user allowed to submit to the signing policy |
 
-Configure Windows **repository variables** `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`,
-`AZURE_SIGNING_ENDPOINT` and `AZURE_PUBLISHER_NAME` (the exact certificate publisher).
-The publisher is also embedded in the updater configuration for signature verification.
-Never put certificates, private keys or client secrets in the repository.
+Repository **variables** for Windows (SignPath): `SIGNPATH_ORGANIZATION_ID`,
+`SIGNPATH_PROJECT_SLUG`, `SIGNPATH_POLICY_SLUG` (the release signing policy) and
+`SIGNPATH_PUBLISHER_NAME` (the exact subject name of the signing certificate; the installed app
+checks that every update is signed by it). Optional: `SIGNPATH_APP_CONFIGURATION` and
+`SIGNPATH_INSTALLER_CONFIGURATION`, the artifact configuration slugs, by default `app` (all
+`.exe` and `.dll` files of the unpacked app, deep) and `installer` (the single setup `.exe`).
+Windows signing turns on when `SIGNPATH_API_TOKEN` and `SIGNPATH_ORGANIZATION_ID` are set.
 
-The workflow forces signing, signs both Mac apps and DMG files, checks signatures, stapled app notarization and Gatekeeper assessment, checks Windows
-app and installer signatures, and smoke-tests each packaged app before attaching installers,
-blockmaps and update manifests to the GitHub release. Apple Silicon uses the `latest-arm64`
-channel; Intel Mac and Windows use `latest`. The Mac manifests have distinct filenames so one
-architecture cannot overwrite the other's feed. `gtdSignedRelease: true` is embedded only in
-signed release builds. Unsigned and source builds do not request updates.
+Apple Silicon uses the `latest-arm64` update channel; Intel Mac and Windows use `latest`, so the
+two Mac manifests cannot overwrite each other. `gtdSignedRelease: true` is embedded only in signed
+builds; unsigned, preview and source builds do not request updates.
 
 Signed installed apps check GitHub Releases at startup and every six hours. A downloaded update
 adds a tray restart action and offers Restart now / Later. Restart stops the server before handing
@@ -104,5 +120,6 @@ control to the installer; Later leaves installation until quit. Downgrades are d
 
 Before declaring Phase 1 complete, configure the accounts, run the signed workflow, install on
 clean Mac (both architectures) and Windows 10/11 machines, and exercise an update between two
-signed versions. Signing alone does not prove that Windows SmartScreen shows no warning.
+signed versions. Signing alone does not prove that Windows SmartScreen shows no warning: a new
+certificate or publisher builds reputation over time.
 See [the Phase 1 audit](../docs/phase-1-audit.md) for current evidence and remaining gates.
