@@ -10,7 +10,8 @@ framework rewrite or a database migration.
 | Location | Responsibility |
 | --- | --- |
 | `src/cli/` | Commands, process lifecycle and local configuration |
-| `server/src/index.ts` | HTTP composition, listener, SSE and shutdown |
+| `server/src/server.ts` | HTTP composition, listener and SSE; `startServer()` for any host (CLI entry, desktop shell) |
+| `server/src/index.ts` | Process entry: reads env vars, starts the server, handles signals and exit |
 | `server/src/routes/` | HTTP inputs, status codes and response formats |
 | `server/src/services/` | Domain operations and workspace persistence |
 | `server/src/utils/` | Shared parsing, path, file response and write boundaries |
