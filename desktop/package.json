@@ -2,7 +2,7 @@
   "name": "@bertonha/getthingsdone-desktop",
   "productName": "Get Things Done",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Get Things Done desktop app (Electron shell around the same server and dashboard)",
   "main": "dist/main.js",
   "scripts": {
