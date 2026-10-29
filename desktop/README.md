@@ -46,9 +46,29 @@ If your npm config has `ignore-scripts=true`, the two downloads do not run on in
 `desktop/` has its own `package.json` and lockfile on purpose: installing the CLI or running
 CI for the web app never downloads Electron.
 
+## Build the installers
+
+```bash
+npm run build                    # repo root: CLI, server and dashboard into dist/
+npm run dist --prefix desktop    # installers for this computer into desktop/release/
+npm run smoke --prefix desktop   # start the packaged app as a new user would and check it
+```
+
+- `npm run package --prefix desktop` builds only the unpacked app (faster, enough for the smoke test).
+- `scripts/stage-app.mjs` puts the server, dashboard and templates into the app exactly as
+  `npm install -g @bertonha/getthingsdone` lays them out: the repo is packed with `npm pack` and
+  installed with production dependencies only (no optional native modules, no install scripts).
+  The app runs that copy from its resources folder.
+- Each platform builds on its own machine: the portable git is downloaded for the computer that
+  runs `npm install`. CI does this in `.github/workflows/desktop.yml` (macOS on Apple Silicon and
+  Windows) and keeps the installers as build artifacts for 14 days.
+- The builds are not signed yet. The Mac app is ad-hoc signed so it starts, but macOS warns about
+  an unidentified developer (right-click, Open). Windows SmartScreen warns too. Signing,
+  notarization and auto-update come with item 9b in #123.
+
 ## Not here yet
 
-Signed installers with auto-update (item 9 in #123). First-run setup is part of the dashboard
+Signed and notarized installers with auto-update (item 9b in #123). First-run setup is part of the dashboard
 (`ui/src/views/SetupView.tsx`), so the desktop app and the browser share it. The portable
 git is downloaded for the platform that runs `npm install`, so installers must be built on each
 platform (item 9).

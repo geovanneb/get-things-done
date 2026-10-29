@@ -8,14 +8,70 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "npm run build && electron .",
-    "fetch-binaries": "node node_modules/electron/install.js && node node_modules/dugite/script/download-git.js"
+    "fetch-binaries": "node node_modules/electron/install.js && node node_modules/dugite/script/download-git.js",
+    "stage": "node scripts/stage-app.mjs",
+    "dist": "npm run build && npm run stage && electron-builder --publish never",
+    "package": "npm run build && npm run stage && electron-builder --dir --publish never",
+    "smoke": "node scripts/smoke-packaged.mjs"
   },
   "devDependencies": {
     "electron": "45.0.0",
+    "electron-builder": "26.17.0",
     "typescript": "^7.0.2"
   },
   "license": "MIT",
   "dependencies": {
     "dugite": "3.2.3"
-  }
+  },
+  "build": {
+    "appId": "io.github.geovanneb.getthingsdone",
+    "productName": "Get Things Done",
+    "directories": {
+      "output": "release",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "dist/**",
+      "assets/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/dugite/git/**"
+    ],
+    "extraResources": [
+      {
+        "from": "stage/gtd/node_modules",
+        "to": "gtd/node_modules"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "identity": "-"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "geovanneb",
+      "repo": "get-things-done"
+    }
+  },
+  "author": "Geovanne Bertonha"
 }

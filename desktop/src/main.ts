@@ -8,7 +8,11 @@ import { classifyLink } from './links';
 import { DEFAULT_PORT, findFreePort } from './port';
 
 const APP_NAME = 'Get Things Done';
-const appRoot = path.resolve(__dirname, '..', '..');
+// The server, dashboard and templates: the repo itself when run from source, or the copy staged into the app's
+// resources (scripts/stage-app.mjs), which has the same layout as `npm install -g @bertonha/getthingsdone`.
+const appRoot = app.isPackaged
+  ? path.join(process.resourcesPath, 'gtd', 'node_modules', '@bertonha', 'getthingsdone')
+  : path.resolve(__dirname, '..', '..');
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
