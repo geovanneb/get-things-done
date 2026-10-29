@@ -1,39 +1,55 @@
 name: Desktop app
 
 # Builds the Mac and Windows installers and starts each packaged app the way a new user would
-# (desktop/scripts/smoke-packaged.mjs). The installers are not signed yet (#123, item 9b): they are
-# build artifacts for testing, not releases.
+# (desktop/scripts/smoke-packaged.mjs).
+#
+# Signing is optional and switched on by secrets (see desktop/README.md, "Releases and signing"):
+# without them the builds are unsigned test builds (the Mac app ad-hoc signed so it starts) and are only
+# kept as workflow artifacts. Release runs (called from release.yml with a tag) attach an installer to
+# the GitHub release only when it was signed.
 on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'server/**'
+      - 'ui/**'
+      - 'src/**'
+      - 'templates/**'
+      - 'package*.json'
+      - '.github/workflows/release.yml'
       - '.github/workflows/desktop.yml'
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Tag of the GitHub release to attach signed installers to
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-${{ github.ref }}
-  cancel-in-progress: true
+  group: desktop-${{ inputs.release_tag || github.ref }}
+  cancel-in-progress: ${{ !inputs.release_tag }}
 
 jobs:
   package:
     name: Package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest is Apple Silicon; the portable git is downloaded for the machine that installs, so each
-        # platform builds on its own runner.
-        os: [macos-latest, windows-latest]
+        # macos-latest is Apple Silicon. The portable git is downloaded for the machine that installs,
+        # so each platform builds on its own runner.
+        os: [macos-latest, macos-15-intel, windows-latest]
     env:
-      # Unsigned builds: do not look for signing certificates in the keychain.
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Signing turns on per platform when its secrets exist. On pull requests from forks secrets are empty.
+      MAC_SIGNING: ${{ inputs.release_tag != '' && startsWith(matrix.os, 'macos-') && secrets.MAC_CERT_P12 != '' && 'true' || 'false' }}
+      WIN_SIGNING: ${{ inputs.release_tag != '' && matrix.os == 'windows-latest' && secrets.AZURE_CLIENT_SECRET != '' && vars.AZURE_SIGNING_ACCOUNT != '' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,9 +64,97 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm ci --prefix desktop
-      - run: npm run dist --prefix desktop
+
+      - name: Require signing configuration for releases
+        if: inputs.release_tag
+        shell: bash
+        run: |
+          if [ "$MAC_SIGNING" != 'true' ] && [ "$WIN_SIGNING" != 'true' ]; then
+            echo "::error::Release signing is not configured. See desktop/README.md."
+            exit 1
+          fi
+
+      - name: Use the release version
+        if: inputs.release_tag
+        shell: bash
+        run: npm pkg set "version=${RELEASE_TAG#v}" --prefix desktop
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+
+      - name: Prepare macOS notarization key
+        if: env.MAC_SIGNING == 'true'
+        shell: bash
+        run: |
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/apple-api-key.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/apple-api-key.p8" >> "$GITHUB_ENV"
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+
+      - name: Build installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$MAC_SIGNING" = 'true' ] || [ "$WIN_SIGNING" = 'true' ]; then
+            npm pkg set gtdSignedRelease=true --json --prefix desktop
+            args+=(-c.forceCodeSigning=true)
+          fi
+          # Separate channels avoid overwriting the Intel Mac manifest with the ARM manifest.
+          if [ "$RUNNER_OS" = 'macOS' ] && [ "$RUNNER_ARCH" = 'ARM64' ]; then
+            args+=(-c.publish.channel=latest-arm64 -c.extraMetadata.gtdUpdateChannel=latest-arm64)
+          fi
+          if [ "$MAC_SIGNING" != 'true' ] && [ "$RUNNER_OS" = 'macOS' ]; then
+            # No Developer ID: ad-hoc sign so the app starts. macOS still warns about an unidentified developer.
+            args+=(-c.mac.identity=-)
+          fi
+          if [ "$MAC_SIGNING" = 'true' ]; then
+            : "${CSC_LINK:?Missing MAC_CERT_P12}" "${APPLE_API_KEY_ID:?Missing APPLE_API_KEY_ID}" "${APPLE_API_ISSUER:?Missing APPLE_API_ISSUER}"
+            test -s "$APPLE_API_KEY"
+          fi
+          if [ "$WIN_SIGNING" = 'true' ]; then
+            : "${AZURE_TENANT_ID:?Missing AZURE_TENANT_ID}" "${AZURE_CLIENT_ID:?Missing AZURE_CLIENT_ID}" "${AZURE_CLIENT_SECRET:?Missing AZURE_CLIENT_SECRET}"
+            : "${AZURE_PUBLISHER_NAME:?Missing AZURE_PUBLISHER_NAME}" "${AZURE_SIGNING_ENDPOINT:?Missing AZURE_SIGNING_ENDPOINT}" "${AZURE_SIGNING_ACCOUNT:?Missing AZURE_SIGNING_ACCOUNT}" "${AZURE_CERT_PROFILE:?Missing AZURE_CERT_PROFILE}"
+            args+=(
+              -c.win.azureSignOptions.publisherName="$AZURE_PUBLISHER_NAME"
+              -c.win.azureSignOptions.endpoint="$AZURE_SIGNING_ENDPOINT"
+              -c.win.azureSignOptions.codeSigningAccountName="$AZURE_SIGNING_ACCOUNT"
+              -c.win.azureSignOptions.certificateProfileName="$AZURE_CERT_PROFILE"
+            )
+          fi
+          npm run build --prefix desktop
+          npm run stage --prefix desktop
+          cd desktop && npx electron-builder --publish never "${args[@]}"
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.MAC_SIGNING }}
+          # macOS: Developer ID certificate (base64 .p12) and notarization (App Store Connect API key).
+          CSC_LINK: ${{ env.MAC_SIGNING == 'true' && secrets.MAC_CERT_P12 || '' }}
+          CSC_KEY_PASSWORD: ${{ env.MAC_SIGNING == 'true' && secrets.MAC_CERT_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ env.MAC_SIGNING == 'true' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ env.MAC_SIGNING == 'true' && secrets.APPLE_API_ISSUER || '' }}
+          # Windows: Azure Trusted Signing through a Microsoft Entra app registration.
+          AZURE_TENANT_ID: ${{ env.WIN_SIGNING == 'true' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ env.WIN_SIGNING == 'true' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ env.WIN_SIGNING == 'true' && secrets.AZURE_CLIENT_SECRET || '' }}
+          AZURE_PUBLISHER_NAME: ${{ vars.AZURE_PUBLISHER_NAME }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERT_PROFILE: ${{ vars.AZURE_CERT_PROFILE }}
+
+      - name: Check the signature
+        if: env.MAC_SIGNING == 'true' || env.WIN_SIGNING == 'true'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = 'macOS' ]; then
+            app="$(ls -d desktop/release/mac*/*.app | head -1)"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            spctl --assess --type execute --verbose "$app"
+          else
+            powershell -Command "Get-Item 'desktop/release/win-unpacked/Get Things Done.exe', 'desktop/release/*.exe' | ForEach-Object { if ((Get-AuthenticodeSignature \$_).Status -ne 'Valid') { exit 1 } }"
+          fi
+
       - name: Smoke-test the packaged app
         run: npm run smoke --prefix desktop
+
       - uses: actions/upload-artifact@v7
         with:
           name: installers-${{ matrix.os }}
@@ -60,3 +164,45 @@ jobs:
             desktop/release/*.exe
           if-no-files-found: error
           retention-days: 14
+
+      # What a release needs, including the files electron-updater reads. Only signed builds qualify.
+      - uses: actions/upload-artifact@v7
+        if: inputs.release_tag && (env.MAC_SIGNING == 'true' || env.WIN_SIGNING == 'true')
+        with:
+          name: release-${{ matrix.os }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  attach:
+    name: Attach signed installers to the release
+    needs: package
+    if: inputs.release_tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Upload to the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          shopt -s nullglob
+          files=(release/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::notice::No signed installers yet, so nothing is attached to $RELEASE_TAG. Add the signing secrets (desktop/README.md)."
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"

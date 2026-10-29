@@ -11,8 +11,9 @@
     "fetch-binaries": "node node_modules/electron/install.js && node node_modules/dugite/script/download-git.js",
     "stage": "node scripts/stage-app.mjs",
     "dist": "npm run build && npm run stage && electron-builder --publish never",
-    "package": "npm run build && npm run stage && electron-builder --dir --publish never",
-    "smoke": "node scripts/smoke-packaged.mjs"
+    "package": "npm run build && npm run stage && electron-builder --dir --publish never -c.mac.identity=-",
+    "smoke": "node scripts/smoke-packaged.mjs",
+    "dist:unsigned": "npm run build && npm run stage && electron-builder --publish never -c.mac.identity=-"
   },
   "devDependencies": {
     "electron": "45.0.0",
@@ -21,7 +22,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "dugite": "3.2.3"
+    "dugite": "3.2.3",
+    "electron-updater": "6.8.10"
   },
   "build": {
     "appId": "io.github.geovanneb.getthingsdone",
@@ -50,7 +52,9 @@
         "zip"
       ],
       "category": "public.app-category.productivity",
-      "identity": "-"
+      "hardenedRuntime": true,
+      "entitlements": "build-resources/entitlements.mac.plist",
+      "entitlementsInherit": "build-resources/entitlements.mac.plist"
     },
     "win": {
       "target": [

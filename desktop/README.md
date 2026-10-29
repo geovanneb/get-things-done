@@ -50,7 +50,7 @@ CI for the web app never downloads Electron.
 
 ```bash
 npm run build                    # repo root: CLI, server and dashboard into dist/
-npm run dist --prefix desktop    # installers for this computer into desktop/release/
+npm run dist:unsigned --prefix desktop # test installers for this computer into desktop/release/
 npm run smoke --prefix desktop   # start the packaged app as a new user would and check it
 ```
 
@@ -59,16 +59,49 @@ npm run smoke --prefix desktop   # start the packaged app as a new user would an
   `npm install -g @bertonha/getthingsdone` lays them out: the repo is packed with `npm pack` and
   installed with production dependencies only (no optional native modules, no install scripts).
   The app runs that copy from its resources folder.
-- Each platform builds on its own machine: the portable git is downloaded for the computer that
-  runs `npm install`. CI does this in `.github/workflows/desktop.yml` (macOS on Apple Silicon and
-  Windows) and keeps the installers as build artifacts for 14 days.
-- The builds are not signed yet. The Mac app is ad-hoc signed so it starts, but macOS warns about
-  an unidentified developer (right-click, Open). Windows SmartScreen warns too. Signing,
-  notarization and auto-update come with item 9b in #123.
+- Each platform builds on its own machine: portable git is downloaded for the computer running
+  `npm install`. CI builds Apple Silicon, Intel Mac and Windows x64 installers and keeps test
+  artifacts for 14 days. Test builds are unsigned (ad-hoc signed on Mac), show OS warnings and
+  never check for updates.
 
-## Not here yet
+## Releases and signing
 
-Signed and notarized installers with auto-update (item 9b in #123). First-run setup is part of the dashboard
-(`ui/src/views/SetupView.tsx`), so the desktop app and the browser share it. The portable
-git is downloaded for the platform that runs `npm install`, so installers must be built on each
-platform (item 9).
+A version tag runs `release.yml`: the existing npm release is followed by the reusable desktop
+workflow. Release builds require signing; missing credentials fail the desktop release job instead
+of publishing unsigned installers. PR, main and manual desktop builds remain unsigned, with no
+signing credentials passed to the build. Desktop's version is set from the validated release tag.
+
+Configure these **repository secrets** before the first desktop release:
+
+| Platform | Secret | Value |
+| --- | --- | --- |
+| Mac | `MAC_CERT_P12` | Base64 Developer ID Application certificate with its private key (.p12) |
+| Mac | `MAC_CERT_PASSWORD` | Certificate export password |
+| Mac | `APPLE_API_KEY` | App Store Connect notarization API key (.p8 contents) |
+| Mac | `APPLE_API_KEY_ID` | API key ID |
+| Mac | `APPLE_API_ISSUER` | API issuer ID |
+| Windows | `AZURE_TENANT_ID` | Microsoft Entra tenant ID |
+| Windows | `AZURE_CLIENT_ID` | App registration client ID |
+| Windows | `AZURE_CLIENT_SECRET` | Client secret for an identity permitted to sign with the certificate profile |
+
+Configure Windows **repository variables** `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_PROFILE`,
+`AZURE_SIGNING_ENDPOINT` and `AZURE_PUBLISHER_NAME` (the exact certificate publisher).
+The publisher is also embedded in the updater configuration for signature verification.
+Never put certificates, private keys or client secrets in the repository.
+
+The workflow forces signing, checks Mac signatures and Gatekeeper assessment, checks Windows
+app and installer signatures, and smoke-tests each packaged app before attaching installers,
+blockmaps and update manifests to the GitHub release. Apple Silicon uses the `latest-arm64`
+channel; Intel Mac and Windows use `latest`. The Mac manifests have distinct filenames so one
+architecture cannot overwrite the other's feed. `gtdSignedRelease: true` is embedded only in
+signed release builds. Unsigned and source builds do not request updates.
+
+Signed installed apps check GitHub Releases at startup and every six hours. A downloaded update
+adds a tray restart action and offers Restart now / Later. Restart stops the server before handing
+control to the installer; Later leaves installation until quit. Downgrades are disabled.
+`GTD_DISABLE_UPDATES=1` disables checks for isolated smoke tests.
+
+Before declaring Phase 1 complete, configure the accounts, run the signed workflow, install on
+clean Mac (both architectures) and Windows 10/11 machines, and exercise an update between two
+signed versions. Signing alone does not prove that Windows SmartScreen shows no warning.
+See [the Phase 1 audit](../docs/phase-1-audit.md) for current evidence and remaining gates.

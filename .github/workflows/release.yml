@@ -110,3 +110,13 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes --verify-tag
           fi
+
+  desktop:
+    name: Release desktop installers
+    needs: github-release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    secrets: inherit

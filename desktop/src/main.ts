@@ -4,6 +4,7 @@ import { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, ut
 import * as fs from 'fs';
 import * as path from 'path';
 import { registerBridge } from './bridge';
+import { installNow, startUpdateChecks } from './updates';
 import { classifyLink } from './links';
 import { DEFAULT_PORT, findFreePort } from './port';
 
@@ -165,16 +166,22 @@ function createTray(): void {
   if (isMac) icon.setTemplateImage(true);
   tray = new Tray(icon);
   tray.setToolTip(APP_NAME);
-  tray.setContextMenu(
+  setTrayMenu(null);
+  // Windows and Linux open the window on click; macOS shows the menu.
+  if (!isMac) tray.on('click', showWindow);
+}
+
+/** `update` is a downloaded version waiting for a restart. */
+function setTrayMenu(update: string | null): void {
+  tray?.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Open ${APP_NAME}`, click: showWindow },
       { label: 'Open in browser', click: () => void shell.openExternal(appUrl) },
+      ...(update ? [{ type: 'separator' as const }, { label: `Restart to update to ${update}`, click: installNow }] : []),
       { type: 'separator' },
       { label: `Quit ${APP_NAME}`, click: () => app.quit() },
     ]),
   );
-  // Windows and Linux open the window on click; macOS shows the menu.
-  if (!isMac) tray.on('click', showWindow);
 }
 
 // ---- App lifecycle ----
@@ -222,6 +229,11 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     createTray();
+    startUpdateChecks((version) => setTrayMenu(version), async () => {
+      // Electron closes windows before before-quit during an update. Allow that only after the server stops.
+      quitting = true;
+      await stopServerProcess();
+    });
     createWindow();
   });
 }
