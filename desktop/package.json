@@ -10,7 +10,7 @@
     "start": "npm run build && electron ."
   },
   "devDependencies": {
-    "electron": "44.9.3",
+    "electron": "45.0.0",
     "typescript": "^5.4.3"
   },
   "license": "MIT"
