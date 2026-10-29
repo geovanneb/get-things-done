@@ -48,6 +48,7 @@ CI for the web app never downloads Electron.
 
 ## Not here yet
 
-The first-run wizard (item 8 in #123) and signed installers with auto-update (9). The portable
+Signed installers with auto-update (item 9 in #123). First-run setup is part of the dashboard
+(`ui/src/views/SetupView.tsx`), so the desktop app and the browser share it. The portable
 git is downloaded for the platform that runs `npm install`, so installers must be built on each
 platform (item 9).

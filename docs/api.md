@@ -61,6 +61,7 @@ A few routes return a simpler `{ "error": "…" }` body. They are noted below.
 - [Kaizen](#kaizen)
 - [Routines](#routines)
 - [Workspace](#workspace)
+- [First-run setup](#first-run-setup)
 
 ---
 
@@ -760,3 +761,47 @@ GET /api/workspace/git/enabled
 GET /api/workspace/files/tasks/active/TASK-2026-0001/deliverables/speaker-notes.md
 → 200 text/markdown
 ```
+
+## First-run setup
+
+The dashboard shows a setup screen instead of its pages until a workspace is open. These two
+routes let it create or open one without `gtd init`. They work before any workspace exists.
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| `GET` | `/api/setup` | Whether a workspace is open, a suggested folder for a new one, the recent workspaces that still exist, and which AI assistants are installed |
+| `POST` | `/api/setup` | Create a workspace in a folder, or open the workspace already there |
+
+`POST /api/setup` body:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `path` | string | Required. `~` is expanded |
+| `create` | boolean | Create the folder when it does not exist. Without it a missing folder is a `400` |
+| `require_existing` | boolean | Only open an existing workspace: a plain folder answers `409` with `needs_init: true` and creates nothing |
+| `workspace_name` | string | Optional, at most 120 characters, one line. Default "Executive Workspace" |
+| `profile` | object | Optional `name`, `role`, `organization`, each at most 120 characters, one line |
+| `ai_tools` | string[] | Any of `claude-code`, `copilot`, `codex`. The workspace gets agent instructions for these only |
+
+An existing workspace is opened as it is: its profile and agent files are never changed. AI
+assistants are detected by looking for their programs on `PATH` and in the usual install folders
+(Copilot also counts with VS Code); nothing is run.
+
+```text
+GET /api/setup
+→ 200 {"configured":false,"workspace_path":null,
+       "suggested_path":"/Users/alex/Documents/Get Things Done","suggested_path_is_workspace":false,
+       "recent":[],
+       "ai_tools":[{"id":"claude-code","label":"Claude Code","description":"…","installed":true,
+                    "install_url":"https://claude.com/product/claude-code"}, …]}
+
+POST /api/setup
+{"path":"~/Documents/Get Things Done","create":true,"workspace_name":"Executive Workspace",
+ "profile":{"name":"Alex Morgan","role":"COO","organization":"Northwind Labs"},"ai_tools":["claude-code"]}
+→ 201 {"initialized":true,"config":{"path":"/Users/alex/Documents/Get Things Done","name":"Executive Workspace", …}}
+
+POST /api/setup
+{"path":"~/Downloads","require_existing":true}
+→ 409 {"error":"This folder is not a Get Things Done workspace yet.","needs_init":true,"path":"/Users/alex/Downloads"}
+```
+

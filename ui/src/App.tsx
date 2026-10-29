@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useAppDispatch } from './store';
 import AppLayout from './components/layout/AppLayout';
 import { useLiveEvents } from './hooks/useLiveEvents';
 import { apiGet } from './utils/api';
 import { WorkspaceConfig, GitStatus } from './types';
+import type { SetupStatus } from './utils/setup';
 
 const SituationView = lazy(() => import('./views/SituationView'));
 const BoardView = lazy(() => import('./views/BoardView'));
@@ -20,6 +21,7 @@ const SettingsView = lazy(() => import('./views/SettingsView'));
 const KaizenView = lazy(() => import('./views/KaizenView'));
 const RoutinesView = lazy(() => import('./views/RoutinesView'));
 const AgentFloorView = lazy(() => import('./views/AgentFloorView'));
+const SetupView = lazy(() => import('./views/SetupView'));
 
 function AppInitializer() {
   const dispatch = useAppDispatch();
@@ -47,11 +49,31 @@ function AppInitializer() {
   return null;
 }
 
+const loading = <div role="status" style={{ padding: 24 }}>Loading…</div>;
+
 function AppRoutes() {
+  // Without an open workspace the dashboard has nothing to show: first-run setup takes its place at any address.
+  // If the check fails (an older server, a network error), the dashboard loads as before.
+  const [setup, setSetup] = useState<SetupStatus | 'ready' | null>(null);
+  useEffect(() => {
+    apiGet<SetupStatus>('/api/setup')
+      .then((status) => setSetup(status.configured ? 'ready' : status))
+      .catch(() => setSetup('ready'));
+  }, []);
+
+  if (setup === null) return loading;
+  if (setup !== 'ready') {
+    return (
+      <Suspense fallback={loading}>
+        <SetupView status={setup} />
+      </Suspense>
+    );
+  }
+
   return (
     <>
       <AppInitializer />
-      <Suspense fallback={<div role="status" style={{ padding: 24 }}>Loading…</div>}>
+      <Suspense fallback={loading}>
       <Routes>
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/situation" replace />} />

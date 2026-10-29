@@ -7,8 +7,7 @@ import { param } from '../utils/params';
 import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
 import { GitService, GitUnavailableError } from '../services/gitService';
-import { watcherService } from '../services/watcherService';
-import { searchService } from '../services/searchService';
+import { activateWorkspace } from '../services/workspaceActivation';
 
 const router = Router();
 const workspaceService = new WorkspaceService();
@@ -187,14 +186,7 @@ router.post('/switch', async (req: Request, res: Response) => {
     return;
   }
 
-  if (isWorkspace) {
-    workspaceService.setWorkspacePath(workspacePath);
-  } else {
-    await workspaceService.initWorkspace(workspacePath);
-  }
-
-  searchService.reset();
-  watcherService.start(workspacePath);
+  await activateWorkspace(workspacePath);
 
   const config = workspaceService.getWorkspaceConfig();
   const git_enabled = await gitService.isGitRepo();
