@@ -1,6 +1,6 @@
 // Starts the packaged app (release/, after `npm run package` or `npm run dist`) the way a new user would: an empty
-// home folder and no git on PATH. Checks the first-run setup API, creates a workspace, proves the bundled git runs,
-// then quits the app. Used by .github/workflows/desktop.yml; works on macOS and Windows.
+// home folder and no git on PATH. Checks the first-run setup API, creates a workspace and a task, proves the bundled
+// git runs, then quits the app. Used by .github/workflows/desktop.yml; works on macOS and Windows.
 import { execFileSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -95,6 +95,15 @@ try {
     body: JSON.stringify({ path: workspace, create: true, profile: { name: 'Alex Morgan', role: 'COO', organization: 'Northwind Labs' }, ai_tools: ['codex'] }),
   });
   check('setup creates a workspace from the templates inside the app', created.status === 201 && fs.existsSync(path.join(workspace, 'AGENTS.md')));
+
+  // The first thing a new user does: add a task, and see it on the board.
+  const task = await (await fetch(`${base}/api/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'Prepare the Q4 steering update', priority: 'high', body: 'Fictional smoke test task.' }),
+  })).json();
+  const board = await (await fetch(`${base}/api/tasks`)).json();
+  check('a new task is saved in the workspace and listed', Boolean(task.id) && board.some((t) => t.id === task.id && t.title === 'Prepare the Q4 steering update'), task.id);
 
   // The smoke test's own git makes the workspace a repository; the app must use its bundled git for the rest.
   execFileSync('git', ['init', '-q'], { cwd: workspace });
