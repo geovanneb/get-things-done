@@ -80,8 +80,9 @@ export const startCommand = new Command('start')
     console.log(chalk.bold('Get Things Done'));
     console.log('');
 
+    // The Node running this command, not whichever `node` is first on PATH.
     if (options.foreground) {
-      const child = spawn('node', [serverPath], { env, stdio: 'inherit' });
+      const child = spawn(process.execPath, [serverPath], { env, stdio: 'inherit' });
       process.on('SIGINT', () => child.kill('SIGINT'));
       process.on('SIGTERM', () => child.kill('SIGTERM'));
       child.on('exit', (code) => process.exit(code ?? 0));
@@ -96,7 +97,7 @@ export const startCommand = new Command('start')
     const spinner = ora('Starting server...').start();
 
     // Detached with the parent's stdio released, so the server outlives this terminal.
-    const child = spawn('node', [serverPath], {
+    const child = spawn(process.execPath, [serverPath], {
       env,
       stdio: ['ignore', logFd, logFd],
       detached: true,
