@@ -67,7 +67,15 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    `analyzed_at`, `summary`, `proposals` (id, action create/update/remove, target, category,
    title, rationale, evidence, confidence), `skipped` (topic, reason) and `unread`.
    Do not set `decision`. A `remove` has no draft: the dashboard moves the file to the
-   trash after approval.
+   trash after approval. For material from meetings, also add `meeting_records`, one per
+   meeting even when it changes no context: a unique `id` (M-01), `title`,
+   `meeting_date`, `attendees` (people shown taking part, not everyone mentioned; `ref`
+   = a stakeholder id or `me`, only when sure, and always `name` as written; unknown
+   people stay listed), `decisions`, `open_questions`, `action_items` (`description`,
+   `owner`, `due_date`) and `source`. Never invent an owner, date or source; leave it
+   out. Never translate or romanize names. Texts under 1,000 characters, lists under 30
+   entries. No records for a memory review. Never set a record's `confirmation`,
+   `confirmed_at` or `confirmed_hash`: the executive does that.
 6. **Memory review** (`kind: memory-review`, opened by the weekly System cleanup job,
    material `materials/memory-scan.md`): there is no new material. Review the whole
    context and stakeholders for duplicates, facts in the wrong place, obsolete notes,
@@ -85,5 +93,5 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
 3. Give rejected proposals `outcome: skipped`, set `status: done` and `applied_at`, then
    delete `proposals/`, and `materials/` unless `update.md` has `keep_materials: true`
-   (the dashboard finishes this if you cannot). Never change `keep_materials`. Keep
-   `update.md` as the record.
+   (the dashboard finishes this if you cannot). Never change `keep_materials` or
+   `meeting_records`. Keep `update.md` as the record.

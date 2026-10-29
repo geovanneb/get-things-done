@@ -18,7 +18,9 @@ Read `context-updates/$ARGUMENTS/update.md`. If it does not exist, tell the user
 - `ready` or `analyzing`: continue. (`analyzing` means an earlier run stopped half way;
   start again from the beginning.)
 - `in_review`: proposals already exist. Ask the user whether to replace them before
-  going on. If they agree, delete `context-updates/$ARGUMENTS/proposals/` first.
+  going on. If they agree, delete `context-updates/$ARGUMENTS/proposals/` first, and
+  remove `meeting_records` from `update.md`: earlier confirmations belong to the old
+  records.
 - `approved`, `applying` or `done`: tell the user this update is past analysis and stop.
 
 Set `status: analyzing` and `updated_at` to the current ISO 8601 timestamp. The
@@ -145,6 +147,23 @@ proposals:
       Why this matters for future work, and what is different from the current file.
     evidence: Where it appears, e.g. "transcript.txt, around 00:14:20" or "deck.pptx, slide 6"
     confidence: high          # high, medium or low
+meeting_records:              # only when the material is from meetings
+  - id: M-01
+    title: Steering committee
+    meeting_date: '2026-10-20'  # YYYY-MM-DD; leave out when the material does not say
+    attendees:
+      - ref: STK-0004           # a stakeholder id, or me; leave out when you are not sure
+        name: Jane Doe          # always the name as the material writes it
+      - name: Speaker 2         # unknown people stay listed, never dropped or guessed
+    decisions:
+      - The pilot moves to Q1.
+    open_questions:
+      - Who owns the budget?
+    action_items:
+      - description: Send the revised plan
+        owner: { ref: me, name: me }
+        due_date: '2026-10-27'
+    source: transcript.txt
 skipped:
   - topic: What you considered
     reason: Why it is not proposed
@@ -153,7 +172,23 @@ unread:
     reason: Audio cannot be read; upload a transcript instead
 ```
 
-Leave out `skipped` or `unread` when they are empty. Do not set `decision`; the
+**Meeting records.** When the material is from one or more meetings, add one record per
+meeting, even when the meeting changes nothing in the context. Keep each one short: the
+decisions, open questions and action items that were stated, not a summary of the talk.
+
+- Give every record a unique id (M-01, M-02...) and a title.
+- `attendees` are people the material shows taking part, not everyone mentioned.
+- Link a person to a stakeholder with `ref` only when you are sure; otherwise keep the
+  name as written and leave out `ref`. Never translate or romanize names.
+- Never invent an owner, a date or a source: leave a field out when the material does
+  not say it.
+- Each text stays under 1,000 characters and each list under 30 entries; a record over
+  a limit cannot be confirmed. Split a long meeting into points instead.
+- Leave out `meeting_records` for material that is not from a meeting, and for a
+  memory review.
+
+Leave out `skipped`, `unread` or `meeting_records` when they are empty. Do not set
+`decision`, or a record's `confirmation`, `confirmed_at` or `confirmed_hash`; the
 executive does that in the dashboard. If there is nothing worth changing, write
 `proposals: []` and still set `status: in_review`, so the executive can close it.
 

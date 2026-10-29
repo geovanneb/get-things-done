@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { WorkspaceService } from './workspace';
 import { TaskService } from './taskService';
-import { ContextUpdateService } from './contextUpdateService';
+import { ContextUpdateService, hasConfirmedRecord } from './contextUpdateService';
 import { KaizenService } from './kaizenService';
 import { parseMarkdown } from '../utils/markdown';
 import { workspaceEntry } from '../utils/files';
@@ -445,8 +445,10 @@ export class SystemCleanupService {
     }
     if (settings.rules.context_updates.enabled) {
       for (const u of await contextUpdateService.list().catch(() => [])) {
-        // Only finished ones. Kept materials are the user's explicit choice; pending removals still need the record.
+        // Only finished ones. Kept materials are the user's explicit choice; pending removals still need the record,
+        // and a confirmed meeting record is the reviewed account of a meeting, kept whatever its age.
         if (!CU_ID.test(u.id) || u.status !== 'done' || u.keep_materials) continue;
+        if (u.meeting_records.some((r) => r.confirmation === 'confirmed')) continue;
         if (u.proposals.some((p) => p.action === 'remove' && p.decision === 'accepted' && !p.outcome)) continue;
         add('context_updates', u.id, u.title, path.join(ws, 'context-updates', u.id), ageDays(when(u.applied_at) ?? when(u.updated_at), now));
       }
@@ -517,6 +519,7 @@ export class SystemCleanupService {
         const p = obj(entry);
         return p['action'] === 'remove' && p['decision'] === 'accepted' && !p['outcome'];
       })) return false;
+      if (hasConfirmedRecord(u['meeting_records'])) return false;
     }
 
     if (item.type === 'kaizen') {

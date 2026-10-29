@@ -473,6 +473,11 @@ comes with a reason, evidence (for example "transcript.txt, around 00:14" or
 "deck.pptx, slide 6") and a confidence level. Contradictions with your current
 context are called out, never silently overwritten.
 
+When the material is from meetings, it also drafts a short **meeting record** per
+meeting: the date, who attended (linked to your stakeholders where it is sure, the
+name as written otherwise), decisions, open questions and action items. A record is
+not a context change, so it does not need a file.
+
 It also lists what it **considered but did not propose**, with the reason, so you can
 see the filter at work. Files it could not read (audio, video, encrypted files) are
 listed too, instead of being guessed at.
@@ -491,6 +496,16 @@ Open the update. Each proposal shows:
 Tick the proposals you accept. Your choices are saved as you go, so you can leave and
 come back. If a proposal is almost right, accept it and add a **note for the agent**,
 such as "keep the old title" or "say this is still a draft".
+
+Meeting records are reviewed on their own: **Confirm** a record that is right, or
+**Reject** it. A confirmation is for the exact text you saw: if the record changes
+afterwards, it needs confirming again before you can approve or close. A record that
+is malformed or too long to show in full says why, and can only be rejected until the
+agent fixes it. You can confirm a meeting that changes nothing in your context, and an
+update with only confirmed records finishes as soon as you approve it. Confirmed
+records stay with the update after it is done, and System cleanup never removes an
+update that has one. A record you did not confirm is rejected when you approve or
+close.
 
 When you are done, click **Approve N selected**. Anything left unticked is rejected and
 your selection is locked. Changed your mind before applying? **Change my selection**
@@ -662,7 +677,8 @@ It never archives, trashes or deletes a file until you turn a rule on. Per type
 (finished tasks, archived tasks, finished context updates, closed kaizen proposals,
 the trash itself) you choose the age in days and the action: archive, move to trash
 or delete permanently. A preview shows exactly what a run would do before you save.
-Tasks tagged `keep` are never touched, and a run handles at most 200 items.
+Tasks tagged `keep` are never touched, nor are context updates whose materials you kept
+or that hold a confirmed meeting record, and a run handles at most 200 items.
 
 ---
 
