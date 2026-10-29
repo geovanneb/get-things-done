@@ -5,6 +5,9 @@ import { FileWatchEvent } from '../types';
 type WatchEventType = 'change' | 'add' | 'unlink';
 type EventHandler = (event: FileWatchEvent) => void;
 
+/** Paths the watcher never reports. Matches both separators: chokidar passes backslash paths on Windows. */
+export const IGNORED_PATH = /node_modules|\.git([\\/]|$)|\.tmp$/;
+
 export class WatcherService {
   private watcher: FSWatcher | null = null;
   private handlers: Map<WatchEventType, EventHandler[]> = new Map();
@@ -25,7 +28,7 @@ export class WatcherService {
     ];
     this.watcher = watch(workspacePath, {
       ignored: (filePath, stats) => {
-        if (/node_modules|\.git(\/|$)|\.tmp$/.test(filePath)) return true;
+        if (IGNORED_PATH.test(filePath)) return true;
         if (skipDirs.some((dir) => filePath === dir || filePath.startsWith(dir + path.sep))) return true;
         // Only Markdown files matter, plus the routine and system cleanup run state: a failed run writes no task, and the
         // dashboard must still show it. Directories must pass so their contents are watched.

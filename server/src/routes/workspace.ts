@@ -27,6 +27,19 @@ function appleScriptQuote(value: string): string {
 }
 
 /**
+ * The Windows launch passes the workspace as the working directory, not inside the command line:
+ * Node escapes quotes in a way cmd does not read, so a `&` or `%` in the path would run as cmd syntax.
+ * `start` opens the new window in the current directory.
+ */
+export function windowsClaudeLaunch(workspacePath: string): {
+  file: string;
+  args: string[];
+  options: { cwd: string };
+} {
+  return { file: 'cmd', args: ['/c', 'start', '', 'cmd', '/k', 'claude'], options: { cwd: workspacePath } };
+}
+
+/**
  * Launch `claude` in a new terminal window at the workspace directory.
  * The command is built entirely from server-side state — nothing from the
  * request body reaches the shell.
@@ -46,7 +59,8 @@ async function openClaudeCode(workspacePath: string): Promise<void> {
   }
 
   if (process.platform === 'win32') {
-    await execFileAsync('cmd', ['/c', 'start', '', 'cmd', '/k', `cd /d "${workspacePath}" && claude`]);
+    const launch = windowsClaudeLaunch(workspacePath);
+    await execFileAsync(launch.file, launch.args, launch.options);
     return;
   }
 
