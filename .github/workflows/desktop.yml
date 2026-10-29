@@ -1,39 +1,63 @@
 name: Desktop app
 
 # Builds the Mac and Windows installers and starts each packaged app the way a new user would
-# (desktop/scripts/smoke-packaged.mjs). The installers are not signed yet (#123, item 9b): they are
-# build artifacts for testing, not releases.
+# (desktop/scripts/smoke-packaged.mjs).
+#
+# Signing is switched on by secrets and variables (see desktop/README.md, "Releases and signing"). Without
+# them, builds are unsigned test builds (the Mac app ad-hoc signed so it starts), kept as workflow artifacts.
+# Release runs (called from release.yml with a tag):
+# - macOS must be signed and notarized, or the release fails and stays a draft.
+# - Windows is not signed yet: the installer is attached unsigned as "unsigned-preview", with no update
+#   manifest (no auto-update). SignPath signing comes later (see desktop/README.md).
 on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'server/**'
+      - 'ui/**'
+      - 'src/**'
+      - 'templates/**'
+      - 'package*.json'
+      - '.github/workflows/release.yml'
       - '.github/workflows/desktop.yml'
   push:
     branches: [main]
-    tags: ['v*']
+  # Run it by hand from the Actions tab. With "sign" checked, the Mac builds are signed and notarized and
+  # checked like a release, but nothing is published: a safe way to test the Apple setup before tagging.
   workflow_dispatch:
+    inputs:
+      sign:
+        description: Sign and notarize the Mac builds (needs the Mac secrets; publishes nothing)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Tag of the GitHub release to attach signed installers to
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: desktop-${{ github.ref }}
-  cancel-in-progress: true
+  group: desktop-${{ inputs.release_tag || github.ref }}
+  cancel-in-progress: ${{ !inputs.release_tag }}
 
 jobs:
   package:
     name: Package (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        # macos-latest is Apple Silicon; the portable git is downloaded for the machine that installs, so each
-        # platform builds on its own runner.
-        os: [macos-latest, windows-latest]
+        # macos-latest is Apple Silicon. The portable git is downloaded for the machine that installs,
+        # so each platform builds on its own runner.
+        os: [macos-latest, macos-15-intel, windows-latest]
     env:
-      # Unsigned builds: do not look for signing certificates in the keychain.
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Signing turns on per platform when its secrets exist. On pull requests from forks secrets are empty.
+      MAC_SIGNING: ${{ (inputs.release_tag != '' || inputs.sign == true) && startsWith(matrix.os, 'macos-') && secrets.MAC_CERT_P12 != '' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,9 +72,92 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm ci --prefix desktop
-      - run: npm run dist --prefix desktop
+
+      - name: Require Mac signing for releases
+        if: (inputs.release_tag || inputs.sign) && startsWith(matrix.os, 'macos-') && env.MAC_SIGNING != 'true'
+        shell: bash
+        run: |
+          echo "::error::Mac release signing is not configured (MAC_CERT_P12 and the notarization key). See desktop/README.md."
+          exit 1
+
+      - name: Use the release version
+        if: inputs.release_tag
+        shell: bash
+        run: npm pkg set "version=${RELEASE_TAG#v}" --prefix desktop
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+
+      - name: Prepare macOS notarization key
+        if: env.MAC_SIGNING == 'true'
+        shell: bash
+        run: |
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/apple-api-key.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/apple-api-key.p8" >> "$GITHUB_ENV"
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+
+      - name: Build installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$MAC_SIGNING" = 'true' ]; then
+            # Only signed builds check for updates (see src/update-controller.ts).
+            npm pkg set gtdSignedRelease=true --json --prefix desktop
+            args+=(-c.forceCodeSigning=true)
+          fi
+          # Separate channels avoid overwriting the Intel Mac manifest with the ARM manifest.
+          if [ "$RUNNER_OS" = 'macOS' ] && [ "$RUNNER_ARCH" = 'ARM64' ]; then
+            args+=(-c.publish.channel=latest-arm64 -c.extraMetadata.gtdUpdateChannel=latest-arm64)
+          fi
+          if [ "$MAC_SIGNING" != 'true' ] && [ "$RUNNER_OS" = 'macOS' ]; then
+            # No Developer ID: ad-hoc sign so the app starts. macOS still warns about an unidentified developer.
+            args+=(-c.mac.identity=-)
+          fi
+          if [ "$MAC_SIGNING" = 'true' ]; then
+            args+=(-c.dmg.sign=true)
+            : "${CSC_LINK:?Missing MAC_CERT_P12}" "${APPLE_API_KEY_ID:?Missing APPLE_API_KEY_ID}" "${APPLE_API_ISSUER:?Missing APPLE_API_ISSUER}"
+            test -s "$APPLE_API_KEY"
+          fi
+          npm run build --prefix desktop
+          npm run stage --prefix desktop
+          cd desktop && npx electron-builder --publish never "${args[@]}"
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.MAC_SIGNING }}
+          # macOS: Developer ID certificate (base64 .p12) and notarization (App Store Connect API key).
+          CSC_LINK: ${{ env.MAC_SIGNING == 'true' && secrets.MAC_CERT_P12 || '' }}
+          CSC_KEY_PASSWORD: ${{ env.MAC_SIGNING == 'true' && secrets.MAC_CERT_PASSWORD || '' }}
+          APPLE_API_KEY_ID: ${{ env.MAC_SIGNING == 'true' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ env.MAC_SIGNING == 'true' && secrets.APPLE_API_ISSUER || '' }}
+
+
+      # ---- Windows: attached to releases as an unsigned preview until Windows signing exists ----
+      - name: Mark the unsigned Windows installer as a preview
+        if: inputs.release_tag && matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd desktop/release
+          for exe in *.exe; do mv "$exe" "${exe%.exe}-unsigned-preview.exe"; done
+          # No update manifest: an unsigned build never offers or receives updates.
+          rm -f latest.yml *.blockmap
+
+      - name: Check the Mac signature and notarization
+        if: env.MAC_SIGNING == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$(ls -d desktop/release/mac*/*.app | head -1)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose "$app"
+          xcrun stapler validate "$app"
+          for dmg in desktop/release/*.dmg; do
+            codesign --verify --strict --verbose=2 "$dmg"
+          done
+
       - name: Smoke-test the packaged app
         run: npm run smoke --prefix desktop
+
       - uses: actions/upload-artifact@v7
         with:
           name: installers-${{ matrix.os }}
@@ -60,3 +167,66 @@ jobs:
             desktop/release/*.exe
           if-no-files-found: error
           retention-days: 14
+
+      # What a release needs, including the files electron-updater reads. Only signed builds qualify.
+      - uses: actions/upload-artifact@v7
+        if: inputs.release_tag && (env.MAC_SIGNING == 'true' || matrix.os == 'windows-latest')
+        with:
+          name: release-${{ matrix.os }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest*.yml
+          # A Windows preview has no blockmap or manifest; the installer itself is still required.
+          if-no-files-found: error
+          retention-days: 7
+
+  attach:
+    name: Attach signed installers to the release
+    needs: package
+    if: inputs.release_tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Upload to the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release/*)
+          dmgs=(release/*.dmg)
+          exes=(release/*.exe)
+          # Both signed Mac architectures and a Windows installer must be present before making this a release.
+          test "${#dmgs[@]}" -eq 2
+          test "${#exes[@]}" -ge 1
+          for manifest in latest-mac.yml latest-arm64-mac.yml; do
+            test -s "release/$manifest"
+          done
+          # A signed Windows installer comes with its update manifest; a preview never has one.
+          previews=(release/*-unsigned-preview.exe)
+          if [ "${#previews[@]}" -eq 0 ]; then
+            test -s release/latest.yml
+          elif [ -e release/latest.yml ]; then
+            echo "::error::An unsigned Windows preview must not have an update manifest."
+            exit 1
+          fi
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::notice::No signed installers yet, so nothing is attached to $RELEASE_TAG. Add the signing secrets (desktop/README.md)."
+            exit 1
+          fi
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG" --notes "Signed installers verified; release publication pending." --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"

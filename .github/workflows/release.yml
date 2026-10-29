@@ -81,7 +81,7 @@ jobs:
 
   github-release:
     name: Create GitHub release
-    needs: publish
+    needs: [publish, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -101,12 +101,37 @@ jobs:
           if [ ! -s notes.md ]; then
             echo "::warning::No CHANGELOG.md entry for $VERSION, using generated notes only."
           fi
+      - name: Explain an unsigned Windows preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The desktop job attaches the Windows installer unsigned while Windows signing is not set up.
+          if gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' 2>/dev/null | grep -q -- '-unsigned-preview\.exe$'; then
+            {
+              echo
+              echo '### Windows: preview installer'
+              echo
+              echo 'The Windows installer is not signed yet, so Windows SmartScreen shows "Windows protected your PC".'
+              echo 'Choose **More info**, then **Run anyway**. This version does not update itself; download the next one from this page.'
+              echo 'The Mac installers are signed and notarized by Apple.'
+            } >> notes.md
+          fi
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md --draft=false
           else
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes --verify-tag
           fi
+
+  desktop:
+    name: Release desktop installers
+    needs: verify
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+    secrets: inherit
