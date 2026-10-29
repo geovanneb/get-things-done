@@ -205,6 +205,16 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
+          # The update manifests (latest*.yml) name each file with dashes for spaces, but GitHub would store
+          # "Get Things Done-0.7.0.dmg" as "Get.Things.Done-0.7.0.dmg", so installed apps could not download
+          # their update. Use the manifests' spelling before uploading.
+          for f in release/*' '*; do mv "$f" "${f// /-}"; done
+          # Every file a manifest points to (and its blockmap) must be among the files to upload.
+          for manifest in release/latest*.yml; do
+            for url in $(sed -n -E 's/^ *- url: *//p' "$manifest"); do
+              test -e "release/$url" || { echo "::error::$(basename "$manifest") points to $url, which is missing."; exit 1; }
+            done
+          done
           files=(release/*)
           dmgs=(release/*.dmg)
           exes=(release/*.exe)
