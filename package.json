@@ -40,7 +40,7 @@
     "build": "npm run build:clean && npm run build:server && npm run build:ui && npm run build:cli && npm run build:copy-ui && npm run build:copy-server",
     "start": "npm run start --workspace=server",
     "test": "npm run test:harness && npm run test:unit && npm run test:smoke",
-    "test:unit": "npm run test --workspace=server && npm run test:agent-floor --workspace=ui && npm run test:org-chart --workspace=ui && npm run test:files --workspace=ui && npm run test:calendar --workspace=ui && npm run test:diff --workspace=ui && npm run test:meeting-prep --workspace=ui && npm run test:desktop",
+    "test:unit": "npm run test --workspace=server && npm run test:agent-floor --workspace=ui && npm run test:org-chart --workspace=ui && npm run test:files --workspace=ui && npm run test:calendar --workspace=ui && npm run test:diff --workspace=ui && npm run test:meeting-prep --workspace=ui && npm run test:desktop-bridge --workspace=ui && npm run test:desktop",
     "test:desktop": "tsx --test desktop/tests/*.test.ts",
     "test:smoke": "node scripts/smoke-test.mjs",
     "lint": "eslint .",

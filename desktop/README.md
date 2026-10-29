@@ -14,6 +14,12 @@ the dashboard and the templates are the same code as `gtd start` (see #123, phas
   cleanly, also on Windows, where there are no signals.
 - `src/links.ts` decides where links go: the app's own pages stay in the app, web pages and
   e-mail open in the system browser or mail app, everything else is blocked.
+- `src/preload.ts` and `src/bridge.ts` give the main window `window.gtdDesktop` with two calls:
+  the system folder dialog and "open the workspace folder". Nothing else from Electron reaches
+  the page, preview windows get no bridge, and no call takes a path from the page (the workspace
+  path comes from the server). The dashboard uses them through `ui/src/utils/desktop.ts` and
+  falls back to the server routes in a browser.
+- Downloads always ask where to save, starting in the Downloads folder.
 - The window is sandboxed (`contextIsolation`, `sandbox`, no Node in the page). The page gets no
   permissions except clipboard writes for the copy buttons.
 - The server reads the workspace from `~/.gtd/config.json`, the same as the CLI, so both
@@ -35,5 +41,5 @@ CI for the web app never downloads Electron.
 
 ## Not here yet
 
-Native folder picker and downloads (item 6 in #123), bundled git (7), the first-run wizard (8)
-and signed installers with auto-update (9).
+Bundled git (item 7 in #123), the first-run wizard (8) and signed installers with
+auto-update (9).

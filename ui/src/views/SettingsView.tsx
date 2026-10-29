@@ -6,6 +6,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
+import { openWorkspaceFolder, pickFolder } from '@/utils/desktop';
 import { formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppState, useAppDispatch } from '@/store';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -630,7 +631,7 @@ export default function SettingsView() {
 
   const handleOpenInFinder = async () => {
     try {
-      await apiPost('/api/workspace/open', {});
+      await openWorkspaceFolder();
     } catch {
       // fire and forget
     }
@@ -669,7 +670,7 @@ export default function SettingsView() {
     setPicking(true);
     setChangeError(null);
     try {
-      const { path: picked } = await apiPost<{ path: string | null }>('/api/workspace/pick-folder', {});
+      const picked = await pickFolder();
       if (picked) {
         setNewPath(picked);
         setNeedsInit(false);

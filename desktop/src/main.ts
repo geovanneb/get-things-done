@@ -3,6 +3,7 @@
 import { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, utilityProcess, UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { registerBridge } from './bridge';
 import { classifyLink } from './links';
 import { DEFAULT_PORT, findFreePort } from './port';
 
@@ -127,7 +128,8 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
-    webPreferences: secureWebPreferences,
+    // Only the main window gets the bridge; preview windows opened from it do not.
+    webPreferences: { ...secureWebPreferences, preload: path.join(__dirname, 'preload.js') },
   });
   guardContents(mainWindow);
   mainWindow.once('ready-to-show', () => mainWindow?.show());
@@ -192,6 +194,12 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     // The dashboard needs no camera, microphone, location or notifications yet. Copy buttons need clipboard writes.
+    // Downloads (attachments, ZIPs) always ask where to save, starting in the Downloads folder.
+    session.defaultSession.on('will-download', (_event, item) => {
+      item.setSaveDialogOptions({ defaultPath: path.join(app.getPath('downloads'), item.getFilename()) });
+    });
+    registerBridge(() => mainWindow, () => appUrl);
+
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
       callback(permission === 'clipboard-sanitized-write');
     });
