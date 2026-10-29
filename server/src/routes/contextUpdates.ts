@@ -3,9 +3,11 @@ import multer from 'multer';
 import { param } from '../utils/params';
 import { sendFile } from '../utils/files';
 import { ContextUpdateService } from '../services/contextUpdateService';
+import { AgentRunnerService } from '../services/agentRunner';
 
 const router = Router();
 const service = new ContextUpdateService();
+const runner = new AgentRunnerService();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const body = (req: Request): Record<string, unknown> =>
@@ -74,6 +76,21 @@ router.put('/:id/meeting-records', async (req: Request, res: Response) => {
 router.post('/:id/meeting-records/:recordId/tasks', async (req: Request, res: Response) => {
   const result = await service.createActionItemTask(param(req, 'id'), param(req, 'recordId'), body(req));
   res.status(result.created ? 201 : 200).json(result);
+});
+
+// GET /api/context-updates/:id/analysis-run  the current or last run of the analysis from the dashboard (null if none)
+router.get('/:id/analysis-run', async (req: Request, res: Response) => {
+  res.json(await runner.get(param(req, 'id')));
+});
+
+// POST /api/context-updates/:id/analysis-run  runs /gtd-context-analyze <id> with the installed AI tool, without a window
+router.post('/:id/analysis-run', async (req: Request, res: Response) => {
+  res.status(202).json(await runner.startAnalysis(param(req, 'id')));
+});
+
+// POST /api/context-updates/:id/analysis-run/cancel
+router.post('/:id/analysis-run/cancel', async (req: Request, res: Response) => {
+  res.json(await runner.cancel(param(req, 'id')));
 });
 
 // State changes made from the dashboard. The agent commands make the others by editing update.md.

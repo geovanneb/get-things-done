@@ -13,6 +13,7 @@ import { formatRelativeDate } from '@/utils/format';
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
 import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord, Stakeholder } from '@/types';
+import AnalysisRun from './AnalysisRun';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
 import { CommandBox, HelpBox, OriginBadge, STATUS_META, StatusPill, StepIndicator, copyText, formatBytes, sectionLabel } from './shared';
@@ -269,6 +270,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const [busy, setBusy] = useState<string | null>(null);
   // The status the user last copied a command for, so the bar can confirm it and say what happens next.
   const [copiedFor, setCopiedFor] = useState<string | null>(null);
+  // An analysis started from the dashboard is running: the page does not also ask the user to run the command.
+  const [running, setRunning] = useState(false);
   const nextRef = useRef<HTMLElement>(null);
   const copyRef = useRef<HTMLButtonElement>(null);
   const prevStatus = useRef<string | null>(null);
@@ -311,7 +314,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const meta = STATUS_META[u.status];
   const reviewing = u.status === 'in_review';
   // Steps where nothing moves until the user runs a command in the agent.
-  const command = u.status === 'ready' ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
+  const command = u.status === 'ready' && !running ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
   const copied = copiedFor === u.status;
   const selectable = u.proposals.filter((p) => !p.problem);
   const acceptedCount = u.proposals.filter((p) => decisions[p.id]?.decision === 'accepted').length;
@@ -485,6 +488,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             label={u.status === 'ready' ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Run in Claude Code to analyze'}
             onCopied={() => setCopiedFor(u.status)} />
         )}
+        {['ready', 'analyzing', 'in_review'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={refetch} onRunning={setRunning} />}
         {(u.status === 'approved' || u.status === 'applying') && (
           <CommandBox ref={u.status === 'approved' ? copyRef : undefined} command={`/gtd-context-apply ${u.id}`} emphasis={u.status === 'approved'}
             label={u.status === 'approved' ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Run in Claude Code to apply your accepted changes'}

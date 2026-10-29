@@ -14,6 +14,7 @@ import { routineScheduler } from './services/routineScheduler';
 import { WorkspaceService } from './services/workspace';
 import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
+import { AgentRunnerService } from './services/agentRunner';
 
 export const HOST = '127.0.0.1';
 
@@ -77,12 +78,15 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     watcherService.off('unlink', broadcastEvent);
     watcherService.stop();
     routineScheduler.stop();
+    // A running analysis is stopped first, with everything it started, and its record saved.
+    const runnerStopped = AgentRunnerService.stopAll().catch(() => {});
 
-    return new Promise((resolve, reject) => {
+    const serverClosed = new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
       // Idle keep-alive connections would otherwise hold close() open.
       server.closeIdleConnections();
     });
+    return Promise.all([runnerStopped, serverClosed]).then(() => undefined);
   };
 
   return new Promise((resolve, reject) => {

@@ -527,6 +527,14 @@ try {
       && madeBody.update?.meeting_records?.[0]?.action_items?.[0]?.task_ref === madeBody.task?.id
       && madeBody.update?.meeting_records?.[0]?.confirmation === 'confirmed' && String(madeTask.meeting_action).startsWith(`${meeting.id}/M-01/`),
       `made=${made.status} again=${madeAgain.status}`);
+    // Never starts a real AI run: only the runner's status and a refusal for an update that is not ready.
+    const runnerStatus = await (await fetch(`${base}/api/runner`)).json();
+    const notReady = await json('POST', `/api/context-updates/${meeting.id}/analysis-run`);
+    const noRun = await (await fetch(`${base}/api/context-updates/${meeting.id}/analysis-run`)).json();
+    check('the runner reports its state, and only a ready update can be analyzed from the dashboard',
+      runnerStatus.id === 'claude-code' && typeof runnerStatus.installed === 'boolean' && Array.isArray(runnerStatus.problems)
+      && notReady.status === 409 && noRun === null,
+      `installed=${runnerStatus.installed} notReady=${notReady.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

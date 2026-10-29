@@ -7,6 +7,7 @@ import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
 import { moveToTrash } from './trash';
+import { isAnalysisRunning } from './runState';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 import { TaskService } from './taskService';
 import type { Task } from '../types';
@@ -522,6 +523,21 @@ export class ContextUpdateService {
     await atomicWrite(file, stringifyMarkdown(body, next));
   }
 
+  /**
+   * Waits until every change to this update already under way has finished. The runner calls it after marking a
+   * run, so no change that passed the run check before can still be writing when the run starts.
+   */
+  async settled(id: string): Promise<void> {
+    await this.serialized(id, async () => {});
+  }
+
+  /** While an analysis started from the dashboard is writing to this update, the dashboard leaves it alone. */
+  private async requireNoRun(id: string, action: string): Promise<void> {
+    if (await isAnalysisRunning(workspaceService.getWorkspacePath(), updateId(id))) {
+      throw httpError(409, `Cannot ${action} while an analysis is running for this update; stop it first`);
+    }
+  }
+
   private requireStatus(update: ContextUpdate, allowed: UpdateStatus[], action: string): void {
     if (!allowed.includes(update.status)) {
       throw httpError(409, `Cannot ${action} while the update is "${update.status}"`);
@@ -809,6 +825,7 @@ export class ContextUpdateService {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['ready'], 'edit the details');
+      await this.requireNoRun(id, 'edit the details');
       const patch: Record<string, unknown> = {};
       if (typeof input.title === 'string' && input.title.trim()) patch['title'] = input.title.trim().slice(0, 200);
       if (input.source_date !== undefined) {
@@ -831,6 +848,7 @@ export class ContextUpdateService {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['ready'], 'add material');
+      await this.requireNoRun(id, 'add material');
       const dir = path.join(this.updateDir(id), 'materials');
       await fsp.mkdir(dir, { recursive: true });
       const duplicate = await sameFileIn(dir, buffer);
@@ -883,6 +901,7 @@ export class ContextUpdateService {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['ready'], 'remove material');
+      await this.requireNoRun(id, 'remove material');
       const dir = path.join(this.updateDir(id), 'materials');
       const removed = topLevelName(name);
       await fsp.unlink(await fileInside(dir, removed));
@@ -1019,6 +1038,7 @@ export class ContextUpdateService {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review'], 'approve');
+      await this.requireNoRun(id, 'approve');
       const records = this.frozenRecords(update, data);
       const confirmed = update.meeting_records.some((r) => r.confirmation === 'confirmed');
       if (!update.proposals.some((p) => p.decision === 'accepted') && !confirmed) {
@@ -1063,6 +1083,7 @@ export class ContextUpdateService {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['analyzing', 'in_review', 'approved'], 'reopen');
+      await this.requireNoRun(id, 'reopen');
       await fsp.rm(path.join(this.updateDir(id), 'proposals'), { recursive: true, force: true });
       await this.write(file, data, update.notes, {
         status: 'ready', proposals: [], meeting_records: undefined, skipped: undefined, unread: undefined, summary: undefined,
@@ -1080,6 +1101,7 @@ export class ContextUpdateService {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review', 'approved'], 'close');
+      await this.requireNoRun(id, 'close');
       const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
       // Before anything is deleted: a record changed after confirmation stops the close.
       const records = this.frozenRecords(update, data);
@@ -1118,6 +1140,7 @@ export class ContextUpdateService {
       const { update } = await this.read(id);
       // Applying may have written some files already; deleting the record would hide what happened.
       this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
+      await this.requireNoRun(id, 'delete the update');
       await fsp.rm(this.updateDir(id), { recursive: true, force: true });
     });
   }

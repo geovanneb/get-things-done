@@ -489,6 +489,31 @@ export interface MeetingRecord {
   changed_since_confirmed: boolean;
 }
 
+/** The AI tool that runs workspace commands for the dashboard (GET /api/runner). */
+export interface RunnerStatus {
+  id: string;
+  label: string;
+  installed: boolean;
+  logged_in: boolean | null;
+  /** Whether Claude Code trusts the workspace folder; null when that could not be verified. */
+  trusted: boolean | null;
+  problems: { code: string; message: string }[];
+}
+
+/** A run of the analysis started from the dashboard. */
+export interface AgentRun {
+  update_id: string;
+  command: 'analyze';
+  runner: string;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  started_at: string;
+  ended_at: string | null;
+  message: string;
+  refused: number;
+  turns: number | null;
+  usage_usd: number | null;
+}
+
 export interface ContextUpdate {
   id: string;
   title: string;
