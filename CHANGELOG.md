@@ -8,6 +8,19 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-29
+
+Get Things Done now comes as a **desktop app for Mac and Windows**: download it, open it, and a
+short setup creates your workspace. Nothing else to install, no terminal. The browser version
+(`gtd start`) works exactly as before and shares the same workspaces.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get Things Done-0.7.0-arm64.dmg`
+- **Mac with Intel**: `Get Things Done-0.7.0.dmg`
+- **Windows 10/11**: the `…-unsigned-preview.exe` installer (see the note at the end)
+
+The Mac apps are signed and notarized by Apple and update themselves from new releases.
+
 ### Added
 
 - **Desktop app for Mac and Windows (preview).** The same server, dashboard and templates as
@@ -37,6 +50,8 @@ minor versions may include breaking changes.
 - **Git is optional on every computer.** Without a git program, git features are hidden, git
   routes answer `503` with a clear message, and Settings says git is not installed instead of
   showing it as active. New `git_installed` field in the workspace and git responses. (#126)
+- Releases publish to npm only after the signed desktop installers are built, checked and attached
+  to the release, so an npm version never appears without its installers. (#144)
 - For contributors: `server/src/server.ts` exports `startServer()`, so any host (the CLI entry,
   the desktop app) runs the same server in-process; `gtd start` starts it with the Node that runs
   the CLI instead of the first `node` on PATH. (#125) Dependencies: Electron 45 (#129),
@@ -447,7 +462,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/geovanneb/get-things-done/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/geovanneb/get-things-done/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/geovanneb/get-things-done/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/geovanneb/get-things-done/compare/v0.3.0...v0.4.0
