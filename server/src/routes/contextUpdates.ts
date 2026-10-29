@@ -78,17 +78,29 @@ router.post('/:id/meeting-records/:recordId/tasks', async (req: Request, res: Re
   res.status(result.created ? 201 : 200).json(result);
 });
 
-// GET /api/context-updates/:id/analysis-run  the current or last run of the analysis from the dashboard (null if none)
-router.get('/:id/analysis-run', async (req: Request, res: Response) => {
+// GET /api/context-updates/:id/run  the current or last run started from the dashboard (null if none)
+router.get('/:id/run', async (req: Request, res: Response) => {
   res.json(await runner.get(param(req, 'id')));
 });
 
-// POST /api/context-updates/:id/analysis-run  runs /gtd-context-analyze <id> with the installed AI tool, without a window
-router.post('/:id/analysis-run', async (req: Request, res: Response) => {
-  res.status(202).json(await runner.startAnalysis(param(req, 'id')));
+// POST /api/context-updates/:id/run  { command: "analyze" | "apply" }  runs /gtd-context-analyze or /gtd-context-apply
+// with the installed AI tool, without a window
+router.post('/:id/run', async (req: Request, res: Response) => {
+  res.status(202).json(await runner.start(param(req, 'id'), body(req)['command'] as 'analyze' | 'apply'));
 });
 
-// POST /api/context-updates/:id/analysis-run/cancel
+// POST /api/context-updates/:id/run/cancel
+router.post('/:id/run/cancel', async (req: Request, res: Response) => {
+  res.json(await runner.cancel(param(req, 'id')));
+});
+
+// The analysis-run endpoints from the first runner release: kept as aliases of /run with command "analyze".
+router.get('/:id/analysis-run', async (req: Request, res: Response) => {
+  res.json(await runner.get(param(req, 'id')));
+});
+router.post('/:id/analysis-run', async (req: Request, res: Response) => {
+  res.status(202).json(await runner.start(param(req, 'id'), 'analyze'));
+});
 router.post('/:id/analysis-run/cancel', async (req: Request, res: Response) => {
   res.json(await runner.cancel(param(req, 'id')));
 });

@@ -500,10 +500,10 @@ export interface RunnerStatus {
   problems: { code: string; message: string }[];
 }
 
-/** A run of the analysis started from the dashboard. */
+/** A run of a workspace command (analyze or apply) started from the dashboard. */
 export interface AgentRun {
   update_id: string;
-  command: 'analyze';
+  command: 'analyze' | 'apply';
   runner: string;
   status: 'running' | 'succeeded' | 'failed' | 'cancelled';
   started_at: string;

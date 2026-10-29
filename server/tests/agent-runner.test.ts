@@ -85,7 +85,7 @@ test('an analysis runs the workspace\'s own command, one at a time, and locks th
   const run = await service.startAnalysis('CU-2026-0001');
   assert.equal(run.status, 'running');
   assert.deepEqual(fake.calls, [{ workspace: ws, prompt: '/gtd-context-analyze CU-2026-0001' }], 'exactly what the user would type');
-  await assert.rejects(new AgentRunnerService(fake.adapter).startAnalysis('CU-2026-0001'), /Another analysis is running/);
+  await assert.rejects(new AgentRunnerService(fake.adapter).startAnalysis('CU-2026-0001'), /Another run is going/);
   await assert.rejects(updates.addMaterial('CU-2026-0001', 'more.txt', Buffer.from('x')), /while an analysis is running/);
   await assert.rejects(updates.remove('CU-2026-0001'), /while an analysis is running/);
   assert.deepEqual(JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'runner-settings.json'), 'utf-8')), { disableAllHooks: true });
@@ -137,7 +137,7 @@ test('a stopped or interrupted run says what to do, and a failed final save does
   assert.equal(stopped?.status, 'cancelled');
   assert.match(stopped!.message, /go back to collecting/);
   assert.deepEqual(fake.stops, ['cancelled']);
-  await assert.rejects(service.cancel('CU-2026-0001'), /No analysis is running/);
+  await assert.rejects(service.cancel('CU-2026-0001'), /Nothing is running/);
 
   const file = path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json');
   // A later run recorded as running (as left by a dashboard that stopped), not the one this dashboard saw end.
@@ -316,4 +316,194 @@ setTimeout(() => {}, 60000);`);
 
   const throwing = new ClaudeCodeAdapter(() => bin, () => { throw new Error('no environment'); });
   assert.ok((await throwing.status(ws)).problems.some((p) => p.code === 'auth_unknown'));
+});
+
+/** Asks the gate about each call, as Claude Code does over MCP, and returns its decisions. */
+async function askGate(mcpConfig: string, calls: { tool_name: string; input: Record<string, unknown> }[]): Promise<string[]> {
+  const { spawn } = await import('node:child_process');
+  const server = (JSON.parse(await fsp.readFile(mcpConfig, 'utf-8')) as { mcpServers: Record<string, { command: string; args: string[]; env: Record<string, string> }> }).mcpServers['gtd_gate']!;
+  const child = spawn(server.command, server.args, { env: { ...process.env, ...server.env }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const answers: Record<number, string> = {};
+  let buffer = '';
+  child.stdout.setEncoding('utf-8');
+  const all = new Promise<void>((resolve) => child.stdout.on('data', (chunk: string) => {
+    buffer += chunk;
+    for (const line of buffer.split('\n').slice(0, -1)) {
+      const m = JSON.parse(line) as { id: number; result?: { content?: { text: string }[] } };
+      if (m.result?.content) answers[m.id] = (JSON.parse(m.result.content[0]!.text) as { behavior: string }).behavior;
+    }
+    buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
+    if (Object.keys(answers).length === calls.length) resolve();
+  }));
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18' } }) + '\n');
+  calls.forEach((c, i) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: i + 1, method: 'tools/call', params: { name: 'approve', arguments: c } }) + '\n'));
+  await all;
+  child.kill();
+  return calls.map((_, i) => answers[i + 1]!);
+}
+
+test('the approval gate allows only accepted files and the update folder, and refuses everything else it is asked', posix, async (t) => {
+  const ws = await workspace(t, 'approved');
+  const { writeApprovalGate, readGateLog, removeApprovalGate } = await import('../src/services/approvalGate');
+  await fsp.mkdir(path.join(ws, 'context', 'strategy', 'plan'), { recursive: true });
+  await fsp.mkdir(path.join(ws, 'profile'), { recursive: true });
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  await fsp.symlink(outside, path.join(ws, 'context', 'strategy', 'link'));
+  const gate = await writeApprovalGate(ws, 'CU-2026-0001', ['context/strategy/plan/note.md', 'context/strategy/new/note.md']);
+  assert.ok(!gate.dir.startsWith(ws), 'the gate lives outside the workspace');
+
+  const decisions = await askGate(gate.mcpConfig, [
+    { tool_name: 'Write', input: { file_path: 'context/strategy/plan/note.md' } },
+    { tool_name: 'Write', input: { file_path: path.join(ws, 'context/strategy/new/note.md') } },
+    { tool_name: 'Edit', input: { file_path: 'context-updates/CU-2026-0001/update.md' } },
+    { tool_name: 'Write', input: { file_path: 'context/strategy/other/note.md' } },
+    { tool_name: 'Write', input: { file_path: 'profile/executive-profile.md' } },
+    { tool_name: 'Write', input: { file_path: 'context/strategy/plan/../../../profile/x.md' } },
+    { tool_name: 'Write', input: { file_path: 'context/strategy/link/note.md' } },
+    { tool_name: 'Edit', input: { file_path: 'context-updates/CU-2026-0002/update.md' } },
+    { tool_name: 'Bash', input: { command: 'rm -r context' } },
+    { tool_name: 'NotebookEdit', input: { notebook_path: 'context/strategy/plan/note.md' } },
+    { tool_name: 'Edit', input: { file_path: 'context/strategy/plan/note.md', notebook_path: 'context/x.ipynb' } },
+    { tool_name: 'Write', input: { file_path: path.join(outside, 'x.md') } },
+  ]);
+  assert.deepEqual(decisions, ['allow', 'allow', 'allow', 'deny', 'deny', 'deny', 'deny', 'deny', 'deny', 'deny', 'deny', 'deny']);
+  const log = await readGateLog(gate.log);
+  assert.ok(log.allowed.includes('context/strategy/plan/note.md'));
+  assert.ok(log.refused.includes('profile/executive-profile.md'));
+  assert.ok(log.refused_actions.includes('Bash'), 'a refused command is not listed as a refused write');
+  await removeApprovalGate(gate);
+  await assert.rejects(fsp.access(gate.dir), 'the private folder is removed after the run');
+});
+
+test('a symlink at an accepted file, on its way or at the update folder is refused, and dangling links too', posix, async (t) => {
+  const ws = await workspace(t, 'approved');
+  const { writeApprovalGate, removeApprovalGate } = await import('../src/services/approvalGate');
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(outside, 'secret.md'), 'keep');
+  await fsp.mkdir(path.join(ws, 'context', 'strategy', 'plan'), { recursive: true });
+
+  await fsp.symlink(path.join(outside, 'secret.md'), path.join(ws, 'context', 'strategy', 'plan', 'note.md'));
+  await assert.rejects(writeApprovalGate(ws, 'CU-2026-0001', ['context/strategy/plan/note.md']), /goes through a symlink/, 'an accepted file that is a link');
+  await fsp.rm(path.join(ws, 'context', 'strategy', 'plan', 'note.md'));
+  await fsp.symlink(path.join(outside, 'missing.md'), path.join(ws, 'context', 'strategy', 'plan', 'note.md'));
+  await assert.rejects(writeApprovalGate(ws, 'CU-2026-0001', ['context/strategy/plan/note.md']), /goes through a symlink/, 'a dangling link');
+  await fsp.rm(path.join(ws, 'context', 'strategy', 'plan', 'note.md'));
+  await fsp.symlink(outside, path.join(ws, 'context', 'strategy', 'linked'));
+  await assert.rejects(writeApprovalGate(ws, 'CU-2026-0001', ['context/strategy/linked/note.md']), /goes through a symlink/, 'a linked folder on the way');
+
+  // A link placed after the gate was prepared is refused at the time of the write.
+  const gate = await writeApprovalGate(ws, 'CU-2026-0001', ['context/strategy/plan/note.md']);
+  t.after(() => removeApprovalGate(gate));
+  await fsp.symlink(path.join(outside, 'later.md'), path.join(ws, 'context', 'strategy', 'plan', 'note.md'));
+  assert.deepEqual(await askGate(gate.mcpConfig, [{ tool_name: 'Write', input: { file_path: 'context/strategy/plan/note.md' } }]), ['deny']);
+  assert.equal(await fsp.readFile(path.join(outside, 'secret.md'), 'utf-8'), 'keep');
+
+  const linkedUpdate = await workspace(t, 'approved');
+  await fsp.rename(path.join(linkedUpdate, 'context-updates', 'CU-2026-0001'), path.join(outside, 'moved'));
+  await fsp.symlink(path.join(outside, 'moved'), path.join(linkedUpdate, 'context-updates', 'CU-2026-0001'));
+  await assert.rejects(writeApprovalGate(linkedUpdate, 'CU-2026-0001', []), /The update folder goes through a symlink/);
+});
+
+/** An approved update with accepted and other proposals, as the dashboard leaves it. */
+async function approved(ws: string, proposals: Record<string, unknown>[]): Promise<void> {
+  const file = path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md');
+  const data = parseMarkdown(await fsp.readFile(file, 'utf-8')).data as Record<string, unknown>;
+  await fsp.writeFile(file, stringifyMarkdown('', { ...data, status: 'approved', proposals }));
+}
+
+test('apply runs the workspace\'s own command with the gate, for the accepted files only, and says what happened', async (t) => {
+  const ws = await workspace(t);
+  const gates: (string | undefined)[] = [];
+  const fake = fakeAdapter();
+  const adapter: AgentRunnerAdapter = { ...fake.adapter, start: (w, p, done, gate) => { gates.push(gate?.mcpConfig); return fake.adapter.start(w, p, done, gate); } };
+  const service = new AgentRunnerService(adapter);
+  await assert.rejects(service.start('CU-2026-0001', 'apply'), /Cannot apply while the update is "ready"/);
+  await assert.rejects(service.start('CU-2026-0001', 'delete' as never), /Invalid command/);
+
+  await approved(ws, [{ id: 'P-01', action: 'remove', target: 'context/strategy/old/note.md', decision: 'accepted' }, { id: 'P-02', action: 'update', target: 'context/strategy/plan/note.md', decision: 'rejected' }]);
+  await assert.rejects(service.start('CU-2026-0001', 'apply'), /Nothing to apply/);
+
+  await approved(ws, [
+    { id: 'P-01', action: 'update', target: 'context/strategy/plan/note.md', decision: 'accepted' },
+    { id: 'P-02', action: 'create', target: '../profile/x.md', decision: 'accepted' },
+    { id: 'P-03', action: 'update', target: 'context/strategy/other/note.md', decision: 'rejected' },
+  ]);
+  const run = await service.start('CU-2026-0001', 'apply');
+  assert.equal(run.command, 'apply');
+  assert.equal(fake.calls.at(-1)?.prompt, '/gtd-context-apply CU-2026-0001');
+  assert.ok(gates.at(-1)?.endsWith('mcp.json'), 'the approval gate is passed to the tool');
+  const config = JSON.parse(await fsp.readFile(path.join(path.dirname(gates.at(-1)!), 'gate.json'), 'utf-8'));
+  assert.deepEqual(config.allowed, [path.join(ws, 'context/strategy/plan/note.md')], 'only accepted, valid targets: not the rejected one, not the path outside');
+
+  // What the apply command leaves: P-01 applied, the update done.
+  const file = path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md');
+  const data = parseMarkdown(await fsp.readFile(file, 'utf-8')).data as Record<string, unknown>;
+  await fsp.writeFile(file, stringifyMarkdown('', { ...data, status: 'done', proposals: [{ id: 'P-01', action: 'update', target: 'context/strategy/plan/note.md', decision: 'accepted', outcome: 'applied' }] }));
+  fake.end(success);
+  await settle();
+  const done = await service.get('CU-2026-0001');
+  assert.equal(done?.status, 'succeeded');
+  assert.match(done!.message, /accepted changes are written/);
+  await assert.rejects(fsp.access(path.dirname(gates.at(-1)!)), 'the gate\'s private folder is gone after the run');
+});
+
+test('success is checked against what was accepted at the start, and a half-done apply can continue', async (t) => {
+  const ws = await workspace(t);
+  const fake = fakeAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+  const file = path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md');
+  const finishWith = async (status: string, proposals: unknown[]) => {
+    const data = parseMarkdown(await fsp.readFile(file, 'utf-8')).data as Record<string, unknown>;
+    await fsp.writeFile(file, stringifyMarkdown('', { ...data, status, proposals }));
+    fake.end(success);
+    await settle();
+    return (await service.get('CU-2026-0001'))!;
+  };
+  const accepted = { id: 'P-01', action: 'update', target: 'context/strategy/plan/note.md', decision: 'accepted' };
+
+  await approved(ws, [accepted, { id: 'P-02', action: 'rename', target: 'context/strategy/x/note.md', decision: 'accepted' }]);
+  await service.start('CU-2026-0001', 'apply');
+  let run = await finishWith('done', []);
+  assert.equal(run.status, 'failed', 'an agent that drops the proposals does not hide unfinished work');
+  assert.match(run.message, /P-01/);
+  assert.doesNotMatch(run.message, /P-02/, 'only creates and updates are writes to check');
+
+  await approved(ws, [accepted]);
+  await service.start('CU-2026-0001', 'apply');
+  run = await finishWith('done', [{ ...accepted, target: 'context/strategy/other/note.md', outcome: 'applied' }]);
+  assert.match(run.message, /P-01 \(changed during the run\)/);
+
+  await approved(ws, [accepted]);
+  await service.start('CU-2026-0001', 'apply');
+  await setStatus(ws, 'applying');
+  await service.cancel('CU-2026-0001');
+  assert.match((await service.get('CU-2026-0001'))!.message, /continues where it stopped/);
+  const data = parseMarkdown(await fsp.readFile(file, 'utf-8')).data as Record<string, unknown>;
+  await fsp.writeFile(file, stringifyMarkdown('', { ...data, status: 'applying', proposals: [accepted] }));
+  const resumed = await service.start('CU-2026-0001', 'apply');
+  assert.equal(resumed.status, 'running', 'a half-done apply can continue from the dashboard');
+  assert.equal(fake.calls.at(-1)?.prompt, '/gtd-context-apply CU-2026-0001');
+  await service.cancel('CU-2026-0001');
+});
+
+test('apply outcomes: missing outcomes, refused writes, a stop half way', () => {
+  const missing = explainOutcome(success, 'done', 'apply', { not_applied: ['P-02'], refused_writes: ['profile/x.md'] });
+  assert.equal(missing.status, 'failed');
+  assert.match(missing.message, /not recorded as applied: P-02.*refused.*profile\/x\.md/s);
+  assert.match(explainOutcome({ exit_code: null, result: null, stderr: '', stopped: 'cancelled' }, 'applying', 'apply').message, /continues where it stopped/);
+  assert.match(explainOutcome({ exit_code: 1, result: null, stderr: '' }, 'applying', 'apply').message, /The apply did not finish/);
+});
+
+test('the adapter runs apply in default mode with the gate as the only MCP server and permission prompt tool', posix, async (t) => {
+  const ws = await workspace(t);
+  const bin = await fakeCli(ws, signedIn, `process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success' }) + '\\n');`);
+  const gate = { mcpConfig: path.join(ws, 'gate.mcp.json'), log: path.join(ws, 'gate.log') };
+  await new Promise<RunOutcome>((resolve) => new ClaudeCodeAdapter(() => bin).start(ws, '/gtd-context-apply CU-2026-0001', resolve, gate));
+  const args = JSON.parse(await fsp.readFile(path.join(ws, 'seen.json'), 'utf-8')).args as string[];
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'default');
+  assert.equal(args[args.indexOf('--mcp-config') + 1], gate.mcpConfig);
+  assert.equal(args[args.indexOf('--permission-prompt-tool') + 1], 'mcp__gtd_gate__approve');
+  assert.ok(args.includes('--strict-mcp-config'));
 });
