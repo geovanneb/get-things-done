@@ -1,8 +1,9 @@
 // Starts the packaged app (release/, after `npm run package` or `npm run dist`) the way a new user would: an empty
-// home folder and no git on PATH. Checks the first-run setup API, creates a workspace and a task, proves the bundled
-// git runs, then quits the app. Used by .github/workflows/desktop.yml; works on macOS and Windows.
+// home folder and no git on PATH. Checks the first-run setup API, creates a workspace, proves the bundled git runs,
+// then quits the app. Used by .github/workflows/desktop.yml; works on macOS and Windows.
 import { execFileSync, spawn } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,9 +29,22 @@ function check(name, ok, detail = '') {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function findServer(deadline) {
+/** A free port far from 3001, so the test never talks to another copy of the app (or `gtd start`) on this machine. */
+function freeHighPort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+async function findServer(firstPort, deadline) {
   while (Date.now() < deadline) {
-    for (let port = 3001; port < 3021; port++) {
+    // The app tries its saved port first, then the next ones.
+    for (let port = firstPort; port < Math.min(firstPort + 20, 65536); port++) {
       try {
         const res = await fetch(`http://127.0.0.1:${port}/api/setup`, { signal: AbortSignal.timeout(500) });
         if (res.ok) return `http://127.0.0.1:${port}`;
@@ -69,20 +83,38 @@ const env = process.platform === 'win32'
       PATH: path.join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32'),
     }
   : { HOME: home, PATH: '/bin', TMPDIR: tmp };
+// No update checks: the smoke test must not depend on the network or on published releases.
+env.GTD_DISABLE_UPDATES = '1';
 
-console.log(`Starting ${executable}`);
-const child = spawn(executable, [`--user-data-dir=${path.join(tmp, 'user-data')}`], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+// The app reads its port from desktop.json in its user data folder.
+const userData = path.join(tmp, 'user-data');
+const port = await freeHighPort();
+fs.mkdirSync(userData, { recursive: true });
+fs.writeFileSync(path.join(userData, 'desktop.json'), JSON.stringify({ port }));
+
+console.log(`Starting ${executable} on port ${port}`);
+const child = spawn(executable, [`--user-data-dir=${userData}`], { env, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '';
 child.stdout.on('data', (d) => { output += d; });
 child.stderr.on('data', (d) => { output += d; });
+child.on('error', (error) => { output += `Spawn failed: ${error.message}\n`; });
 
 let base = null;
 try {
-  base = await findServer(Date.now() + 60_000);
+  base = await findServer(port, Date.now() + 60_000);
   check('the packaged app starts its server', base !== null);
   if (!base) throw new Error('server did not start');
 
+  // Never change anything unless this is the copy we started: its suggested folder is inside our temporary home.
+  // (A copy started another way, for example by macOS on the first run of a new build, would use the real home.)
   const status = await (await fetch(`${base}/api/setup`)).json();
+  const ours = typeof status.suggested_path === 'string' && path.resolve(status.suggested_path) === path.join(home, 'Documents', 'Get Things Done');
+  check('the server belongs to the app this test started', ours, status.suggested_path);
+  if (!ours) {
+    base = null;
+    throw new Error('connected to an app that uses another home folder; stopping before any change');
+  }
+
   check('a new user gets the setup screen', status.configured === false && status.ai_tools?.length === 3);
 
   const page = await fetch(`${base}/`);
@@ -96,14 +128,16 @@ try {
   });
   check('setup creates a workspace from the templates inside the app', created.status === 201 && fs.existsSync(path.join(workspace, 'AGENTS.md')));
 
-  // The first thing a new user does: add a task, and see it on the board.
-  const task = await (await fetch(`${base}/api/tasks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  // Persist and read back a fictional task, through the API (Phase 1 acceptance).
+  const taskResponse = await fetch(`${base}/api/tasks`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title: 'Prepare the Q4 steering update', priority: 'high', body: 'Fictional smoke test task.' }),
-  })).json();
-  const board = await (await fetch(`${base}/api/tasks`)).json();
-  check('a new task is saved in the workspace and listed', Boolean(task.id) && board.some((t) => t.id === task.id && t.title === 'Prepare the Q4 steering update'), task.id);
+  });
+  const task = await taskResponse.json();
+  const boardResponse = await fetch(`${base}/api/tasks`);
+  const board = await boardResponse.json();
+  check('a new task is saved in the workspace and listed', taskResponse.status === 201 && boardResponse.ok &&
+    Array.isArray(board) && board.some((t) => t.id === task.id && t.title === 'Prepare the Q4 steering update'), JSON.stringify(task));
 
   // The smoke test's own git makes the workspace a repository; the app must use its bundled git for the rest.
   execFileSync('git', ['init', '-q'], { cwd: workspace });
@@ -112,8 +146,9 @@ try {
   const staged = await fetch(`${base}/api/workspace/git/stage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file: 'workspace.yaml' }),
   });
+  const stageBody = await staged.text();
   const gitStatus = await (await fetch(`${base}/api/workspace/git/status`)).json();
-  check('the bundled git stages a file', staged.ok && gitStatus.staged?.includes('workspace.yaml'), JSON.stringify(gitStatus.staged));
+  check('the bundled git stages a file', staged.ok && gitStatus.staged?.includes('workspace.yaml'), JSON.stringify({ status: staged.status, response: stageBody, gitStatus }));
 } catch (err) {
   check('smoke test ran to the end', false, err instanceof Error ? err.message : String(err));
 } finally {
