@@ -676,15 +676,20 @@ is selected.
 | `GET` | `/api/workspace/git/log` | Recent commits. Optional `limit` (default 20) |
 | `POST` | `/api/workspace/git/stage` | Stage one file. Body: `{ "file": "…" }` |
 | `POST` | `/api/workspace/git/commit` | Commit what is staged. Body: `{ "message": "…" }` |
-| `GET` | `/api/workspace/git/enabled` | Whether the workspace is a git repository |
+| `GET` | `/api/workspace/git/enabled` | Whether git features are usable (`git_enabled`: a repository and git installed) and whether git is installed (`git_installed`) |
 | `GET` | `/api/workspace/files/<path>` | Serve any file inside the workspace. Add `?download=1` to save it. Paths that leave the workspace are refused |
 
 `switch`, `recent/forget`, `pick-folder`, `open` and `open-claude` return
 `{ "error": "…" }` on failure.
 
+Git is optional. When no git program is installed, `git_enabled` and `is_repo` are
+`false` and `git_installed` is `false`, even if the workspace has a `.git` folder.
+`git/diff`, `git/log`, `git/stage` and `git/commit` then answer
+`503 {"error":"Git not available","message":"Git is not installed on this computer. …"}`.
+
 ```text
 GET /api/workspace
-→ 200 {"path":"/Users/alex/gtd-demo","name":"Executive Workspace","git_enabled":false,
+→ 200 {"path":"/Users/alex/gtd-demo","name":"Executive Workspace","git_enabled":false,"git_installed":true,
        "schema_versions":{"task":"1.0","stakeholder":"1.0", …}}
 
 PUT /api/workspace
@@ -732,7 +737,7 @@ GET /api/workspace/validation/count
 
 GET /api/workspace/git/status
 → 200 {"is_repo":true,"branch":"main","modified":["profile/executive-profile.md"],"staged":[],
-       "untracked":[],"ahead":0,"behind":0,"is_clean":false}
+       "untracked":[],"ahead":0,"behind":0,"is_clean":false,"git_installed":true}
 
 GET /api/workspace/git/diff?file=profile/executive-profile.md
 → 200 {"files":["profile/executive-profile.md"],"diff":"diff --git a/profile/executive-profile.md …",
@@ -750,7 +755,7 @@ POST /api/workspace/git/commit
 → 200 {"message":"Committed successfully"}
 
 GET /api/workspace/git/enabled
-→ 200 {"git_enabled":true}
+→ 200 {"git_enabled":true,"git_installed":true}
 
 GET /api/workspace/files/tasks/active/TASK-2026-0001/deliverables/speaker-notes.md
 → 200 text/markdown

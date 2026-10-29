@@ -1,12 +1,12 @@
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { fileInside, sendFile } from '../utils/files';
 import { param } from '../utils/params';
 import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
-import { GitService } from '../services/gitService';
+import { GitService, GitUnavailableError } from '../services/gitService';
 import { watcherService } from '../services/watcherService';
 import { searchService } from '../services/searchService';
 
@@ -126,7 +126,8 @@ async function pickFolder(): Promise<string | null> {
 router.get('/', async (req: Request, res: Response) => {
   const config = workspaceService.getWorkspaceConfig();
   const git_enabled = await gitService.isGitRepo();
-  res.json({ ...config, git_enabled });
+  const git_installed = await gitService.isInstalled();
+  res.json({ ...config, git_enabled, git_installed });
 });
 
 // PUT /api/workspace — update workspace name
@@ -197,7 +198,8 @@ router.post('/switch', async (req: Request, res: Response) => {
 
   const config = workspaceService.getWorkspaceConfig();
   const git_enabled = await gitService.isGitRepo();
-  res.json({ message: 'Workspace changed', initialized: !isWorkspace, config: { ...config, git_enabled } });
+  const git_installed = await gitService.isInstalled();
+  res.json({ message: 'Workspace changed', initialized: !isWorkspace, config: { ...config, git_enabled, git_installed } });
 });
 
 // GET /api/workspace/recent — workspaces opened on this machine, for one-click switching
@@ -338,13 +340,23 @@ router.post('/git/commit', async (req: Request, res: Response) => {
 // GET /api/workspace/git/enabled
 router.get('/git/enabled', async (req: Request, res: Response) => {
   const isRepo = await gitService.isGitRepo();
-  res.json({ git_enabled: isRepo });
+  const git_installed = await gitService.isInstalled();
+  res.json({ git_enabled: isRepo, git_installed });
 });
 
 // GET /api/workspace/files/* — serve any file from within the workspace
 router.get('/files/*splat', async (req: Request, res: Response) => {
   const fullPath = await fileInside(workspaceService.getWorkspacePath(), param(req, 'splat'));
   sendFile(res, fullPath, req.query['download'] === '1');
+});
+
+// Git is optional: answer with a readable 503 (the shared handler hides messages of 5xx errors).
+router.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof GitUnavailableError) {
+    res.status(503).json({ error: 'Git not available', message: err.message });
+    return;
+  }
+  next(err);
 });
 
 export default router;
