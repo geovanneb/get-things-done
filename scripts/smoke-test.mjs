@@ -496,7 +496,7 @@ try {
     const meeting = await (await json('POST', '/api/context-updates', { title: 'Fictional weekly sync', text: 'Fictional transcript' })).json();
     const meetingDir = path.join(ws, 'context-updates', meeting.id);
     fs.writeFileSync(path.join(meetingDir, 'update.md'), fs.readFileSync(path.join(meetingDir, 'update.md'), 'utf-8')
-      .replace('status: ready', 'status: in_review\nmeeting_records:\n  - id: M-01\n    title: Weekly sync\n    meeting_date: \'2026-10-20\'\n    decisions:\n      - Fictional decision'));
+      .replace('status: ready', 'status: in_review\nmeeting_records:\n  - id: M-01\n    title: Weekly sync\n    meeting_date: \'2026-10-20\'\n    decisions:\n      - Fictional decision\n    action_items:\n      - description: Send the fictional plan'));
     const { revision } = (await (await fetch(`${base}/api/context-updates/${meeting.id}`)).json()).meeting_records[0];
     const badRecord = await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'yes', revision } } });
     const staleRecord = await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'confirmed', revision: 'old' } } });
@@ -516,6 +516,17 @@ try {
     check('a WebVTT upload gets a readable transcript next to it, and the same file twice is refused',
       vttUp.status === 201 && vttSaved.transcript === 'sync.transcript.md' && readable.includes('Fictional Speaker\n  Fictional words.') && vttSaved.transcript_complete === true && vttAgain.status === 409,
       `up=${vttUp.status} again=${vttAgain.status} transcript=${vttSaved.transcript}`);
+    const makeTask = () => json('POST', `/api/context-updates/${meeting.id}/meeting-records/M-01/tasks`, { item: 0, revision, task: { title: 'Send the fictional plan', priority: 'medium' } });
+    const made = await makeTask();
+    const madeBody = await made.json();
+    const madeAgain = await makeTask();
+    const againBody = await madeAgain.json();
+    const madeTask = await (await fetch(`${base}/api/tasks/${madeBody.task?.id}`)).json();
+    check('a task made from an action item is created and linked in one step, once',
+      made.status === 201 && madeAgain.status === 200 && againBody.task?.id === madeBody.task?.id
+      && madeBody.update?.meeting_records?.[0]?.action_items?.[0]?.task_ref === madeBody.task?.id
+      && madeBody.update?.meeting_records?.[0]?.confirmation === 'confirmed' && String(madeTask.meeting_action).startsWith(`${meeting.id}/M-01/`),
+      `made=${made.status} again=${madeAgain.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

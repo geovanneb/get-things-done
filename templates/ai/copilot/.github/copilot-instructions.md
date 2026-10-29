@@ -11,7 +11,7 @@ This workspace is managed by Get Things Done. When working in this directory:
 - `context/` — company, strategy, risks, decisions, and glossary notes.
 - `outputs/templates/` — output format templates.
 - `context-updates/` — imported material waiting for review. Not context: never use it as a source for a task.
-- `routines/`: RT-NNNN.md schedules that create recurring tasks. Tasks with `routine_ref` were created by a routine (`routines/RT-NNNN.md`, a schedule plus a task template). Work on them like any other task, and never change `routine_ref` or `routine_occurrence`: they stop the routine creating the same task twice. Create or edit a routine only when the user asks, following `.schemas/routine.schema.json`; the dashboard picks up the change on its next check. In a routine's task title, `{{date}}` is the scheduled run date and `{{due_date}}` the due date (both YYYY-MM-DD); the routine body is copied into each task as written.
+- `routines/`: RT-NNNN.md schedules that create recurring tasks. Tasks with `routine_ref` were created by a routine (`routines/RT-NNNN.md`, a schedule plus a task template). Work on them like any other task, and never change `routine_ref` or `routine_occurrence`: they stop the routine creating the same task twice. Create or edit a routine only when the user asks, following `.schemas/routine.schema.json`; the dashboard picks up the change on its next check. In a routine's task title, `{{date}}` is the scheduled run date and `{{due_date}}` the due date (both YYYY-MM-DD); the routine body is copied into each task as written. Tasks with `meeting_action` were made from a meeting's action item; never change it either: it stops the same item becoming a second task.
 
 ## Rules
 
@@ -80,7 +80,8 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    `owner`, `due_date`) and `source`. Never invent an owner, date or source; leave it
    out. Never translate or romanize names. Texts under 1,000 characters, lists under 30
    entries. No records for a memory review. Never set a record's `confirmation`,
-   `confirmed_at` or `confirmed_hash`: the executive does that.
+   `confirmed_at` or `confirmed_hash`, or an action item's `task_ref`, and never create
+   tasks from action items: the executive does that from the confirmed record.
 6. **Memory review** (`kind: memory-review`, opened by the weekly System cleanup job,
    material `materials/memory-scan.md`): there is no new material. Review the whole
    context and stakeholders for duplicates, facts in the wrong place, obsolete notes,

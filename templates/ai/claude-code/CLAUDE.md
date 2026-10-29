@@ -40,6 +40,7 @@ they stop the routine creating the same task twice. Create or edit a routine onl
 following `.schemas/routine.schema.json`; the dashboard picks up the change on its next check.
 In a routine's task title, `{{date}}` is the scheduled run date and `{{due_date}}` the due date
 (both YYYY-MM-DD); the routine body is copied into each task as written.
+Tasks with `meeting_action` were made from a meeting's action item; never change it either: it stops the same item becoming a second task.
 
 ## Before starting any task
 

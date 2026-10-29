@@ -44,8 +44,14 @@ export default function AppLayout() {
         defaultStatus={newTaskModal.defaultStatus}
         draft={newTaskModal.draft}
         onClose={() => dispatch({ type: 'CLOSE_NEW_TASK_MODAL' })}
-        onCreated={(task, uploadErrors) => {
+        onCreated={(task, uploadErrors, existing) => {
+          const fromMeeting = Boolean(newTaskModal.draft?.meeting_action);
           dispatch({ type: 'CLOSE_NEW_TASK_MODAL' });
+          // The server linked the meeting action item to the task; the record shows the link.
+          if (fromMeeting) dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
+          if (existing) {
+            dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'info', message: `This action item already has a task: ${task.id}. Nothing new was created.` } });
+          }
           if (uploadErrors.length) {
             dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: `Task created, but some files did not upload: ${uploadErrors.join('; ')}` } });
           }

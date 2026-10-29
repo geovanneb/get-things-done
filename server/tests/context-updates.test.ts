@@ -547,3 +547,65 @@ test('a copy no longer counts once its source or the copy itself was edited, and
   const pasted = await service.create({ text: 'WEBVTT\n\nnot a cue\n' });
   assert.deepEqual((await service.get(pasted.id)).transcript_problems, [{ source: 'pasted-text.vtt', reason: 'No cue could be read, so no readable copy was made.' }]);
 });
+
+/** The tasks in the fictional workspace, active and archived. */
+async function taskIds(ws: string): Promise<string[]> {
+  const list = async (folder: string) => fsp.readdir(path.join(ws, 'tasks', folder)).catch(() => [] as string[]);
+  return [...await list('active'), ...await list('archive')].filter((n) => n.startsWith('TASK-')).sort();
+}
+
+test('a task is made from an action item and linked in one step, only once the update is done', async (t) => {
+  const records = [{ ...MEETINGS[0], action_items: [{ description: '' }, ...MEETINGS[0]!.action_items, 'Book the room'] }];
+  const { ws, service, id, file, choose } = await withMeetings(t, records);
+  const create = async (item: number, revision?: string) => {
+    const shown = (await service.get(id)).meeting_records[0]!;
+    return service.createActionItemTask(id, 'M-01', { item, revision: revision ?? shown.revision, task: { title: 'Fictional task' } });
+  };
+
+  const confirmed = (await choose({ 'M-01': 'confirmed' })).meeting_records[0]!;
+  await assert.rejects(create(0), /while the update is "in_review"/, 'not while the update can still be reopened');
+  await service.approve(id);
+  await assert.rejects(create(0, 'old'), /changed since you loaded it/);
+  await assert.rejects(create(5), /Invalid action item/);
+  await assert.rejects(service.createActionItemTask(id, 'M-01', { item: 0, revision: confirmed.revision, task: 'x' }), /Invalid task/);
+  assert.deepEqual(await taskIds(ws), [], 'nothing is created before every check passed');
+
+  const first = await create(0);
+  assert.equal(first.created, true);
+  assert.equal(first.update.meeting_records[0]!.action_items[0]!.task_ref, first.task.id, 'item 0 is the first shown item, after the empty entry');
+  assert.equal(first.update.meeting_records[0]!.confirmation, 'confirmed', 'the link is not part of what was confirmed');
+  const again = await create(0);
+  assert.deepEqual([again.created, again.task.id], [false, first.task.id], 'a second tab or a retry gets the same task');
+
+  const text = await create(1);
+  assert.equal(text.created, true, 'a plain-text item can become a task');
+  const raw = (parseMarkdown(await fsp.readFile(file, 'utf-8')).data['meeting_records'] as { action_items: unknown[] }[])[0]!.action_items;
+  assert.deepEqual(raw[0], { description: '' }, 'the empty entry is untouched');
+  assert.deepEqual(raw[2], { description: 'Book the room', task_ref: text.task.id }, 'the text stays, now with the link');
+  assert.equal((await service.get(id)).meeting_records[0]!.revision, confirmed.revision, 'the record still reads as confirmed');
+  assert.equal((await taskIds(ws)).length, 2);
+
+  await fsp.rm(path.join(ws, 'tasks', 'active', first.task.id), { recursive: true });
+  assert.equal((await service.get(id)).meeting_records[0]!.action_items[0]!.task_found, false, 'a deleted task shows as gone');
+  await assert.rejects(create(0), /which no longer exists/);
+});
+
+test('after a crash between writing the task and the link, a retry finds the task instead of making another', async (t) => {
+  const { ws, service, id, file, choose } = await withMeetings(t);
+  await choose({ 'M-01': 'confirmed' });
+  await service.approve(id);
+  const shown = (await service.get(id)).meeting_records[0]!;
+  const first = await service.createActionItemTask(id, 'M-01', { item: 0, revision: shown.revision, task: { title: 'Fictional task' } });
+  // Simulate the lost link: the task exists, the item does not point at it.
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+  const records = parsed.data['meeting_records'] as { action_items: Record<string, unknown>[] }[];
+  delete records[0]!.action_items[0]!['task_ref'];
+  await fsp.writeFile(file, stringifyMarkdown(parsed.content, parsed.data));
+  const taskMd = parseMarkdown(await fsp.readFile(path.join(ws, 'tasks', 'active', first.task.id, 'task.md'), 'utf-8')).data;
+  assert.match(String(taskMd['meeting_action']), new RegExp(`^${id}/M-01/[0-9a-f]{12}$`), 'the task says which item it was made from');
+
+  const retry = await service.createActionItemTask(id, 'M-01', { item: 0, revision: shown.revision, task: { title: 'Fictional task' } });
+  assert.deepEqual([retry.created, retry.task.id], [false, first.task.id]);
+  assert.equal(retry.update.meeting_records[0]!.action_items[0]!.task_ref, first.task.id, 'the link is restored');
+  assert.equal((await taskIds(ws)).length, 1);
+});

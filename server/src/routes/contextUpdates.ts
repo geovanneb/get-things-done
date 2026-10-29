@@ -69,6 +69,13 @@ router.put('/:id/meeting-records', async (req: Request, res: Response) => {
   res.json(await service.saveMeetingRecords(param(req, 'id'), body(req)['records']));
 });
 
+// POST /api/context-updates/:id/meeting-records/:recordId/tasks  { item, revision, task }
+// 201 with the new task, or 200 with the task the action item already has.
+router.post('/:id/meeting-records/:recordId/tasks', async (req: Request, res: Response) => {
+  const result = await service.createActionItemTask(param(req, 'id'), param(req, 'recordId'), body(req));
+  res.status(result.created ? 201 : 200).json(result);
+});
+
 // State changes made from the dashboard. The agent commands make the others by editing update.md.
 router.post('/:id/approve', async (req: Request, res: Response) => {
   res.json(await service.approve(param(req, 'id')));
