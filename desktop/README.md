@@ -66,8 +66,9 @@ npm run smoke --prefix desktop   # start the packaged app as a new user would an
 
 ## Releases and signing
 
-A version tag runs `release.yml`: the existing npm release is followed by the reusable desktop
-workflow. Release builds require signing; missing credentials fail the desktop release job instead
+A version tag runs `release.yml`: the reusable desktop workflow starts after build/test verification, in parallel with npm
+publishing. Signed installers are uploaded to a draft GitHub release; the release becomes public
+only after both desktop and npm jobs succeed. Release builds require signing; missing credentials fail the desktop release job instead
 of publishing unsigned installers. PR, main and manual desktop builds remain unsigned, with no
 signing credentials passed to the build. Desktop's version is set from the validated release tag.
 
@@ -89,7 +90,7 @@ Configure Windows **repository variables** `AZURE_SIGNING_ACCOUNT`, `AZURE_CERT_
 The publisher is also embedded in the updater configuration for signature verification.
 Never put certificates, private keys or client secrets in the repository.
 
-The workflow forces signing, checks Mac signatures and Gatekeeper assessment, checks Windows
+The workflow forces signing, signs both Mac apps and DMG files, checks signatures, stapled app notarization and Gatekeeper assessment, checks Windows
 app and installer signatures, and smoke-tests each packaged app before attaching installers,
 blockmaps and update manifests to the GitHub release. Apple Silicon uses the `latest-arm64`
 channel; Intel Mac and Windows use `latest`. The Mac manifests have distinct filenames so one

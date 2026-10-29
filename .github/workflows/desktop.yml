@@ -108,6 +108,7 @@ jobs:
             args+=(-c.mac.identity=-)
           fi
           if [ "$MAC_SIGNING" = 'true' ]; then
+            args+=(-c.dmg.sign=true)
             : "${CSC_LINK:?Missing MAC_CERT_P12}" "${APPLE_API_KEY_ID:?Missing APPLE_API_KEY_ID}" "${APPLE_API_ISSUER:?Missing APPLE_API_ISSUER}"
             test -s "$APPLE_API_KEY"
           fi
@@ -144,10 +145,15 @@ jobs:
         if: env.MAC_SIGNING == 'true' || env.WIN_SIGNING == 'true'
         shell: bash
         run: |
+          set -euo pipefail
           if [ "$RUNNER_OS" = 'macOS' ]; then
             app="$(ls -d desktop/release/mac*/*.app | head -1)"
             codesign --verify --deep --strict --verbose=2 "$app"
             spctl --assess --type execute --verbose "$app"
+            xcrun stapler validate "$app"
+            for dmg in desktop/release/*.dmg; do
+              codesign --verify --strict --verbose=2 "$dmg"
+            done
           else
             powershell -Command "Get-Item 'desktop/release/win-unpacked/Get Things Done.exe', 'desktop/release/*.exe' | ForEach-Object { if ((Get-AuthenticodeSignature \$_).Status -ne 'Valid') { exit 1 } }"
           fi
@@ -199,10 +205,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
+          set -euo pipefail
           shopt -s nullglob
           files=(release/*)
+          dmgs=(release/*.dmg)
+          exes=(release/*.exe)
+          # Both Mac architectures and Windows must be present before making this a release.
+          test "${#dmgs[@]}" -eq 2
+          test "${#exes[@]}" -ge 1
+          for manifest in latest.yml latest-mac.yml latest-arm64-mac.yml; do
+            test -s "release/$manifest"
+          done
           if [ ${#files[@]} -eq 0 ]; then
             echo "::notice::No signed installers yet, so nothing is attached to $RELEASE_TAG. Add the signing secrets (desktop/README.md)."
             exit 1
+          fi
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG" --notes "Signed installers verified; release publication pending." --repo "$GITHUB_REPOSITORY"
           fi
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"

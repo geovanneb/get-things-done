@@ -40,7 +40,7 @@ Phase 1 work items and must not be advertised as implemented.
 - Unsigned packaged apps could check for updates despite the comment promising otherwise. Only a
   signed-release metadata flag enables checks; development and smoke-test modes remain disabled.
 - `quitAndInstall` can close windows/start installation before `before-quit`. Restart now waits for
-  server shutdown and coalesces repeated requests. Channel selection no longer enables downgrades.
+  server shutdown (including exit after a forced kill) and coalesces repeated requests. Channel selection no longer enables downgrades.
 - The updater's background download has a separate promise. Failures from both the check and the
   download are consumed and logged, as are dialog failures.
 - The packaged smoke test scanned the normal app ports. PR #141 now uses an ephemeral saved port,
@@ -57,7 +57,7 @@ All fixtures are fictional and all API/browser tests use temporary workspaces.
 | Root build | Pass on Node 22 and 26 |
 | Full `npm test` | Pass on Node 20.19.0, 22, 24 and 26; parser boundary, 150 server tests, UI suites and package smoke |
 | Desktop build | Pass |
-| Desktop unit tests | Eight pass, including unsigned-update policy, shutdown ordering/retry and failed downloads |
+| Desktop unit tests | Eleven pass, including unsigned-update policy, shutdown ordering/retry and failed downloads |
 | Lint | Zero errors; 16 existing warnings |
 | Production dependency audit | Zero vulnerabilities |
 | Desktop dependency audit including Electron | Zero vulnerabilities |
@@ -68,6 +68,7 @@ All fixtures are fictional and all API/browser tests use temporary workspaces.
 
 The 390px board and 1440px dark-mode screenshots were visually inspected. Narrow board columns
 scroll horizontally; these screenshots are not a claim of exhaustive visual or accessibility coverage.
+The forced-shutdown regression fails against the previous resolve-immediately-after-kill behavior and passes with the exit-event wait.
 No private workspace or screenshot is included in the repository.
 
 ## PR review and remaining gates

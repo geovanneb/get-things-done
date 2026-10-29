@@ -81,7 +81,7 @@ jobs:
 
   github-release:
     name: Create GitHub release
-    needs: publish
+    needs: [publish, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -106,14 +106,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md --draft=false
           else
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --generate-notes --verify-tag
           fi
 
   desktop:
     name: Release desktop installers
-    needs: github-release
+    needs: verify
     permissions:
       contents: write
     uses: ./.github/workflows/desktop.yml

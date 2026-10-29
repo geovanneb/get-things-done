@@ -4,6 +4,7 @@ import { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, ut
 import * as fs from 'fs';
 import * as path from 'path';
 import { registerBridge } from './bridge';
+import { stopServer } from './server-lifecycle';
 import { installNow, startUpdateChecks } from './updates';
 import { classifyLink } from './links';
 import { DEFAULT_PORT, findFreePort } from './port';
@@ -82,19 +83,7 @@ function startServerProcess(port: number): Promise<string> {
 }
 
 function stopServerProcess(): Promise<void> {
-  const child = server;
-  if (!child) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve();
-    }, 7000);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    child.postMessage({ type: 'shutdown' });
-  });
+  return stopServer(server);
 }
 
 // ---- Window ----
