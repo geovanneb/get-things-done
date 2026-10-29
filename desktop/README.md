@@ -22,6 +22,10 @@ the dashboard and the templates are the same code as `gtd start` (see #123, phas
 - Downloads always ask where to save, starting in the Downloads folder.
 - The window is sandboxed (`contextIsolation`, `sandbox`, no Node in the page). The page gets no
   permissions except clipboard writes for the copy buttons.
+- Git comes with the app: `dugite` ships a portable git (the one GitHub Desktop uses), and
+  `server-host.ts` passes it to `startServer({ git })`. Users never install git. If the bundled
+  copy is missing, the server uses the git on PATH, and without any git the git features are
+  hidden (#126).
 - The server reads the workspace from `~/.gtd/config.json`, the same as the CLI, so both
   see the same workspaces.
 
@@ -32,14 +36,18 @@ Server logs go to the app's log folder (`~/Library/Logs/Get Things Done/server.l
 
 ```bash
 npm install                  # repo root, once
-npm install --prefix desktop # downloads Electron, once
+npm install --prefix desktop # downloads Electron and the portable git, once
 npm run desktop              # builds everything, then opens the app
 ```
+
+If your npm config has `ignore-scripts=true`, the two downloads do not run on install. Run
+`npm run fetch-binaries --prefix desktop` once after installing (and after reinstalling).
 
 `desktop/` has its own `package.json` and lockfile on purpose: installing the CLI or running
 CI for the web app never downloads Electron.
 
 ## Not here yet
 
-Bundled git (item 7 in #123), the first-run wizard (8) and signed installers with
-auto-update (9).
+The first-run wizard (item 8 in #123) and signed installers with auto-update (9). The portable
+git is downloaded for the platform that runs `npm install`, so installers must be built on each
+platform (item 9).

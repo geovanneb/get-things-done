@@ -7,11 +7,15 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "npm run build && electron ."
+    "start": "npm run build && electron .",
+    "fetch-binaries": "node node_modules/electron/install.js && node node_modules/dugite/script/download-git.js"
   },
   "devDependencies": {
     "electron": "45.0.0",
     "typescript": "^5.4.3"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "dugite": "3.2.3"
+  }
 }

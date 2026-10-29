@@ -12,6 +12,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { watcherService } from './services/watcherService';
 import { routineScheduler } from './services/routineScheduler';
 import { WorkspaceService } from './services/workspace';
+import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 
 export const HOST = '127.0.0.1';
@@ -25,6 +26,8 @@ export interface StartServerOptions {
   workspacePath?: string;
   /** Folder of the workspace templates. Without it the copy next to the package is used. */
   templatesPath?: string;
+  /** A git program to use instead of the `git` on PATH (the desktop app bundles one). */
+  git?: GitRuntime;
   /** Log each request to stdout (default true). */
   logRequests?: boolean;
 }
@@ -49,6 +52,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
   // The services read these at call time, so setting them here is how options reach them.
   if (options.workspacePath) process.env['ESB_WORKSPACE_PATH'] = options.workspacePath;
   if (options.templatesPath) process.env['ESB_TEMPLATES_PATH'] = options.templatesPath;
+  if (options.git) useGitRuntime(options.git);
 
   const sseClients = new Set<Response>();
   const app = createApp(port, options, sseClients);

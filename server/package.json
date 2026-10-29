@@ -10,6 +10,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@simple-git/argv-parser": "2.0.1",
     "ajv": "^8.12.0",
     "ajv-formats": "^3.0.1",
     "chokidar": "^5.0.0",
