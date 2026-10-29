@@ -894,7 +894,9 @@ export default function SettingsView() {
       <SectionCard title="Git">
         {config?.git_enabled === false ? (
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
-            Git is not enabled for this workspace.
+            {config.git_installed === false
+              ? 'Git is not installed on this computer, so git features are hidden. Everything else works without it.'
+              : 'Git is not enabled for this workspace.'}
           </p>
         ) : (
           <>

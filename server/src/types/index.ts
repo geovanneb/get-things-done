@@ -213,6 +213,8 @@ export interface GitStatus {
   behind: number;
   is_clean: boolean;
   is_repo: boolean;
+  /** False when no git program is installed; then `is_repo` is false even if the workspace has a `.git` folder. */
+  git_installed: boolean;
 }
 
 export interface GitDiff {

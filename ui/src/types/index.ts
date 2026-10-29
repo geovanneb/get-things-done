@@ -344,6 +344,8 @@ export interface GitStatus {
   ahead: number;
   behind: number;
   is_repo: boolean;
+  /** False when no git program is installed. Older servers leave it out. */
+  git_installed?: boolean;
   recent_commits?: Array<{ hash: string; message: string; author: string; date: string }>;
 }
 
@@ -364,6 +366,8 @@ export interface WorkspaceConfig {
   path: string;
   name: string;
   git_enabled: boolean;
+  /** False when no git program is installed. Older servers leave it out. */
+  git_installed?: boolean;
 }
 
 /** A workspace opened on this machine before, as listed by `GET /api/workspace/recent`. */

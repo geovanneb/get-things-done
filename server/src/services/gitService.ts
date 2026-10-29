@@ -6,19 +6,61 @@ import { WorkspaceService } from './workspace';
 
 const workspaceService = new WorkspaceService();
 
+/** Thrown when the workspace uses git but no git program is installed. Routes answer it with 503. */
+export class GitUnavailableError extends Error {
+  readonly statusCode = 503;
+  constructor() {
+    super('Git is not installed on this computer. Install git to see changes and commit from the dashboard.');
+    this.name = 'GitUnavailableError';
+  }
+}
+
+// Installing git while the server runs is rare, so a found git is remembered, but a missing one is checked again
+// after a minute instead of until restart.
+const RECHECK_MISSING_MS = 60_000;
+let installedCheck: { installed: boolean; checkedAt: number } | null = null;
+
 export class GitService {
   private getGit(): SimpleGit {
     const workspacePath = workspaceService.getWorkspacePath();
     return simpleGit(workspacePath);
   }
 
-  async isGitRepo(): Promise<boolean> {
+  /** Whether a git program can be run. Git is optional: the dashboard works without it. */
+  async isInstalled(): Promise<boolean> {
+    if (installedCheck && (installedCheck.installed || Date.now() - installedCheck.checkedAt < RECHECK_MISSING_MS)) {
+      return installedCheck.installed;
+    }
+    let installed: boolean;
+    try {
+      installed = (await simpleGit().version()).installed;
+    } catch {
+      installed = false;
+    }
+    installedCheck = { installed, checkedAt: Date.now() };
+    return installed;
+  }
+
+  /** The workspace has a `.git` folder, whether or not git is installed. */
+  hasRepository(): boolean {
     const workspacePath = workspaceService.getWorkspacePath();
     return fs.existsSync(path.join(workspacePath, '.git'));
   }
 
+  /** Git features are usable: the workspace is a repository and git is installed. */
+  async isGitRepo(): Promise<boolean> {
+    return this.hasRepository() && (await this.isInstalled());
+  }
+
+  private async requireGit(): Promise<SimpleGit> {
+    if (!(await this.isInstalled())) throw new GitUnavailableError();
+    return this.getGit();
+  }
+
   async getStatus(): Promise<GitStatus> {
+    const installed = await this.isInstalled();
     try {
+      if (!installed) throw new GitUnavailableError();
       const git = this.getGit();
       const status = await git.status();
       return {
@@ -30,6 +72,7 @@ export class GitService {
         behind: status.behind,
         is_clean: status.isClean(),
         is_repo: true,
+        git_installed: true,
       };
     } catch {
       return {
@@ -41,12 +84,13 @@ export class GitService {
         behind: 0,
         is_clean: true,
         is_repo: false,
+        git_installed: installed,
       };
     }
   }
 
   async getDiff(filePath?: string): Promise<GitDiff> {
-    const git = this.getGit();
+    const git = await this.requireGit();
 
     let diffOutput: string;
     if (filePath) {
@@ -75,7 +119,7 @@ export class GitService {
   }
 
   async getLog(limit = 20): Promise<{ hash: string; author: string; date: string; message: string }[]> {
-    const git = this.getGit();
+    const git = await this.requireGit();
     const log = await git.log({ maxCount: limit });
 
     return (log.all || []).map((entry) => ({
@@ -87,7 +131,7 @@ export class GitService {
   }
 
   async stageFile(filePath: string): Promise<void> {
-    const git = this.getGit();
+    const git = await this.requireGit();
     await git.add(filePath);
   }
 
@@ -95,7 +139,7 @@ export class GitService {
     if (!message || message.trim().length === 0) {
       throw new Error('Commit message is required');
     }
-    const git = this.getGit();
+    const git = await this.requireGit();
     // NEVER auto-push
     await git.commit(message);
   }
