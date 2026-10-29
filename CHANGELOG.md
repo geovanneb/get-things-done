@@ -15,9 +15,9 @@ short setup creates your workspace. Nothing else to install, no terminal. The br
 (`gtd start`) works exactly as before and shares the same workspaces.
 
 **Download** (below, under Assets):
-- **Mac with Apple Silicon** (M1 and newer): `Get Things Done-0.7.0-arm64.dmg`
-- **Mac with Intel**: `Get Things Done-0.7.0.dmg`
-- **Windows 10/11**: the `…-unsigned-preview.exe` installer (see the note at the end)
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.7.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.7.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.7.0-unsigned-preview.exe` (see the note at the end)
 
 The Mac apps are signed and notarized by Apple and update themselves from new releases.
 
