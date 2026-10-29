@@ -307,10 +307,11 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 | `DELETE` | `/api/context-updates/:id/materials/:name` | Delete one piece of material. Returns `204` |
 | `PUT` | `/api/context-updates/:id/keep-materials` | Keep the material after the update is done, or release it. Body: `{ "keep": true }` |
 | `PUT` | `/api/context-updates/:id/decisions` | Save review decisions on proposals: `accepted`, `rejected` or `null`, with an optional `reviewer_note` |
-| `POST` | `/api/context-updates/:id/approve` | From `in_review`: approve the accepted proposals so an agent can apply them. Needs at least one accepted proposal |
+| `PUT` | `/api/context-updates/:id/meeting-records` | From `in_review`: confirm or reject meeting records, apart from the proposals. Body: `{ "records": { "M-01": { "confirmation": "confirmed", "revision": "<the record's revision>" } } }`, each `confirmed`, `rejected` or `null`. Returns `409` when the record changed since it was loaded, and `400` for a record with `problems` (it can only be rejected) or a duplicate id |
+| `POST` | `/api/context-updates/:id/approve` | From `in_review`: approve the accepted proposals so an agent can apply them. Needs at least one accepted proposal or one confirmed meeting record. Records not confirmed are rejected. With no file to write (only removals or meeting records), the update is `done` at once. Returns `409` when a record changed after it was confirmed |
 | `POST` | `/api/context-updates/:id/back-to-review` | From `approved`: back to `in_review`, before the apply has started |
-| `POST` | `/api/context-updates/:id/reopen` | From `analyzing`, `in_review` or `approved`: back to `ready` to add material. The proposals are discarded |
-| `POST` | `/api/context-updates/:id/close` | From `in_review` or `approved`: finish without changing any context note |
+| `POST` | `/api/context-updates/:id/reopen` | From `analyzing`, `in_review` or `approved`: back to `ready` to add material. The proposals and meeting records, also confirmed ones, are discarded |
+| `POST` | `/api/context-updates/:id/close` | From `in_review` or `approved`: finish without changing any context note. Confirmed meeting records stay; `409` when one changed after it was confirmed |
 
 A state change from the wrong status returns `409`, for example
 `Cannot close while the update is "ready"`.
@@ -352,6 +353,10 @@ PUT /api/context-updates/CU-2026-0001/keep-materials
 PUT /api/context-updates/CU-2026-0001/decisions
 {"decisions":{"P-01":{"decision":"accepted","reviewer_note":"Correct, the contract is signed."}}}
 → 200 {"id":"CU-2026-0001","proposals":[{"id":"P-01","decision":"accepted", …}], …}
+
+PUT /api/context-updates/CU-2026-0001/meeting-records
+{"records":{"M-01":{"confirmation":"confirmed","revision":"3f9c1a7b2e4d6f80"}}}
+→ 200 {"id":"CU-2026-0001","meeting_records":[{"id":"M-01","confirmation":"confirmed", …}], …}
 
 POST /api/context-updates/CU-2026-0001/approve
 → 200 {"id":"CU-2026-0001","status":"approved", …}

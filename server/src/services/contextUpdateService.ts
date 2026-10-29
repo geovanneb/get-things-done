@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
+import { createHash } from 'crypto';
 import { WorkspaceService } from './workspace';
 import { reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
@@ -30,6 +31,10 @@ const pendingUpdates = new Map<string, Promise<void>>();
  * out accepted removals itself: it moves the file (a context note with its whole folder) to the trash once
  * the update is done, or straight away when removals are all that was accepted.
  *
+ * `meeting_records` hold what each meeting was (date, attendees, decisions, open questions, action items).
+ * The analysis drafts them; the user confirms or rejects each one apart from the proposals, and a
+ * confirmed record keeps the update out of the System cleanup. The materials stay unreviewed evidence.
+ *
  * `origin` says who opened the update. Only the server sets it (the weekly memory review writes
  * `system-cleanup`); an import from the dashboard has none.
  * The agent commands (/gtd-context-analyze, /gtd-context-apply) move analyzing/in_review and applying/done;
@@ -44,7 +49,14 @@ const STAKEHOLDER_FOLDERS = ['people', 'groups', 'org-charts'];
 
 const ID_PATTERN = /^CU-\d{4}-\d{4}$/;
 const PROPOSAL_ID_PATTERN = /^P-\d{2,3}$/;
+const RECORD_ID_PATTERN = /^M-\d{2,3}$/;
+/** A stakeholder id, or `me` for the workspace owner. */
+const PERSON_REF_PATTERN = /^(STK-\d{4}|me)$/;
 const MAX_PROPOSALS = 50;
+// Limits on what can be confirmed. A record over a limit is shown in full with a problem, never shortened.
+const MAX_RECORDS = 20;
+const MAX_RECORD_ITEMS = 30;
+const MAX_RECORD_TEXT = 1000;
 const MAX_NOTE = 2000;
 const MAX_TEXT = 200_000;
 /** Larger files are not shown as a diff; the dashboard offers to open them instead. */
@@ -67,6 +79,44 @@ export interface UpdateProposal {
   outcome_note: string;
 }
 
+/**
+ * Someone named in a meeting record: a stakeholder (or `me`) when the agent linked one, and the name as written.
+ * The link is the agent's claim; `ref_found` (detail only) says whether that stakeholder file exists.
+ */
+export interface MeetingPerson { ref: string | null; name: string; ref_found?: boolean }
+
+export interface MeetingActionItem { description: string; owner: MeetingPerson | null; due_date: string }
+
+/**
+ * What one meeting was: drafted by the analysis, confirmed or rejected by the user on its own, apart from
+ * the context proposals. A confirmed record is the reviewed account of the meeting; the transcript stays
+ * unreviewed material. Confirming means the user checked the record, not that every attendee agreed to it.
+ */
+export interface MeetingRecord {
+  id: string;
+  title: string;
+  /** YYYY-MM-DD, or empty when the material does not say. */
+  meeting_date: string;
+  attendees: MeetingPerson[];
+  decisions: string[];
+  open_questions: string[];
+  action_items: MeetingActionItem[];
+  /** Where it comes from, e.g. the material file. */
+  source: string;
+  /**
+   * Set by the user in the dashboard, never by an agent. `confirmed` only counts while the record still has
+   * the content the user confirmed (`confirmed_hash` in the file); otherwise it reads as null.
+   */
+  confirmation: 'confirmed' | 'rejected' | null;
+  confirmed_at: string | null;
+  /** Hash of the record's content. A confirmation must name it, so it applies to exactly what was shown. */
+  revision: string;
+  /** Why this record cannot be confirmed as it is (malformed, too long, duplicate id). Empty when fine. */
+  problems: string[];
+  /** It was confirmed, then its content changed: it needs a new review. */
+  changed_since_confirmed: boolean;
+}
+
 export interface ContextUpdate {
   id: string;
   title: string;
@@ -87,6 +137,7 @@ export interface ContextUpdate {
   /** What the analysis is about: 'memory-review' reviews the existing memory instead of new material. */
   kind: string | null;
   proposals: UpdateProposal[];
+  meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
 }
@@ -179,6 +230,110 @@ function normalizePairs<K extends string, V extends string>(raw: unknown, k: K, 
   });
 }
 
+/** A text field of a record. Non-text values and over-long text are reported, never converted or cut. */
+function recordText(value: unknown, what: string, problems: string[]): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') { problems.push(`${what} is not text`); return ''; }
+  if (value.length > MAX_RECORD_TEXT) problems.push(`${what} is longer than ${MAX_RECORD_TEXT} characters`);
+  return value.trim();
+}
+
+function recordList(raw: unknown, what: string, problems: string[]): unknown[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) { problems.push(`${what} is not a list`); return []; }
+  if (raw.length > MAX_RECORD_ITEMS) problems.push(`${what} has more than ${MAX_RECORD_ITEMS} entries`);
+  return raw;
+}
+
+function recordDate(value: unknown, what: string, problems: string[]): string {
+  if (value === undefined || value === null || value === '') return '';
+  const date = str(value, true);
+  if (!isDateOnly(date)) { problems.push(`${what} is not a date (YYYY-MM-DD)`); return ''; }
+  return date;
+}
+
+/** A person from the agent's file: an object with `ref` and `name`, or just a name. Empty entries are left out. */
+function recordPerson(raw: unknown, what: string, problems: string[]): MeetingPerson | null {
+  if (typeof raw === 'string') return raw.trim() ? { ref: null, name: recordText(raw, what, problems) } : null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { problems.push(`${what} is not a person`); return null; }
+  const o = raw as Record<string, unknown>;
+  const name = recordText(o['name'], `${what} name`, problems);
+  let ref: string | null = null;
+  if (o['ref'] !== undefined && o['ref'] !== null && o['ref'] !== '') {
+    if (typeof o['ref'] === 'string' && PERSON_REF_PATTERN.test(o['ref'].trim())) ref = o['ref'].trim();
+    else problems.push(`${what} has a ref that is not a stakeholder id or "me"`);
+  }
+  return ref || name ? { ref, name } : null;
+}
+
+/** The content a confirmation is bound to, in a fixed order. */
+function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' | 'revision' | 'problems' | 'changed_since_confirmed'>): string {
+  const content = [r.id, r.title, r.meeting_date, r.attendees.map((p) => [p.ref, p.name]), r.decisions, r.open_questions,
+    r.action_items.map((a) => [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date]), r.source];
+  return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 16);
+}
+
+/**
+ * Reads the agent's records without changing what they say: nothing is shortened, renamed or invented. What
+ * cannot be shown faithfully, or has no unique id, gets a problem and cannot be confirmed until it is fixed.
+ */
+function normalizeRecords(raw: unknown): MeetingRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const records = raw.map((entry) => {
+    const problems: string[] = [];
+    const r = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>;
+    if (r !== entry) problems.push('the record is not an object');
+    const id = typeof r['id'] === 'string' ? r['id'].trim() : '';
+    if (!RECORD_ID_PATTERN.test(id)) problems.push('the record has no valid id (M-01, M-02...)');
+    const people = (list: unknown[], what: string) => list.map((p, i) => recordPerson(p, `${what} ${i + 1}`, problems)).filter((p): p is MeetingPerson => p !== null);
+    const texts = (list: unknown[], what: string) => list.map((t, i) => recordText(t, `${what} ${i + 1}`, problems)).filter(Boolean);
+    const content = {
+      id,
+      title: recordText(r['title'], 'title', problems),
+      meeting_date: recordDate(r['meeting_date'], 'meeting_date', problems),
+      attendees: people(recordList(r['attendees'], 'attendees', problems), 'attendee'),
+      decisions: texts(recordList(r['decisions'], 'decisions', problems), 'decision'),
+      open_questions: texts(recordList(r['open_questions'], 'open_questions', problems), 'open question'),
+      action_items: recordList(r['action_items'], 'action_items', problems).map((item, i) => {
+        const a = (item && typeof item === 'object' && !Array.isArray(item) ? item : null) as Record<string, unknown> | null;
+        if (!a) return { description: recordText(item, `action item ${i + 1}`, problems), owner: null, due_date: '' };
+        return {
+          description: recordText(a['description'], `action item ${i + 1}`, problems),
+          owner: a['owner'] == null ? null : recordPerson(a['owner'], `action item ${i + 1} owner`, problems),
+          due_date: recordDate(a['due_date'], `action item ${i + 1} due_date`, problems),
+        };
+      }).filter((a) => a.description || a.owner || a.due_date),
+      source: recordText(r['source'], 'source', problems),
+    };
+    const revision = recordRevision(content);
+    const hash = typeof r['confirmed_hash'] === 'string' ? r['confirmed_hash'] : '';
+    // A confirmation counts only for the content it was given for. One written without that hash (by hand
+    // or by an agent) is not the user's confirmation.
+    const confirmedNow = r['confirmation'] === 'confirmed' && hash === revision;
+    const confirmedAt = typeof r['confirmed_at'] === 'string' && !Number.isNaN(Date.parse(r['confirmed_at'])) ? r['confirmed_at'] : null;
+    return {
+      ...content,
+      confirmation: confirmedNow ? 'confirmed' as const : r['confirmation'] === 'rejected' ? 'rejected' as const : null,
+      confirmed_at: confirmedNow ? confirmedAt : null,
+      revision,
+      problems,
+      changed_since_confirmed: r['confirmation'] === 'confirmed' && hash !== '' && hash !== revision,
+    };
+  });
+  const counts = new Map<string, number>();
+  for (const r of records) if (r.id) counts.set(r.id, (counts.get(r.id) ?? 0) + 1);
+  for (const r of records) {
+    if (r.id && counts.get(r.id)! > 1) r.problems.push(`another record has the same id ${r.id}`);
+    if (records.length > MAX_RECORDS) r.problems.push(`more than ${MAX_RECORDS} meeting records in one update`);
+  }
+  return records;
+}
+
+/** Whether a finished update holds a meeting record the user confirmed. Reads the raw frontmatter value. */
+export function hasConfirmedRecord(meetingRecords: unknown): boolean {
+  return normalizeRecords(meetingRecords).some((r) => r.confirmation === 'confirmed');
+}
+
 function normalize(data: Record<string, unknown>, body: string, folderId: string): ContextUpdate {
   const status = UPDATE_STATUSES.includes(data['status'] as UpdateStatus) ? data['status'] as UpdateStatus : 'ready';
   const materials = Array.isArray(data['materials'])
@@ -205,6 +360,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
+    meeting_records: normalizeRecords(data['meeting_records']),
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
   };
@@ -300,6 +456,7 @@ export class ContextUpdateService {
       }
       const { update: current } = await this.read(id);
       const proposals = await Promise.all(current.proposals.map((p) => this.proposalDetail(dir, current, p)));
+      await this.markLinkedPeople(current.meeting_records);
       const material_files = await listFolderFiles(path.join(dir, 'materials'));
       return { ...current, proposals, material_files };
     });
@@ -347,6 +504,22 @@ export class ContextUpdateService {
       return r ? { ...(raw as Record<string, unknown>), ...r } : raw;
     });
     await this.write(file, data, update.notes, { proposals });
+  }
+
+  /** Says for every linked person whether that stakeholder exists: the link is only the agent's claim. */
+  private async markLinkedPeople(records: MeetingRecord[]): Promise<void> {
+    const people = path.join(workspaceService.getWorkspacePath(), 'stakeholders', 'people');
+    const found = new Map<string, boolean>();
+    const check = async (p: MeetingPerson | null) => {
+      if (!p?.ref) return;
+      if (p.ref === 'me') { p.ref_found = true; return; }
+      if (!found.has(p.ref)) found.set(p.ref, await fileInside(people, `${p.ref.toLowerCase()}.md`).then(() => true, () => false));
+      p.ref_found = found.get(p.ref)!;
+    };
+    for (const r of records) {
+      for (const p of r.attendees) await check(p);
+      for (const a of r.action_items) await check(a.owner);
+    }
   }
 
   private async proposalDetail(dir: string, update: ContextUpdate, p: UpdateProposal): Promise<ProposalDetail> {
@@ -537,6 +710,69 @@ export class ContextUpdateService {
     });
   }
 
+  /**
+   * Confirms or rejects meeting records while the user reviews, apart from the proposals:
+   * `{ "M-01": { "confirmation": "confirmed" | "rejected" | null, "revision": "<the record's revision>" } }`.
+   * The revision is the content the user saw: if the record changed since, the choice is refused (409).
+   */
+  async saveMeetingRecords(id: string, input: unknown): Promise<ContextUpdate> {
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['in_review'], 'confirm meeting records');
+      const choices = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+      const byId = new Map(update.meeting_records.map((r) => [r.id, r] as const));
+      const changes = new Map<string, MeetingRecord['confirmation']>();
+      for (const [key, raw] of Object.entries(choices)) {
+        const record = key ? byId.get(key) : undefined;
+        if (!record) throw httpError(400, `Invalid meeting record id: ${key}`);
+        if (update.meeting_records.filter((r) => r.id === key).length > 1) {
+          throw httpError(400, `Meeting record ${key} cannot be chosen: another record has the same id`);
+        }
+        const choice = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        const value = choice['confirmation'];
+        if (value !== 'confirmed' && value !== 'rejected' && value !== null) throw httpError(400, 'Invalid confirmation: use confirmed, rejected or null');
+        if (choice['revision'] !== record.revision) throw httpError(409, `Meeting record ${key} changed since you loaded it; review it again`);
+        if (value === 'confirmed' && record.problems.length) throw httpError(400, `Meeting record ${key} cannot be confirmed: ${record.problems.join('; ')}`);
+        changes.set(key, value);
+      }
+      const now = new Date().toISOString();
+      const normalized = update.meeting_records;
+      const records = this.rawRecords(data).map((raw, i) => {
+        const r = normalized[i]!;
+        if (!changes.has(r.id)) return raw;
+        const value = changes.get(r.id)!;
+        return {
+          ...(raw as Record<string, unknown>),
+          confirmation: value ?? undefined,
+          confirmed_at: value === 'confirmed' ? now : undefined,
+          confirmed_hash: value === 'confirmed' ? r.revision : undefined,
+        };
+      });
+      await this.write(file, data, update.notes, { meeting_records: this.clean(records) });
+      return (await this.read(id)).update;
+    });
+  }
+
+  /** Every record as written, never cut to a limit: a save must not lose the ones the dashboard flags. */
+  private rawRecords(data: Record<string, unknown>): unknown[] {
+    return Array.isArray(data['meeting_records']) ? (data['meeting_records'] as unknown[]) : [];
+  }
+
+  /**
+   * At the end of the review a record nobody confirmed is rejected, like an unticked proposal. A record that
+   * changed after the user confirmed it stops the review: the user must look at it again.
+   */
+  private frozenRecords(update: ContextUpdate, data: Record<string, unknown>): unknown[] | undefined {
+    if (!Array.isArray(data['meeting_records'])) return undefined;
+    const changed = update.meeting_records.filter((r) => r.changed_since_confirmed);
+    if (changed.length) {
+      throw httpError(409, `Meeting record ${changed.map((r) => r.id || '(no id)').join(', ')} changed after you confirmed it; review it again`);
+    }
+    return this.clean(this.rawRecords(data).map((raw, i) => update.meeting_records[i]!.confirmation === 'confirmed'
+      ? raw
+      : { ...(raw as Record<string, unknown>), confirmation: 'rejected', confirmed_at: undefined, confirmed_hash: undefined }));
+  }
+
   private rawProposals(data: Record<string, unknown>): unknown[] {
     return Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS) : [];
   }
@@ -548,28 +784,34 @@ export class ContextUpdateService {
     });
   }
 
-  /** Freezes the selection: everything not accepted is rejected, and the apply command may run. */
+  /**
+   * Freezes the selection: everything not accepted is rejected, every meeting record not confirmed is
+   * rejected, and the apply command may run.
+   */
   async approve(id: string): Promise<ContextUpdate> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review'], 'approve');
-      if (!update.proposals.some((p) => p.decision === 'accepted')) {
-        throw httpError(400, 'Invalid approval: select at least one proposal, or close the update without changes');
+      const records = this.frozenRecords(update, data);
+      const confirmed = update.meeting_records.some((r) => r.confirmation === 'confirmed');
+      if (!update.proposals.some((p) => p.decision === 'accepted') && !confirmed) {
+        throw httpError(400, 'Invalid approval: select at least one proposal or confirm a meeting record, or close the update without changes');
       }
       const proposals = this.rawProposals(data).map((raw, i) => {
         const p = normalizeProposal(raw, i);
         return p.decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), decision: 'rejected' };
       });
       const now = new Date().toISOString();
-      // Removals are carried out here, not by the agent. With nothing else accepted there is nothing to run.
+      // Removals are carried out here, not by the agent, and a meeting record needs no file. With no file
+      // to write there is nothing for the apply command to run.
       const onlyRemovals = update.proposals.every((p) => p.decision !== 'accepted' || p.action === 'remove');
       if (onlyRemovals) {
         const closed = proposals.map((raw, i) => normalizeProposal(raw, i).decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), outcome: 'skipped' });
-        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed });
+        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records });
         await this.cleanup(id, update.keep_materials);
         await this.finishRemovals(id);
       } else {
-        await this.write(file, data, update.notes, { status: 'approved', approved_at: now, proposals: proposals });
+        await this.write(file, data, update.notes, { status: 'approved', approved_at: now, proposals: proposals, meeting_records: records });
       }
       return (await this.read(id)).update;
     });
@@ -587,7 +829,8 @@ export class ContextUpdateService {
 
   /**
    * Back to "ready" so the user can add material, or because an analysis stopped half way.
-   * The old proposals are discarded: the next analysis must see all material at once.
+   * The old proposals and meeting records are discarded, confirmed or not: the next analysis must see
+   * all material at once, and a confirmation belongs to the record the user read.
    */
   async reopen(id: string): Promise<ContextUpdate> {
     return this.serialized(id, async () => {
@@ -595,21 +838,26 @@ export class ContextUpdateService {
       this.requireStatus(update, ['analyzing', 'in_review', 'approved'], 'reopen');
       await fsp.rm(path.join(this.updateDir(id), 'proposals'), { recursive: true, force: true });
       await this.write(file, data, update.notes, {
-        status: 'ready', proposals: [], skipped: undefined, unread: undefined, summary: undefined,
+        status: 'ready', proposals: [], meeting_records: undefined, skipped: undefined, unread: undefined, summary: undefined,
         analyzed_at: undefined, approved_at: undefined,
       });
       return (await this.read(id)).update;
     });
   }
 
-  /** Done without changing any context file. Keeps the record, deletes the drafts, and the materials unless they are kept. */
+  /**
+   * Done without changing any context file. Keeps the record, deletes the drafts, and the materials unless
+   * they are kept. Confirmed meeting records stay confirmed: they change no context file.
+   */
   async close(id: string): Promise<ContextUpdate> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review', 'approved'], 'close');
       const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
+      // Before anything is deleted: a record changed after confirmation stops the close.
+      const records = this.frozenRecords(update, data);
       await this.cleanup(id, update.keep_materials);
-      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals });
+      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records });
       return (await this.read(id)).update;
     });
   }

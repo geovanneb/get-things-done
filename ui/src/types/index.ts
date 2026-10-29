@@ -461,6 +461,28 @@ export interface ContextUpdateProposal {
   problem?: string | null;
 }
 
+/** `ref` is the agent's link to a stakeholder; `ref_found` (detail only) says whether that stakeholder exists. */
+export interface MeetingPerson { ref: string | null; name: string; ref_found?: boolean }
+
+/** One meeting in the material, confirmed or rejected apart from the proposals. */
+export interface MeetingRecord {
+  id: string;
+  title: string;
+  meeting_date: string;
+  attendees: MeetingPerson[];
+  decisions: string[];
+  open_questions: string[];
+  action_items: { description: string; owner: MeetingPerson | null; due_date: string }[];
+  source: string;
+  confirmation: 'confirmed' | 'rejected' | null;
+  confirmed_at: string | null;
+  /** The content a confirmation is for: sent back with every choice. */
+  revision: string;
+  /** Why it cannot be confirmed as it is. */
+  problems: string[];
+  changed_since_confirmed: boolean;
+}
+
 export interface ContextUpdate {
   id: string;
   title: string;
@@ -480,6 +502,7 @@ export interface ContextUpdate {
   origin: string | null;
   kind: string | null;
   proposals: ContextUpdateProposal[];
+  meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
   /** Detail only: the files still in materials/. */

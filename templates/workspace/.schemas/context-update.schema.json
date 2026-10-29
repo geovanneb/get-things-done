@@ -22,6 +22,38 @@
         "outcome": {"type": "string", "enum": ["applied", "merged", "failed", "skipped"], "description": "Set by the apply step."},
         "outcome_note": {"type": "string"}
       }
+    },
+    "person": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "ref": {"type": "string", "pattern": "^(STK-\\d{4}|me)$", "description": "A stakeholder id, or me. Only when the agent is sure."},
+        "name": {"type": "string", "description": "The name as the material writes it, never translated."}
+      }
+    },
+    "meetingRecord": {
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^M-\\d{2,3}$"},
+        "title": {"type": "string", "maxLength": 1000},
+        "meeting_date": {"type": "string", "format": "date", "description": "When the meeting happened, if the material says."},
+        "attendees": {"type": "array", "maxItems": 30, "items": {"$ref": "#/definitions/person"}},
+        "decisions": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 1000}},
+        "open_questions": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 1000}},
+        "action_items": {
+          "type": "array", "maxItems": 30,
+          "items": {"type": "object", "required": ["description"], "properties": {
+            "description": {"type": "string", "maxLength": 1000},
+            "owner": {"$ref": "#/definitions/person"},
+            "due_date": {"type": "string", "format": "date"}
+          }}
+        },
+        "source": {"type": "string", "maxLength": 1000, "description": "Where the record comes from, e.g. the material file."},
+        "confirmation": {"anyOf": [{"type": "string", "enum": ["confirmed", "rejected"]}, {"type": "null"}], "description": "Set by the executive in the dashboard, never by the analysis."},
+        "confirmed_at": {"type": "string", "format": "date-time", "description": "Set by the dashboard."},
+        "confirmed_hash": {"type": "string", "description": "Set by the dashboard: the record content the executive confirmed. If the record changes, the confirmation no longer counts."}
+      }
     }
   },
   "properties": {
@@ -50,6 +82,7 @@
     },
     "keep_materials": {"type": "boolean", "description": "Set by the executive in the dashboard, never by an agent. When true, the apply step and closing keep materials/; only the executive releases it."},
     "proposals": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/proposal"}},
+    "meeting_records": {"type": "array", "maxItems": 20, "description": "One reviewed account per meeting in the material: drafted by the analysis, confirmed or rejected by the executive apart from the proposals. A confirmed record keeps the update out of System cleanup.", "items": {"$ref": "#/definitions/meetingRecord"}},
     "skipped": {
       "type": "array",
       "description": "What the analysis considered and did not propose, so the executive can trust the filter.",

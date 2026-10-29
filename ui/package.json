@@ -13,6 +13,7 @@
     "test:calendar": "tsx src/components/insights/calendar/calendarModel.test.ts",
     "test:diff": "tsx src/utils/lineDiff.test.ts",
     "test:meeting-prep": "tsx src/utils/meetingPrep.test.ts",
+    "test:review-choices": "tsx src/utils/reviewChoices.test.ts",
     "test:desktop-bridge": "tsx src/utils/desktop.test.ts",
     "test:setup": "tsx src/utils/setup.test.ts"
   },

@@ -276,3 +276,183 @@ test('source dates reject impossible calendar days without changing the record',
   await assert.rejects(service.edit(update.id, { source_date: '2026-02-30' }), /source_date/);
   assert.equal((await service.get(update.id)).source_date, '2024-02-29');
 });
+
+/** Two fictional meetings as the analysis writes them. */
+const MEETINGS = [
+  {
+    id: 'M-01', title: 'Steering committee', meeting_date: '2026-10-20', source: 'transcript.txt',
+    attendees: [{ ref: 'STK-0004', name: 'Jane Doe' }, { name: 'Speaker 2' }],
+    decisions: ['The pilot moves to Q1.'], open_questions: ['Who owns the budget?'],
+    action_items: [{ description: 'Send the revised plan', owner: { ref: 'me', name: 'me' }, due_date: '2026-10-27' }],
+  },
+  { id: 'M-02', title: 'Weekly sync', meeting_date: '2026-10-21', decisions: ['Keep the Friday demo.'] },
+];
+
+/** An update in review with the given meeting records and, optionally, proposals with drafts. */
+async function withMeetings(t: Parameters<typeof workspace>[0], records: unknown[] = MEETINGS, proposals: Record<string, unknown>[] = [], drafts: Record<string, string> = {}) {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'Transcript...' });
+  await analyze(ws, id, proposals, drafts);
+  const file = path.join(ws, 'context-updates', id, 'update.md');
+  const edit = async (change: (records: Record<string, unknown>[]) => unknown[]) => {
+    const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+    const current = (parsed.data['meeting_records'] ?? []) as Record<string, unknown>[];
+    await fsp.writeFile(file, stringifyMarkdown(parsed.content, { ...parsed.data, meeting_records: change(current) }));
+  };
+  await edit(() => records);
+  /** What the dashboard sends: the choice plus the revision the user saw. */
+  const choose = async (choices: Record<string, 'confirmed' | 'rejected' | null>) => {
+    const shown = await service.get(id);
+    const body = Object.fromEntries(Object.entries(choices).map(([rid, confirmation]) =>
+      [rid, { confirmation, revision: shown.meeting_records.find((r) => r.id === rid)?.revision }]));
+    return service.saveMeetingRecords(id, body);
+  };
+  return { ws, service, id, file, edit, choose };
+}
+
+test('meeting records are shown as written: malformed or over-long content is flagged, never cut or converted', async (t) => {
+  const hidden = `${'x'.repeat(1000)} DO NOT PROCEED`;
+  const { service, id, choose } = await withMeetings(t, [
+    { id: 'M-01', title: 'Long', decisions: [hidden], attendees: [{ ref: '../profile', name: 'Speaker 2' }, { name: '' }] },
+    { id: 'M-02', title: 42, decisions: Array.from({ length: 31 }, (_, i) => `D${i}`), meeting_date: '2026-02-30' },
+    { id: 'M-03', title: 'Fine', attendees: [{ ref: 'STK-0004', name: 'Jane Doe' }], action_items: [{ description: 'Plan', owner: { ref: 'me', name: 'me' } }] },
+  ]);
+  const [long, odd, fine] = (await service.get(id)).meeting_records;
+  assert.equal(long!.decisions[0], hidden, 'the whole text is shown');
+  assert.match(long!.problems.join(' '), /longer than 1000/);
+  assert.match(long!.problems.join(' '), /not a stakeholder id/);
+  assert.deepEqual(long!.attendees.map((p) => p.name), ['Speaker 2'], 'an empty person is left out, a bad ref is not linked');
+  assert.equal(odd!.title, '');
+  assert.match(odd!.problems.join(' '), /title is not text/);
+  assert.match(odd!.problems.join(' '), /more than 30 entries/);
+  assert.match(odd!.problems.join(' '), /not a date/);
+  assert.equal(odd!.decisions.length, 31, 'no entry is dropped');
+  assert.deepEqual(fine!.problems, []);
+  assert.equal(fine!.attendees[0]!.ref_found, false, 'a link to a stakeholder that does not exist is shown as such');
+  assert.equal(fine!.action_items[0]!.owner!.ref_found, true);
+
+  await assert.rejects(choose({ 'M-01': 'confirmed' }), /cannot be confirmed/);
+  await assert.rejects(choose({ 'M-02': 'confirmed' }), /cannot be confirmed/);
+  const rejected = await choose({ 'M-01': 'rejected' });
+  assert.equal(rejected.meeting_records[0]!.confirmation, 'rejected', 'a flawed record can still be rejected');
+});
+
+test('saving a choice never drops records over the limit, and more than 20 cannot be confirmed', async (t) => {
+  const many = Array.from({ length: 21 }, (_, i) => ({ id: `M-${String(i + 1).padStart(2, '0')}`, title: `Meeting ${i + 1}` }));
+  const { service, id, file, choose } = await withMeetings(t, many);
+  const shown = await service.get(id);
+  assert.equal(shown.meeting_records.length, 21);
+  assert.match(shown.meeting_records[0]!.problems.join(' '), /more than 20/);
+  await choose({ 'M-01': 'rejected' });
+  const saved = parseMarkdown(await fsp.readFile(file, 'utf-8')).data['meeting_records'] as unknown[];
+  assert.equal(saved.length, 21);
+});
+
+test('records without a unique id cannot be confirmed, so one choice never confirms two meetings', async (t) => {
+  const { service, id, choose } = await withMeetings(t, [
+    { id: 'M-02', title: 'First' }, { id: 'bad', title: 'Second' }, { id: 'M-02', title: 'Third' },
+  ]);
+  const records = (await service.get(id)).meeting_records;
+  assert.equal(records[1]!.id, 'bad', 'the id stays as written; none is invented');
+  assert.match(records[1]!.problems.join(' '), /no valid id/);
+  assert.match(records[0]!.problems.join(' '), /same id M-02/);
+  await assert.rejects(choose({ 'M-02': 'confirmed' }), /same id/);
+  await assert.rejects(choose({ 'M-02': 'rejected' }), /same id/);
+  await assert.rejects(choose({ bad: 'confirmed' }), /cannot be confirmed/);
+  assert.deepEqual((await service.get(id)).meeting_records.map((r) => r.confirmation), [null, null, null], 'nothing was written');
+});
+
+test('a confirmation is bound to the content the user saw', async (t) => {
+  const { service, id, edit, choose } = await withMeetings(t);
+  const shown = await service.get(id);
+  await edit((records) => records.map((r) => r['id'] === 'M-01' ? { ...r, title: 'Changed before the click' } : r));
+  await assert.rejects(service.saveMeetingRecords(id, { 'M-01': { confirmation: 'confirmed', revision: shown.meeting_records[0]!.revision } }), /changed since you loaded it/);
+
+  const confirmed = await choose({ 'M-01': 'confirmed' });
+  assert.equal(confirmed.meeting_records[0]!.confirmation, 'confirmed');
+  await edit((records) => records.map((r) => r['id'] === 'M-01' ? { ...r, title: 'Changed after confirmation' } : r));
+  const changed = (await service.get(id)).meeting_records[0]!;
+  assert.equal(changed.confirmation, null, 'changed content is no longer confirmed');
+  assert.equal(changed.changed_since_confirmed, true);
+  await assert.rejects(service.approve(id), /changed after you confirmed it/);
+  await assert.rejects(service.close(id), /changed after you confirmed it/);
+  assert.equal((await service.get(id)).status, 'in_review', 'nothing was finished or deleted');
+  assert.equal((await choose({ 'M-01': 'confirmed' })).meeting_records[0]!.confirmation, 'confirmed', 'a new review clears it');
+});
+
+test('a confirmation written into the file by an agent is not the user\'s', async (t) => {
+  const { service, id } = await withMeetings(t, [{ ...MEETINGS[1], confirmation: 'confirmed', confirmed_at: '2026-10-29T00:00:00.000Z' }]);
+  assert.equal((await service.get(id)).meeting_records[0]!.confirmation, null);
+  await assert.rejects(service.approve(id), /confirm a meeting record/);
+});
+
+test('meeting records are confirmed apart from the proposals, and only while reviewing', async (t) => {
+  const { service, id, choose } = await withMeetings(t);
+  await assert.rejects(service.saveMeetingRecords(id, { 'M-09': { confirmation: 'confirmed', revision: 'x' } }), /Invalid meeting record id/);
+  await assert.rejects(choose({ 'M-01': 'yes' as never }), /Invalid confirmation/);
+
+  let update = await choose({ 'M-01': 'confirmed' });
+  assert.equal(update.meeting_records[0]!.confirmation, 'confirmed');
+  assert.ok(update.meeting_records[0]!.confirmed_at);
+  assert.equal(update.proposals.length, 0, 'records do not touch proposals');
+  update = await choose({ 'M-01': null });
+  assert.equal(update.meeting_records[0]!.confirmation, null);
+  assert.equal(update.meeting_records[0]!.confirmed_at, null);
+  assert.equal(update.meeting_records[0]!.title, 'Steering committee', 'the agent\'s fields survive');
+
+  await assert.rejects(service.approve(id), /confirm a meeting record/);
+  await service.close(id);
+  await assert.rejects(choose({ 'M-01': 'confirmed' }), /Cannot confirm meeting records while the update is "done"/);
+});
+
+test('an update with only confirmed meeting records finishes on approval, without the apply command', async (t) => {
+  const { ws, service, id, choose } = await withMeetings(t, MEETINGS,
+    [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md', title: 'Not this', rationale: 'x' }],
+    { 'P-01.md': 'New plan\n' });
+  await choose({ 'M-01': 'confirmed' });
+
+  const done = await service.approve(id);
+  assert.equal(done.status, 'done', 'a meeting record needs no file, so nothing is left to apply');
+  assert.deepEqual(done.meeting_records.map((r) => r.confirmation), ['confirmed', 'rejected'], 'a record nobody confirmed is rejected');
+  assert.equal(done.proposals[0]!.decision, 'rejected');
+  assert.equal(done.proposals[0]!.outcome, 'skipped');
+  assert.equal(await fsp.readFile(path.join(ws, 'context', 'strategy', 'growth-plan', 'note.md'), 'utf-8'), '---\nid: CTX-growth-plan\n---\nOld plan\n');
+  await assert.rejects(fsp.access(path.join(ws, 'context-updates', id, 'materials')), 'the transcript goes unless it is kept');
+  assert.equal((await service.get(id)).meeting_records[0]!.decisions[0], 'The pilot moves to Q1.', 'the confirmed record stays');
+});
+
+test('a confirmed record with an accepted removal finishes at once and still removes the file', async (t) => {
+  const { ws, service, id, choose } = await withMeetings(t, MEETINGS,
+    [{ id: 'P-01', action: 'remove', target: 'context/strategy/growth-plan/note.md', title: 'Obsolete', rationale: 'x' }]);
+  await service.saveDecisions(id, { 'P-01': { decision: 'accepted' } });
+  await choose({ 'M-02': 'confirmed' });
+  const done = await service.approve(id);
+  assert.equal(done.status, 'done');
+  assert.equal(done.proposals[0]!.outcome, 'applied');
+  await assert.rejects(fsp.access(path.join(ws, 'context', 'strategy', 'growth-plan')));
+  assert.deepEqual(done.meeting_records.map((r) => r.confirmation), ['rejected', 'confirmed']);
+});
+
+test('with an accepted proposal, approval waits for the apply command and freezes the records', async (t) => {
+  const { service, id, choose } = await withMeetings(t, MEETINGS,
+    [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md', title: 'Plan', rationale: 'x' }],
+    { 'P-01.md': 'New plan\n' });
+  await service.saveDecisions(id, { 'P-01': { decision: 'accepted' } });
+  await choose({ 'M-02': 'confirmed' });
+  const approved = await service.approve(id);
+  assert.equal(approved.status, 'approved');
+  assert.deepEqual(approved.meeting_records.map((r) => r.confirmation), ['rejected', 'confirmed']);
+});
+
+test('closing keeps confirmed records, and reopening discards every record with the proposals', async (t) => {
+  const first = await withMeetings(t);
+  await first.choose({ 'M-02': 'confirmed' });
+  const reopened = await first.service.reopen(first.id);
+  assert.deepEqual(reopened.meeting_records, [], 'a confirmation belongs to the record the user read');
+
+  const second = await withMeetings(t);
+  await second.choose({ 'M-01': 'confirmed' });
+  const closed = await second.service.close(second.id);
+  assert.deepEqual(closed.meeting_records.map((r) => r.confirmation), ['confirmed', 'rejected']);
+});

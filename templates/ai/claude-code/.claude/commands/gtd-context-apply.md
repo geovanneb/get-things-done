@@ -52,6 +52,8 @@ done, and only when no other accepted change failed.
    rerun can pick up where this one stopped.
 
 Do not edit anything that was not accepted, and do not add improvements of your own.
+Never change `meeting_records`: the executive confirmed them in the dashboard, and they
+need no file.
 If you notice something else that should change, mention it in your reply.
 
 ## Step 3: Close the update

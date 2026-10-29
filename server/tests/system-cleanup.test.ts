@@ -401,3 +401,57 @@ test('kaizen updates preserve YAML-sensitive titles and extra frontmatter', asyn
   assert.equal(parsed.data['custom'], 'preserved');
   assert.match(parsed.content, /Fictional body/);
 });
+
+/** A record as the dashboard saves it after the user confirmed it: bound to the record's content. */
+async function confirmedRecord(): Promise<Record<string, unknown>> {
+  const { ContextUpdateService: Service } = await import('../src/services/contextUpdateService');
+  const service = new Service();
+  const { id } = await service.create({ text: 'x' });
+  const file = path.join(process.env.ESB_WORKSPACE_PATH!, 'context-updates', id, 'update.md');
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+  await fsp.writeFile(file, stringifyMarkdown('', { ...parsed.data, status: 'in_review', meeting_records: [{ id: 'M-01', title: 'Fictional sync', meeting_date: '2026-01-01' }] }));
+  const [record] = (await service.get(id)).meeting_records;
+  await service.saveMeetingRecords(id, { 'M-01': { confirmation: 'confirmed', revision: record!.revision } });
+  const saved = (parseMarkdown(await fsp.readFile(file, 'utf-8')).data['meeting_records'] as Record<string, unknown>[])[0]!;
+  await fsp.rm(path.dirname(file), { recursive: true });
+  return saved;
+}
+
+test('a finished update with a confirmed meeting record is never cleaned up; a rejected record does not keep it', async (t) => {
+  const ws = await workspace(t);
+  const service = new RoutineService();
+  const old = '2026-01-01T00:00:00.000Z';
+  const confirmed = await confirmedRecord();
+  await write(ws, 'context-updates/CU-2026-0001/update.md', { id: 'CU-2026-0001', type: 'context-update', title: 'Confirmed', status: 'done', source_date: '2026-01-01', created_at: old, applied_at: old, meeting_records: [confirmed] });
+  await write(ws, 'context-updates/CU-2026-0002/update.md', { id: 'CU-2026-0002', type: 'context-update', title: 'Rejected', status: 'done', source_date: '2026-01-01', created_at: old, applied_at: old, meeting_records: [{ ...confirmed, confirmation: 'rejected' }] });
+  await service.updateSystemCleanup({
+    memory_review: { enabled: false },
+    rules: { context_updates: { enabled: true, older_than_days: 90, action: 'delete' } },
+  }, local('2026-10-28T10:00'));
+
+  const preview = await service.previewSystemCleanup(undefined, local('2026-10-28T10:00'));
+  assert.deepEqual(preview.plan.items.map((i) => i.id), ['CU-2026-0002']);
+  const run = await service.runSystemCleanupNow(local('2026-10-28T10:00'));
+  assert.equal(run.status, 'ok', run.message);
+  assert.ok(await exists(path.join(ws, 'context-updates/CU-2026-0001/update.md')), 'the reviewed account of a meeting stays');
+  assert.equal(await exists(path.join(ws, 'context-updates/CU-2026-0002')), false);
+});
+
+test('cleanup rechecks meeting records after planning', async (t) => {
+  const ws = await workspace(t);
+  const old = '2026-01-01T00:00:00.000Z';
+  const confirmed = await confirmedRecord();
+  const fields = { id: 'CU-2026-0001', type: 'context-update', title: 'Sync', status: 'done', source_date: '2026-01-01', created_at: old, applied_at: old };
+  await write(ws, 'context-updates/CU-2026-0001/update.md', { ...fields, meeting_records: [{ ...confirmed, confirmation: 'rejected' }] });
+  const service = new SystemCleanupService();
+  await service.writeSettings(parseSettings({ memory_review: { enabled: false }, rules: { context_updates: { enabled: true, action: 'delete' } } }));
+  const plan = service.plan.bind(service);
+  service.plan = async (...args) => {
+    const result = await plan(...args);
+    await write(ws, 'context-updates/CU-2026-0001/update.md', { ...fields, meeting_records: [confirmed] });
+    return result;
+  };
+  const result = await service.runNow(local('2026-10-28T10:00'));
+  assert.equal(result.cleaned.length, 0);
+  assert.ok(await exists(path.join(ws, 'context-updates/CU-2026-0001/update.md')));
+});

@@ -64,6 +64,11 @@ router.put('/:id/decisions', async (req: Request, res: Response) => {
   res.json(await service.saveDecisions(param(req, 'id'), body(req)['decisions']));
 });
 
+// PUT /api/context-updates/:id/meeting-records  { records: { "M-01": "confirmed" | "rejected" | null } }
+router.put('/:id/meeting-records', async (req: Request, res: Response) => {
+  res.json(await service.saveMeetingRecords(param(req, 'id'), body(req)['records']));
+});
+
 // State changes made from the dashboard. The agent commands make the others by editing update.md.
 router.post('/:id/approve', async (req: Request, res: Response) => {
   res.json(await service.approve(param(req, 'id')));

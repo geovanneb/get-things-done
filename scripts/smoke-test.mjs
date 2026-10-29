@@ -492,6 +492,20 @@ try {
       badKeep.status === 400 && keptDetail.status === 'done' && keptDetail.keep_materials === true
       && keptFile.status === 200 && released.status === 200 && !fs.existsSync(path.join(keptDir, 'materials')),
       `bad=${badKeep.status} file=${keptFile.status} released=${released.status}`);
+    // A meeting that changes no context: the record alone is confirmed, and approving finishes the update.
+    const meeting = await (await json('POST', '/api/context-updates', { title: 'Fictional weekly sync', text: 'Fictional transcript' })).json();
+    const meetingDir = path.join(ws, 'context-updates', meeting.id);
+    fs.writeFileSync(path.join(meetingDir, 'update.md'), fs.readFileSync(path.join(meetingDir, 'update.md'), 'utf-8')
+      .replace('status: ready', 'status: in_review\nmeeting_records:\n  - id: M-01\n    title: Weekly sync\n    meeting_date: \'2026-10-20\'\n    decisions:\n      - Fictional decision'));
+    const { revision } = (await (await fetch(`${base}/api/context-updates/${meeting.id}`)).json()).meeting_records[0];
+    const badRecord = await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'yes', revision } } });
+    const staleRecord = await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'confirmed', revision: 'old' } } });
+    await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'confirmed', revision } } });
+    const meetingDone = await (await json('POST', `/api/context-updates/${meeting.id}/approve`)).json();
+    check('a confirmed meeting record alone finishes the update and stays as the record',
+      badRecord.status === 400 && staleRecord.status === 409 && meetingDone.status === 'done' && meetingDone.meeting_records?.[0]?.confirmation === 'confirmed'
+      && !fs.existsSync(path.join(meetingDir, 'materials')),
+      `bad=${badRecord.status} stale=${staleRecord.status} status=${meetingDone.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

@@ -9,7 +9,8 @@ import { useAppDispatch, useDataVersion } from '@/store';
 import { apiDelete, apiPost, apiPut } from '@/utils/api';
 import { diffLines, diffStats } from '@/utils/lineDiff';
 import { formatRelativeDate } from '@/utils/format';
-import type { ContextUpdate, ContextUpdateProposal } from '@/types';
+import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
+import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord } from '@/types';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
 import { CommandBox, HelpBox, OriginBadge, STATUS_META, StatusPill, StepIndicator, copyText, formatBytes, sectionLabel } from './shared';
@@ -32,6 +33,96 @@ const OUTCOME: Record<string, string> = {
 };
 
 type Decisions = Record<string, { decision: ContextUpdateProposal['decision']; reviewer_note: string }>;
+type Confirmations = Record<string, MeetingRecord['confirmation']>;
+
+/** The name as the material writes it; the stakeholder id only says the agent linked it. */
+function personLabel(p: MeetingPerson): string {
+  if (p.ref === 'me') return p.name && p.name !== 'me' ? `${p.name} (you)` : 'You';
+  return p.name || p.ref || '';
+}
+
+function RecordList({ label, items }: { label: string; items: React.ReactNode[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <div style={{ ...sectionLabel, marginBottom: 2 }}>{label}</div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-sm)', display: 'flex', flexDirection: 'column', gap: 2, overflowWrap: 'anywhere' }}>
+        {items.map((item, i) => <li key={i}>{item}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+/** How a person shows: the name, and whether the agent's link to a stakeholder holds. */
+function PersonName({ person }: { person: MeetingPerson }) {
+  const unknownLink = person.ref && person.ref !== 'me' && person.ref_found === false;
+  return (
+    <>
+      <span title={person.ref && person.ref !== 'me' ? `The agent linked this to ${person.ref}` : person.ref ? undefined : 'Not linked to a stakeholder'}>{personLabel(person)}</span>
+      {!person.ref && <span style={{ color: 'var(--color-text-muted)' }}> (not linked)</span>}
+      {unknownLink && <span style={{ color: 'var(--color-warning)' }}> (no stakeholder {person.ref})</span>}
+    </>
+  );
+}
+
+function MeetingRecordCard({ record, reviewing, confirmation, onChoose }: {
+  record: MeetingRecord;
+  reviewing: boolean;
+  confirmation: MeetingRecord['confirmation'];
+  onChoose: (value: MeetingRecord['confirmation']) => void;
+}) {
+  const confirmed = confirmation === 'confirmed';
+  const rejected = confirmation === 'rejected';
+  // A record without a unique id cannot be chosen at all; a flawed one can still be rejected.
+  const unusableId = record.problems.some((p) => p.includes('valid id') || p.includes('same id'));
+  const canConfirm = record.problems.length === 0;
+  return (
+    <article aria-label={`Meeting record ${record.id || 'without id'}`} style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8, borderLeft: `3px solid ${confirmed ? 'var(--color-success)' : rejected ? 'var(--color-border)' : 'var(--color-border-strong)'}`, opacity: rejected && !reviewing ? 0.7 : 1 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{record.title || 'Meeting'}</span>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{record.meeting_date || 'date unknown'}</span>
+        {!reviewing && confirmation && (
+          <span style={{ marginLeft: 'auto', fontSize: 'var(--text-xs)', fontWeight: 600, color: confirmed ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+            {confirmed ? 'Confirmed' : 'Rejected'}
+          </span>
+        )}
+      </div>
+      {record.attendees.length > 0 && (
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+          <span style={{ fontWeight: 600 }}>Attendees: </span>
+          {record.attendees.map((p, i) => <span key={i}>{i > 0 && ', '}<PersonName person={p} /></span>)}
+        </div>
+      )}
+      <RecordList label="Decisions" items={record.decisions} />
+      <RecordList label="Open questions" items={record.open_questions} />
+      <RecordList label="Action items" items={record.action_items.map((a) => (
+        <>{a.description}{a.owner && <span style={{ color: 'var(--color-text-secondary)' }}> · <PersonName person={a.owner} /></span>}{a.due_date && <span style={{ color: 'var(--color-text-secondary)' }}> · by {a.due_date}</span>}</>
+      ))} />
+      {record.source && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Source: {record.source}</div>}
+      {record.changed_since_confirmed && (
+        <HelpBox tone="warning" title="Changed after you confirmed it">
+          The record is no longer the one you confirmed. Read it again and confirm or reject it before you approve or close.
+        </HelpBox>
+      )}
+      {record.problems.length > 0 && (
+        <HelpBox tone="critical" title="Cannot be confirmed as it is">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>{record.problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
+          Ask the agent to fix the record (or analyze again).{!unusableId && ' You can still reject it.'}
+        </HelpBox>
+      )}
+      {reviewing && !unusableId && (
+        <div role="group" aria-label={`Review ${record.id}`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Button variant={confirmed ? 'primary' : 'secondary'} size="sm" aria-pressed={confirmed} disabled={!canConfirm && !confirmed} onClick={() => onChoose(confirmed ? null : 'confirmed')}>
+            {confirmed ? 'Confirmed' : 'Confirm'}
+          </Button>
+          <Button variant="ghost" size="sm" aria-pressed={rejected} onClick={() => onChoose(rejected ? null : 'rejected')}>
+            {rejected ? 'Rejected' : 'Reject'}
+          </Button>
+        </div>
+      )}
+    </article>
+  );
+}
 
 function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
   proposal: ContextUpdateProposal;
@@ -154,6 +245,12 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const { data, loading, error, refetch } = useApi<ContextUpdate>(`/api/context-updates/${id}`, [version]);
   const dispatch = useAppDispatch();
   const [decisions, setDecisions] = useState<Decisions>({});
+  const [confirmations, setConfirmations] = useState<Confirmations>({});
+  // Choices still being saved. Finishing the review waits for them, so it always uses the last click.
+  const pendingDecisions = useRef(new PendingChoices());
+  const pendingRecords = useRef(new PendingChoices());
+  const [saving, setSaving] = useState(0);
+  const updateSaving = () => setSaving(pendingDecisions.current.size + pendingRecords.current.size);
   const [busy, setBusy] = useState<string | null>(null);
   // The status the user last copied a command for, so the bar can confirm it and say what happens next.
   const [copiedFor, setCopiedFor] = useState<string | null>(null);
@@ -178,7 +275,11 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
   useEffect(() => {
     if (!data) return;
-    setDecisions(Object.fromEntries(data.proposals.map((p) => [p.id, { decision: p.decision, reviewer_note: p.reviewer_note }])));
+    const serverDecisions: Decisions = Object.fromEntries(data.proposals.map((p) => [p.id, { decision: p.decision, reviewer_note: p.reviewer_note }]));
+    const serverConfirmations: Confirmations = Object.fromEntries((data.meeting_records ?? []).map((r) => [r.id, r.confirmation]));
+    // A refresh must not undo a click whose save is still on its way.
+    setDecisions((local) => mergeServerChoices(local, serverDecisions, pendingDecisions.current.ids()));
+    setConfirmations((local) => mergeServerChoices(local, serverConfirmations, pendingRecords.current.ids()));
   }, [data]);
 
   if (loading) return <LoadingSpinner text="Loading update..." />;
@@ -199,8 +300,16 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const copied = copiedFor === u.status;
   const selectable = u.proposals.filter((p) => !p.problem);
   const acceptedCount = u.proposals.filter((p) => decisions[p.id]?.decision === 'accepted').length;
-  // Removals are done by the dashboard on approval; only creates and updates need the apply command.
-  const onlyRemovals = acceptedCount > 0 && u.proposals.every((p) => decisions[p.id]?.decision !== 'accepted' || p.action === 'remove');
+  const records = u.meeting_records ?? [];
+  const recordChoice = (r: MeetingRecord) => shownChoice(confirmations, r.id, r.confirmation);
+  const confirmedCount = records.filter((r) => recordChoice(r) === 'confirmed').length;
+  const canApprove = acceptedCount > 0 || confirmedCount > 0;
+  // Removals are done by the dashboard on approval and a meeting record needs no file; only creates and
+  // updates need the apply command.
+  const noFileToWrite = canApprove && u.proposals.every((p) => decisions[p.id]?.decision !== 'accepted' || p.action === 'remove');
+  const approveHint = !noFileToWrite ? 'After approving, you copy one command to apply.'
+    : acceptedCount > 0 ? 'Approving moves the selected files to the trash right away.'
+    : 'Approving keeps the confirmed meeting records and finishes the update.';
 
   const run = async (label: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(label);
@@ -215,29 +324,58 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     }
   };
 
-  const saveDecision = async (pid: string, change: Partial<Decisions[string]>) => {
-    const previous = decisions;
-    setDecisions((d) => ({ ...d, [pid]: { ...d[pid]!, ...change } }));
+  /**
+   * Saves proposal choices. Only the latest save of each proposal may roll back on failure, and only its
+   * own proposal, so an earlier failure never undoes a later click or another proposal.
+   */
+  const saveDecisions = async (changes: Record<string, Partial<Decisions[string]>>) => {
+    const tickets = Object.keys(changes).map((pid) => [pid, pendingDecisions.current.start(pid), decisions[pid]] as const);
+    updateSaving();
+    setDecisions((d) => {
+      const next = { ...d };
+      for (const [pid, change] of Object.entries(changes)) next[pid] = { ...next[pid]!, ...change };
+      return next;
+    });
     try {
-      await apiPut(`/api/context-updates/${u.id}/decisions`, { decisions: { [pid]: change } });
+      await apiPut(`/api/context-updates/${u.id}/decisions`, { decisions: changes });
     } catch (err) {
-      setDecisions(previous);
+      setDecisions((d) => {
+        const next = { ...d };
+        for (const [pid, ticket, previous] of tickets) if (previous && pendingDecisions.current.isLatest(pid, ticket)) next[pid] = previous;
+        return next;
+      });
       notify('error', err instanceof Error ? err.message : 'Could not save your choice.');
+    } finally {
+      for (const [pid, ticket] of tickets) pendingDecisions.current.finish(pid, ticket);
+      updateSaving();
     }
   };
 
-  const selectAll = async (accept: boolean) => {
-    const change = Object.fromEntries(selectable.map((p) => [p.id, { decision: accept ? 'accepted' : null }]));
-    setDecisions((d) => {
-      const next = { ...d };
-      for (const p of selectable) next[p.id] = { ...next[p.id]!, decision: accept ? 'accepted' : null };
-      return next;
-    });
-    try { await apiPut(`/api/context-updates/${u.id}/decisions`, { decisions: change }); } catch (err) {
+  const saveDecision = (pid: string, change: Partial<Decisions[string]>) => saveDecisions({ [pid]: change });
+
+  /** Confirms or rejects one record, naming the revision the user saw, and takes the server's answer. */
+  const chooseRecord = async (record: MeetingRecord, value: MeetingRecord['confirmation']) => {
+    const rid = record.id;
+    const previous = recordChoice(record);
+    const ticket = pendingRecords.current.start(rid);
+    updateSaving();
+    setConfirmations((c) => ({ ...c, [rid]: value }));
+    try {
+      const saved = await apiPut<ContextUpdate>(`/api/context-updates/${u.id}/meeting-records`, { records: { [rid]: { confirmation: value, revision: record.revision } } });
+      const answer = saved.meeting_records.find((r) => r.id === rid);
+      if (answer && pendingRecords.current.isLatest(rid, ticket)) setConfirmations((c) => ({ ...c, [rid]: answer.confirmation }));
+    } catch (err) {
+      if (pendingRecords.current.isLatest(rid, ticket)) setConfirmations((c) => ({ ...c, [rid]: previous }));
       notify('error', err instanceof Error ? err.message : 'Could not save your choice.');
       refetch();
+    } finally {
+      pendingRecords.current.finish(rid, ticket);
+      updateSaving();
     }
   };
+
+  const selectAll = (accept: boolean) =>
+    saveDecisions(Object.fromEntries(selectable.map((p) => [p.id, { decision: accept ? 'accepted' as const : null }])));
 
   const addFiles = (files: File[]) => run('upload', async () => {
     const errors: string[] = [];
@@ -253,20 +391,21 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const reopen = () => {
     const msg = u.status === 'analyzing'
       ? 'Stop waiting for the agent and go back to collecting? Run the analysis again afterwards.'
-      : 'Add more material? The current proposals are discarded, and the next analysis looks at all material together.';
+      : `Add more material? The current proposals${records.length ? ' and meeting records (also confirmed ones)' : ''} are discarded, and the next analysis looks at all material together.`;
     if (window.confirm(msg)) void run('reopen', () => apiPost(`/api/context-updates/${u.id}/reopen`));
   };
 
   const close = () => {
     const files = u.keep_materials ? 'the materials are kept until you release them' : 'the materials are deleted';
-    if (!window.confirm(`Close this update without changing any context file? The record stays; ${files}.`)) return;
+    const kept = confirmedCount > 0 ? ' Confirmed meeting records are kept.' : '';
+    if (!window.confirm(`Close this update without changing any context file? The record stays; ${files}.${kept}`)) return;
     void run('close', () => apiPost(`/api/context-updates/${u.id}/close`), 'Closed without changes.');
   };
 
   const remove = () => {
     const msg = u.status === 'done'
-      ? 'Delete this record? Context changes it made stay; only the record goes.'
-      : 'Delete this update and its materials? Nothing in your context has changed yet.';
+      ? `Delete this record? Context changes it made stay; only the record goes${records.some((r) => r.confirmation === 'confirmed') ? ', including its confirmed meeting records' : ''}.`
+      : `Delete this update and its materials${confirmedCount > 0 ? ', including the meeting records you confirmed' : ''}? Nothing in your context has changed yet.`;
     if (!window.confirm(msg)) return;
     void (async () => {
       try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update deleted.'); onBack(); } catch (err) {
@@ -390,7 +529,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
           )}
           {busy === 'upload' && <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Uploading...</span>}
           {(u.status === 'in_review' || u.status === 'approved') && (
-            <div><Button variant="ghost" size="sm" onClick={reopen}>+ Add more material</Button></div>
+            <div><Button variant="ghost" size="sm" disabled={saving > 0} onClick={reopen}>+ Add more material</Button></div>
           )}
         </div>
       </section>
@@ -408,10 +547,27 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               </HelpBox>
             )}
 
+            {records.length > 0 && (
+              <section aria-label="Meeting records" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <h4 style={{ ...sectionLabel, margin: 0 }}>Meetings · {records.length}</h4>
+                {reviewing && (
+                  <HelpBox>
+                    What each meeting was, as the agent read it. Confirm a record that is right, even when the meeting changes
+                    nothing in your context; it stays with this update as the reviewed account. Records you do not confirm are
+                    rejected when you approve or close. The transcript itself stays unreviewed material.
+                  </HelpBox>
+                )}
+                {records.map((r, i) => (
+                  <MeetingRecordCard key={`${i}-${r.id}`} record={r} reviewing={reviewing} confirmation={recordChoice(r)}
+                    onChoose={(value) => void chooseRecord(r, value)} />
+                ))}
+              </section>
+            )}
+
             {u.proposals.length === 0 ? (
               <HelpBox title="Nothing worth changing">
                 The agent found nothing in this material that should change your context. That is a normal result: not
-                every meeting changes what is true. {reviewing && 'Close the update to finish.'}
+                every meeting changes what is true. {reviewing && (records.length > 0 ? 'Confirm the meeting records you want to keep and approve, or close the update.' : 'Close the update to finish.')}
               </HelpBox>
             ) : (
               <>
@@ -456,21 +612,21 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{acceptedCount} of {u.proposals.length} selected</span>
               <Button variant="ghost" size="sm" onClick={() => void selectAll(true)}>Select all</Button>
               <Button variant="ghost" size="sm" onClick={() => void selectAll(false)}>Clear</Button>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                {onlyRemovals ? 'Approving moves the selected files to the trash right away.' : 'After approving, you copy one command to apply.'}
-              </span>
             </>
           )}
+          {records.length > 0 && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{confirmedCount} of {records.length} meetings confirmed</span>}
+          {canApprove && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{approveHint}</span>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button variant="secondary" loading={busy === 'close'} onClick={close}
+            <Button variant="secondary" loading={busy === 'close'} disabled={saving > 0} onClick={close}
               title="Finish without changing any context file">
-              {u.proposals.length === 0 ? 'Close update' : 'Close without changes'}
+              {u.proposals.length === 0 && records.length === 0 ? 'Close update' : 'Close without changes'}
             </Button>
-            {u.proposals.length > 0 && (
-              <Button variant="primary" disabled={acceptedCount === 0} loading={busy === 'approve'}
-                title={acceptedCount === 0 ? 'Tick at least one proposal, or close without changes' : onlyRemovals ? 'Move the selected files to the trash and finish this update' : 'Lock your selection and get the apply command'}
-                onClick={() => run('approve', () => apiPost(`/api/context-updates/${u.id}/approve`), onlyRemovals ? 'Approved. The files are in the trash.' : 'Approved. Run the apply command to write the changes.')}>
-                Approve {acceptedCount > 0 ? acceptedCount : ''} selected
+            {(u.proposals.length > 0 || records.length > 0) && (
+              <Button variant="primary" disabled={!canApprove || saving > 0} loading={busy === 'approve'}
+                title={saving > 0 ? 'Saving your choices...' : !canApprove ? 'Tick at least one proposal or confirm a meeting record, or close without changes' : noFileToWrite ? 'Finish this update now: nothing needs the apply command' : 'Lock your selection and get the apply command'}
+                onClick={() => run('approve', () => apiPost(`/api/context-updates/${u.id}/approve`),
+                  !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.')}>
+                {acceptedCount > 0 ? `Approve ${acceptedCount} selected` : 'Approve'}
               </Button>
             )}
           </span>
