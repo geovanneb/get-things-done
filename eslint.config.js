@@ -33,7 +33,7 @@ module.exports = tseslint.config(
 
   // CLI, server and the Node scripts.
   {
-    files: ['src/**/*.ts', 'server/**/*.ts', 'scripts/**/*.mjs', 'bin/**/*.js', 'eslint.config.js'],
+    files: ['src/**/*.ts', 'server/**/*.ts', 'desktop/**/*.ts', 'scripts/**/*.mjs', 'bin/**/*.js', 'eslint.config.js'],
     languageOptions: { globals: globals.node },
   },
   {

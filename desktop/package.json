@@ -1,0 +1,17 @@
+{
+  "name": "@bertonha/getthingsdone-desktop",
+  "productName": "Get Things Done",
+  "private": true,
+  "version": "0.6.0",
+  "description": "Get Things Done desktop app (Electron shell around the same server and dashboard)",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron ."
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "typescript": "^5.4.3"
+  },
+  "license": "MIT"
+}

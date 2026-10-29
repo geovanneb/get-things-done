@@ -164,6 +164,7 @@ npm run seed:demo -- http://127.0.0.1:3001
 | `src/cli/` | The `gtd` command |
 | `server/` | Express API over the workspace files, file watcher, SSE |
 | `ui/` | React + Vite dashboard |
+| `desktop/` | Electron shell for the Mac and Windows app (own `package.json` and lockfile, see `desktop/README.md`) |
 | `templates/` | Everything scaffolded into a new workspace (AI agent setup, schemas, output templates) |
 | `scripts/` | Demo seed and smoke test |
 

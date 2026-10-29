@@ -51,6 +51,7 @@ jobs:
             const leaked = files.filter(f =>
               f.startsWith('executive-workspace/') ||
               f.startsWith('scripts/') ||
+              f.startsWith('desktop/') ||
               f.includes('node_modules/') ||
               f.endsWith('.DS_Store')
             );
@@ -82,3 +83,25 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Reject high or critical production advisories
         run: npm audit --omit=dev --audit-level=high
+
+  desktop:
+    name: Desktop shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Type-checking needs Electron's types, not its ~100 MB binary.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci --prefix desktop
+      - run: npm run build --prefix desktop
+      # Electron is a dev dependency of the package but ships inside the app, so every advisory counts.
+      - name: Reject high or critical advisories
+        run: npm audit --prefix desktop --audit-level=high

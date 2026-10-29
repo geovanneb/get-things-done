@@ -816,6 +816,7 @@ npm run dev          # API on :3001, Vite UI on :5173
 | `npm run build` | Build CLI, server and UI into `dist/` |
 | `npm run dev` | Run server and UI in watch mode |
 | `npm test` | Unit tests plus an end-to-end smoke test (needs `npm run build` first) |
+| `npm run desktop` | Build, then open the desktop app from source (needs `npm install --prefix desktop` once) |
 | `npm run seed:demo -- <url>` | Fill a running server with the fictional demo workspace |
 | `npm pack` | Produce the exact tarball that would be published |
 
@@ -832,7 +833,8 @@ npm run seed:demo -- http://127.0.0.1:3001
 for module ownership, trust boundaries and testing rules. `src/cli/` is the CLI. `server/` is an Express API over the
 workspace files, with a chokidar watcher pushing changes over SSE. `ui/` is React +
 Vite, served statically by the server in production. `templates/` holds everything
-scaffolded into a new workspace.
+scaffolded into a new workspace. `desktop/` is the Electron shell of the desktop app: it runs the
+same server and dashboard, nothing is duplicated.
 
 **HTTP API.** Agents and scripts can use the same local API as the dashboard. Every
 route is listed, with examples, in the [API reference](docs/api.md).
