@@ -435,6 +435,17 @@ under the categories). Then add:
   spreadsheets, photos, screenshots. Up to 50 MB each.
 - **Pasted text**, for a transcript copied from your meeting tool, notes or an email
   thread. It is saved as a file with the rest.
+
+A **WebVTT transcript** (`.vtt`, the export of Teams, Zoom or Meet, uploaded or pasted)
+also gets a readable copy next to it, `<name>.transcript.md`: each turn with its start
+and end time and the speaker as the file labels it, every word kept. Anything the
+dashboard cannot read is listed in the copy, which then says it is incomplete. The
+original stays, and the update records which file is a copy of which, so the agent
+reads the copy and removing an original removes its unchanged copy. If the original or
+the copy is edited afterwards, the copy is marked outdated and the agent reads the
+original. To make a copy
+again, remove the original and add it again. The same file twice in one update is
+refused.
 - **Date of the material**: when the meeting happened or the deck was shared, not
   today. The agent uses it to tell newer facts from older ones, so an old deck never
   overwrites something more recent.

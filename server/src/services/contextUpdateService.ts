@@ -7,6 +7,7 @@ import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
 import { moveToTrash } from './trash';
+import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 
 const workspaceService = new WorkspaceService();
 
@@ -63,6 +64,29 @@ const MAX_TEXT = 200_000;
 const MAX_DIFF_BYTES = 512 * 1024;
 
 export interface UpdateMaterial { name: string; size: number; type: string }
+
+/**
+ * A readable copy the dashboard made from a transcript, recorded by the dashboard only. This list, not a
+ * file's name or first line, says which file is a copy: an uploaded file can claim anything.
+ */
+export interface UpdateTranscript {
+  /** The copy and the original it was made from, both in materials/. */
+  file: string;
+  source: string;
+  source_sha256: string;
+  /** The copy as written; a copy changed since is kept when its original is removed. */
+  sha256: string;
+  /** Every cue was read. When false, the copy lists what is missing and the original must be read too. */
+  complete: boolean;
+  /**
+   * Detail only: both files still have the recorded SHA-256. When false, the source or the copy was edited
+   * (or is gone) after the copy was made, so the copy no longer stands for the source.
+   */
+  current?: boolean;
+}
+
+/** A transcript copy prepared in memory, before anything is written. */
+interface PreparedTranscript { content: string; complete: boolean }
 
 export interface UpdateProposal {
   id: string;
@@ -130,6 +154,10 @@ export interface ContextUpdate {
   summary: string;
   notes: string;
   materials: UpdateMaterial[];
+  /** Readable copies the dashboard made from transcripts in materials/. */
+  transcripts: UpdateTranscript[];
+  /** Transcripts in materials/ the dashboard could not make a copy of, with the reason. */
+  transcript_problems: { source: string; reason: string }[];
   /** The user's choice: materials/ stays after the update is done, until they release it. Never set by an agent. */
   keep_materials: boolean;
   /** Who opened this update: 'system-cleanup' for the memory review, null for an import by the user. */
@@ -356,6 +384,12 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     summary: str(data['summary']),
     notes: body,
     materials,
+    transcripts: Array.isArray(data['transcripts']) ? (data['transcripts'] as unknown[]).flatMap((entry) => {
+      const t = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+      const ok = typeof t['file'] === 'string' && typeof t['source'] === 'string' && typeof t['sha256'] === 'string';
+      return ok ? [{ file: t['file'] as string, source: t['source'] as string, source_sha256: str(t['source_sha256']), sha256: t['sha256'] as string, complete: t['complete'] === true }] : [];
+    }) : [],
+    transcript_problems: normalizePairs(data['transcript_problems'], 'source', 'reason'),
     keep_materials: data['keep_materials'] === true,
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
@@ -364,6 +398,38 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
   };
+}
+
+/**
+ * The readable copy of a transcript, prepared in memory. Null when the file is not a transcript; a problem
+ * when it looks like one but cannot be converted (the original is then saved alone).
+ */
+function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | { problem: string } | null {
+  const ext = path.extname(name).toLowerCase();
+  if (!['.vtt', '.txt', '.md'].includes(ext)) return null;
+  const text = decodeText(buffer.length > MAX_CONVERT_BYTES ? buffer.subarray(0, 64) : buffer);
+  if (text === null) return ext === '.vtt' ? { problem: 'The file is not valid UTF-8 or UTF-16 text, so no readable copy was made.' } : null;
+  if (buffer.length > MAX_CONVERT_BYTES) {
+    return /^\uFEFF?WEBVTT/.test(text) ? { problem: `The transcript is over ${MAX_CONVERT_BYTES / 1024 / 1024} MB, so no readable copy was made.` } : null;
+  }
+  const parsed = parseWebVtt(text);
+  if (!parsed) return ext === '.vtt' ? { problem: 'The file does not start with WEBVTT, so no readable copy was made.' } : null;
+  if (parsed.cues.length === 0) return { problem: 'No cue could be read, so no readable copy was made.' };
+  return { content: transcriptMarkdown(name, sha256(buffer), parsed), complete: parsed.problems.length === 0 };
+}
+
+/** The name of a file in `dir` with exactly these bytes, if any. Only files of the same size are read. */
+async function sameFileIn(dir: string, buffer: Buffer): Promise<string | null> {
+  const hash = sha256(buffer);
+  for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isFile()) continue;
+    const full = path.join(dir, entry.name);
+    const stat = await fsp.stat(full).catch(() => null);
+    if (stat?.size !== buffer.length) continue;
+    const content = await fsp.readFile(full).catch(() => null);
+    if (content && sha256(content) === hash) return entry.name;
+  }
+  return null;
 }
 
 /** Sanitizes a name the way saveAttachment does, then adds -2, -3... so a second "notes.txt" never replaces the first. */
@@ -458,7 +524,15 @@ export class ContextUpdateService {
       const proposals = await Promise.all(current.proposals.map((p) => this.proposalDetail(dir, current, p)));
       await this.markLinkedPeople(current.meeting_records);
       const material_files = await listFolderFiles(path.join(dir, 'materials'));
-      return { ...current, proposals, material_files };
+      const hashOf = async (name: string) => {
+        const full = await fileInside(path.join(dir, 'materials'), name).catch(() => null);
+        const content = full ? await fsp.readFile(full).catch(() => null) : null;
+        return content ? sha256(content) : null;
+      };
+      const transcripts = await Promise.all(current.transcripts.map(async (t) => ({
+        ...t, current: (await hashOf(t.source)) === t.source_sha256 && (await hashOf(t.file)) === t.sha256,
+      })));
+      return { ...current, proposals, material_files, transcripts };
     });
   }
 
@@ -610,8 +684,17 @@ export class ContextUpdateService {
     if (!id) throw httpError(409, 'Could not reserve a new context update id; try again');
     await fsp.mkdir(path.join(dir, 'materials'));
 
+    const transcripts: UpdateTranscript[] = [];
+    const problems: { source: string; reason: string }[] = [];
     if (text.trim()) {
-      await saveAttachment(path.join(dir, 'materials'), system?.textName ?? 'pasted-text.md', Buffer.from(text, 'utf-8'), 'update.md');
+      const buffer = Buffer.from(text, 'utf-8');
+      // A pasted WebVTT export is kept as .vtt and gets a readable transcript next to it, like an upload.
+      const pastedVtt = !system && parseWebVtt(text) !== null;
+      const name = system?.textName ?? (pastedVtt ? 'pasted-text.vtt' : 'pasted-text.md');
+      const prepared = pastedVtt ? prepareTranscript(name, buffer) : null;
+      const saved = await saveAttachment(path.join(dir, 'materials'), name, buffer, 'update.md');
+      if (prepared && 'content' in prepared) transcripts.push(await this.saveTranscript(path.join(dir, 'materials'), saved.name, buffer, prepared));
+      if (prepared && 'problem' in prepared) problems.push({ source: saved.name, reason: prepared.problem });
     }
 
     const now = new Date().toISOString();
@@ -625,6 +708,8 @@ export class ContextUpdateService {
       source_date: sourceDate,
       created_at: now,
       materials: await this.materialList(dir),
+      ...(transcripts.length ? { transcripts } : {}),
+      ...(problems.length ? { transcript_problems: problems } : {}),
       proposals: [],
     };
     await this.write(path.join(dir, 'update.md'), data, notes, {});
@@ -652,25 +737,83 @@ export class ContextUpdateService {
     });
   }
 
-  async addMaterial(id: string, originalName: string, buffer: Buffer): Promise<FolderFile> {
+  /**
+   * Saves one uploaded file. The same file twice in one update is refused: the analysis would read it twice.
+   * A WebVTT transcript also gets a readable copy next to it, recorded in `transcripts`; the original is kept.
+   * The copy is prepared before anything is written, and a failed write leaves nothing behind, so the same
+   * upload can simply be tried again.
+   */
+  async addMaterial(id: string, originalName: string, buffer: Buffer): Promise<FolderFile & { transcript?: string; transcript_complete?: boolean; transcript_problem?: string }> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['ready'], 'add material');
       const dir = path.join(this.updateDir(id), 'materials');
       await fsp.mkdir(dir, { recursive: true });
-      const saved = await saveAttachment(dir, await uniqueName(dir, originalName), buffer, 'update.md');
-      await this.write(file, data, update.notes, { materials: await this.materialList(this.updateDir(id)) });
-      return saved;
+      const duplicate = await sameFileIn(dir, buffer);
+      if (duplicate) throw httpError(409, `This file is already in the update, as ${duplicate}`);
+
+      const name = await uniqueName(dir, originalName);
+      const prepared = prepareTranscript(name, buffer);
+      const written: string[] = [];
+      try {
+        const saved = await saveAttachment(dir, name, buffer, 'update.md');
+        written.push(saved.name);
+        let entry: UpdateTranscript | null = null;
+        if (prepared && 'content' in prepared) {
+          entry = await this.saveTranscript(dir, saved.name, buffer, prepared);
+          written.push(entry.file);
+        }
+        const problem = prepared && 'problem' in prepared ? { source: saved.name, reason: prepared.problem } : null;
+        await this.write(file, data, update.notes, {
+          materials: await this.materialList(this.updateDir(id)),
+          ...(entry ? { transcripts: [...update.transcripts, entry] } : {}),
+          ...(problem ? { transcript_problems: [...update.transcript_problems, problem] } : {}),
+        });
+        if (entry) return { ...saved, transcript: entry.file, transcript_complete: entry.complete };
+        return prepared && 'problem' in prepared ? { ...saved, transcript_problem: prepared.problem } : saved;
+      } catch (err) {
+        for (const n of written) await fsp.unlink(path.join(dir, n)).catch(() => {});
+        throw err;
+      }
     });
   }
 
+  /** Writes a prepared copy under a free name that keeps the `.transcript.md` ending, and returns its record. */
+  private async saveTranscript(dir: string, sourceName: string, buffer: Buffer, prepared: PreparedTranscript): Promise<UpdateTranscript> {
+    const stem = sourceName.replace(/\.[^.]+$/, '') || 'transcript';
+    let name = `${stem}.transcript.md`;
+    for (let n = 2; await fsp.lstat(path.join(dir, name)).then(() => true, () => false); n++) {
+      if (n > 999) throw httpError(409, 'Too many files with the same name');
+      name = `${stem}-${n}.transcript.md`;
+    }
+    const content = Buffer.from(prepared.content, 'utf-8');
+    await saveAttachment(dir, name, content, 'update.md');
+    return { file: name, source: sourceName, source_sha256: sha256(buffer), sha256: sha256(content), complete: prepared.complete };
+  }
+
+  /**
+   * Removes one file. Removing an original also removes the readable copy the dashboard recorded for it,
+   * unless the copy was changed since; removing a copy keeps its original.
+   */
   async removeMaterial(id: string, name: string): Promise<void> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['ready'], 'remove material');
       const dir = path.join(this.updateDir(id), 'materials');
-      await fsp.unlink(await fileInside(dir, topLevelName(name)));
-      await this.write(file, data, update.notes, { materials: await this.materialList(this.updateDir(id)) });
+      const removed = topLevelName(name);
+      await fsp.unlink(await fileInside(dir, removed));
+      for (const t of update.transcripts.filter((x) => x.source === removed)) {
+        const copy = await fileInside(dir, t.file).catch(() => null);
+        const content = copy ? await fsp.readFile(copy).catch(() => null) : null;
+        if (copy && content && sha256(content) === t.sha256) await fsp.unlink(copy);
+      }
+      const transcripts = update.transcripts.filter((x) => x.source !== removed && x.file !== removed);
+      const problems = update.transcript_problems.filter((x) => x.source !== removed);
+      await this.write(file, data, update.notes, {
+        materials: await this.materialList(this.updateDir(id)),
+        transcripts: transcripts.length ? transcripts : undefined,
+        transcript_problems: problems.length ? problems : undefined,
+      });
     });
   }
 
