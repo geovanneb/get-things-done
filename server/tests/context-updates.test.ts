@@ -68,7 +68,7 @@ test('material names cannot escape the materials folder', async (t) => {
   const { id } = await service.create({ text: 'x' });
   await assert.rejects(service.materialPath(id, '../update.md'), /traversal/);
   await assert.rejects(service.removeMaterial(id, '../update.md'), /Invalid file name/);
-  const saved = await service.addMaterial(id, '../../evil.md', Buffer.from('x'));
+  const saved = await service.addMaterial(id, '../../evil.md', Buffer.from('evil'));
   assert.equal(saved.name, 'evil.md');
   await fsp.access(path.join(process.env.ESB_WORKSPACE_PATH!, 'context-updates', id, 'materials', 'evil.md'));
 });
@@ -156,7 +156,7 @@ test('reopen discards proposals so the next analysis sees all material, and appl
   assert.equal(reopened.status, 'ready');
   assert.deepEqual(reopened.proposals, []);
   await assert.rejects(fsp.access(path.join(ws, 'context-updates', id, 'proposals')));
-  await service.addMaterial(id, 'more.txt', Buffer.from('x'));
+  await service.addMaterial(id, 'more.txt', Buffer.from('more'));
 
   const file = path.join(ws, 'context-updates', id, 'update.md');
   const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
@@ -455,4 +455,95 @@ test('closing keeps confirmed records, and reopening discards every record with 
   await second.choose({ 'M-01': 'confirmed' });
   const closed = await second.service.close(second.id);
   assert.deepEqual(closed.meeting_records.map((r) => r.confirmation), ['confirmed', 'rejected']);
+});
+
+test('a WebVTT transcript gets a readable copy, recorded by the dashboard, and the same file twice is refused', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const vtt = 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Jane Doe>Fictional words.</v>\n';
+  const { id } = await service.create({ text: 'x' });
+  const saved = await service.addMaterial(id, 'Weekly sync.vtt', Buffer.from(vtt));
+  assert.equal(saved.name, 'Weekly_sync.vtt');
+  assert.deepEqual([saved.transcript, saved.transcript_complete], ['Weekly_sync.transcript.md', true]);
+  const dir = path.join(ws, 'context-updates', id, 'materials');
+  assert.equal(await fsp.readFile(path.join(dir, 'Weekly_sync.vtt'), 'utf-8'), vtt, 'the original is kept as it was');
+  assert.match(await fsp.readFile(path.join(dir, 'Weekly_sync.transcript.md'), 'utf-8'), /\[00:00:01 → 00:00:02\] Jane Doe\n {2}Fictional words\./);
+  const [record] = (await service.get(id)).transcripts;
+  assert.deepEqual([record!.file, record!.source, record!.complete], ['Weekly_sync.transcript.md', 'Weekly_sync.vtt', true]);
+
+  await assert.rejects(service.addMaterial(id, 'copy.vtt', Buffer.from(vtt)), /already in the update, as Weekly_sync\.vtt/);
+  assert.equal((await service.addMaterial(id, 'notes.txt', Buffer.from('Not a transcript'))).transcript, undefined, 'other files are saved as they are');
+
+  await service.removeMaterial(id, 'Weekly_sync.vtt');
+  const after = await service.get(id);
+  assert.deepEqual(after.materials.map((m) => m.name).sort(), ['notes.txt', 'pasted-text.md'], 'the copy goes with its original');
+  assert.deepEqual(after.transcripts, []);
+
+  const pasted = await service.create({ text: vtt });
+  const pastedDetail = await service.get(pasted.id);
+  assert.deepEqual(pastedDetail.materials.map((m) => m.name).sort(), ['pasted-text.transcript.md', 'pasted-text.vtt'], 'pasted WebVTT is handled like an upload');
+  assert.equal(pastedDetail.transcripts[0]?.source, 'pasted-text.vtt');
+});
+
+test('only a copy the dashboard recorded goes with its original, and never one that was changed', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'notes' });
+  const dir = path.join(ws, 'context-updates', id, 'materials');
+  await service.addMaterial(id, 'independent.transcript.md', Buffer.from('<!-- gtd:transcript source="pasted-text.md" -->\nMy own notes'));
+  await service.removeMaterial(id, 'pasted-text.md');
+  await fsp.access(path.join(dir, 'independent.transcript.md'));
+
+  const vtt = (n: number) => Buffer.from(`WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v A>Words ${n}.</v>\n`);
+  const first = await service.addMaterial(id, 'sync.vtt', vtt(1));
+  await fsp.appendFile(path.join(dir, first.transcript!), '\nMy correction.');
+  await service.removeMaterial(id, 'sync.vtt');
+  await fsp.access(path.join(dir, first.transcript!));
+  assert.deepEqual((await service.get(id)).transcripts, [], 'the changed copy stays, as an ordinary file');
+
+  await service.addMaterial(id, 'sync.vtt', vtt(2));
+  const third = await service.addMaterial(id, 'sync.txt', Buffer.concat([vtt(3)]));
+  assert.equal(third.transcript, 'sync-3.transcript.md', 'a name collision keeps the .transcript.md ending');
+  assert.deepEqual((await service.get(id)).transcripts.map((x) => [x.source, x.file]), [['sync.vtt', 'sync-2.transcript.md'], ['sync.txt', 'sync-3.transcript.md']]);
+});
+
+test('a transcript that cannot be converted is saved alone, with the reason, and can be removed and added again', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'x' });
+  const odd = await service.addMaterial(id, 'broken.vtt', Buffer.from([0xfe, 0xff, 0x41]));
+  assert.equal(odd.transcript, undefined);
+  assert.match(odd.transcript_problem!, /not valid UTF-8 or UTF-16/);
+  const notVtt = await service.addMaterial(id, 'wrong.vtt', Buffer.from('Hello'));
+  assert.match(notVtt.transcript_problem!, /does not start with WEBVTT/);
+  assert.equal((await service.addMaterial(id, 'bytes.txt', Buffer.from([0x57, 0xff]))).transcript_problem, undefined, 'a .txt that is not text is just a file');
+
+  const partial = await service.addMaterial(id, 'partial.vtt', Buffer.from('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nok\n\nstray block\n'));
+  assert.equal(partial.transcript_complete, false);
+  assert.match(await fsp.readFile(path.join(ws, 'context-updates', id, 'materials', partial.transcript!), 'utf-8'), /\*\*Incomplete\.\*\*/);
+
+  assert.deepEqual((await service.get(id)).transcript_problems.map((p) => p.source), ['broken.vtt', 'wrong.vtt'], 'the reason stays with the update');
+  await service.removeMaterial(id, 'broken.vtt');
+  assert.deepEqual((await service.get(id)).transcript_problems.map((p) => p.source), ['wrong.vtt']);
+  await service.addMaterial(id, 'broken.vtt', Buffer.from([0xfe, 0xff, 0x41]));
+  assert.ok((await service.get(id)).materials.some((m) => m.name === 'broken.vtt'), 'metadata and files stay in step');
+});
+
+test('a copy no longer counts once its source or the copy itself was edited, and pasted problems are kept', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'x' });
+  const dir = path.join(ws, 'context-updates', id, 'materials');
+  const saved = await service.addMaterial(id, 'sync.vtt', Buffer.from('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v A>Launch.</v>\n'));
+  assert.equal((await service.get(id)).transcripts[0]!.current, true);
+  await fsp.writeFile(path.join(dir, 'sync.vtt'), 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v A>Do not launch.</v>\n');
+  assert.equal((await service.get(id)).transcripts[0]!.current, false, 'an edited source');
+
+  const other = await service.addMaterial(id, 'other.vtt', Buffer.from('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v B>Yes.</v>\n'));
+  await fsp.appendFile(path.join(dir, other.transcript!), 'edited');
+  assert.equal((await service.get(id)).transcripts.find((x) => x.source === 'other.vtt')!.current, false, 'an edited copy');
+  assert.ok(saved.transcript);
+
+  const pasted = await service.create({ text: 'WEBVTT\n\nnot a cue\n' });
+  assert.deepEqual((await service.get(pasted.id)).transcript_problems, [{ source: 'pasted-text.vtt', reason: 'No cue could be read, so no readable copy was made.' }]);
 });

@@ -506,6 +506,20 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               {filesGone
                 ? <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-text-secondary)' }}>{f.name}</span>
                 : <a href={`/api/context-updates/${u.id}/materials/${f.name.split('/').map(encodeURIComponent).join('/')}`} target="_blank" rel="noreferrer" style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-accent)' }}>{f.name}</a>}
+              {(() => {
+                const copy = (u.transcripts ?? []).find((x) => x.file === f.name);
+                const problem = (u.transcript_problems ?? []).find((x) => x.source === f.name);
+                if (copy) {
+                  const outdated = copy.current === false;
+                  return (
+                    <span title={outdated ? 'The original or this copy was changed after the copy was made; the agent reads the original.' : undefined}
+                      style={{ fontSize: 'var(--text-xs)', color: copy.complete && !outdated ? 'var(--color-text-muted)' : 'var(--color-warning)' }}>
+                      readable copy of {copy.source}{copy.complete ? '' : ' · incomplete'}{outdated ? ' · outdated' : ''}
+                    </span>
+                  );
+                }
+                return problem ? <span title={problem.reason} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>no readable copy</span> : null;
+              })()}
               <OfficeCheckBadge check={f.officeCheck} />
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
               {u.status === 'ready' && (

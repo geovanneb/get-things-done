@@ -506,6 +506,16 @@ try {
       badRecord.status === 400 && staleRecord.status === 409 && meetingDone.status === 'done' && meetingDone.meeting_records?.[0]?.confirmation === 'confirmed'
       && !fs.existsSync(path.join(meetingDir, 'materials')),
       `bad=${badRecord.status} stale=${staleRecord.status} status=${meetingDone.status}`);
+    const vttForm = new FormData();
+    vttForm.append('file', new Blob(['WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Fictional Speaker>Fictional words.</v>\n']), 'sync.vtt');
+    const vttUpdate = await (await json('POST', '/api/context-updates', { title: 'Fictional sync' })).json();
+    const vttUp = await fetch(`${base}/api/context-updates/${vttUpdate.id}/materials`, { method: 'POST', body: vttForm });
+    const vttSaved = await vttUp.json();
+    const vttAgain = await fetch(`${base}/api/context-updates/${vttUpdate.id}/materials`, { method: 'POST', body: vttForm });
+    const readable = vttSaved.transcript ? await (await fetch(`${base}/api/context-updates/${vttUpdate.id}/materials/${vttSaved.transcript}`)).text() : '';
+    check('a WebVTT upload gets a readable transcript next to it, and the same file twice is refused',
+      vttUp.status === 201 && vttSaved.transcript === 'sync.transcript.md' && readable.includes('Fictional Speaker\n  Fictional words.') && vttSaved.transcript_complete === true && vttAgain.status === 409,
+      `up=${vttUp.status} again=${vttAgain.status} transcript=${vttSaved.transcript}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }
