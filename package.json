@@ -74,9 +74,6 @@
     "simple-git": "^4.0.2",
     "uuid": "^14.0.3"
   },
-  "optionalDependencies": {
-    "better-sqlite3": "^13.0.3"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^20.11.30",

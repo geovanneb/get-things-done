@@ -791,9 +791,9 @@ Check `.situation-board/logs/server.log` in your workspace — `gtd start` print
 last lines on failure. `gtd status` shows whether a server is running and where.
 
 **Search results look incomplete.**
-Search uses a native SQLite index. If `better-sqlite3` could not build on your
-machine, the app falls back to an in-memory scan automatically — everything still
-works, ranking is just simpler. The log line starting `[search]` confirms it.
+Search uses the SQLite index built into Node 22.13 and newer (the desktop app has it
+too). On Node 20 the app falls back to an in-memory scan automatically — everything
+still works, ranking is just simpler. The log line starting `[search]` confirms it.
 
 **I edited `CLAUDE.md` and now there is a `CLAUDE.md.new` next to it.**
 Working as intended. A new version shipped, but your edits were kept. Diff the two

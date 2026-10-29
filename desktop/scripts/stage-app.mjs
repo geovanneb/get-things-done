@@ -29,7 +29,7 @@ const packed = JSON.parse(npm(['pack', '--json', '--ignore-scripts', '--pack-des
 const tarball = path.join(stage, packed[0].filename);
 
 fs.writeFileSync(path.join(gtd, 'package.json'), JSON.stringify({ name: 'gtd-desktop-stage', private: true }, null, 2));
-// No optional dependencies: better-sqlite3 is built for the system Node, not Electron, and search works without it.
+// No optional dependencies: nothing optional is needed (search uses node:sqlite, built into Electron's Node).
 // No install scripts: none of the production dependencies needs one.
 npm(['install', tarball, '--omit=dev', '--omit=optional', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock'], gtd);
 

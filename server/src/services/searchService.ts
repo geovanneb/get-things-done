@@ -1,6 +1,5 @@
 import * as path from 'path';
 import * as fs from 'fs';
-import type Database from 'better-sqlite3';
 import { SearchResult } from '../types';
 import { WorkspaceService } from './workspace';
 import { FileService } from './fileService';
@@ -35,29 +34,33 @@ interface IndexRow {
   path: string | null;
 }
 
-type DatabaseCtor = typeof Database;
+// The parts of node:sqlite used here. Declared locally because the @types/node line we use (20.x) predates it.
+interface Statement {
+  run(...params: (string | null)[]): unknown;
+  all(...params: string[]): unknown[];
+}
+interface SqliteDatabase {
+  exec(sql: string): void;
+  prepare(sql: string): Statement;
+  close(): void;
+}
+type DatabaseCtor = new (path: string) => SqliteDatabase;
 
 /**
- * better-sqlite3 is a native module and an optional dependency. If it is missing
- * or was built against a different Node ABI, search falls back to an in-memory
- * substring scan rather than taking the whole server down.
+ * The search index uses Node's built-in SQLite (node:sqlite, with FTS5): nothing native to install or rebuild,
+ * and the desktop app's Node has it too. Node 22.13+ has it without a flag. On older Node versions, or if the
+ * index cannot be opened, search falls back to an in-memory substring scan.
  */
 let sqliteCtor: DatabaseCtor | null | undefined;
 
 function loadSqlite(): DatabaseCtor | null {
   if (sqliteCtor !== undefined) return sqliteCtor;
-  // better-sqlite3 13 requires Node 22+. A shared install may still contain its native
-  // binary on Node 20, where loading it can crash the process instead of throwing.
-  if (Number(process.versions.node.split('.')[0]) < 22) {
-    sqliteCtor = null;
-    return null;
-  }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    sqliteCtor = require('better-sqlite3') as DatabaseCtor;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded lazily: older Node versions lack it
+    sqliteCtor = (require('node:sqlite') as { DatabaseSync: DatabaseCtor }).DatabaseSync;
   } catch (err) {
     console.warn(
-      '[search] better-sqlite3 unavailable, falling back to in-memory search:',
+      '[search] node:sqlite unavailable (Node 22.13+ has it), falling back to in-memory search:',
       err instanceof Error ? err.message : err
     );
     sqliteCtor = null;
@@ -66,7 +69,7 @@ function loadSqlite(): DatabaseCtor | null {
 }
 
 export class SearchService {
-  private db: Database.Database | null = null;
+  private db: SqliteDatabase | null = null;
   private memoryRows: IndexRow[] | null = null;
 
   /** Drops the open index so the next query reopens it under the current workspace. */
@@ -86,8 +89,8 @@ export class SearchService {
     return path.join(workspaceService.getWorkspacePath(), '.situation-board', 'cache', 'search.db');
   }
 
-  /** Returns null when the native module is unavailable or the DB cannot be opened. */
-  private openDb(): Database.Database | null {
+  /** Returns null when node:sqlite is unavailable or the DB cannot be opened. */
+  private openDb(): SqliteDatabase | null {
     if (this.db) return this.db;
 
     const Ctor = loadSqlite();
@@ -168,22 +171,25 @@ export class SearchService {
       return;
     }
 
-    db.exec('DELETE FROM entities_fts');
-
     const insertStmt = db.prepare(
       'INSERT INTO entities_fts (id, type, title, body, status, file_path) VALUES (?, ?, ?, ?, ?, ?)'
     );
 
-    const insertMany = db.transaction((batch: IndexRow[]) => {
-      for (const row of batch) {
+    // One transaction: much faster than one write per row, and a failure leaves the old index intact.
+    db.exec('BEGIN');
+    try {
+      db.exec('DELETE FROM entities_fts');
+      for (const row of rows) {
         insertStmt.run(row.id, row.type, row.title, row.body, row.status, row.path);
       }
-    });
-
-    insertMany(rows);
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
   }
 
-  /** Substring scan used when the native search index is unavailable. */
+  /** Substring scan used when the SQLite search index is unavailable. */
   private async searchInMemory(query: string, types?: string[]): Promise<SearchResult[]> {
     if (!this.memoryRows) {
       this.memoryRows = await this.collectRows();
@@ -235,7 +241,7 @@ export class SearchService {
       WHERE entities_fts MATCH ?
     `;
 
-    const params: (string | string[])[] = [`"${escapedQuery}"*`];
+    const params: string[] = [`"${escapedQuery}"*`];
 
     if (types && types.length > 0) {
       sql += ` AND type IN (${types.map(() => '?').join(',')})`;
