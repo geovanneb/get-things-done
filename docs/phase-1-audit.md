@@ -17,11 +17,11 @@ The shared CLI/server/dashboard remain the implementation in both browser and de
 | Built-in SQLite search | #140 merged; full suite on Node 20.19.0 (fallback), 22 and 24 |
 | Electron shell / tray | #128 merged; packaged Apple Silicon app starts and serves dashboard |
 | Native bridge / links / downloads | #136 merged; bridge and link tests; native OS dialog interactions still require platform acceptance |
-| Bundled Git | #137 merged; Apple Silicon packaged stage test passes; Windows staging failure in #141 needs a green rerun on the final head |
+| Bundled Git | #137 merged; Apple Silicon packaged stage test passes; Windows packaged CI passes on #141 head `34906f0` |
 | Shared welcome wizard | #138 merged; setup regressions and packaged workspace creation |
 | Packaging | #139 merged; local Mac app, installer build and CI packaging workflow |
 | Task creation in packaged smoke | #141 open; task POST, board GET, status checks and isolated HOME/port |
-| Signed release / auto-update | This branch implements plumbing; signing accounts and real signed install/update tests remain required |
+| Signed release / auto-update | Draft PR #142 implements plumbing; signing accounts and real signed install/update tests remain required |
 | Intel Mac support | Added native Intel runner alongside Apple Silicon and Windows x64; requires CI result |
 | Browser compatibility | Complete package smoke suite plus 13 Playwright checks on fictional data |
 
@@ -76,7 +76,7 @@ No private workspace or screenshot is included in the repository.
 Mac packaging, dependency audit and CodeQL, but failed Windows packaging at bundled-Git staging.
 Its task-creation check passed. The initial log only showed an empty staged list, so it did not
 establish a root cause. The updated smoke test preserves the assertion and exposes the response
-and full status rather than retrying or weakening the check. Final-head CI must be green.
+and full status rather than retrying or weakening the check. All ten checks, including Windows and Mac packaging, passed on updated head `34906f0`. The original failure did not recur; its underlying cause was not established.
 
 The other open PRs at audit start were dependency updates #131, #132 and #134. They are not
 Phase 1 dependencies. In particular, #134's Chokidar 6 update requires Node 22.22+, conflicting
