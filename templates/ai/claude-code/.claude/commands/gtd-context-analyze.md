@@ -198,8 +198,9 @@ decisions, open questions and action items that were stated, not a summary of th
   memory review.
 
 Leave out `skipped`, `unread` or `meeting_records` when they are empty. Do not set
-`decision`, or a record's `confirmation`, `confirmed_at` or `confirmed_hash`; the
-executive does that in the dashboard. If there is nothing worth changing, write
+`decision`, or a record's `confirmation`, `confirmed_at` or `confirmed_hash`, or an
+action item's `task_ref`; the executive does that in the dashboard. Never create tasks
+from action items yourself: the executive creates them from the confirmed record. If there is nothing worth changing, write
 `proposals: []` and still set `status: in_review`, so the executive can close it.
 
 The frontmatter needs both an opening and a closing `---`. Read the file back and

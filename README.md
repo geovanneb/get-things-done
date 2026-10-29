@@ -512,7 +512,14 @@ Meeting records are reviewed on their own: **Confirm** a record that is right, o
 **Reject** it. A confirmation is for the exact text you saw: if the record changes
 afterwards, it needs confirming again before you can approve or close. A record that
 is malformed or too long to show in full says why, and can only be rejected until the
-agent fixes it. You can confirm a meeting that changes nothing in your context, and an
+agent fixes it.
+
+Once the update is done, each action item of a confirmed record has **Create task**: it
+opens the New task form filled in from the item (title, where it comes from, the due
+date, and the owner as stakeholder when the record's name is that stakeholder's name).
+Nothing is created until you save. Saving creates the task and links the item to it in
+one step, so the same item never becomes two tasks, even from two windows. Agents never
+create tasks from action items themselves. You can confirm a meeting that changes nothing in your context, and an
 update with only confirmed records finishes as soon as you approve it. Confirmed
 records stay with the update after it is done, and System cleanup never removes an
 update that has one. A record you did not confirm is rejected when you approve or

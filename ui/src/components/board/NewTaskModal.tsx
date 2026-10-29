@@ -36,8 +36,11 @@ interface NewTaskModalProps {
   defaultStatus?: Task['status'];
   /** Starting values, applied each time the form opens. */
   draft?: NewTaskDraft;
-  /** `uploadErrors` lists the files that could not be attached; the task itself was created. */
-  onCreated?: (task: Task, uploadErrors: string[]) => void;
+  /**
+   * `uploadErrors` lists the files that could not be attached; the task itself was created. `existing` is
+   * true when the draft's meeting action item already had a task, which is returned instead of a new one.
+   */
+  onCreated?: (task: Task, uploadErrors: string[], existing?: boolean) => void;
 }
 
 interface FormState {
@@ -54,7 +57,7 @@ const defaultForm = (defaultStatus?: Task['status'], draft?: NewTaskDraft): Form
   title: draft?.title ?? '',
   status: defaultStatus ?? 'backlog',
   priority: 'medium',
-  due_date: '',
+  due_date: draft?.due_date ?? '',
   objective: draft?.objective ?? '',
   deliverables: (draft?.deliverables ?? []).map((d, i) => ({ ...d, id: `DEL-${String(i + 1).padStart(2, '0')}` })),
   preferred_agent: draft?.preferred_agent ?? '',
@@ -172,14 +175,28 @@ export default function NewTaskModal({
         })),
         contexts: [],
       };
-      const created = await apiPost<Task>('/api/tasks', payload);
+      // From a meeting action item, the server creates the task and links the item in one step, or returns
+      // the task the item already has.
+      const action = draft?.meeting_action;
+      let created: Task;
+      let existing = false;
+      if (action) {
+        const result = await apiPost<{ task: Task; created: boolean }>(
+          `/api/context-updates/${action.update_id}/meeting-records/${action.record_id}/tasks`,
+          { item: action.item, revision: action.revision, task: payload },
+        );
+        created = result.task;
+        existing = !result.created;
+      } else {
+        created = await apiPost<Task>('/api/tasks', payload);
+      }
       const uploadErrors: string[] = [];
-      for (let i = 0; i < files.length; i++) {
+      for (let i = 0; i < (existing ? 0 : files.length); i++) {
         setProgress(`Uploading ${i + 1} of ${files.length}...`);
         const failed = await uploadTaskFile(created.id, files[i]!);
         if (failed) uploadErrors.push(failed);
       }
-      onCreated?.(created, uploadErrors);
+      onCreated?.(created, uploadErrors, existing);
       onClose();
     } catch (err: any) {
       setSaveError(err?.message ?? 'Failed to create task. Please try again.');

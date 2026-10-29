@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Button from '@/components/common/Button';
 import { Textarea } from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
@@ -6,11 +7,12 @@ import MarkdownView from '@/components/common/MarkdownView';
 import OfficeCheckBadge from '@/components/common/OfficeCheckBadge';
 import { useApi } from '@/hooks/useApi';
 import { useAppDispatch, useDataVersion } from '@/store';
-import { apiDelete, apiPost, apiPut } from '@/utils/api';
+import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { diffLines, diffStats } from '@/utils/lineDiff';
 import { formatRelativeDate } from '@/utils/format';
+import { meetingActionDraft } from '@/utils/meetingAction';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
-import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord } from '@/types';
+import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord, Stakeholder } from '@/types';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
 import { CommandBox, HelpBox, OriginBadge, STATUS_META, StatusPill, StepIndicator, copyText, formatBytes, sectionLabel } from './shared';
@@ -65,11 +67,13 @@ function PersonName({ person }: { person: MeetingPerson }) {
   );
 }
 
-function MeetingRecordCard({ record, reviewing, confirmation, onChoose }: {
+function MeetingRecordCard({ record, reviewing, confirmation, onChoose, onCreateTask }: {
   record: MeetingRecord;
   reviewing: boolean;
   confirmation: MeetingRecord['confirmation'];
   onChoose: (value: MeetingRecord['confirmation']) => void;
+  /** Set when the record's action items can become tasks: it is confirmed and the update is done. */
+  onCreateTask?: (item: number) => void;
 }) {
   const confirmed = confirmation === 'confirmed';
   const rejected = confirmation === 'rejected';
@@ -95,8 +99,19 @@ function MeetingRecordCard({ record, reviewing, confirmation, onChoose }: {
       )}
       <RecordList label="Decisions" items={record.decisions} />
       <RecordList label="Open questions" items={record.open_questions} />
-      <RecordList label="Action items" items={record.action_items.map((a) => (
-        <>{a.description}{a.owner && <span style={{ color: 'var(--color-text-secondary)' }}> · <PersonName person={a.owner} /></span>}{a.due_date && <span style={{ color: 'var(--color-text-secondary)' }}> · by {a.due_date}</span>}</>
+      <RecordList label="Action items" items={record.action_items.map((a, i) => (
+        <>
+          {a.description}{a.owner && <span style={{ color: 'var(--color-text-secondary)' }}> · <PersonName person={a.owner} /></span>}{a.due_date && <span style={{ color: 'var(--color-text-secondary)' }}> · by {a.due_date}</span>}
+          {a.task_ref && (a.task_found === false
+            ? <span style={{ color: 'var(--color-text-muted)' }}> · task {a.task_ref} (no longer exists)</span>
+            : <> · <Link to={`/board/task/${a.task_ref}`} style={{ color: 'var(--color-accent)' }}>{a.task_ref}</Link></>)}
+          {!a.task_ref && onCreateTask && (
+            <button type="button" onClick={() => onCreateTask(i)} aria-label={`Create a task from: ${a.description}`}
+              style={{ marginLeft: 8, padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600 }}>
+              Create task
+            </button>
+          )}
+        </>
       ))} />
       {record.source && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Source: {record.source}</div>}
       {record.changed_since_confirmed && (
@@ -374,6 +389,16 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     }
   };
 
+  /** Opens the New task form filled in from an action item; the task is linked back to it once saved. */
+  const createTask = async (record: MeetingRecord, item: number) => {
+    const ownerRef = record.action_items[item]?.owner;
+    let owner: Stakeholder | undefined;
+    if (ownerRef?.ref && ownerRef.ref !== 'me' && ownerRef.ref_found) {
+      owner = await apiGet<Stakeholder>(`/api/stakeholders/${ownerRef.ref}`).catch(() => undefined);
+    }
+    dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: meetingActionDraft(u, record, item, owner) });
+  };
+
   const selectAll = (accept: boolean) =>
     saveDecisions(Object.fromEntries(selectable.map((p) => [p.id, { decision: accept ? 'accepted' as const : null }])));
 
@@ -573,7 +598,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
                 )}
                 {records.map((r, i) => (
                   <MeetingRecordCard key={`${i}-${r.id}`} record={r} reviewing={reviewing} confirmation={recordChoice(r)}
-                    onChoose={(value) => void chooseRecord(r, value)} />
+                    onChoose={(value) => void chooseRecord(r, value)}
+                    onCreateTask={r.confirmation === 'confirmed' && u.status === 'done' ? (item) => void createTask(r, item) : undefined} />
                 ))}
               </section>
             )}

@@ -40,6 +40,8 @@ export interface Task {
   /** Set when a routine created the task. */
   routine_ref?: string;
   routine_occurrence?: string;
+  /** The meeting action item this task was made from (set by the dashboard). */
+  meeting_action?: string;
   skills: string[];
   estimated_hours?: number;
   body?: string;
@@ -66,6 +68,9 @@ export interface NewTaskDraft {
   stakeholders?: Stakeholder[];
   deliverables?: Array<{ template_ref?: string; format?: string }>;
   preferred_agent?: string;
+  due_date?: string;
+  /** The meeting action item this task is created from: the new task is linked back to it once saved. */
+  meeting_action?: { update_id: string; record_id: string; item: number; revision: string };
 }
 
 export interface ContextNote {
@@ -472,7 +477,8 @@ export interface MeetingRecord {
   attendees: MeetingPerson[];
   decisions: string[];
   open_questions: string[];
-  action_items: { description: string; owner: MeetingPerson | null; due_date: string }[];
+  /** `task_ref`: the task created from the item in the dashboard; `task_found` (detail only): it still exists. */
+  action_items: { description: string; owner: MeetingPerson | null; due_date: string; task_ref: string | null; task_found?: boolean }[];
   source: string;
   confirmation: 'confirmed' | 'rejected' | null;
   confirmed_at: string | null;

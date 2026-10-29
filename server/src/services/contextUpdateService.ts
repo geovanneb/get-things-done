@@ -8,8 +8,11 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
 import { moveToTrash } from './trash';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
+import { TaskService } from './taskService';
+import type { Task } from '../types';
 
 const workspaceService = new WorkspaceService();
+const taskService = new TaskService();
 
 // Shared across service instances. Serializes this server's read-modify-write operations,
 // including filename reservation; external agents/processes still need coordination.
@@ -53,6 +56,7 @@ const PROPOSAL_ID_PATTERN = /^P-\d{2,3}$/;
 const RECORD_ID_PATTERN = /^M-\d{2,3}$/;
 /** A stakeholder id, or `me` for the workspace owner. */
 const PERSON_REF_PATTERN = /^(STK-\d{4}|me)$/;
+const TASK_REF_PATTERN = /^TASK-\d{4}-\d{4}$/;
 const MAX_PROPOSALS = 50;
 // Limits on what can be confirmed. A record over a limit is shown in full with a problem, never shortened.
 const MAX_RECORDS = 20;
@@ -109,7 +113,11 @@ export interface UpdateProposal {
  */
 export interface MeetingPerson { ref: string | null; name: string; ref_found?: boolean }
 
-export interface MeetingActionItem { description: string; owner: MeetingPerson | null; due_date: string }
+/**
+ * `task_ref` is the task the user created from this item in the dashboard, so it is not created twice. It is
+ * not part of what was confirmed. `task_found` (detail only) says whether that task still exists.
+ */
+export interface MeetingActionItem { description: string; owner: MeetingPerson | null; due_date: string; task_ref: string | null; task_found?: boolean }
 
 /**
  * What one meeting was: drafted by the analysis, confirmed or rejected by the user on its own, apart from
@@ -294,6 +302,25 @@ function recordPerson(raw: unknown, what: string, problems: string[]): MeetingPe
   return ref || name ? { ref, name } : null;
 }
 
+/**
+ * The action items a record shows, each with its position in the file. Entries with nothing in them are
+ * left out; the position lets the dashboard write a task link to the right entry.
+ */
+function shownActionItems(list: unknown[], problems: string[]): { item: MeetingActionItem; index: number }[] {
+  return list.map((entry, i) => {
+    const a = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : null) as Record<string, unknown> | null;
+    const item: MeetingActionItem = !a
+      ? { description: recordText(entry, `action item ${i + 1}`, problems), owner: null, due_date: '', task_ref: null }
+      : {
+        description: recordText(a['description'], `action item ${i + 1}`, problems),
+        owner: a['owner'] == null ? null : recordPerson(a['owner'], `action item ${i + 1} owner`, problems),
+        due_date: recordDate(a['due_date'], `action item ${i + 1} due_date`, problems),
+        task_ref: typeof a['task_ref'] === 'string' && TASK_REF_PATTERN.test(a['task_ref']) ? a['task_ref'] : null,
+      };
+    return { item, index: i };
+  }).filter((x) => x.item.description || x.item.owner || x.item.due_date);
+}
+
 /** The content a confirmation is bound to, in a fixed order. */
 function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' | 'revision' | 'problems' | 'changed_since_confirmed'>): string {
   const content = [r.id, r.title, r.meeting_date, r.attendees.map((p) => [p.ref, p.name]), r.decisions, r.open_questions,
@@ -322,15 +349,7 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
       attendees: people(recordList(r['attendees'], 'attendees', problems), 'attendee'),
       decisions: texts(recordList(r['decisions'], 'decisions', problems), 'decision'),
       open_questions: texts(recordList(r['open_questions'], 'open_questions', problems), 'open question'),
-      action_items: recordList(r['action_items'], 'action_items', problems).map((item, i) => {
-        const a = (item && typeof item === 'object' && !Array.isArray(item) ? item : null) as Record<string, unknown> | null;
-        if (!a) return { description: recordText(item, `action item ${i + 1}`, problems), owner: null, due_date: '' };
-        return {
-          description: recordText(a['description'], `action item ${i + 1}`, problems),
-          owner: a['owner'] == null ? null : recordPerson(a['owner'], `action item ${i + 1} owner`, problems),
-          due_date: recordDate(a['due_date'], `action item ${i + 1} due_date`, problems),
-        };
-      }).filter((a) => a.description || a.owner || a.due_date),
+      action_items: shownActionItems(recordList(r['action_items'], 'action_items', problems), problems).map((x) => x.item),
       source: recordText(r['source'], 'source', problems),
     };
     const revision = recordRevision(content);
@@ -355,6 +374,19 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
     if (records.length > MAX_RECORDS) r.problems.push(`more than ${MAX_RECORDS} meeting records in one update`);
   }
   return records;
+}
+
+/** What identifies an action item for its task: its content, so the same item always maps to the same task. */
+function actionItemKey(a: MeetingActionItem): string {
+  const content = [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date];
+  return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 12);
+}
+
+async function taskExists(tasksDir: string, taskId: string): Promise<boolean> {
+  for (const folder of ['active', 'archive']) {
+    if (await fileInside(path.join(tasksDir, folder), `${taskId}/task.md`).then(() => true, () => false)) return true;
+  }
+  return false;
 }
 
 /** Whether a finished update holds a meeting record the user confirmed. Reads the raw frontmatter value. */
@@ -590,10 +622,62 @@ export class ContextUpdateService {
       if (!found.has(p.ref)) found.set(p.ref, await fileInside(people, `${p.ref.toLowerCase()}.md`).then(() => true, () => false));
       p.ref_found = found.get(p.ref)!;
     };
+    const tasks = path.join(workspaceService.getWorkspacePath(), 'tasks');
     for (const r of records) {
       for (const p of r.attendees) await check(p);
-      for (const a of r.action_items) await check(a.owner);
+      for (const a of r.action_items) {
+        await check(a.owner);
+        if (a.task_ref) a.task_found = await taskExists(tasks, a.task_ref);
+      }
     }
+  }
+
+  /**
+   * Creates a task from an action item of a confirmed meeting record and links the item to it, in one step
+   * under this update's lock: `{ "item": 0, "revision": "<the record's revision>", "task": { ...New task fields } }`.
+   * Only for a finished update, which cannot be reopened, so the link is never discarded by a new analysis.
+   * Everything is checked before the task is created. When the item already has its task (a second tab, a
+   * retry, or a crash after the task was written), that task is returned instead of creating another.
+   */
+  async createActionItemTask(id: string, recordId: string, input: unknown): Promise<{ update: ContextUpdate; task: Task; created: boolean }> {
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['done'], 'create a task from an action item');
+      const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+      const matches = update.meeting_records.flatMap((r, i) => r.id === recordId ? [i] : []);
+      if (matches.length !== 1) throw httpError(400, `Invalid meeting record id: ${recordId}`);
+      const index = matches[0]!;
+      const record = update.meeting_records[index]!;
+      if (record.confirmation !== 'confirmed') throw httpError(409, `Meeting record ${recordId} is not confirmed, so its action items cannot become tasks`);
+      if (body['revision'] !== record.revision) throw httpError(409, `Meeting record ${recordId} changed since you loaded it; review it again`);
+      const item = body['item'];
+      if (typeof item !== 'number' || !Number.isInteger(item) || item < 0 || item >= record.action_items.length) throw httpError(400, 'Invalid action item');
+      const fields = body['task'];
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) throw httpError(400, 'Invalid task');
+
+      const tasksDir = path.join(workspaceService.getWorkspacePath(), 'tasks');
+      const action = record.action_items[item]!;
+      if (action.task_ref) {
+        if (!(await taskExists(tasksDir, action.task_ref))) throw httpError(409, `This action item had a task, ${action.task_ref}, which no longer exists`);
+        return { update, task: await taskService.getTask(action.task_ref).catch(() => ({ id: action.task_ref } as Task)), created: false };
+      }
+      const raws = this.rawRecords(data);
+      const raw = raws[index] as Record<string, unknown>;
+      const rawItems = Array.isArray(raw['action_items']) ? [...raw['action_items']] : [];
+      const rawIndex = shownActionItems(rawItems, [])[item]?.index;
+      if (rawIndex === undefined) throw httpError(400, 'Invalid action item');
+
+      // Recorded on the task, so a crash between writing the task and the link cannot lead to a second task.
+      const identity = `${update.id}/${record.id}/${actionItemKey(action)}`;
+      const found = await taskService.findByMeetingAction(identity);
+      const task = found ?? await taskService.createTask(fields as Partial<Task>, { meeting_action: identity });
+      const entry = rawItems[rawIndex];
+      // A plain-text item becomes an object with the same text, so it can hold the link; what it says is unchanged.
+      rawItems[rawIndex] = { ...(entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : { description: entry }), task_ref: task.id };
+      raws[index] = { ...raw, action_items: rawItems };
+      await this.write(file, data, update.notes, { meeting_records: raws });
+      return { update: (await this.read(id)).update, task, created: !found };
+    });
   }
 
   private async proposalDetail(dir: string, update: ContextUpdate, p: UpdateProposal): Promise<ProposalDetail> {

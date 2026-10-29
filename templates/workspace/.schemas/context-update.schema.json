@@ -46,7 +46,8 @@
           "items": {"type": "object", "required": ["description"], "properties": {
             "description": {"type": "string", "maxLength": 1000},
             "owner": {"$ref": "#/definitions/person"},
-            "due_date": {"type": "string", "format": "date"}
+            "due_date": {"type": "string", "format": "date"},
+            "task_ref": {"type": "string", "pattern": "^TASK-\\d{4}-\\d{4}$", "description": "Set by the dashboard: the task the executive created from this item. Not part of what was confirmed."}
           }}
         },
         "source": {"type": "string", "maxLength": 1000, "description": "Where the record comes from, e.g. the material file."},

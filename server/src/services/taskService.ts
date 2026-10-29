@@ -71,6 +71,12 @@ export class TaskService {
   }
 
   /** Tasks filed away under `tasks/archive/`. The board never shows these; Insights counts them. */
+  /** The task, active or archived, that was made from this meeting action item, if any. */
+  async findByMeetingAction(meetingAction: string): Promise<Task | null> {
+    const all = [...await this.listTasks().catch(() => []), ...await this.listArchivedTasks().catch(() => [])];
+    return all.find((t) => (t as Record<string, unknown>)['meeting_action'] === meetingAction) ?? null;
+  }
+
   async listArchivedTasks(): Promise<Task[]> {
     return this.readTaskFolders(this.getArchiveDir());
   }
@@ -216,7 +222,11 @@ If the executive comes back with feedback on a task that is already \`in_review\
     await fsp.writeFile(commandFile, content, 'utf-8');
   }
 
-  async createTask(data: Partial<Task>): Promise<Task> {
+  /**
+   * `origin.meeting_action` is for the server only, never a request body: it names the meeting action item
+   * the task was made from, so a retry finds this task instead of creating a second one.
+   */
+  async createTask(data: Partial<Task>, origin?: { meeting_action: string }): Promise<Task> {
     const rawData = data as Record<string, unknown>;
     // Set by routines, so a scheduled occurrence never produces a second task. Request bodies are not
     // typed at runtime: only well-formed pairs are kept, as the task schema requires.
@@ -270,6 +280,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
       task['routine_ref'] = routineRef;
       task['routine_occurrence'] = occurrence;
     }
+    if (origin) task['meeting_action'] = origin.meeting_action;
 
     const { path: _path, body: _body, ...fields } = task;
     // .schemas/task.schema.json requires schema_version and type; write them like every other

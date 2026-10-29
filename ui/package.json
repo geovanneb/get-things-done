@@ -14,6 +14,7 @@
     "test:diff": "tsx src/utils/lineDiff.test.ts",
     "test:meeting-prep": "tsx src/utils/meetingPrep.test.ts",
     "test:review-choices": "tsx src/utils/reviewChoices.test.ts",
+    "test:meeting-action": "tsx src/utils/meetingAction.test.ts",
     "test:desktop-bridge": "tsx src/utils/desktop.test.ts",
     "test:setup": "tsx src/utils/setup.test.ts"
   },
