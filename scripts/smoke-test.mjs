@@ -67,6 +67,11 @@ try {
 
   const forbidden = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { Origin: 'https://untrusted.example' } });
   check('untrusted origins are rejected before routes run', forbidden.status === 403);
+  const page = await fetch(`${base}/`);
+  const pageCsp = page.headers.get('content-security-policy') ?? '';
+  check('the dashboard is served with a restrictive CSP',
+    pageCsp.includes("script-src 'self'") && pageCsp.includes("frame-ancestors 'none'"), pageCsp);
+  check('API requests are rate limited', Boolean(page.headers.get('ratelimit-policy')));
   const malformed = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
   check('malformed JSON returns a client error', malformed.status === 400);
   fs.writeFileSync(path.join(tmp, 'outside.txt'), 'private fixture');

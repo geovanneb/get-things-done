@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
+import { rateLimit } from 'express-rate-limit';
 import * as http from 'http';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -18,15 +19,35 @@ const PORT = parseInt(process.env['PORT'] || '3001', 10);
 
 const app = express();
 
-// Security headers
+// Security headers. The CSP allows only what the dashboard loads: its own files, inline style attributes
+// (the UI uses inline styles), the Google Fonts stylesheet and font files, and data/blob images and downloads.
 app.use(helmet({
   crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      mediaSrc: ["'self'", 'blob:'],
+      connectSrc: ["'self'"],
+      frameSrc: ["'self'", 'blob:'],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+  },
 }));
 
 // Reject untrusted requests before parsing bodies or running any route.
 app.use(localRequestGuard(PORT));
 app.use(cors({ origin: [...allowedOrigins(PORT)], credentials: true }));
+
+// Every client is this machine, so this is one shared budget. It is far above what the dashboard
+// needs and only stops a runaway local script from flooding the workspace with file operations.
+app.use(rateLimit({ windowMs: 60_000, limit: 3000, standardHeaders: 'draft-8', legacyHeaders: false }));
 
 // Request logging
 app.use(morgan('dev'));
