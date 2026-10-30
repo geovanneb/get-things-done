@@ -8,7 +8,7 @@ import { dateInputStyle, sectionLabelStyle, fieldLabelStyle } from '@/components
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
 import { useRecorder } from '@/components/recording/RecordingProvider';
-import { RecordMeetingModal } from '@/components/recording/RecordMeetingModal';
+import { useRecordLauncher } from '@/components/recording/RecordLauncher';
 import type { MeetingDigest, MeetingDigestSettings, QueuedMeeting, RecordingState, RoutineRun, RoutineWeekday, RunnerStatus, TranscriptionProgress } from '@/types';
 
 const WEEKDAYS: { id: RoutineWeekday; short: string }[] = [
@@ -89,7 +89,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
   const hours = Math.max(1, Math.round(settings.max_characters / CHARACTERS_PER_HOUR));
 
   const recorder = useRecorder();
-  const [recording, setRecording] = React.useState(false);
+  const { openRecordDialog } = useRecordLauncher();
   const act = async (kind: string, fn: () => Promise<string | void>) => {
     setBusy(kind);
     setNotice(null);
@@ -212,7 +212,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           onClick={() => act('run', async () => (await apiPost<RoutineRun>('/api/routines/meeting-digest/run')).message)}>
           Make digest now
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => setRecording(true)} disabled={recorder.active}>Record a meeting</Button>
+        <Button size="sm" variant="ghost" onClick={openRecordDialog} disabled={recorder.active}>Record a meeting</Button>
         <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>Settings</Button>
         {notice && (
           <span role={notice.error ? 'alert' : 'status'} style={{ fontSize: 'var(--text-xs)', color: notice.error ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
@@ -220,7 +220,6 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           </span>
         )}
       </div>
-      <RecordMeetingModal isOpen={recording} onClose={() => setRecording(false)} />
     </article>
   );
 }
