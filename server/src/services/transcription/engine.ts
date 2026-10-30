@@ -58,7 +58,9 @@ async function stop(child: ChildProcess): Promise<boolean> {
   const exited = new Promise<'exited'>((resolve) => child.once('exit', () => resolve('exited')));
   try { if (child.connected) child.disconnect(); } catch { /* already closed */ }
   child.kill('SIGTERM');
-  const timeout = (ms: number) => new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms).unref());
+  // Kept referenced: these waits are short and bounded, and an unreferenced timer could let the process (or a test)
+  // end while it still waits for the worker.
+  const timeout = (ms: number) => new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms));
   if (await Promise.race([exited, timeout(STOP_GRACE_MS)]) === 'timeout') {
     child.kill('SIGKILL');
     await Promise.race([exited, timeout(STOP_GRACE_MS)]);
