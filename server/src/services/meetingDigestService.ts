@@ -597,7 +597,7 @@ export class MeetingDigestService {
           await this.clearBatch();
           return {
             status: 'error',
-            message: `Digest ${batch.update_id} was removed before its meetings left the queue. ${batch.meetings.join(', ')} stay in the queue on hold: queue them again or remove them.`,
+            message: `Digest ${batch.update_id} was removed before its meetings left the queue. ${batch.meetings.join(', ')} ${batch.meetings.length === 1 ? 'stays in the queue on hold: queue it again or remove it' : 'stay in the queue on hold: queue them again or remove them'}.`,
             did_something: true,
           };
         }
