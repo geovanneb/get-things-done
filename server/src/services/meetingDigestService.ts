@@ -8,6 +8,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, saveAttachment, topLevelName, workspaceEntry } from '../utils/files';
 import { Schedule, ScheduleError, describeSchedule, localDate, nextOccurrences, occurrencesBetween, parseSchedule } from './routineSchedule';
 import { reserveIds, reservedSequence } from './idReservations';
+import { AgentRunnerService } from './agentRunner';
 
 const workspaceService = new WorkspaceService();
 const contextUpdateService = new ContextUpdateService();
@@ -66,6 +67,8 @@ export interface DigestSettings {
   max_meetings: number;
   /** Readable text per digest, in characters. A meeting longer than this on its own gets a digest of its own. */
   max_characters: number;
+  /** Start the analysis of each new digest with the dashboard runner (the user's installed Claude Code). Off by default. */
+  auto_analyze: boolean;
   updated_at: string | null;
 }
 
@@ -76,7 +79,12 @@ export interface DigestState {
   last_status?: 'ok' | 'error';
   last_message?: string;
   last_context_update?: string;
+  /** The automatic analysis of the open digest: started, waiting for another run to end, or not started (and why). */
+  analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started'; message: string; at: string };
 }
+
+/** What the digest needs from the dashboard runner. */
+export type DigestRunner = Pick<AgentRunnerService, 'startAnalysis' | 'get'>;
 
 export interface QueuedFile { name: string; size: number; sha256: string }
 
@@ -154,6 +162,7 @@ export function defaultSettings(): DigestSettings {
     schedule: parseSchedule({ frequency: 'weekly', interval: 1, weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'], time: '18:00', starts_on: '2026-01-05' }),
     max_meetings: 10,
     max_characters: MAX_CHARACTERS_DEFAULT,
+    auto_analyze: false,
     updated_at: null,
   };
 }
@@ -169,6 +178,7 @@ export function parseSettings(input: unknown, base: DigestSettings = defaultSett
     }
   }
   if (o['enabled'] !== undefined && typeof o['enabled'] !== 'boolean') throw httpError(400, 'Invalid enabled');
+  if (o['auto_analyze'] !== undefined && typeof o['auto_analyze'] !== 'boolean') throw httpError(400, 'Invalid auto_analyze');
   let max = base.max_meetings;
   if (o['max_meetings'] !== undefined) {
     const n = typeof o['max_meetings'] === 'string' && o['max_meetings'].trim() ? Number(o['max_meetings']) : o['max_meetings'];
@@ -191,6 +201,7 @@ export function parseSettings(input: unknown, base: DigestSettings = defaultSett
     schedule,
     max_meetings: max,
     max_characters: chars,
+    auto_analyze: o['auto_analyze'] === undefined ? base.auto_analyze : o['auto_analyze'] as boolean,
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
 }
@@ -264,6 +275,8 @@ function serialized<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 export class MeetingDigestService {
+  constructor(private readonly runner: DigestRunner = new AgentRunnerService()) {}
+
   private routinesDir(): string {
     return path.join(workspaceService.getWorkspacePath(), '.situation-board', 'routines');
   }
@@ -377,6 +390,12 @@ export class MeetingDigestService {
     await this.writeJson('meeting-digest.json', next);
     if (JSON.stringify(next.schedule) !== JSON.stringify(current.schedule) || next.enabled !== current.enabled) {
       await this.writeJson('meeting-digest-state.json', { ...await this.readState(), checked_at: now.toISOString(), disabled: !next.enabled });
+    }
+    if (next.auto_analyze && !current.auto_analyze) {
+      // Switched on: the open digest may be tried again, even if an earlier attempt could not start.
+      const state = await this.readState();
+      delete state.analysis;
+      await this.writeJson('meeting-digest-state.json', state);
     }
     return this.view(now);
   }
@@ -543,6 +562,10 @@ export class MeetingDigestService {
    * An interrupted digest is finished or discarded on every check, due or not. The caller holds the routine lock.
    */
   async runIfDue(now: Date): Promise<DigestRunResult | null> {
+    return combine(await this.due(now), await this.analyzeIfWanted(now, false));
+  }
+
+  private async due(now: Date): Promise<DigestRunResult | null> {
     const recovered = await this.recover();
     if (recovered?.status === 'error') return this.stopped(recovered, now, false);
     const settings = await this.readSettings();
@@ -570,7 +593,42 @@ export class MeetingDigestService {
     if (recovered?.status === 'error') return this.stopped(recovered, now, true);
     const result = await this.make(await this.readSettings(), now);
     await this.writeJson('meeting-digest-state.json', { ...await this.readState(), ...this.stateFor(result, now) });
-    return combine(recovered, result) ?? result;
+    return combine(combine(recovered, result), await this.analyzeIfWanted(now, true)) ?? result;
+  }
+
+  /**
+   * With automatic analysis on, starts the analysis of the open digest while it is ready and has never had a run.
+   * Another run going (the runner does one at a time) means trying again on the next check; any other refusal (not
+   * installed, not signed in, folder not trusted) is reported once and not retried, and a digest that had a run,
+   * even a failed one, is never started again by itself: the user starts it from the digest's page. A paused job
+   * starts nothing on its own; "Make digest now" is the user's own click, so its digest is analyzed even then.
+   */
+  private async analyzeIfWanted(now: Date, manual: boolean): Promise<DigestRunResult | null> {
+    const settings = await this.readSettings().catch(() => null);
+    if (!settings?.auto_analyze || (!settings.enabled && !manual)) return null;
+    if (await this.readBatch().catch(() => true)) return null; // a digest is still being handed over, or the batch is damaged
+    const updates = await contextUpdateService.list().catch(() => []);
+    const open = updates.find((u) => u.origin === DIGEST_ORIGIN && u.kind === DIGEST_KIND && u.status !== 'done');
+    if (!open || open.status !== 'ready') return null;
+    const state = await this.readState();
+    const before = state.analysis?.update_id === open.id ? state.analysis : null;
+    if (before && before.status !== 'waiting') return null;
+    if (await this.runner.get(open.id)) return null;
+    let analysis: NonNullable<DigestState['analysis']>;
+    try {
+      await this.runner.startAnalysis(open.id);
+      analysis = { update_id: open.id, status: 'started', message: `Started the analysis of ${open.id}.`, at: now.toISOString() };
+    } catch (err) {
+      const reason = (err as Error).message;
+      const busy = /Another run is going|may still be going/.test(reason);
+      analysis = busy
+        ? { update_id: open.id, status: 'waiting', message: `The analysis of ${open.id} waits for another run to end.`, at: now.toISOString() }
+        : { update_id: open.id, status: 'not_started', message: `The analysis of ${open.id} could not start: ${reason} Start it from the digest's page.`, at: now.toISOString() };
+    }
+    await this.writeJson('meeting-digest-state.json', { ...await this.readState(), analysis });
+    // A scheduled check that is still waiting stays out of the history.
+    if (analysis.status === 'waiting' && before?.status === 'waiting' && !manual) return null;
+    return { status: analysis.status === 'not_started' ? 'error' : 'ok', message: analysis.message, context_update: open.id, did_something: true };
   }
 
   /**

@@ -596,6 +596,11 @@ try {
     check('the text per digest is saved, and a value out of range is refused',
       budget.status === 200 && budgetBody.settings?.max_characters === 200000 && badBudget.status === 400,
       `saved=${budget.status} ${budgetBody.settings?.max_characters} bad=${badBudget.status}`);
+    // Never switched on here: that would start a real analysis with the Claude Code installed on this machine.
+    const badAuto = await json('PUT', '/api/routines/meeting-digest', { auto_analyze: 'yes' });
+    const digestNow = await (await fetch(`${base}/api/routines/meeting-digest`)).json();
+    check('automatic analysis is off unless switched on, and only true or false is accepted',
+      badAuto.status === 400 && digestNow.settings?.auto_analyze === false, `bad=${badAuto.status} auto=${digestNow.settings?.auto_analyze}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }
