@@ -482,12 +482,30 @@ test('right after a meeting: a digest within a check of queueing, meetings wait 
   assert.deepEqual((await updates.get(third!.context_update!)).digest_meetings.map((m) => m.id), [e]);
   await close(third!.context_update!);
 
+  // Not retried by the schedule either: Monday 18:00 passes quietly with the same queue.
+  const f = await queueMeeting(service, 'Changed again', '2026-11-02', [['g.md', Buffer.from('G')]]);
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue', f, 'g.md'), 'edited');
+  assert.equal((await service.runIfDue(new Date('2026-11-02T17:00:00')))!.status, 'error');
+  assert.equal(await service.runIfDue(new Date('2026-11-02T18:01:00')), null, 'the scheduled run keeps the skip');
+  assert.equal(await service.runIfDue(new Date('2026-11-02T18:02:00')), null);
+  await service.removeMeeting(f);
+
   // Paused: nothing, however long the queue.
   await service.removeMeeting(d);
   await service.update({ enabled: false });
   await queueMeeting(service, 'Later', '2026-10-31', [['f.md', Buffer.from('F')]]);
   assert.equal(await service.runIfDue(at('09:08')), null);
   assert.equal((await updates.list()).filter((u) => u.status !== 'done').length, 0);
+});
+
+test('right after a meeting: the first check after a start already makes the digest for meetings waiting', async (t) => {
+  const ws = await workspace(t);
+  await fsp.writeFile(path.join(ws, '.situation-board', 'routines', 'meeting-digest.json'), JSON.stringify({ after_each_meeting: true }));
+  const service = new MeetingDigestService();
+  const a = await queueMeeting(service, 'Sync', '2026-10-31', [['a.md', Buffer.from('A')]]);
+  const first = await service.runIfDue(new Date('2026-10-31T09:00:00'));
+  assert.deepEqual((await updates.get(first!.context_update!)).digest_meetings.map((m) => m.id), [a]);
+  assert.ok((await service.readState()).checked_at, 'the schedule counts from now');
 });
 
 test('the schedule: first check counts from now, missed runs collapse into one, switched off makes nothing', async (t) => {

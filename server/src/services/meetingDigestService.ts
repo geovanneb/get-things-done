@@ -581,22 +581,30 @@ export class MeetingDigestService {
       if (!state.disabled) await this.writeJson('meeting-digest-state.json', { ...state, disabled: true, checked_at: now.toISOString() });
       return recovered;
     }
+    let current = state;
+    let scheduled = false;
     const checked = Date.parse(state.checked_at ?? '');
     if (state.disabled || !Number.isFinite(checked)) {
-      // First check, or switched back on: start counting from now. Queued meetings still wait for the next run.
-      await this.writeJson('meeting-digest-state.json', { ...state, disabled: false, checked_at: now.toISOString() });
-      return recovered;
+      // First check, or switched back on: the schedule counts from now. Meetings already queued still get a digest
+      // right away when that is switched on.
+      current = { ...state, disabled: false, checked_at: now.toISOString() };
+      await this.writeJson('meeting-digest-state.json', current);
+    } else {
+      scheduled = occurrencesBetween(settings.schedule, new Date(checked), now).length > 0;
     }
-    const scheduled = occurrencesBetween(settings.schedule, new Date(checked), now).length > 0;
     // Right after a meeting: whenever no digest waits for review and meetings are queued, on every check. So a
     // meeting gets its digest within a minute of being queued, and meetings that queued up while a digest was open
     // go into the next one as soon as it is done, also after a restart.
-    const queue = !scheduled && settings.after_each_meeting ? await this.waitingQueue() : null;
-    if (!scheduled && (!queue || queue === state.after_meeting_skip)) return recovered;
+    const queue = settings.after_each_meeting ? await this.waitingQueue() : null;
+    if (!scheduled && !queue) return recovered;
+    // The same queue that could not become a digest is not tried again, by the schedule either, until it changes.
+    if (queue && queue === current.after_meeting_skip) {
+      if (scheduled) await this.writeJson('meeting-digest-state.json', { ...current, checked_at: now.toISOString() });
+      return recovered;
+    }
     const result = await this.make(settings, now);
     // Advanced even after an error: retrying every minute would repeat the same failure. "Make digest now" retries.
-    // A digest right after a meeting that could not be made is tried again only once the queue changes.
-    const next: DigestState = { ...state, checked_at: now.toISOString(), ...this.stateFor(result, now) };
+    const next: DigestState = { ...current, checked_at: now.toISOString(), ...this.stateFor(result, now) };
     if (queue && result.status === 'error' && !result.context_update) next.after_meeting_skip = queue;
     else delete next.after_meeting_skip;
     await this.writeJson('meeting-digest-state.json', next);
