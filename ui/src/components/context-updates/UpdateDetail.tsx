@@ -16,7 +16,7 @@ import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord
 import AnalysisRun from './AnalysisRun';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
-import { CommandBox, HelpBox, OriginBadge, STATUS_META, StatusPill, StepIndicator, copyText, formatBytes, sectionLabel } from './shared';
+import { CommandBox, HelpBox, STATUS_META, StatusPill, StepIndicator, TypeBadge, copyText, formatBytes, sectionLabel } from './shared';
 
 const card: React.CSSProperties = {
   background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 16,
@@ -466,8 +466,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
           <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 700 }}>{u.title}</h2>
+          <TypeBadge origin={u.origin} />
           <StatusPill status={u.status} />
-          <OriginBadge origin={u.origin} />
           <span style={{ marginLeft: 'auto' }}>
             {u.status !== 'applying' && <Button variant="ghost" size="sm" onClick={remove}>Delete</Button>}
           </span>

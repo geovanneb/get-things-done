@@ -1,5 +1,7 @@
 import { forwardRef, useState } from 'react';
+import Badge from '@/components/common/Badge';
 import type { ContextUpdateStatus } from '@/types';
+import { typeMeta, updateType } from '@/utils/updateTypes';
 
 /** What each status means to the user, and what they should do next. */
 export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: string; subtle: string; step: number; next: string }> = {
@@ -147,13 +149,13 @@ export const sectionLabel: React.CSSProperties = {
   fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px',
 };
 
-/** Marks an update the user did not import: the weekly System cleanup job opened it. */
-export function OriginBadge({ origin }: { origin: string | null }) {
-  if (origin !== 'system-cleanup') return null;
-  return (
-    <span title="Opened by the weekly System cleanup job to review your memory. Set it up under Routines."
-      style={{ display: 'inline-flex', alignItems: 'center', padding: '1px 8px', borderRadius: 'var(--radius-full, 999px)', fontSize: 'var(--text-xs)', fontWeight: 600, background: 'var(--color-info-subtle)', color: 'var(--color-info)', whiteSpace: 'nowrap' }}>
-      System cleanup
-    </span>
-  );
+/**
+ * Marks an update the user did not import (a meeting digest, a memory review). Imports, the usual case, get no
+ * badge. Neutral on purpose: color on these cards means status.
+ */
+export function TypeBadge({ origin }: { origin: string | null }) {
+  const type = updateType({ origin });
+  if (type === 'imported') return null;
+  const meta = typeMeta(type);
+  return <span title={meta.hint} style={{ display: 'inline-flex' }}><Badge variant="default">{meta.label}</Badge></span>;
 }
