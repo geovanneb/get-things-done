@@ -334,3 +334,26 @@ test('a writer that stops while the queue is full ends the download; a malformed
   await removal;
   assert.equal(await service.installed('fictional-model'), false);
 });
+
+test('a takeover guard is cleared only when its holder is gone, never by age while it lives', async (t) => {
+  const dir = await modelsFolder(t);
+  const { base } = await fileServer(t, files);
+  const service = new TranscriptionModelService(catalog(base).models, catalog(base).vad);
+  const lock = path.join(dir, 'download.lock');
+  const guard = `${lock}.takeover`;
+  const old = new Date(Date.now() - 60_000);
+  await fsp.writeFile(lock, JSON.stringify({ pid: 2 ** 22 + 12345, token: 'gone' }));
+  // A live dashboard paused in the middle of a takeover: its old guard stays, so nothing is taken over meanwhile.
+  await fsp.writeFile(guard, JSON.stringify({ pid: process.ppid, token: 'paused' }));
+  await fsp.utimes(guard, old, old);
+  await assert.rejects(service.download('fictional-model'), /could not be taken/);
+  assert.equal(await fsp.readFile(guard, 'utf-8'), JSON.stringify({ pid: process.ppid, token: 'paused' }));
+  assert.match(await fsp.readFile(lock, 'utf-8'), /"gone"/);
+
+  // Its holder gone: the guard is cleared, the stale lock taken over, and the download runs.
+  await fsp.writeFile(guard, JSON.stringify({ pid: 2 ** 22 + 54321, token: 'crashed' }));
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  assert.equal(await service.installed('fictional-model'), true);
+  await assert.rejects(fsp.access(guard));
+});

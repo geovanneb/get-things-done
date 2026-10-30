@@ -636,17 +636,26 @@ export class TranscriptionModelService {
     throw httpError(409, 'The download lock could not be taken; try again');
   }
 
-  /** Removes the stale lock seen, under the takeover lock, if it is still that very file. */
+  /**
+   * Removes the stale lock seen, under the takeover guard, if it is still that very file. The guard names its holder:
+   * it is cleared only when that process is gone (never by age while it lives, so a dashboard paused mid-takeover
+   * keeps it), and each dashboard removes only its own. Left open: two dashboards clearing the same dead holder's
+   * guard within the same instant, which needs operating-system file locks Node does not offer.
+   */
   private async takeOver(ino: number, raw: string): Promise<void> {
     const guard = `${this.lockFile()}.takeover`;
-    let handle: fsp.FileHandle;
+    const mine = JSON.stringify({ pid: process.pid, token: randomUUID() });
     try {
-      handle = await fsp.open(guard, 'wx', 0o600);
+      const created = await fsp.open(guard, 'wx', 0o600);
+      try { await created.writeFile(mine); } finally { await created.close(); }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      // Held only for a moment; one left by a dashboard that stopped right then is cleared after a while.
-      const st = await fsp.lstat(guard).catch(() => null);
-      if (st && Date.now() - st.mtimeMs > INCOMPLETE_LOCK_MS) await fsp.rm(guard, { force: true });
+      const held = await this.readLock(guard);
+      const gone = held && (held.incomplete ? Date.now() - held.mtime > INCOMPLETE_LOCK_MS : !processAlive(held.pid));
+      if (gone) {
+        const again = await this.readLock(guard);
+        if (again && again.ino === held.ino && again.raw === held.raw) await fsp.rm(guard, { force: true });
+      }
       await new Promise((r) => setTimeout(r, 50));
       return;
     }
@@ -654,8 +663,8 @@ export class TranscriptionModelService {
       const now = await this.readLock();
       if (now && now.ino === ino && now.raw === raw) await fsp.rm(this.lockFile(), { force: true });
     } finally {
-      await handle.close().catch(() => {});
-      await fsp.rm(guard, { force: true });
+      const held = await fsp.readFile(guard, 'utf-8').catch(() => '');
+      if (held === mine) await fsp.rm(guard, { force: true });
     }
   }
 
