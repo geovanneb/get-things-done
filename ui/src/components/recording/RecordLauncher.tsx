@@ -2,10 +2,13 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { onRecordingCommand } from '@/utils/desktop';
 import { RecordMeetingModal } from './RecordMeetingModal';
 import { useRecorder } from './RecordingProvider';
+import type { RecordPrefill } from '@/utils/meetingParticipants';
 
 interface RecordLauncher {
   /** Opens the record dialog. Does nothing while a recording runs: there is one at a time. */
   openRecordDialog: () => void;
+  /** The same, started from what is already known about the meeting. */
+  openRecordDialogFor: (prefill: RecordPrefill) => void;
 }
 
 const LauncherContext = createContext<RecordLauncher | null>(null);
@@ -17,11 +20,17 @@ const LauncherContext = createContext<RecordLauncher | null>(null);
 export function RecordLauncherProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorder();
   const [open, setOpen] = useState(false);
+  const [prefill, setPrefill] = useState<RecordPrefill | null>(null);
   // The menu's commands arrive outside React; they act on the recorder as it is now.
   const latest = useRef(recorder);
   latest.current = recorder;
 
   const openRecordDialog = useCallback(() => {
+    setPrefill(null);
+    if (!latest.current.active) setOpen(true);
+  }, []);
+  const openRecordDialogFor = useCallback((next: RecordPrefill) => {
+    setPrefill(next);
     if (!latest.current.active) setOpen(true);
   }, []);
 
@@ -30,11 +39,11 @@ export function RecordLauncherProvider({ children }: { children: React.ReactNode
     else if (latest.current.status === 'recording') void latest.current.stop();
   }), [openRecordDialog]);
 
-  const value = useMemo(() => ({ openRecordDialog }), [openRecordDialog]);
+  const value = useMemo(() => ({ openRecordDialog, openRecordDialogFor }), [openRecordDialog, openRecordDialogFor]);
   return (
     <LauncherContext.Provider value={value}>
       {children}
-      <RecordMeetingModal isOpen={open} onClose={() => setOpen(false)} />
+      <RecordMeetingModal isOpen={open} onClose={() => setOpen(false)} prefill={prefill} />
     </LauncherContext.Provider>
   );
 }

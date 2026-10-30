@@ -3,6 +3,7 @@ import Button from '@/components/common/Button';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { apiDelete, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
+import { joinNames } from '@/utils/meetingParticipants';
 import type { MeetingDigest, QueuedMeeting, RecordingState, TranscriptionProgress } from '@/types';
 
 /** A recording whose transcript can go into a digest: done, or partial and used as it is. */
@@ -121,6 +122,7 @@ export function MeetingQueueList({ job, onChanged }: { job: MeetingDigest; onCha
             <li key={m.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}</span>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
+              {m.participants?.length ? <span style={{ flexBasis: '100%', order: 1, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Expected: {joinNames(m.participants)}</span> : null}
               <span title={m.held ?? undefined} style={{ fontSize: 'var(--text-xs)', color: m.held ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
                 {m.live ? (recorder.active && recorder.meetingId === m.id ? 'recording' : recordingElsewhere(m) ? 'recording in another page' : 'recording interrupted') : m.status === 'draft' ? 'uploading' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
                   : m.files.some((f) => f.recording && !transcribed(f.recording)) ? 'waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}

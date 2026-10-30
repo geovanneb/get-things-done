@@ -14,7 +14,10 @@ import MarkdownEditor from '../components/common/MarkdownEditor';
 import StakeholderPicker from '../components/task-form/StakeholderPicker';
 import DeliverableList from '../components/task-form/DeliverableList';
 import { selectStyle, dateInputStyle } from '../components/task-form/styles';
+import { useRecordLauncher } from '../components/recording/RecordLauncher';
+import { useRecorder } from '../components/recording/RecordingProvider';
 import { apiPut, apiDelete } from '../utils/api';
+import { isMeetingPrepTask, recordPrefillFromTask } from '../utils/meetingParticipants';
 import { formatDate, formatPriorityLabel, formatStatusLabel } from '../utils/format';
 
 /* ---- Tab type ------------------------------------------------------ */
@@ -353,6 +356,12 @@ export default function TaskDetailView() {
   }, [task]);
 
   const close = useCallback(() => navigate('/board'), [navigate]);
+  const { openRecordDialogFor } = useRecordLauncher();
+  const recorder = useRecorder();
+  // Loaded with the page, so the button never opens the dialog late, or without the people it should name. The version
+  // in the address sets `loading` during a refresh, so the button waits for the current list.
+  const stakeholdersVersion = useDataVersion('stakeholders');
+  const { data: people, loading: peopleLoading, error: peopleError } = useApi<Stakeholder[]>(`/api/stakeholders?v=${stakeholdersVersion}`);
 
   const panelRef = useDialogFocus(true, close, true);
 
@@ -519,6 +528,15 @@ export default function TaskDetailView() {
             </div>
 
             <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
+              {isMeetingPrepTask(localTask) && (
+                <Button
+                  variant="secondary" size="sm" disabled={recorder.active || !people || peopleLoading || !!peopleError}
+                  title={recorder.active ? 'A recording is running' : peopleError ? 'Could not load the stakeholders. Reload the page to try again.' : undefined}
+                  onClick={() => { if (people) openRecordDialogFor(recordPrefillFromTask(localTask, people)); }}
+                >
+                  Record this meeting
+                </Button>
+              )}
               {isDirty && (
                 <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>
                   Save changes

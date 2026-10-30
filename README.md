@@ -861,6 +861,11 @@ model is downloaded; the Meetings page shows each one's progress.
   chosen model transcribes the recording again after the meeting: the live text stays
   readable, the meeting waits, and **Use the live transcript** skips the wait. If a live
   transcript stops or falls behind, the recording is simply transcribed after the meeting.
+- **Participants:** when recording or adding a meeting, list who you expect: stakeholders,
+  or any other name. They stay with the meeting, the reminder to tell everyone names them,
+  and the digest lists them as expected, not as proof of who came: the analysis names
+  anyone who never appears. **Record this meeting** on a prepare-a-meeting task starts
+  with its title and stakeholders.
 - A recording stays in the queue until its meeting goes into a digest. Once the digest
   is checked to hold the complete transcript, the recording goes with the queue folder.
   **Keep recordings after transcription** in Settings keeps it with the digest's
