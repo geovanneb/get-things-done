@@ -561,6 +561,17 @@ the update is **Done**. Its record stays (the summary, the list of materials, ev
 proposal with your decision and its outcome), while the uploaded files and drafts are
 deleted, so the workspace does not grow over time.
 
+**Or apply from the dashboard.** An approved update has **Apply with Claude Code**: the
+same command, run in the background with your Claude Code and your Claude plan. The
+workspace asks before any write to `context/`, `stakeholders/` and `outputs/`, and the
+dashboard answers for you, file by file: yes only for the files you accepted (and the
+update's own folder), no for everything else it is asked about, including commands.
+Writes the workspace allows without asking (with the rules the app installs:
+`context-updates/` and `tasks/`) go through as usual. A file reached through a symlink is
+always refused. The run's result checks every change you accepted against what the
+agent recorded, and lists any write that was refused. An apply that stopped half way
+can be continued with **Continue applying**.
+
 ### Statuses
 
 | Status | Meaning | What you do |

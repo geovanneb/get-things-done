@@ -4,7 +4,8 @@ import * as fsp from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
 import { WorkspaceService } from './workspace';
 import { findCommand } from './aiToolDetection';
-import { ContextUpdateService, updateId } from './contextUpdateService';
+import { ContextUpdateService, proposalTarget, updateId } from './contextUpdateService';
+import { GATE_TOOL, readGateLog, removeApprovalGate, writeApprovalGate, type ApprovalGate } from './approvalGate';
 import { processAlive, setAnalysisRunning } from './runState';
 import { parseMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
@@ -34,9 +35,12 @@ import { atomicWrite } from '../utils/atomicWrite';
 
 export type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 
+/** The workspace commands the dashboard can run: analyze a ready update, apply an approved one. */
+export type RunCommand = 'analyze' | 'apply';
+
 export interface AgentRun {
   update_id: string;
-  command: 'analyze';
+  command: RunCommand;
   runner: string;
   status: RunStatus;
   started_at: string;
@@ -89,7 +93,8 @@ export interface AgentRunnerAdapter {
   id: string;
   label: string;
   status(workspace: string): Promise<RunnerStatus>;
-  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void): RunHandle;
+  /** With `gate`, every permission prompt goes to the approval gate instead of being refused. */
+  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate): RunHandle;
 }
 
 const MAX_TURNS = 80;
@@ -281,10 +286,14 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
     return { ...base, installed: true, logged_in: loggedIn, trusted, problems };
   }
 
-  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void): RunHandle {
+  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate): RunHandle {
     const bin = this.binary();
     if (!bin) throw httpError(409, 'Claude Code is not installed on this computer.');
-    const args = ['-p', prompt, '--setting-sources', 'project', '--permission-mode', 'dontAsk',
+    // Without a gate every prompt is refused (dontAsk). With one, prompts go to it: the only MCP server loaded.
+    const permissions = gate
+      ? ['--permission-mode', 'default', '--mcp-config', gate.mcpConfig, '--permission-prompt-tool', GATE_TOOL]
+      : ['--permission-mode', 'dontAsk'];
+    const args = ['-p', prompt, '--setting-sources', 'project', ...permissions,
       '--strict-mcp-config', '--settings', runnerSettingsFile(workspace),
       '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--max-turns', String(MAX_TURNS)];
     const child = launch(bin, args, workspace, this.env());
@@ -343,9 +352,21 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
 
 const workspaceService = new WorkspaceService();
 
+/** An accepted change that writes a file, as the run started with it. */
+export interface AcceptedChange { id: string; action: string; target: string }
+
+/** What an apply left behind: accepted changes the agent did not record as applied or merged, and the gate's log. */
+export interface ApplyFacts { not_applied: string[]; refused_writes: string[] }
+
+const WORDS: Record<RunCommand, { noun: string; again: string }> = {
+  analyze: { noun: 'analysis', again: 'run the analysis again' },
+  apply: { noun: 'apply', again: 'apply again' },
+};
+
 /** Turns what the tool left behind, and where the update ended up, into a status and a plain message. */
-export function explainOutcome(outcome: RunOutcome, updateStatus: string | null): Pick<AgentRun, 'status' | 'message' | 'refused' | 'turns' | 'usage_usd'> {
+export function explainOutcome(outcome: RunOutcome, updateStatus: string | null, command: RunCommand = 'analyze', apply?: ApplyFacts): Pick<AgentRun, 'status' | 'message' | 'refused' | 'turns' | 'usage_usd'> {
   const r = outcome.result;
+  const w = WORDS[command];
   const facts = {
     refused: Array.isArray(r?.permission_denials) ? r!.permission_denials!.length : 0,
     turns: typeof r?.num_turns === 'number' ? r.num_turns : null,
@@ -353,23 +374,43 @@ export function explainOutcome(outcome: RunOutcome, updateStatus: string | null)
   };
   const failed = (message: string) => ({ ...facts, status: 'failed' as const, message });
   switch (outcome.stopped) {
-    case 'cancelled': return { ...facts, status: 'cancelled', message: updateStatus === 'analyzing' ? 'Stopped. The update was left half analyzed: go back to collecting, then run the analysis again.' : 'Stopped.' };
-    case 'shutdown': return failed('The dashboard stopped while the analysis was running. Run it again.');
-    case 'timeout': return failed('The analysis took longer than 30 minutes and was stopped. Run it again, or run the command in Claude Code yourself.');
+    case 'cancelled': {
+      const half = command === 'analyze' && updateStatus === 'analyzing'
+        ? ' The update was left half analyzed: go back to collecting, then run the analysis again.'
+        : command === 'apply' && updateStatus === 'applying'
+        ? ' Some accepted changes may already be written. Apply again: it continues where it stopped, and changes already made are merged, not repeated.'
+        : '';
+      return { ...facts, status: 'cancelled', message: `Stopped.${half}` };
+    }
+    case 'shutdown': return failed(`The dashboard stopped while the ${w.noun} was running. ${capital(w.again)}.`);
+    case 'timeout': return failed(`The ${w.noun} took longer than 30 minutes and was stopped. ${capital(w.again)}, or run the command in Claude Code yourself.`);
     case 'api_key': return failed('Claude Code started with an API key instead of your Claude plan, so the run was stopped as soon as it reported this. Remove the API key from your Claude Code setup, then try again.');
-    case 'not_trusted': return failed('Claude Code has not trusted this workspace folder, so it would ignore the workspace\'s permission rules; the run was stopped. Open a terminal in the workspace folder, run claude once and accept "trust this folder", then run the analysis again.');
+    case 'not_trusted': return failed(`Claude Code has not trusted this workspace folder, so it would ignore the workspace's permission rules; the run was stopped. Open a terminal in the workspace folder, run claude once and accept "trust this folder", then ${w.again}.`);
     default: break;
   }
   const clean = outcome.exit_code === 0 && r?.subtype === 'success' && r.is_error !== true;
-  if (updateStatus === 'in_review' && clean) return { ...facts, status: 'succeeded', message: 'The analysis finished. Review the proposals below.' };
-  if (updateStatus === 'in_review') return failed('Proposals are ready to review, but Claude Code reported an error at the end of the run. Check them carefully.');
+  if (command === 'analyze') {
+    if (updateStatus === 'in_review' && clean) return { ...facts, status: 'succeeded', message: 'The analysis finished. Review the proposals below.' };
+    if (updateStatus === 'in_review') return failed('Proposals are ready to review, but Claude Code reported an error at the end of the run. Check them carefully.');
+  } else {
+    const missing = apply?.not_applied ?? [];
+    const blocked = apply?.refused_writes.length ? ` Writes refused because you had not accepted them: ${apply.refused_writes.join(', ')}.` : '';
+    if (updateStatus === 'done' && clean && missing.length === 0) return { ...facts, status: 'succeeded', message: `Your accepted changes are written.${blocked}` };
+    if (updateStatus === 'done') {
+      return failed(`The update is finished, but ${missing.length ? `these accepted changes are not recorded as applied: ${missing.join(', ')}` : 'Claude Code reported an error at the end of the run'}. Check the outcome of each change below.${blocked}`);
+    }
+  }
   const text = `${r?.result ?? ''}\n${outcome.stderr}`;
   if (/failed to authenticate|oauth session expired|not logged in|please run \/login/i.test(text)) {
-    return failed('Claude Code needs you to sign in again. Open a terminal, run claude, sign in, then run the analysis again.');
+    return failed(`Claude Code needs you to sign in again. Open a terminal, run claude, sign in, then ${w.again}.`);
   }
-  if (r?.subtype === 'error_max_turns') return failed(`The analysis stopped after ${MAX_TURNS} steps without finishing. Run it again, or run the command in Claude Code yourself.`);
+  if (r?.subtype === 'error_max_turns') return failed(`The ${w.noun} stopped after ${MAX_TURNS} steps without finishing. ${capital(w.again)}, or run the command in Claude Code yourself.`);
   const where = updateStatus ? ` The update is now "${updateStatus}".` : '';
-  return failed(`The analysis did not finish.${where} Run it again, or run the command in Claude Code yourself to see what happens.`);
+  return failed(`The ${w.noun} did not finish.${where} ${capital(w.again)}, or run the command in Claude Code yourself to see what happens.`);
+}
+
+function capital(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 interface Active {
@@ -379,6 +420,9 @@ interface Active {
   stopRequested: StopReason | null;
   /** Set once the run has ended: from then on no "running" record may be written. */
   terminal: boolean;
+  /** For an apply: the approval gate (removed after the run) and the accepted changes the run started with. */
+  gate: ApprovalGate | null;
+  accepted: AcceptedChange[];
   /** Record writes for this run, one after the other, so an older one never lands after a newer one. */
   writes: Promise<void>;
   done: Promise<void>;
@@ -441,7 +485,7 @@ export class AgentRunnerService {
   private async orphan(workspace: string): Promise<AgentRun | null> {
     const names = await fsp.readdir(this.runDir(workspace)).catch(() => [] as string[]);
     for (const name of names) {
-      if (!/^CU-\d{4}-\d{4}\.json$/.test(name)) continue; // not runner-settings.json
+      if (!/^CU-\d{4}-\d{4}\.json$/.test(name)) continue; // not runner-settings.json, gate files
       const run = await this.readRecord(workspace, name.slice(0, -5));
       if (run?.status === 'running' && processAlive(run.pid)) return run;
     }
@@ -463,24 +507,74 @@ export class AgentRunnerService {
       : saved.started_at > remembered.started_at ? saved : remembered;
     if (run?.status !== 'running') return run;
     if (processAlive(run.pid)) {
-      return { ...run, message: `A run started before the dashboard restarted may still be going (process ${run.pid}). Wait for it to end, or end it yourself, before running the analysis again.` };
+      return { ...run, message: `A run started before the dashboard restarted may still be going (process ${run.pid}). Wait for it to end, or end it yourself, before starting another.` };
     }
-    return { ...run, status: 'failed', message: 'The dashboard stopped while the analysis was running. Run it again.' };
+    return { ...run, status: 'failed', message: 'The dashboard stopped while this was running. Start it again.' };
+  }
+
+  /** The accepted creates and updates of an approved update: what an apply may write. Removals are the dashboard's. */
+  private async acceptedTargets(workspace: string, id: string): Promise<AcceptedChange[]> {
+    const raw = await fsp.readFile(path.join(workspace, 'context-updates', updateId(id), 'update.md'), 'utf-8');
+    const proposals = (parseMarkdown(raw).data as Record<string, unknown>)['proposals'];
+    if (!Array.isArray(proposals)) return [];
+    return proposals.flatMap((entry) => {
+      const p = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+      const target = proposalTarget(p['target']);
+      const writes = p['action'] === 'create' || p['action'] === 'update';
+      return p['decision'] === 'accepted' && writes && target ? [{ id: String(p['id']), action: String(p['action']), target }] : [];
+    });
+  }
+
+  /**
+   * After an apply: the accepted changes the run started with that are not recorded, unchanged and accepted, with an
+   * applied or merged outcome. A change dropped or altered by the agent, or an update.md that cannot be read, counts
+   * as not done. This checks the record the agent kept, not the files themselves.
+   */
+  private async notApplied(workspace: string, id: string, started: AcceptedChange[]): Promise<string[]> {
+    let proposals: unknown;
+    try {
+      const raw = await fsp.readFile(path.join(workspace, 'context-updates', updateId(id), 'update.md'), 'utf-8');
+      proposals = (parseMarkdown(raw).data as Record<string, unknown>)['proposals'];
+    } catch {
+      return started.map((c) => `${c.id} (the update could not be read to check)`);
+    }
+    const now = new Map<string, Record<string, unknown>>();
+    for (const entry of Array.isArray(proposals) ? proposals : []) {
+      if (entry && typeof entry === 'object') now.set(String((entry as Record<string, unknown>)['id']), entry as Record<string, unknown>);
+    }
+    return started.flatMap((c) => {
+      const p = now.get(c.id);
+      const same = p && p['decision'] === 'accepted' && p['action'] === c.action && proposalTarget(p['target']) === c.target;
+      const done = same && (p['outcome'] === 'applied' || p['outcome'] === 'merged');
+      return done ? [] : [p && !same ? `${c.id} (changed during the run)` : c.id];
+    });
   }
 
   /** Starts `/gtd-context-analyze <id>` for an update that is ready. One run at a time. */
-  async startAnalysis(id: string): Promise<AgentRun> {
+  startAnalysis(id: string): Promise<AgentRun> {
+    return this.start(id, 'analyze');
+  }
+
+  /**
+   * Starts `/gtd-context-analyze <id>` for a ready update, or `/gtd-context-apply <id>` for an approved one. An apply
+   * runs with the approval gate: it may write only the accepted files and the update's own folder. One run at a time.
+   */
+  async start(id: string, command: RunCommand): Promise<AgentRun> {
+    if (command !== 'analyze' && command !== 'apply') throw httpError(400, 'Invalid command: use analyze or apply');
     const uid = updateId(id);
     const workspace = workspaceService.getWorkspacePath();
-    if (active) throw httpError(409, `Another analysis is running (${active.run.update_id}). Wait for it, or stop it first.`);
+    // An apply that stopped half way (status "applying") can continue: the apply command resumes and skips what is done.
+    const allowedStatus = command === 'analyze' ? ['ready'] : ['approved', 'applying'];
+    if (active) throw httpError(409, `Another run is going (${active.run.update_id}). Wait for it, or stop it first.`);
     // Reserved before the first await, so two starts can never both pass the checks.
     let resolveDone!: () => void;
     const done = new Promise<void>((r) => { resolveDone = r; });
     const run: AgentRun = {
-      update_id: uid, command: 'analyze', runner: this.adapter.id, status: 'running', started_at: new Date().toISOString(),
-      ended_at: null, message: `${this.adapter.label} is analyzing the material.`, refused: 0, turns: null, usage_usd: null, pid: null,
+      update_id: uid, command, runner: this.adapter.id, status: 'running', started_at: new Date().toISOString(), ended_at: null,
+      message: command === 'analyze' ? `${this.adapter.label} is analyzing the material.` : `${this.adapter.label} is writing your accepted changes.`,
+      refused: 0, turns: null, usage_usd: null, pid: null,
     };
-    const current: Active = { workspace, run, handle: null, stopRequested: null, terminal: false, writes: Promise.resolve(), done, resolveDone };
+    const current: Active = { workspace, run, handle: null, stopRequested: null, terminal: false, gate: null, accepted: [], writes: Promise.resolve(), done, resolveDone };
     active = current;
     recent.delete(recentKey(workspace, uid));
     setAnalysisRunning(workspace, uid, true);
@@ -496,21 +590,27 @@ export class AgentRunnerService {
       if (orphan) throw httpError(409, `A run started before the dashboard restarted may still be going (${orphan.update_id}, process ${orphan.pid}). Wait for it to end first.`);
       const before = await this.updateStatus(workspace, uid);
       if (before === null) throw httpError(404, `Context update not found: ${uid}`);
-      if (before !== 'ready') throw httpError(409, `Cannot run the analysis while the update is "${before}"`);
+      if (!allowedStatus.includes(before)) throw httpError(409, `Cannot ${command} while the update is "${before}"`);
+      const targets = command === 'apply' ? await this.acceptedTargets(workspace, uid) : [];
+      if (command === 'apply' && targets.length === 0) throw httpError(409, 'Nothing to apply: no accepted change writes a file');
       const check = await this.adapter.status(workspace);
       if (check.problems.length) throw httpError(409, check.problems[0]!.message);
       // Checked again right before launch: the update may have changed during the checks.
       const now = await this.updateStatus(workspace, uid);
-      if (now !== 'ready') throw httpError(409, now === null ? `Context update not found: ${uid}` : `Cannot run the analysis while the update is "${now}"`);
+      if (now === null || !allowedStatus.includes(now)) throw httpError(409, now === null ? `Context update not found: ${uid}` : `Cannot ${command} while the update is "${now}"`);
       await this.record(current);
       await atomicWrite(runnerSettingsFile(workspace), RUNNER_SETTINGS);
+      const gate = command === 'apply' ? await writeApprovalGate(workspace, uid, targets.map((t) => t.target)) : undefined;
+      current.gate = gate ?? null;
+      current.accepted = targets;
       if (current.stopRequested) {
         await this.finish(current, { exit_code: null, result: null, stderr: '', stopped: current.stopRequested });
         return current.run;
       }
-      current.handle = this.adapter.start(workspace, `/gtd-context-analyze ${uid}`, (outcome) => {
+      const prompt = command === 'analyze' ? `/gtd-context-analyze ${uid}` : `/gtd-context-apply ${uid}`;
+      current.handle = this.adapter.start(workspace, prompt, (outcome) => {
         void this.finish(current, { ...outcome, stopped: outcome.stopped ?? current.stopRequested ?? undefined });
-      });
+      }, gate);
       if (!current.terminal) {
         current.run = { ...current.run, pid: current.handle.pid };
         await this.record(current).catch(() => {});
@@ -518,6 +618,7 @@ export class AgentRunnerService {
       // Stop or shutdown asked for while the process was starting: end it now.
       if (current.stopRequested) void current.handle.stop(current.stopRequested);
     } catch (err) {
+      if (current.gate) await removeApprovalGate(current.gate);
       release();
       throw err;
     }
@@ -529,12 +630,16 @@ export class AgentRunnerService {
     current.terminal = true;
     try {
       const status = await this.updateStatus(current.workspace, current.run.update_id).catch(() => null);
-      current.run = { ...current.run, ...explainOutcome(outcome, status), ended_at: new Date().toISOString() };
+      const apply = current.run.command === 'apply'
+        ? { not_applied: await this.notApplied(current.workspace, current.run.update_id, current.accepted), refused_writes: current.gate ? (await readGateLog(current.gate.log)).refused : [] }
+        : undefined;
+      current.run = { ...current.run, ...explainOutcome(outcome, status, current.run.command, apply), ended_at: new Date().toISOString() };
       recent.set(recentKey(current.workspace, current.run.update_id), current.run);
       await this.record(current);
     } catch (err) {
-      console.error(`Could not save how the analysis of ${current.run.update_id} ended: ${(err as Error).message}`);
+      console.error(`Could not save how the run of ${current.run.update_id} ended: ${(err as Error).message}`);
     } finally {
+      if (current.gate) await removeApprovalGate(current.gate);
       if (active === current) active = null;
       setAnalysisRunning(current.workspace, current.run.update_id, false);
       current.resolveDone();
@@ -543,7 +648,7 @@ export class AgentRunnerService {
 
   async cancel(id: string): Promise<AgentRun> {
     const workspace = workspaceService.getWorkspacePath();
-    if (!active || active.workspace !== workspace || active.run.update_id !== updateId(id)) throw httpError(409, 'No analysis is running for this update');
+    if (!active || active.workspace !== workspace || active.run.update_id !== updateId(id)) throw httpError(409, 'Nothing is running for this update');
     const current = active;
     current.stopRequested ??= 'cancelled';
     // Before launch the start sees the request and never launches; after launch the process tree is ended.

@@ -314,7 +314,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const meta = STATUS_META[u.status];
   const reviewing = u.status === 'in_review';
   // Steps where nothing moves until the user runs a command in the agent.
-  const command = u.status === 'ready' && !running ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
+  const command = running ? null : u.status === 'ready' ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
   const copied = copiedFor === u.status;
   const selectable = u.proposals.filter((p) => !p.problem);
   const acceptedCount = u.proposals.filter((p) => decisions[p.id]?.decision === 'accepted').length;
@@ -483,18 +483,20 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       {/* What to do next: always one clear action. */}
       <section ref={nextRef} aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
         <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{u.status === 'done' ? doneNext : meta.next}</div>
-        {(u.status === 'ready' || u.status === 'analyzing') && (
+        {(u.status === 'ready' || u.status === 'analyzing') && !running && (
           <CommandBox ref={u.status === 'ready' ? copyRef : undefined} command={`/gtd-context-analyze ${u.id}`} emphasis={u.status === 'ready'}
             label={u.status === 'ready' ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Run in Claude Code to analyze'}
             onCopied={() => setCopiedFor(u.status)} />
         )}
+
         {['ready', 'analyzing', 'in_review'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={refetch} onRunning={setRunning} />}
-        {(u.status === 'approved' || u.status === 'applying') && (
+        {(u.status === 'approved' || u.status === 'applying') && !running && (
           <CommandBox ref={u.status === 'approved' ? copyRef : undefined} command={`/gtd-context-apply ${u.id}`} emphasis={u.status === 'approved'}
             label={u.status === 'approved' ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Run in Claude Code to apply your accepted changes'}
             onCopied={() => setCopiedFor(u.status)} />
         )}
-        {(u.status === 'analyzing' || u.status === 'applying') && (
+        {['approved', 'applying', 'done'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={refetch} onRunning={setRunning} />}
+        {(u.status === 'analyzing' || u.status === 'applying') && !running && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             Taking too long, or the agent stopped? Run the same command again: it picks up where it left off.
             {u.status === 'analyzing' && <> Or <button type="button" onClick={reopen} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'inherit' }}>go back to collecting</button>.</>}
