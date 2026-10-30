@@ -172,8 +172,11 @@ const HIDDEN = new Set(['del', 'moveFrom', 'instrText', 'delInstrText']);
 /** Elements that only group content that is read: they are passed through. */
 const WRAPPERS = new Set(['document', 'body', 'r', 'hyperlink', 'smartTag', 'sdt', 'sdtContent', 'ins', 'moveTo', 'customXml', 'fldSimple', 'dir', 'bdo', 'tr', 'tc']);
 /** What a text copy cannot hold, by element, in plain words. */
+/** What a copy lacks when the document has pictures: no text is missing, only images. */
+export const PICTURES = 'pictures or charts';
+
 const NOT_TEXT = new Map([
-  ['tbl', 'tables'], ['drawing', 'pictures or charts'], ['pict', 'pictures or charts'], ['object', 'embedded objects'],
+  ['tbl', 'tables'], ['drawing', PICTURES], ['pict', PICTURES], ['object', 'embedded objects'],
   ['txbxContent', 'text boxes'], ['sym', 'symbols'], ['altChunk', 'imported content'], ['AlternateContent', 'alternative versions of content'],
   ['footnoteReference', 'footnote references'], ['endnoteReference', 'endnote references'], ['ptab', 'positioned tabs'],
 ]);

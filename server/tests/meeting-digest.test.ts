@@ -321,6 +321,14 @@ test('long meetings: a digest holds at most max_characters of readable text, and
   const third = await service.runNow(new Date('2026-10-30T18:00:00'));
   assert.deepEqual((await updates.get(third.context_update!)).digest_meetings.map((m) => m.id), [c]);
 
+  // A transcript whose readable copy is incomplete counts with its source: it cannot hide a long meeting.
+  await close(third.context_update!);
+  const broken = await queueMeeting(service, 'Broken export', '2026-10-31', [['broken.vtt', Buffer.from(`WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Jane Doe>Hello.</v>\n\nnot a timing line\n${'Fictional discussion. '.repeat(30_000)}\n`)]]);
+  const after = await queueMeeting(service, 'After', '2026-11-01', [['d.md', Buffer.from('Notes.')]]);
+  const alone = await service.runNow(new Date('2026-11-01T18:00:00'));
+  assert.deepEqual((await updates.get(alone.context_update!)).digest_meetings.map((m) => m.id), [broken]);
+  assert.ok((await service.readQueue()).meetings.some((m) => m.id === after));
+
   assert.throws(() => parseSettings({ max_characters: 1000 }), /50000 to 4000000/);
   assert.equal(parseSettings({}).max_characters, 400_000);
 });

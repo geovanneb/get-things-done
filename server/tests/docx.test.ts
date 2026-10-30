@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as zlib from 'node:zlib';
 import { crc32, docxMarkdown, docxText } from '../src/utils/docx';
+import { readableSize } from '../src/services/contextUpdateService';
 
 /** A minimal fictional .docx: a ZIP with the given entries. `size`, `crc` and `flags` override what the headers state. */
 function zip(entries: { name: string; data: Buffer; store?: boolean; size?: number; flags?: number; crc?: number; descriptor?: 'plain' | 'signed'; descriptorCrc?: number }[]): Buffer {
@@ -241,4 +242,21 @@ test('literal line endings are read as LF, a CR reference stays', () => {
   assert.deepEqual(r.paragraphs, ['A\nB\nC', 'D\nE\nF', 'G\rH']);
   const md = docxMarkdown('x.docx', 'h', r);
   assert.ok(md.includes('\n  G\n  H\n'), 'every line is indented, a CR included');
+});
+
+test('readable size: a copy alone when it holds all the text, the original too when it does not', () => {
+  const words = 'Fictional discussion of the pilot. '.repeat(200);
+  const plain = docx(p(t(words)));
+  const pictured = docx(p(t(words)) + '<w:p><w:r><w:drawing/></w:r></w:p>');
+  const table = docx(p(t(words)) + '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>');
+  const copy = (b: Buffer) => { const r = docxText(b); assert.ok(r.ok); return docxMarkdown('notes.docx', 'x'.repeat(64), r.text).length; };
+  assert.equal(readableSize('notes.docx', plain), copy(plain));
+  assert.equal(readableSize('notes.docx', pictured), copy(pictured), 'pictures only: all the text is in the copy');
+  assert.equal(readableSize('notes.docx', table), copy(table) + table.length, 'a table: the original counts as well');
+
+  // A transcript whose copy stops early counts with its whole source, so it cannot slip past a digest's text budget.
+  const broken = Buffer.from(`WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Jane Doe>Hello.</v>\n\nnot a timing line\n${'Fictional discussion. '.repeat(30_000)}\n`);
+  assert.ok(readableSize('talk.vtt', broken) > broken.length, `${readableSize('talk.vtt', broken)}`);
+  assert.equal(readableSize('notes.md', Buffer.from('Short notes.')), 'Short notes.'.length);
+  assert.equal(readableSize('deck.pdf', Buffer.alloc(1000)), 1000, 'anything else by its size');
 });

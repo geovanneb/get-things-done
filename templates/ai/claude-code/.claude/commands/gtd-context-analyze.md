@@ -74,10 +74,10 @@ transcript's times as evidence); when `complete` is false, it lists what it coul
 the source as well. Speaker labels are what the file says, not
 identities: link a speaker to a stakeholder only when the material makes it clear.
 
-A long transcript (a meeting of an hour or more is tens of thousands of words) does not
-fit in one read: read it in parts, in order, and note the candidate facts from each part
-before the next. Never stop part way and treat the rest as read. If you only skimmed part
-of a file, say which part in the summary.
+A long transcript (an hour or more of meeting) does not fit in one read: read it in
+parts, in order, and note the candidate facts from each part before the next. Never stop
+part way and treat the rest as read. If you only skimmed part of a file, say which part
+in the summary.
 
 If you cannot read a file (audio, video, encrypted, corrupt), do not guess its content.
 Record it under `unread` with the reason, and carry on with the rest.
