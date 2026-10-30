@@ -641,6 +641,22 @@ try {
       wavUp.status === 201 && wavMeeting.files?.[0]?.recording?.status === 'pending' && oggUp.status === 415
       && /waits? for transcription|not done yet/.test(waitRun.message ?? '') && stillQueued,
       `up=${wavUp.status} ogg=${oggUp.status} run=${waitRun.message}`);
+    // A meeting recorded in blocks: stored once, sealed, and removed again, so the smoke queue stays as it was.
+    const liveMeeting = await (await json('POST', '/api/meeting-queue', { title: 'Fictional recorded meeting', meeting_date: '2026-10-30' })).json();
+    const recordToken = 'fictional-smoke-writer-token';
+    const recordStart = await json('POST', `/api/meeting-queue/${liveMeeting.id}/recording`, { token: recordToken });
+    const putBlock = () => fetch(`${base}/api/meeting-queue/${liveMeeting.id}/recording?offset=0`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'X-Recording-Token': recordToken }, body: Buffer.alloc(32000),
+    });
+    const firstBlock = await putBlock();
+    const sameBlock = await (await putBlock()).json();
+    const sealedResponse = await json('POST', `/api/meeting-queue/${liveMeeting.id}/recording/finish`, { token: recordToken, offset: 32000 });
+    const sealedMeeting = await sealedResponse.json();
+    await fetch(`${base}/api/meeting-queue/${liveMeeting.id}`, { method: 'DELETE' });
+    check('a recording in blocks is stored once and becomes a file of its meeting',
+      recordStart.status === 201 && firstBlock.status === 200 && sameBlock.offset === 32000
+      && sealedResponse.status === 200 && sealedMeeting.files?.[0]?.recording?.status === 'pending',
+      `start=${recordStart.status} block=${firstBlock.status} again=${sameBlock.offset} finish=${sealedResponse.status}`);
     // The engine loads in its worker on this machine (no model needed).
     const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
     check('the transcription engine loads in its worker', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));

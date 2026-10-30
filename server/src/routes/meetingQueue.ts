@@ -1,14 +1,16 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import * as fsp from 'fs/promises';
 import multer from 'multer';
 import { param } from '../utils/params';
 import { MAX_RECORDING_BYTES, MeetingDigestService, queueId, type Upload } from '../services/meetingDigestService';
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
+import { MeetingRecordingService } from '../services/meetingRecording';
 import { topLevelName } from '../utils/files';
 
 const router = Router();
 const service = new MeetingDigestService();
 const transcription = new MeetingTranscriptionService();
+const recording = new MeetingRecordingService(service);
 
 /**
  * One file per request, streamed straight into its meeting's folder (recordings can be gigabytes): writeUpload checks
@@ -50,6 +52,23 @@ router.post('/:id/files', upload.single('file'), async (req: Request, res: Respo
     // Renamed into place when committed; otherwise the upload is not kept.
     await fsp.rm(saved.path, { force: true });
   }
+});
+
+// POST /api/meeting-queue/:id/recording  { token }  starts recording into a draft meeting
+router.post('/:id/recording', async (req: Request, res: Response) => {
+  res.status(201).json(await recording.start(queueId(param(req, 'id')), (req.body as { token?: string }).token as string));
+});
+
+// PUT /api/meeting-queue/:id/recording?offset=N  a block of audio, with the writer token in X-Recording-Token
+router.put('/:id/recording', express.raw({ type: 'application/octet-stream', limit: '1mb', inflate: false }), async (req: Request, res: Response) => {
+  const offset = typeof req.query['offset'] === 'string' && /^\d+$/.test(req.query['offset']) ? Number(req.query['offset']) : -1;
+  res.json(await recording.append(queueId(param(req, 'id')), req.get('x-recording-token') ?? '', offset, req.body as Buffer));
+});
+
+// POST /api/meeting-queue/:id/recording/finish  { token, offset, generation } or { recover: true, generation }
+router.post('/:id/recording/finish', async (req: Request, res: Response) => {
+  const { token, offset, recover, generation } = req.body as { token?: string; offset?: number; recover?: boolean; generation?: string };
+  res.json(await recording.finish(queueId(param(req, 'id')), { token, offset, recover: recover === true, generation }));
 });
 
 // POST /api/meeting-queue/:id/queue  the draft is complete: the next digest can take it

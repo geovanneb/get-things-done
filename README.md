@@ -783,6 +783,9 @@ settings.
   AAC, FLAC or AIFF. Uploads stream to disk. A meeting with a recording waits in the
   queue for its transcript, made on this computer with the model chosen in **Settings >
   Transcription** (see below); the transcript then goes into the digest with the meeting.
+- A meeting recorded in the dashboard is saved as it happens, block by block, into its
+  draft meeting. A recording whose page is gone is never cleaned up: it stays until you
+  finish or discard it.
 - Every change to the queue takes one lock for the workspace, so two dashboards on the
   same workspace never change it at the same time.
 - A meeting removed from the queue, and drafts left half-uploaded for a day, are

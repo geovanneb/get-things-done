@@ -1,0 +1,241 @@
+import * as fsp from 'fs/promises';
+import * as path from 'path';
+import { constants as fsConstants } from 'fs';
+import { createHash, randomUUID } from 'crypto';
+import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
+
+/**
+ * A meeting recorded in the dashboard, saved as it happens.
+ *
+ * The page sends 16 kHz mono 16-bit audio every few seconds; each block is appended to a hidden file of its own session
+ * in the draft meeting's folder and synced to disk before it is acknowledged. What the server acknowledged survives a
+ * closed page, a crash of the dashboard or a restart. What the page has not sent yet does not.
+ *
+ * The session lives in the meeting's manifest, written before the file exists:
+ * - `recording`: blocks are accepted from the page holding the writer token. An offset says where a block belongs, so
+ *   a block sent again is compared with what is stored, never added twice; a mismatch is refused.
+ * - `finalizing`: the audio is sealed and no block is accepted. Each step can be repeated, and none of them deletes
+ *   audio: the header gets its sizes, the file is hashed and checked, renamed to its reserved name, then recorded.
+ *
+ * Nothing finishes on its own, so a laptop that wakes up can carry on. A recording whose page is gone stays, however
+ * old, until the user chooses Finish or Discard, and a new one waits for that: one at a time on a workspace, across
+ * dashboards. Acknowledged blocks are synced, which covers a crash of the dashboard or the computer's programs; the
+ * folder entries of a rename are not, so a power cut during Finish is not covered: Finish can then be tried again.
+ */
+
+const HEADER_BYTES = 44;
+const SAMPLE_RATE = 16_000;
+const MAX_FILES = 10;
+
+function httpError(status: number, message: string, details?: unknown): Error {
+  return Object.assign(new Error(message), { statusCode: status, ...(details === undefined ? {} : { details }) });
+}
+
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+/** A 16 kHz mono 16-bit WAV header for this much audio. */
+export function wavHeader(dataBytes: number): Buffer {
+  const head = Buffer.alloc(HEADER_BYTES);
+  head.write('RIFF', 0, 'ascii'); head.writeUInt32LE(36 + dataBytes, 4); head.write('WAVE', 8, 'ascii');
+  head.write('fmt ', 12, 'ascii'); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(SAMPLE_RATE, 24); head.writeUInt32LE(SAMPLE_RATE * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+  head.write('data', 36, 'ascii'); head.writeUInt32LE(dataBytes, 40);
+  return head;
+}
+
+/** Writes all of `data` at `position`: one write call may store only part of it. */
+async function writeAll(handle: fsp.FileHandle, data: Buffer, position: number): Promise<void> {
+  for (let done = 0; done < data.length;) {
+    const { bytesWritten } = await handle.write(data, done, data.length - done, position + done);
+    done += bytesWritten;
+  }
+}
+
+/** Opens the live file for writing, never through a link. */
+async function openLive(file: string): Promise<fsp.FileHandle> {
+  const handle = await fsp.open(file, fsConstants.O_RDWR | (fsConstants.O_NOFOLLOW ?? 0));
+  const st = await handle.stat();
+  if (!st.isFile() || st.nlink !== 1) {
+    await handle.close();
+    throw httpError(409, 'The recording file is not a plain file; it was not changed.');
+  }
+  return handle;
+}
+
+/** Creates the file if the session has none yet, and repairs what a crash left: a cut header or half a sample. */
+async function liveFile(file: string): Promise<{ handle: fsp.FileHandle; saved: number }> {
+  const created = await fsp.open(file, fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600)
+    .catch((err: NodeJS.ErrnoException) => { if (err.code === 'EEXIST') return null; throw err; });
+  if (created) await created.close();
+  const handle = await openLive(file);
+  try {
+    const { size } = await handle.stat();
+    if (size < HEADER_BYTES) { await handle.truncate(0); await writeAll(handle, wavHeader(0), 0); return { handle, saved: 0 }; }
+    const saved = (size - HEADER_BYTES) - ((size - HEADER_BYTES) % 2);
+    if (size !== HEADER_BYTES + saved) await handle.truncate(HEADER_BYTES + saved);
+    return { handle, saved };
+  } catch (err) {
+    await handle.close();
+    throw err;
+  }
+}
+
+export class MeetingRecordingService {
+  constructor(private readonly queue = new MeetingDigestService()) {}
+
+  /** Starts recording into a draft meeting. Starting again with the same token returns the same session. */
+  async start(id: string, token: string, now = new Date()): Promise<{ generation: string; offset: number }> {
+    if (typeof token !== 'string' || token.length < 16 || token.length > 200) throw httpError(400, 'A writer token is required');
+    return this.queue.withQueue(async () => {
+      const meeting = await this.queue.loadMeeting(id);
+      if (meeting.status !== 'draft') throw httpError(409, 'A recording can only go into a meeting before it is queued');
+      if (meeting.live) {
+        if (meeting.live.token_sha256 !== hashToken(token) || meeting.live.state !== 'recording') throw httpError(409, 'This meeting already has a recording: finish or discard it first');
+        return this.opened(meeting);
+      }
+      if (meeting.files.length >= MAX_FILES) throw httpError(409, `A meeting holds at most ${MAX_FILES} files`);
+      // Not judged by how recent its audio is: a page that was only quiet for a while could carry on next to a new one.
+      const running = (await this.queue.readQueue()).meetings.find((m) => m.live?.state === 'recording');
+      if (running) throw httpError(409, `Another recording is open ("${running.title}"): finish or discard it first`);
+      const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})/, '$1-');
+      meeting.live = { generation: randomUUID(), token_sha256: hashToken(token), state: 'recording', started_at: now.toISOString(), name: `recording-${stamp}.wav` };
+      // The session first: a file exists only with a session that protects it.
+      await this.queue.saveMeeting(meeting);
+      return this.opened(meeting);
+    });
+  }
+
+  private async opened(meeting: QueuedMeeting): Promise<{ generation: string; offset: number }> {
+    const { handle, saved } = await liveFile(path.join(await this.queue.meetingFolder(meeting.id), liveRecordingFile(meeting.live!.generation)));
+    await handle.close();
+    return { generation: meeting.live!.generation, offset: saved };
+  }
+
+  /** Stores a block of audio at `offset` (bytes of audio, without the header) and says how much is safely stored. */
+  async append(id: string, token: string, offset: number, block: Buffer): Promise<{ offset: number }> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset % 2 !== 0) throw httpError(400, 'Invalid offset');
+    if (!Buffer.isBuffer(block) || block.length === 0 || block.length % 2 !== 0) throw httpError(400, 'A block of audio is whole 16-bit samples');
+    return this.queue.withQueue(async () => {
+      const meeting = await this.queue.loadMeeting(id);
+      if (meeting.live?.state !== 'recording' || meeting.live.token_sha256 !== hashToken(token ?? '')) {
+        throw httpError(409, 'This page no longer holds the recording');
+      }
+      const folder = await this.queue.meetingFolder(id);
+      const { handle, saved } = await liveFile(path.join(folder, liveRecordingFile(meeting.live.generation)));
+      try {
+        if (offset > saved) throw httpError(409, 'Audio is missing before this block', { offset: saved });
+        const overlap = Math.min(saved - offset, block.length);
+        if (overlap > 0) {
+          const stored = Buffer.alloc(overlap);
+          await handle.read(stored, 0, overlap, HEADER_BYTES + offset);
+          if (!stored.equals(block.subarray(0, overlap))) throw httpError(409, 'This block differs from the audio already stored', { offset: saved });
+        }
+        const rest = block.subarray(overlap);
+        // Sent again after a crash: the block may be on the disk's way only, so it is synced before it is acknowledged.
+        if (rest.length === 0) { await handle.datasync(); return { offset: saved }; }
+        const others = meeting.files.filter((f) => f.recording).reduce((sum, f) => sum + f.size, 0);
+        if (others + HEADER_BYTES + saved + rest.length > MAX_RECORDING_BYTES) throw httpError(413, 'A meeting holds at most 4 GB of recordings');
+        const disk = await fsp.statfs(folder).catch(() => null);
+        if (disk && disk.bavail * disk.bsize < rest.length + SPARE_DISK_BYTES) throw httpError(507, 'The disk is nearly full: the recording stopped here, and what was saved is kept.');
+        try {
+          await writeAll(handle, rest, HEADER_BYTES + saved);
+          await handle.datasync();
+        } catch (err) {
+          // Back to the last whole block: what was acknowledged stays, and the page can send this one again.
+          await handle.truncate(HEADER_BYTES + saved).catch(() => {});
+          if ((err as NodeJS.ErrnoException).code === 'ENOSPC') throw httpError(507, 'The disk is full: the recording stopped here, and what was saved is kept.');
+          throw err;
+        }
+        return { offset: saved + rest.length };
+      } finally {
+        await handle.close();
+      }
+    });
+  }
+
+  /**
+   * Seals the recording and adds it to the meeting. With the token, `offset` must be what the server holds. With
+   * `recover` (the user's Finish on an interrupted recording) what is stored is sealed, and any page still sending is
+   * refused from then on; it needs the `generation` the user saw. Safe to repeat, and to run twice at once, also after
+   * a lost reply or a crash at any step.
+   */
+  async finish(id: string, input: { token?: string; offset?: number; recover?: boolean; generation?: string }): Promise<QueuedMeeting> {
+    // Kept from the first look: if another Finish completes this one meanwhile, the next look must recognise it.
+    let generation = input.generation;
+    for (let attempt = 0; ; attempt++) {
+      const sealed = await this.queue.withQueue(async () => {
+        const meeting = await this.queue.loadMeeting(id);
+        // The reply to an earlier call was lost: it is done, whatever came after it.
+        if (generation && meeting.files.some((f) => f.capture === generation)) return null;
+        const live = meeting.live;
+        if (!live) throw httpError(409, 'This meeting has no recording to finish');
+        if (live.state === 'damaged') throw httpError(409, 'The record of this recording cannot be read: its file is kept. Remove the meeting to discard it.');
+        if (generation && live.generation !== generation) throw httpError(409, 'This meeting holds a different recording now');
+        if (input.recover && !generation) throw httpError(400, 'Finishing an interrupted recording needs its generation');
+        if (live.state === 'finalizing') return live;
+        const folder = await this.queue.meetingFolder(id);
+        const { handle, saved } = await liveFile(path.join(folder, liveRecordingFile(live.generation)));
+        await handle.datasync().finally(() => handle.close());
+        if (!input.recover) {
+          if (live.token_sha256 !== hashToken(input.token ?? '')) throw httpError(409, 'This page no longer holds the recording');
+          if (input.offset !== saved) throw httpError(409, 'Audio is still on its way', { offset: saved });
+        }
+        if (saved === 0) throw httpError(409, 'Nothing was recorded; discard this meeting instead');
+        meeting.live = { ...live, state: 'finalizing', sealed_bytes: saved };
+        await this.queue.saveMeeting(meeting);
+        return meeting.live;
+      });
+      if (!sealed) return this.queue.loadMeeting(id);
+      generation = sealed.generation;
+      try {
+        // Hashing gigabytes runs without the lock; nothing can change a sealed recording.
+        const checked = await this.checkSealed(id, sealed);
+        return await this.queue.withQueue(async () => {
+          const meeting = await this.queue.loadMeeting(id);
+          if (meeting.live?.generation !== sealed.generation || meeting.live.state !== 'finalizing') return meeting;
+          await this.queue.publishRecording(meeting, checked);
+          return this.queue.loadMeeting(id);
+        });
+      } catch (err) {
+        // Another Finish moved the file while this one read it: look again at where things stand.
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || attempt >= 2) throw err;
+      }
+    }
+  }
+
+  /** Reads a sealed recording under whichever name it has now: exactly the sealed audio, in a plain file, or it stays. */
+  private async checkSealed(id: string, live: LiveRecording): Promise<{ size: number; sha256: string }> {
+    const folder = await this.queue.meetingFolder(id);
+    const hidden = path.join(folder, liveRecordingFile(live.generation));
+    const inPlace = await fsp.lstat(hidden).then(() => true, () => false);
+    const handle = await openLive(inPlace ? hidden : path.join(folder, live.name));
+    try {
+      const want = HEADER_BYTES + live.sealed_bytes!;
+      const { size } = await handle.stat();
+      if (inPlace && size < want) throw httpError(409, 'The recording is shorter than what was saved: its file is kept.');
+      if (!inPlace && size !== want) throw httpError(409, 'The finished recording is not the one that was saved: its file is kept.');
+      if (inPlace) {
+        // Only what was sealed: a block written before the seal was acknowledged is cut here, never after.
+        if (size > want) await handle.truncate(want);
+        await writeAll(handle, wavHeader(live.sealed_bytes!), 0);
+        await handle.sync();
+      }
+      const head = Buffer.alloc(HEADER_BYTES);
+      await handle.read(head, 0, HEADER_BYTES, 0);
+      if (!head.equals(wavHeader(live.sealed_bytes!))) throw httpError(409, 'The finished recording is not the one that was saved: its file is kept.');
+      const hash = createHash('sha256');
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      for (let position = 0; position < want;) {
+        const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, want - position), position);
+        if (bytesRead === 0) throw httpError(409, 'The recording is shorter than what was saved: its file is kept.');
+        hash.update(buffer.subarray(0, bytesRead));
+        position += bytesRead;
+      }
+      return { size: want, sha256: hash.digest('hex') };
+    } finally {
+      await handle.close();
+    }
+  }
+}
+
+export type { LiveRecording };

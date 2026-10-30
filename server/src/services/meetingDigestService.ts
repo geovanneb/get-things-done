@@ -71,10 +71,17 @@ const MAX_MEETING_BYTES = 100 * 1024 * 1024;
  */
 export const MAX_RECORDING_BYTES = 4_000_000_000;
 /** Disk space an upload must leave free, on top of the upload itself: the transcription needs room too. */
-const SPARE_DISK_BYTES = 2_000_000_000;
+export const SPARE_DISK_BYTES = 2_000_000_000;
 /** An upload file nobody has written to for this long was abandoned (a crash or a dropped connection). */
 const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
 const UPLOAD_PREFIX = '.upload-';
+/**
+ * The audio of a recording in progress (meetingRecording.ts), hidden in the meeting's folder. Each session has its own
+ * file, so anything still working on an older session can never touch a newer one.
+ */
+const LIVE_PREFIX = '.live-recording-';
+export const liveRecordingFile = (generation: string) => `${LIVE_PREFIX}${generation}.wav`;
+const GENERATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** While an upload streams, free disk space is checked again after each this much. */
 const DISK_CHECK_BYTES = 64 * 1024 * 1024;
 
@@ -137,6 +144,36 @@ export interface QueuedFile {
   sha256: string;
   /** Set for a recording: the meeting waits for its transcript before a digest can take it. */
   recording?: RecordingState;
+  /** The session that recorded it here, so finishing twice is safe. */
+  capture?: string;
+}
+
+/** A recording in progress in a draft meeting. Its file is kept whatever happens, until the user finishes or discards it. */
+export interface LiveRecording {
+  generation: string;
+  /** The hash of the token that lets a page send audio. */
+  token_sha256: string;
+  /** `damaged`: the manifest's record cannot be read; the file is kept and only removing the meeting discards it. */
+  state: 'recording' | 'finalizing' | 'damaged';
+  started_at: string;
+  /** The name it gets in the meeting. */
+  name: string;
+  /** How much audio was sealed, once finalizing. */
+  sealed_bytes?: number;
+}
+
+/** The manifest's record of a recording in progress. One that cannot be read is kept as damaged, never dropped: it protects audio. */
+function parseLive(value: unknown): LiveRecording | undefined {
+  if (value === undefined || value === null) return undefined;
+  const o = obj(value);
+  const good = typeof o['generation'] === 'string' && GENERATION.test(o['generation']) && typeof o['token_sha256'] === 'string' && typeof o['name'] === 'string' && plainName(o['name'])
+    && (o['state'] === 'recording' || (o['state'] === 'finalizing' && Number.isSafeInteger(o['sealed_bytes']) && (o['sealed_bytes'] as number) > 0));
+  const text = (k: string) => (typeof o[k] === 'string' ? o[k] as string : '');
+  if (!good) return { generation: text('generation'), token_sha256: '', state: 'damaged', started_at: text('started_at'), name: text('name') };
+  return {
+    generation: o['generation'] as string, token_sha256: o['token_sha256'] as string, state: o['state'] as LiveRecording['state'], started_at: text('started_at'), name: o['name'] as string,
+    ...(o['state'] === 'finalizing' ? { sealed_bytes: o['sealed_bytes'] as number } : {}),
+  };
 }
 
 /** A file name the queue may use: at the top of the meeting's folder, not hidden, not the manifest. */
@@ -208,6 +245,8 @@ export interface QueuedMeeting {
   held: string | null;
   /** True while a digest is being made from it: it cannot be removed. */
   in_digest: boolean;
+  /** A recording in progress or interrupted. It blocks queueing, and keeps the draft from ever being cleaned up. */
+  live?: LiveRecording;
 }
 
 export interface DigestRunResult {
@@ -455,6 +494,39 @@ export class MeetingDigestService {
     return this.writeMeeting(meeting);
   }
 
+  /**
+   * The last step of finishing a recording; call under withQueue. Where the file is now is looked up here, not taken
+   * from what an earlier step saw. The final name goes into the manifest before the rename, so a crash at any point
+   * finds the audio under a known, protected name. If the manifest cannot be written the file goes back. A recording
+   * in neither place keeps its session: nothing that does not exist is ever recorded.
+   */
+  async publishRecording(meeting: QueuedMeeting, file: { size: number; sha256: string }): Promise<void> {
+    const live = meeting.live!;
+    const dir = await this.inWorkspace(this.meetingDir(meeting.id));
+    const exists = (name: string) => fsp.lstat(path.join(dir, name)).then((st) => st.isFile() && st.size === file.size, () => false);
+    const hidden = liveRecordingFile(live.generation);
+    let name = live.name;
+    const inPlace = await exists(hidden);
+    if (inPlace) {
+      const ext = path.extname(name);
+      const stem = name.slice(0, name.length - ext.length);
+      for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
+        || await fsp.lstat(path.join(dir, name)).then(() => true, () => false); n++) name = `${stem}-${n}${ext}`;
+      if (name !== live.name) await this.writeMeeting({ ...meeting, live: { ...live, name } });
+      await fsp.rename(path.join(dir, hidden), path.join(dir, name));
+    } else if (!await exists(name)) {
+      throw httpError(409, 'The recording was not found where it should be: its session is kept. Try Finish again.');
+    }
+    const { live: _done, ...rest } = meeting;
+    const next: QueuedMeeting = { ...rest, files: [...meeting.files, { name, size: file.size, sha256: file.sha256, recording: { status: 'pending' as RecordingStatus }, capture: live.generation }] };
+    try {
+      await this.writeMeeting(next);
+    } catch (err) {
+      if (inPlace) await fsp.rename(path.join(dir, name), path.join(dir, hidden)).catch(() => {});
+      throw err;
+    }
+  }
+
   /** Removes files the meeting's manifest does not name (written by a dashboard that stopped); call under withQueue. */
   dropUnrecorded(meeting: QueuedMeeting, dir: string): Promise<void> {
     return this.dropOrphans(meeting, dir);
@@ -627,8 +699,9 @@ export class MeetingDigestService {
       const recording = parseRecording(o['recording']);
       // Only a plain name inside the meeting's folder: a hand-edited manifest never points the queue elsewhere.
       return typeof o['name'] === 'string' && plainName(o['name']) && typeof o['sha256'] === 'string'
-        ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording ? { recording } : {}) }] : [];
+        ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording ? { recording } : {}), ...(typeof o['capture'] === 'string' ? { capture: o['capture'] } : {}) }] : [];
     }) : [];
+    const live = parseLive(data['live_recording']);
     return {
       id: path.basename(dir),
       title: str(data['title']) || 'Meeting',
@@ -640,6 +713,7 @@ export class MeetingDigestService {
       files,
       held: str(data['held']) || null,
       in_digest: false,
+      ...(live ? { live } : {}),
     };
   }
 
@@ -655,6 +729,7 @@ export class MeetingDigestService {
       updated_at: new Date().toISOString(),
       ...(m.queued_at ? { queued_at: m.queued_at } : {}),
       ...(m.held ? { held: m.held } : {}),
+      ...(m.live ? { live_recording: m.live } : {}),
       files: m.files,
     };
     const body = 'A meeting waiting for the meeting digest. Raw material from a meeting: never a source for tasks.';
@@ -791,12 +866,16 @@ export class MeetingDigestService {
     return this.exclusive(async () => {
       const meeting = await this.readMeeting(id);
       if (meeting.status !== 'draft') throw httpError(409, 'Files can only be added before the meeting is queued');
-      if (meeting.files.length >= MAX_FILES_PER_MEETING) throw httpError(409, `A meeting holds at most ${MAX_FILES_PER_MEETING} files`);
+      // A recording in progress has its place in the meeting already, so finishing it never fails for lack of room.
+      if (meeting.files.length + (meeting.live ? 1 : 0) >= MAX_FILES_PER_MEETING) throw httpError(409, `A meeting holds at most ${MAX_FILES_PER_MEETING} files`);
       const kind = recordingKind(originalName);
       if (kind.recording && !kind.supported) throw httpError(415, kind.reason);
       const others = meeting.files.filter((f) => !f.recording).reduce((sum, f) => sum + f.size, 0);
       const recordings = meeting.files.filter((f) => f.recording).reduce((sum, f) => sum + f.size, 0);
-      if (kind.recording && recordings + upload.size > MAX_RECORDING_BYTES) throw httpError(413, 'A meeting holds at most 4 GB of recordings');
+      // Counted by what was sealed once it is: until it is recorded, the file may already have its final name.
+      const live = meeting.live?.sealed_bytes ? meeting.live.sealed_bytes + 44
+        : meeting.live ? await fsp.lstat(path.join(await this.inWorkspace(this.meetingDir(id)), liveRecordingFile(meeting.live.generation))).then((s) => s.size, () => 0) : 0;
+      if (kind.recording && recordings + live + upload.size > MAX_RECORDING_BYTES) throw httpError(413, 'A meeting holds at most 4 GB of recordings');
       if (!kind.recording && others + upload.size > MAX_MEETING_BYTES) throw httpError(413, 'A meeting holds at most 100 MB of files');
       if (meeting.files.some((f) => f.sha256 === upload.sha256)) throw httpError(409, 'This file is already in the meeting');
       // A WAV recording is read by the transcription as it is, so it must be one it can read.
@@ -829,7 +908,10 @@ export class MeetingDigestService {
    * stopped before it recorded it. Hidden work files (uploads still arriving) are left alone. Call under the lock.
    */
   private async dropOrphans(meeting: QueuedMeeting, dir: string): Promise<void> {
+    // With a damaged record of a recording, its audio could be under any name: nothing goes.
+    if (meeting.live?.state === 'damaged') return;
     const named = new Set(meeting.files.map((f) => f.name));
+    if (meeting.live) named.add(meeting.live.name);
     for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
       if (!entry.isFile() || entry.name === MANIFEST || entry.name.startsWith('.') || named.has(entry.name)) continue;
       await fsp.rm(path.join(dir, entry.name), { force: true });
@@ -841,6 +923,7 @@ export class MeetingDigestService {
     return this.exclusive(async () => {
       const meeting = await this.readMeeting(id);
       if (meeting.status === 'queued' && !meeting.held) return meeting;
+      if (meeting.live) throw httpError(409, 'This meeting has a recording in progress: finish or discard it first');
       if (meeting.files.length === 0) throw httpError(409, 'Add at least one file before queueing the meeting');
       if (meeting.status === 'draft') await this.dropOrphans(meeting, await this.inWorkspace(this.meetingDir(id)));
       await this.writeMeeting({ ...meeting, status: 'queued', held: null, queued_at: meeting.queued_at ?? now.toISOString() });
@@ -1292,7 +1375,8 @@ export class MeetingDigestService {
         if (st?.isFile() && now.getTime() - st.mtime.getTime() > STALE_UPLOAD_MS) await fsp.rm(path.join(dir, name), { force: true });
         else if (st) uploading = true;
       }
-      if (uploading) continue;
+      // A recording in progress is never cleaned up, whatever its age: only the user finishes or discards it.
+      if (uploading || (await fsp.readdir(dir).catch(() => [] as string[])).some((n) => n.startsWith(LIVE_PREFIX))) continue;
       const manifest = await fsp.lstat(path.join(dir, MANIFEST)).catch(() => null);
       let stale: boolean;
       if (!manifest) {
@@ -1300,7 +1384,7 @@ export class MeetingDigestService {
         stale = Boolean(st && now.getTime() - st.mtime.getTime() > ABANDONED_MS);
       } else {
         const meeting = await this.readMeeting(entry.name).catch(() => null);
-        stale = Boolean(meeting && meeting.status === 'draft' && now.getTime() - Date.parse(meeting.updated_at) > ABANDONED_MS);
+        stale = Boolean(meeting && !meeting.live && meeting.status === 'draft' && now.getTime() - Date.parse(meeting.updated_at) > ABANDONED_MS);
       }
       if (!stale) continue;
       await reserveIds([entry.name]);
