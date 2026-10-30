@@ -755,7 +755,7 @@ export interface TranscriptionModel {
   download: { model: string; status: 'downloading' | 'verifying' | 'failed' | 'cancelled'; received: number; total: number; file: string; message?: string } | null;
 }
 
-export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; updated_at: string | null }
+export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; updated_at: string | null }
 
 export interface Transcription {
   models: TranscriptionModel[];

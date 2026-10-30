@@ -10,6 +10,7 @@ import * as os from 'node:os';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
 import { MeetingTranscriptionService, transcriptionTimings } from '../src/services/meetingTranscription';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
+import { TranscriptionModelService } from '../src/services/transcriptionModels';
 import type { Segment, TranscriptionEngine } from '../src/services/transcription/engine';
 import type { TranscriptionModelService } from '../src/services/transcriptionModels';
 
@@ -18,10 +19,15 @@ async function workspace(t: { after: (fn: () => Promise<void> | void) => void })
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-transcribe-'));
   const previous = process.env.ESB_WORKSPACE_PATH;
   process.env.ESB_WORKSPACE_PATH = dir;
+  // The digest reads "Keep recordings" from the models folder: never this computer's own.
+  const models = process.env.ESB_MODELS_PATH;
+  process.env.ESB_MODELS_PATH = path.join(dir, '.models');
   t.after(async () => {
     await MeetingTranscriptionService.settled();
     if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
     else process.env.ESB_WORKSPACE_PATH = previous;
+    if (models === undefined) delete process.env.ESB_MODELS_PATH;
+    else process.env.ESB_MODELS_PATH = models;
     await fsp.rm(dir, { recursive: true, force: true });
   });
   for (const d of ['tasks/active', 'context-updates', '.situation-board/routines']) await fsp.mkdir(path.join(dir, d), { recursive: true });
@@ -386,6 +392,157 @@ test('a Stop from another dashboard ends a job that reports no progress, and wor
   await MeetingTranscriptionService.settled();
   assert.equal(job.progress(), null, 'the job ended without any progress report');
   assert.equal((await recording(queue, id)).status, 'stopped');
+});
+
+test('a complete transcript goes into the digest and the recording goes with the queue; "Keep recordings" and a partial keep it', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const updates = new ContextUpdateService();
+  let fail = false;
+  const { engine } = fakeEngine(async (wav, o) => {
+    if (!fail) return speaks(['Fictional budget review.'])(wav, o);
+    o.onSegment?.({ start: 0, end: 1, text: 'Only the start.' });
+    throw new Error('The transcription engine stopped unexpectedly (SIGKILL).');
+  });
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const dirOf = (id: string) => path.join(ws, 'context-updates', 'meeting-queue', id);
+  const digest = async () => {
+    const run = await queue.runNow(new Date('2026-10-30T18:00:00'));
+    assert.equal(run.status, 'ok', run.message);
+    return updates.get(run.context_update!);
+  };
+
+  // Complete, with the default setting: the transcript is in the digest, the audio nowhere.
+  const first = await queueRecording(queue, 'Workshop');
+  const wavHash = (await queue.loadMeeting(first)).files[0]!.sha256;
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  const transcriptHash = (await recording(queue, first)).transcript_sha256;
+  const done = await digest();
+  assert.deepEqual(done.material_files.map((f) => f.name).sort(), [`${first}-workshop.transcript.md`, 'meetings.md']);
+  assert.deepEqual(done.transcripts.map((c) => [c.file, c.source, c.source_sha256, c.kind, c.complete, c.source_removed, c.current]),
+    [[`${first}-workshop.transcript.md`, 'workshop.wav', wavHash, 'audio', true, true, true]]);
+  assert.deepEqual(done.digest_meetings[0]!.recordings, [{
+    source: 'workshop.wav', source_sha256: wavHash, transcript: `${first}-workshop.transcript.md`, transcript_sha256: transcriptHash, complete: true, file: null,
+  }]);
+  assert.match(await fsp.readFile(path.join(ws, 'context-updates', done.id, 'materials', 'meetings.md'), 'utf-8'), /workshop\.wav: complete transcript in .*audio not kept/);
+  await assert.rejects(fsp.access(dirOf(first)), 'the queue folder went, with the recording');
+  const receipts = await fsp.readFile(path.join(ws, '.situation-board', 'routines', 'meeting-digest-receipts.jsonl'), 'utf-8');
+  assert.equal(JSON.parse(receipts.trim().split('\n')[0]!).recordings[0].source_sha256, wavHash);
+  await updates.remove(done.id);
+
+  // "Keep recordings" on: the audio stays with the digest, and its materials are kept after review.
+  await new TranscriptionModelService().updateSettings({ keep_recordings: true });
+  const second = await queueRecording(queue, 'Kept', [['kept.wav', silentWav(2)]]);
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  const kept = await digest();
+  assert.ok(kept.material_files.some((f) => f.name === `${second}-kept.wav`));
+  assert.equal(kept.keep_materials, true);
+  assert.deepEqual(kept.transcripts.map((c) => [c.source, c.source_removed, c.current]), [[`${second}-kept.wav`, undefined, true]]);
+  await updates.remove(kept.id);
+
+  // A partial transcript used as it is keeps its recording, whatever the setting says.
+  await new TranscriptionModelService().updateSettings({ keep_recordings: false });
+  fail = true;
+  const third = await queueRecording(queue, 'Partial', [['cut.wav', silentWav(3)]]);
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  await job.accept(third, 'cut.wav');
+  const partial = await digest();
+  assert.ok(partial.material_files.some((f) => f.name === `${third}-cut.wav`));
+  assert.equal(partial.keep_materials, false);
+  assert.deepEqual(partial.transcripts.map((c) => [c.complete, c.source_removed]), [[false, undefined]]);
+});
+
+test('settings that cannot be read keep recordings; only a clear "not kept" lets one go', async (t) => {
+  await workspace(t);
+  const service = new TranscriptionModelService();
+  const file = path.join(process.env.ESB_MODELS_PATH!, 'settings.json');
+  assert.equal(await service.keepRecordings(), false, 'no settings yet: the default');
+  await service.updateSettings({ keep_recordings: true });
+  assert.equal(await service.keepRecordings(), true);
+  await fsp.writeFile(file, '{ damaged');
+  assert.equal(await service.keepRecordings(), true);
+  await fsp.writeFile(file, JSON.stringify({ language: 'nonsense' }));
+  assert.equal(await service.keepRecordings(), true);
+
+  const queue = new MeetingDigestService();
+  const { engine } = fakeEngine(speaks(['Fictional budget review.']));
+  const id = await queueRecording(queue, 'Workshop');
+  await new MeetingTranscriptionService(queue, fakeModels(), engine).tick();
+  await MeetingTranscriptionService.settled();
+  const run = await queue.runNow(new Date('2026-10-30T18:00:00'));
+  const update = await new ContextUpdateService().get(run.context_update!);
+  assert.ok(update.material_files.some((f) => f.name === `${id}-workshop.wav`), 'the audio was kept');
+});
+
+test('a change to the digest\'s record of a recording stops the handoff, and a hand-set flag is not believed', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const updates = new ContextUpdateService();
+  let fail = true;
+  const { engine } = fakeEngine(async (wav, o) => {
+    if (!fail) return speaks(['Complete.'])(wav, o);
+    o.onSegment?.({ start: 0, end: 1, text: 'Only the start.' });
+    throw new Error('The transcription engine stopped unexpectedly (SIGKILL).');
+  });
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const id = await queueRecording(queue, 'Workshop');
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  await job.accept(id, 'workshop.wav');
+
+  const internals = queue as unknown as { release: (b: unknown) => Promise<string[]> };
+  const release = internals.release;
+  internals.release = async () => { throw new Error('stopped here'); };
+  assert.equal((await queue.runNow(new Date('2026-10-30T18:00:00'))).status, 'error');
+  internals.release = release;
+  const update = (await updates.list()).find((u) => u.origin === 'meetings')!;
+  // A partial transcript made to look complete, in both records.
+  const file = path.join(ws, 'context-updates', update.id, 'update.md');
+  const text = await fsp.readFile(file, 'utf-8');
+  assert.match(text, /complete: false/);
+  await fsp.writeFile(file, text.replace(/complete: false/g, 'complete: true'));
+  const again = await queue.runNow(new Date('2026-10-30T18:05:00'));
+  assert.equal(again.status, 'error');
+  await fsp.access(path.join(ws, 'context-updates', 'meeting-queue', id, 'workshop.wav'));
+
+  // A readable copy of any other kind does not get to skip its source with the flag.
+  fail = false;
+  const plain = await updates.create({ title: 'Fictional notes', notes: '', source_date: '2026-10-30' } as never);
+  const vtt = Buffer.from('WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n<v Jane Doe>Fictional words.</v>\n');
+  await updates.addMaterial(plain.id, 'talk.vtt', vtt);
+  const plainFile = path.join(ws, 'context-updates', plain.id, 'update.md');
+  const plainText = await fsp.readFile(plainFile, 'utf-8');
+  await fsp.writeFile(plainFile, plainText.replace(/kind: webvtt/, 'kind: webvtt\n    source_removed: true'));
+  await fsp.rm(path.join(ws, 'context-updates', plain.id, 'materials', 'talk.vtt'));
+  assert.equal((await updates.get(plain.id)).transcripts[0]!.current, false);
+});
+
+test('a recording stays in the queue when the digest does not hold its transcript as recorded', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engine } = fakeEngine(speaks(['Fictional budget review.']));
+  const id = await queueRecording(queue, 'Workshop');
+  await new MeetingTranscriptionService(queue, fakeModels(), engine).tick();
+  await MeetingTranscriptionService.settled();
+
+  // The dashboard stops right after publishing, before it hands the meeting over...
+  const internals = queue as unknown as { release: (b: unknown) => Promise<string[]> };
+  const release = internals.release;
+  internals.release = async () => { throw new Error('stopped here'); };
+  const run = await queue.runNow(new Date('2026-10-30T18:00:00'));
+  assert.equal(run.status, 'error');
+  internals.release = release;
+  const update = (await new ContextUpdateService().list()).find((u) => u.origin === 'meetings')!;
+
+  // ...and the transcript in the digest changes before recovery: the audio is the only good copy left.
+  await fsp.writeFile(path.join(ws, 'context-updates', update.id, 'materials', `${id}-workshop.transcript.md`), 'changed');
+  const again = await queue.runNow(new Date('2026-10-30T18:05:00'));
+  assert.equal(again.status, 'error');
+  assert.match(again.message, new RegExp(id));
+  await fsp.access(path.join(ws, 'context-updates', 'meeting-queue', id, 'workshop.wav'));
 });
 
 test('no background job left an unhandled rejection', async () => {

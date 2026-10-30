@@ -89,8 +89,10 @@ export interface UpdateTranscript {
    * the copy says what is missing and the original must be read too.
    */
   complete: boolean;
-  /** What it was made from: `webvtt` or `docx`. */
-  kind: 'webvtt' | 'docx';
+  /** What it was made from: `webvtt`, `docx`, or `audio` (a recording transcribed on this computer). */
+  kind: 'webvtt' | 'docx' | 'audio';
+  /** The source was left out on purpose (a recording not kept). It counts only with a matching entry in `digest_meetings`. */
+  source_removed?: boolean;
   /**
    * Detail only: both files still have the recorded SHA-256. When false, the source or the copy was edited
    * (or is gone) after the copy was made, so the copy no longer stands for the source.
@@ -195,6 +197,20 @@ export interface DigestMeeting {
   title: string;
   meeting_date: string;
   files: { source: string; file: string; sha256: string }[];
+  /** Which transcript came from which recording, also for a recording that is not in the digest. */
+  recordings?: DigestRecording[];
+}
+
+export interface DigestRecording {
+  /** The recording's name in the queue, and its hash. */
+  source: string;
+  source_sha256: string;
+  /** Its transcript in this digest's materials, and that file's hash. */
+  transcript: string;
+  transcript_sha256: string;
+  complete: boolean;
+  /** The recording's name in the materials; null when it was not kept. */
+  file: string | null;
 }
 
 export interface ProposalDetail extends UpdateProposal {
@@ -438,8 +454,8 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     transcripts: Array.isArray(data['transcripts']) ? (data['transcripts'] as unknown[]).flatMap((entry) => {
       const t = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
       const ok = typeof t['file'] === 'string' && typeof t['source'] === 'string' && typeof t['sha256'] === 'string';
-      const kind = t['kind'] === 'docx' ? 'docx' as const : 'webvtt' as const;
-      return ok ? [{ file: t['file'] as string, source: t['source'] as string, source_sha256: str(t['source_sha256']), sha256: t['sha256'] as string, complete: t['complete'] === true, kind }] : [];
+      const kind = t['kind'] === 'docx' ? 'docx' as const : t['kind'] === 'audio' ? 'audio' as const : 'webvtt' as const;
+      return ok ? [{ file: t['file'] as string, source: t['source'] as string, source_sha256: str(t['source_sha256']), sha256: t['sha256'] as string, complete: t['complete'] === true, kind, ...(t['source_removed'] === true ? { source_removed: true } : {}) }] : [];
     }) : [],
     transcript_problems: normalizePairs(data['transcript_problems'], 'source', 'reason'),
     keep_materials: data['keep_materials'] === true,
@@ -462,7 +478,13 @@ function normalizeDigestMeetings(value: unknown): DigestMeeting[] {
       const o = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
       return typeof o['file'] === 'string' ? [{ source: str(o['source']), file: o['file'] as string, sha256: str(o['sha256']) }] : [];
     }) : [];
-    return [{ id: m['id'] as string, title: str(m['title']), meeting_date: str(m['meeting_date'], true), files }];
+    const recordings = Array.isArray(m['recordings']) ? (m['recordings'] as unknown[]).flatMap((r) => {
+      const o = (r && typeof r === 'object' ? r : {}) as Record<string, unknown>;
+      return typeof o['source'] === 'string' && typeof o['transcript'] === 'string'
+        ? [{ source: o['source'], source_sha256: str(o['source_sha256']), transcript: o['transcript'], transcript_sha256: str(o['transcript_sha256']), complete: o['complete'] === true, file: typeof o['file'] === 'string' ? o['file'] : null }]
+        : [];
+    }) : [];
+    return [{ id: m['id'] as string, title: str(m['title']), meeting_date: str(m['meeting_date'], true), files, ...(recordings.length ? { recordings } : {}) }];
   });
 }
 
@@ -661,8 +683,13 @@ export class ContextUpdateService {
         const content = full ? await fsp.readFile(full).catch(() => null) : null;
         return content ? sha256(content) : null;
       };
+      // A recording's transcript stands on the digest's own record, which also spares reading gigabytes of audio here.
+      const recorded = (t: UpdateTranscript) => t.kind === 'audio' && current.digest_meetings.some((m) => (m.recordings ?? []).some((r) => (
+        r.transcript === t.file && r.transcript_sha256 === t.sha256 && r.source_sha256 === t.source_sha256 && r.complete === t.complete
+        && (r.file ?? r.source) === t.source && (r.file === null) === Boolean(t.source_removed)
+      )));
       const transcripts = await Promise.all(current.transcripts.map(async (t) => ({
-        ...t, current: (await hashOf(t.source)) === t.source_sha256 && (await hashOf(t.file)) === t.sha256,
+        ...t, current: (recorded(t) || (await hashOf(t.source)) === t.source_sha256) && (await hashOf(t.file)) === t.sha256,
       })));
       return { ...current, proposals, material_files, transcripts };
     });
@@ -908,7 +935,7 @@ export class ContextUpdateService {
    * the caller makes unique; transcripts get their readable copies as in an upload.
    */
   async createDigest(
-    input: { title: string; source_date: string; notes: string; meetingsText: string; meetings: DigestMeeting[]; files: { name: string; from: string; sha256: string }[] },
+    input: { title: string; source_date: string; notes: string; meetingsText: string; meetings: DigestMeeting[]; files: { name: string; from: string; sha256: string }[]; keep_materials?: boolean },
     system: { origin: string; kind: string },
     onReserved: (id: string) => Promise<void>,
   ): Promise<ContextUpdate> {
@@ -961,6 +988,13 @@ export class ContextUpdateService {
       if (prepared && 'content' in prepared) transcripts.push(await this.saveTranscript(materials, file.name, buffer, prepared));
       if (prepared && 'problem' in prepared) problems.push({ source: file.name, reason: prepared.problem });
     }
+    // A recording's transcript was made by the dashboard, as its readable copy; the digest's own record says so.
+    for (const r of input.meetings.flatMap((m) => m.recordings ?? [])) {
+      transcripts.push({
+        file: r.transcript, source: r.file ?? r.source, source_sha256: r.source_sha256, sha256: r.transcript_sha256,
+        complete: r.complete, kind: 'audio', ...(r.file ? {} : { source_removed: true }),
+      });
+    }
     const data: Record<string, unknown> = {
       schema_version: '1.0',
       id,
@@ -977,7 +1011,7 @@ export class ContextUpdateService {
       digest_meetings: input.meetings,
       proposals: [],
     };
-    await this.write(path.join(dir, 'update.md'), data, input.notes, {});
+    await this.write(path.join(dir, 'update.md'), data, input.notes, input.keep_materials ? { keep_materials: true } : {});
     return (await this.read(id)).update;
   }
 

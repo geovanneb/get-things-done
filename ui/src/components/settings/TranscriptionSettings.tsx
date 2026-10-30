@@ -175,11 +175,21 @@ export default function TranscriptionSettings() {
           out right. For the most accurate transcript of a meeting in one language, choose that language.
         </span>
       </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
+          <input type="checkbox" checked={data.settings.keep_recordings} disabled={saving}
+            onChange={(e) => void save({ keep_recordings: e.target.checked })} />
+          Keep recordings after transcription
+        </span>
+        <span style={hintStyle}>
+          Off: a recording is removed once its complete transcript is safely in a digest. On: it stays with the digest&apos;s
+          materials, which are kept after review. A partial transcript always keeps its recording until the digest is done.
+        </span>
+      </label>
       {notice && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{notice}</p>}
       <p style={hintStyle}>
         Models are kept in <code>{data.models_dir}</code>, shared by every workspace. Speeds were measured on an Apple Silicon
-        Mac; other computers may be slower. Transcribing recordings arrives in a next version: downloading a model now
-        gets it ready.
+        Mac; other computers may be slower.
       </p>
     </div>
   );

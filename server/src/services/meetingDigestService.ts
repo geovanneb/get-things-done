@@ -5,7 +5,8 @@ import { constants as fsConstants } from 'fs';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { WorkspaceService } from './workspace';
-import { ContextUpdateService, DigestMeeting, readableSizeOf } from './contextUpdateService';
+import { ContextUpdateService, DigestMeeting, DigestRecording, readableSizeOf } from './contextUpdateService';
+import { TranscriptionModelService } from './transcriptionModels';
 import { hashFile } from '../utils/fileHash';
 import { lock, unlock } from '../utils/fileLock';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
@@ -233,7 +234,7 @@ export interface DigestView {
   max_meetings_limit: number;
 }
 
-interface BatchMeeting { id: string; files: { file: string; sha256: string }[] }
+interface BatchMeeting { id: string; files: { file: string; sha256: string }[]; recordings?: DigestRecording[] }
 /** The digest being made: which meetings, exactly which files (saved name and hash) it must hold, and how far it got. */
 interface Batch { meetings: string[]; expected: BatchMeeting[]; update_id: string | null; published: boolean; started_at: string; owner?: BatchOwner }
 /** The dashboard building the digest, and its build's token: only it may change the batch while it lives. */
@@ -346,6 +347,7 @@ function meetingsMarkdown(meetings: DigestMeeting[], characters: Map<string, num
     `  date: ${m.meeting_date}`,
     `  title: ${literal(m.title)}`,
     `  files: [${m.files.map((f) => literal(f.file)).join(', ')}]`,
+    ...(m.recordings ? [`  recordings: [${m.recordings.map((r) => literal(`${r.source}: ${r.complete ? 'complete' : 'partial'} transcript in ${r.transcript}, audio ${r.file ? `in ${r.file}` : 'not kept'}`)).join(', ')}]`] : []),
     `  text_characters: ${characters.get(m.id) ?? 0}`,
   ]);
   const body = lines.join('\n');
@@ -407,6 +409,7 @@ interface MakePlan {
   broken: string[];
   brokenNote: string;
   problems: { id: string; reason: string }[];
+  keepMaterials: boolean | undefined;
   unreadable: string;
   characters: number;
 }
@@ -537,8 +540,14 @@ export class MeetingDigestService {
     const expected = Array.isArray(o['expected']) ? (o['expected'] as unknown[]).flatMap((e) => {
       const m = obj(e);
       const files = Array.isArray(m['files']) ? (m['files'] as unknown[]).map(obj).filter((f) => typeof f['file'] === 'string' && typeof f['sha256'] === 'string') : [];
+      const recordings = Array.isArray(m['recordings']) ? (m['recordings'] as unknown[]).map(obj).filter((r) => (
+        typeof r['source'] === 'string' && typeof r['source_sha256'] === 'string' && typeof r['transcript'] === 'string'
+        && typeof r['transcript_sha256'] === 'string' && typeof r['complete'] === 'boolean' && (r['file'] === null || typeof r['file'] === 'string')
+      )) as unknown as DigestRecording[] : [];
+      // A batch that lost a recording's link must stop the job: its audio may go only with a verified transcript.
+      if (m['recordings'] !== undefined && (!Array.isArray(m['recordings']) || recordings.length !== m['recordings'].length)) return [];
       return typeof m['id'] === 'string' && QUEUE_ID.test(m['id']) && Array.isArray(m['files']) && files.length === m['files'].length && files.length > 0
-        ? [{ id: m['id'], files: files.map((f) => ({ file: f['file'] as string, sha256: f['sha256'] as string })) }] : [];
+        ? [{ id: m['id'], files: files.map((f) => ({ file: f['file'] as string, sha256: f['sha256'] as string })), ...(recordings.length ? { recordings } : {}) }] : [];
     }) : [];
     const updateId = typeof o['update_id'] === 'string' && /^CU-\d{4}-\d{4}$/.test(o['update_id']) ? o['update_id'] : null;
     if (!Array.isArray(o['expected']) || expected.length !== o['expected'].length || expected.length === 0
@@ -1057,7 +1066,8 @@ export class MeetingDigestService {
     for (const id of released) {
       if (done.has(id)) continue;
       const files = batch.expected.find((e) => e.id === id)!.files;
-      await fsp.appendFile(receipts, JSON.stringify({ meeting: id, update_id: batch.update_id, files, at: new Date().toISOString() }) + '\n', { mode: 0o600 });
+      const recordings = batch.expected.find((e) => e.id === id)!.recordings;
+      await fsp.appendFile(receipts, JSON.stringify({ meeting: id, update_id: batch.update_id, files, ...(recordings ? { recordings } : {}), at: new Date().toISOString() }) + '\n', { mode: 0o600 });
     }
     await reserveIds(released);
     for (const id of released) {
@@ -1085,6 +1095,14 @@ export class MeetingDigestService {
       for (const copy of update.transcripts.filter((t) => t.source === f.file)) {
         if (!await savedAs(copy.file, copy.sha256)) return false;
       }
+    }
+    // A recording that is not kept goes with the queue folder, so its transcript must be there, and be the one recorded.
+    for (const r of want.recordings ?? []) {
+      const link = (entry.recordings ?? []).find((e) => e.source === r.source && e.source_sha256 === r.source_sha256);
+      if (!link || link.transcript !== r.transcript || link.transcript_sha256 !== r.transcript_sha256 || link.file !== r.file || link.complete !== r.complete) return false;
+      const copy = update.transcripts.find((t) => t.kind === 'audio' && t.file === r.transcript && t.source_sha256 === r.source_sha256);
+      if (!copy || copy.sha256 !== r.transcript_sha256 || copy.complete !== r.complete || copy.source !== (r.file ?? r.source) || Boolean(copy.source_removed) !== (r.file === null)) return false;
+      if (!await savedAs(r.transcript, r.transcript_sha256)) return false;
     }
     return true;
   }
@@ -1119,6 +1137,7 @@ export class MeetingDigestService {
         if (await this.readBatch()) throw new Error('An earlier digest is not finished yet');
         const removed = await this.removeAbandoned(now);
         const open = await this.openDigest();
+        const keepRecordings = await new TranscriptionModelService().keepRecordings();
         const { meetings, problems } = await this.readQueue();
         const queued = meetings.filter(readyForDigest);
         const transcribing = meetings.filter((m) => m.status === 'queued' && !m.held && waitsForTranscript(m)).length;
@@ -1165,34 +1184,47 @@ export class MeetingDigestService {
         // Each meeting's files are saved as "<meeting id>-<name>": unique in the digest, and the record shows where each came from.
         const files: { name: string; from: string; sha256: string }[] = [];
         const saved = new Map<string, string>();
-        const digestMeetings: DigestMeeting[] = chosen.map(({ meeting, files: own }) => ({
-          id: meeting.id,
-          title: meeting.title,
-          meeting_date: meeting.meeting_date,
-          files: own.map(({ from, file }) => {
+        const digestMeetings: DigestMeeting[] = chosen.map(({ meeting, files: own }) => {
+          const place = (id: string, from: string, file: QueuedFile) => {
             let name = saved.get(file.sha256);
             if (!name) {
-              name = `${meeting.id}-${file.name}`;
+              name = `${id}-${file.name}`;
               saved.set(file.sha256, name);
               files.push({ name, from, sha256: file.sha256 });
             }
-            return { source: file.name, file: name, sha256: file.sha256 };
-          }),
-        }));
+            return name;
+          };
+          const transcriptOf = (file: QueuedFile) => own.find((o) => o.file.name === file.recording?.transcript && o.file.sha256 === file.recording?.transcript_sha256);
+          // A recording leaves with the queue only when its complete transcript is right here. Any doubt keeps the audio.
+          const leavesOut = (file: QueuedFile) => !keepRecordings && file.recording?.status === 'done' && Boolean(transcriptOf(file));
+          const kept = own.filter(({ file }) => !leavesOut(file));
+          const entries = kept.map(({ from, file }) => ({ source: file.name, file: place(meeting.id, from, file), sha256: file.sha256 }));
+          const recordings: DigestRecording[] = own.flatMap(({ file }) => {
+            const transcript = transcriptOf(file);
+            if (!file.recording || !transcript) return [];
+            return [{
+              source: file.name, source_sha256: file.sha256,
+              transcript: place(meeting.id, transcript.from, transcript.file), transcript_sha256: transcript.file.sha256,
+              complete: file.recording.status === 'done',
+              file: leavesOut(file) ? null : place(meeting.id, '', file),
+            }];
+          });
+          return { id: meeting.id, title: meeting.title, meeting_date: meeting.meeting_date, files: entries, ...(recordings.length ? { recordings } : {}) };
+        });
 
         const batch: Batch = {
           meetings: digestMeetings.map((m) => m.id),
-          expected: digestMeetings.map((m) => ({ id: m.id, files: m.files.map((f) => ({ file: f.file, sha256: f.sha256 })) })),
+          expected: digestMeetings.map((m) => ({ id: m.id, files: m.files.map((f) => ({ file: f.file, sha256: f.sha256 })), ...(m.recordings ? { recordings: m.recordings } : {}) })),
           update_id: null,
           published: false,
           started_at: now.toISOString(),
           owner: { pid: process.pid, token },
         };
         await this.writeJson('meeting-digest-batch.json', batch);
-        return { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters };
+        return { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters, keepMaterials: keepRecordings && digestMeetings.some((m) => m.recordings?.length) };
       });
       if ('status' in plan) return plan;
-      const { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters } = plan;
+      const { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters, keepMaterials } = plan;
         try {
           await contextUpdateService.createDigest({
             title: digestTitle(digestMeetings),
@@ -1201,6 +1233,7 @@ export class MeetingDigestService {
             meetingsText: meetingsMarkdown(digestMeetings, new Map(chosen.map((c) => [c.meeting.id, c.characters]))),
             meetings: digestMeetings,
             files,
+            ...(keepMaterials ? { keep_materials: true } : {}),
           }, { origin: DIGEST_ORIGIN, kind: DIGEST_KIND }, (id) => this.asOwner(token, async () => {
             batch.update_id = id;
             await this.writeJson('meeting-digest-batch.json', batch);

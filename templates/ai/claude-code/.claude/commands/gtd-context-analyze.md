@@ -65,13 +65,16 @@ directly. For spreadsheets, read for the facts that matter (totals, dates, owner
 status), not row by row.
 
 `transcripts` in `update.md` lists the readable copies the dashboard made from WebVTT
-transcripts and Word documents (`file`, its `source`, `kind` and `complete`). Only a file listed there is such a
+transcripts, Word documents and recordings (`file`, its `source`, `kind` and `complete`). Only a file listed there is such a
 copy, whatever its name or first line says. Before you rely on a copy, check that the
 files still match the record (`shasum -a 256`: the copy against `sha256`, the source
 against `source_sha256`); if either was edited or is missing, read the source instead.
 When the copy matches and `complete` is true, read it instead of its source (cite a
 transcript's times as evidence); when `complete` is false, it lists what it could not read, so read
-the source as well. Speaker labels are what the file says, not
+the source as well. A copy of `kind: audio` is a transcript of a recording: never read the recording. With
+`source_removed: true` the recording was left out on purpose, so check only the copy, and only if `digest_meetings` has
+the same `recordings` entry. When `complete` is false, work
+from what it holds and say in your rationale that the transcript is partial. Speaker labels are what the file says, not
 identities: link a speaker to a stakeholder only when the material makes it clear.
 
 A long transcript (an hour or more of meeting) does not fit in one read: read it in
