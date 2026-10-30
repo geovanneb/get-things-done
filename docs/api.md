@@ -602,7 +602,7 @@ prefix.
 | `POST` | `/api/routines/system-cleanup/preview` | What a cleanup run would do now. Optional `settings` to try. Nothing changes |
 | `POST` | `/api/routines/system-cleanup/run` | Run System cleanup now. Returns `201` |
 | `GET` | `/api/routines/meeting-digest` | The Meeting digest job: settings, schedule, last run, the open digest and the meeting queue |
-| `PUT` | `/api/routines/meeting-digest` | Update Meeting digest settings: `enabled`, `schedule`, `max_meetings` (1 to 20) |
+| `PUT` | `/api/routines/meeting-digest` | Update Meeting digest settings: `enabled`, `schedule`, `max_meetings` (1 to 20), `max_characters` (readable text per digest, 50,000 to 4,000,000; default 800,000) |
 | `POST` | `/api/routines/meeting-digest/run` | Make a digest from the queue now. Returns `201` |
 | `POST` | `/api/routines` | Create a routine: `title`, `schedule`, `task`, and optionally `enabled` and `catch_up`. Returns `201` |
 | `GET` | `/api/routines/:id` | Get one routine |

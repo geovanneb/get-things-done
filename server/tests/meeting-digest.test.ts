@@ -290,6 +290,41 @@ test('a receipts file that is a symbolic link out of the workspace is never writ
   assert.deepEqual((await service.readQueue()).meetings.map((m) => m.id), [a]);
 });
 
+test('long meetings: a digest holds at most max_characters of readable text, and a longer meeting gets a digest of its own', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  await service.update({ max_characters: 50_000 });
+  // About 80 minutes of fictional transcript: well over 50,000 characters in its readable copy.
+  const at = (s: number) => new Date(s * 1000).toISOString().slice(11, 23);
+  let long = 'WEBVTT\n\n';
+  for (let i = 0; i < 1200; i++) long += `${at(i * 4)} --> ${at(i * 4 + 3)}\n<v Jane Doe>We agreed to move the pilot review to next week and check the budget first.</v>\n\n`;
+  const a = await queueMeeting(service, 'Short sync', '2026-10-26', [['a.md', Buffer.from('Short notes.')]]);
+  const b = await queueMeeting(service, 'Workshop', '2026-10-27', [['workshop.vtt', Buffer.from(long)]]);
+  const c = await queueMeeting(service, 'Short review', '2026-10-28', [['c.md', Buffer.from('More notes.')]]);
+  const close = async (id: string) => {
+    const file = path.join(ws, 'context-updates', id, 'update.md');
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace('status: ready', 'status: done'));
+  };
+
+  // The workshop does not fit next to the first meeting, and the one after it waits too: oldest first.
+  const first = await service.runNow(new Date('2026-10-28T18:00:00'));
+  assert.deepEqual((await updates.get(first.context_update!)).digest_meetings.map((m) => m.id), [a]);
+  assert.match(first.message, /2 more wait for the next digest \(at most 10 meetings and 50,000 characters of text per digest\)/);
+  await close(first.context_update!);
+  const second = await service.runNow(new Date('2026-10-29T18:00:00'));
+  assert.deepEqual((await updates.get(second.context_update!)).digest_meetings.map((m) => m.id), [b]);
+  assert.match(second.message, new RegExp(`${b} is longer than the text per digest, so it has a digest of its own`));
+  const list = await fsp.readFile(path.join(ws, 'context-updates', second.context_update!, 'materials', 'meetings.md'), 'utf-8');
+  const size = Number(/text_characters: (\d+)/.exec(list)![1]);
+  assert.ok(size > 50_000 && size < long.length, `counted by the readable copy: ${size}`);
+  await close(second.context_update!);
+  const third = await service.runNow(new Date('2026-10-30T18:00:00'));
+  assert.deepEqual((await updates.get(third.context_update!)).digest_meetings.map((m) => m.id), [c]);
+
+  assert.throws(() => parseSettings({ max_characters: 1000 }), /50000 to 4000000/);
+  assert.equal(parseSettings({}).max_characters, 800_000);
+});
+
 test('the schedule: first check counts from now, missed runs collapse into one, switched off makes nothing', async (t) => {
   await workspace(t);
   const service = new MeetingDigestService();

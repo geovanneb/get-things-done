@@ -489,6 +489,17 @@ function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | {
   return { content: transcriptMarkdown(name, sha256(buffer), parsed), complete: parsed.problems.length === 0, kind: 'webvtt' };
 }
 
+/**
+ * Roughly how much an agent reads for one file, in characters: a transcript by its readable copy, other text by
+ * its length, anything else by its size, so a deck or a PDF is counted high rather than low.
+ */
+export function readableSize(name: string, buffer: Buffer): number {
+  const prepared = prepareTranscript(name, buffer);
+  if (prepared && 'content' in prepared) return prepared.content.length;
+  const text = buffer.length <= MAX_CONVERT_BYTES ? decodeText(buffer) : null;
+  return text !== null ? text.length : buffer.length;
+}
+
 /** The name of a file in `dir` with exactly these bytes, if any. Only files of the same size are read. */
 async function sameFileIn(dir: string, buffer: Buffer): Promise<string | null> {
   const hash = sha256(buffer);

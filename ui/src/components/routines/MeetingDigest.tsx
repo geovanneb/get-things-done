@@ -14,6 +14,15 @@ const WEEKDAYS: { id: RoutineWeekday; short: string }[] = [
   { id: 'fri', short: 'Fri' }, { id: 'sat', short: 'Sat' }, { id: 'sun', short: 'Sun' },
 ];
 
+/** Text per digest, in characters of readable text: an hour of transcript is about 90,000. */
+const TEXT_SIZES: { value: number; label: string }[] = [
+  { value: 100_000, label: 'About 1 hour of transcript' },
+  { value: 200_000, label: 'About 2 hours of transcript' },
+  { value: 400_000, label: 'About 4 hours of transcript' },
+  { value: 800_000, label: 'About 9 hours of transcript' },
+  { value: 1_600_000, label: 'About 18 hours of transcript' },
+];
+
 const cardStyle: React.CSSProperties = {
   border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', background: 'var(--color-surface)', padding: 16,
 };
@@ -31,6 +40,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
   const queued = job.queue.filter((m) => m.status === 'queued' && !m.held);
   const held = job.queue.filter((m) => m.held).length;
   const drafts = job.queue.filter((m) => m.status === 'draft').length;
+  const hours = Math.max(1, Math.round(settings.max_characters / 90_000));
 
   const act = async (kind: string, fn: () => Promise<string | void>) => {
     setBusy(kind);
@@ -57,7 +67,8 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
             {failed && <Badge variant="critical" size="sm">Last run failed</Badge>}
           </div>
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 4 }}>
-            {job.summary}. Collects the meetings you queued into one context update, at most {settings.max_meetings} at a time.
+            {job.summary}. Collects the meetings you queued into one context update, at most {settings.max_meetings} at a time
+            and about {hours} hour{hours > 1 ? 's' : ''} of transcript.
             A day without queued meetings makes nothing.
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
@@ -210,7 +221,20 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
             <input aria-label="Meetings per digest" inputMode="numeric" style={{ ...dateInputStyle, width: 80 }} value={max} onChange={(e) => setMax(e.target.value)} />
             meetings per digest (up to {job.max_meetings_limit})
           </label>
-          <p style={hintStyle}>The oldest meetings go first; the rest wait for the next digest.</p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 'var(--text-sm)' }}>
+            Text per digest
+            <select aria-label="Text per digest" style={{ ...dateInputStyle, width: 'auto' }} value={draft.max_characters}
+              onChange={(e) => setDraft({ ...draft, max_characters: Number(e.target.value) })}>
+              {TEXT_SIZES.some((t) => t.value === draft.max_characters) ? null : (
+                <option value={draft.max_characters}>{draft.max_characters.toLocaleString()} characters</option>
+              )}
+              {TEXT_SIZES.map((t) => <option key={t.value} value={t.value}>{t.label} ({t.value.toLocaleString()} characters)</option>)}
+            </select>
+          </label>
+          <p style={hintStyle}>
+            The oldest meetings go first; the rest wait for the next digest. One analysis reads the whole digest, so long
+            meetings are spread over several digests. A meeting longer than this on its own gets a digest of its own.
+          </p>
         </section>
 
         {error && <div role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</div>}
