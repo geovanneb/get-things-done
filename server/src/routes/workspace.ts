@@ -8,6 +8,9 @@ import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
 import { GitService, GitUnavailableError } from '../services/gitService';
 import { activateWorkspace } from '../services/workspaceActivation';
+import {
+  InvalidIconError, decodeIcon, removeWorkspaceIcon, saveWorkspaceIcon, workspaceIconPath, workspaceIconVersion,
+} from '../services/workspaceIcon';
 
 const router = Router();
 const workspaceService = new WorkspaceService();
@@ -139,6 +142,49 @@ router.put('/', async (req: Request, res: Response) => {
   workspaceService.updateWorkspaceName(name.trim());
   const config = workspaceService.getWorkspaceConfig();
   res.json(config);
+});
+
+// GET /api/workspace/icon?path=… — the picture of the current workspace, or of one in the recent list
+router.get('/icon', async (req: Request, res: Response) => {
+  const requested = req.query['path'];
+  if (requested !== undefined && typeof requested !== 'string') {
+    res.status(400).json({ error: 'Invalid workspace path.' });
+    return;
+  }
+  // Only workspaces this machine already knows, so the route cannot probe other folders.
+  const target = requested === undefined
+    ? workspaceService.getWorkspacePath()
+    : workspaceService.listRecentWorkspaces().find((w) => path.resolve(w.path) === path.resolve(requested))?.path;
+  if (!target || workspaceIconVersion(target) === null) {
+    res.status(404).json({ error: 'No picture set for this workspace.' });
+    return;
+  }
+  // The dashboard adds ?v=<icon_version>, so a changed picture gets a new URL.
+  res.setHeader('Cache-Control', 'private, no-cache');
+  sendFile(res, workspaceIconPath(target), false);
+});
+
+// PUT /api/workspace/icon — set the current workspace's picture (a cropped PNG data URL)
+router.put('/icon', async (req: Request, res: Response) => {
+  let png: Buffer;
+  try {
+    png = decodeIcon(req.body?.image);
+  } catch (err) {
+    if (err instanceof InvalidIconError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+  const workspacePath = workspaceService.getWorkspacePath();
+  await saveWorkspaceIcon(workspacePath, png);
+  res.json({ icon_version: workspaceIconVersion(workspacePath) });
+});
+
+// DELETE /api/workspace/icon — back to the colored letter
+router.delete('/icon', async (_req: Request, res: Response) => {
+  await removeWorkspaceIcon(workspaceService.getWorkspacePath());
+  res.json({ icon_version: null });
 });
 
 // POST /api/workspace/init

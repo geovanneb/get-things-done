@@ -5,13 +5,15 @@ import Modal from '@/components/common/Modal';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
-import { apiGet, apiPost, apiPut } from '@/utils/api';
+import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { openWorkspaceFolder, pickFolder } from '@/utils/desktop';
 import { formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppState, useAppDispatch } from '@/store';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useApi } from '@/hooks/useApi';
 import { cleanupSummary } from '@/components/routines/SystemCleanup';
+import WorkspaceAvatar from '@/components/layout/WorkspaceAvatar';
+import WorkspaceIconCrop from '@/components/layout/WorkspaceIconCrop';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
 import type { ThemeMode, TextSize } from '@/utils/theme';
 import type { WorkspaceConfig, GitStatus, ValidationResult, SystemCleanup } from '@/types';
@@ -570,7 +572,7 @@ function GitStatusPanel({ status }: { status: GitStatus }) {
 // ---------------------------------------------------------------------------
 
 export default function SettingsView() {
-  const { agenticVisualMode, showTaskIds, theme, accent, textSize } = useAppState();
+  const { agenticVisualMode, showTaskIds, theme, accent, textSize, workspace } = useAppState();
   const dispatch = useAppDispatch();
 
   const [config,            setConfig]            = useState<WorkspaceConfig | null>(null);
@@ -582,6 +584,11 @@ export default function SettingsView() {
   const [nameSaving,        setNameSaving]        = useState(false);
   const [nameSaved,         setNameSaved]         = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Workspace picture: the chosen file opens the crop dialog
+  const [iconFile,          setIconFile]          = useState<File | null>(null);
+  const [iconError,         setIconError]         = useState<string | null>(null);
+  const iconInputRef = useRef<HTMLInputElement>(null);
 
   // Reinit modal
   const [showReinitModal,   setShowReinitModal]   = useState(false);
@@ -747,6 +754,35 @@ export default function SettingsView() {
     }
   };
 
+  // The sidebar reads the workspace from the store, so a new picture shows there straight away.
+  const applyIconVersion = (iconVersion: string | null) => {
+    setConfig(prev => (prev ? { ...prev, icon_version: iconVersion } : prev));
+    const base = workspace ?? config;
+    if (base) dispatch({ type: 'SET_WORKSPACE', payload: { ...base, icon_version: iconVersion } });
+  };
+
+  const handleIconChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    e.target.value = ''; // picking the same file again still fires a change
+    if (!file) return;
+    setIconError(null);
+    if (file.size > 25 * 1024 * 1024) {
+      setIconError('This picture is larger than 25 MB. Choose a smaller one.');
+      return;
+    }
+    setIconFile(file);
+  };
+
+  const handleRemoveIcon = async () => {
+    setIconError(null);
+    try {
+      await apiDelete('/api/workspace/icon');
+      applyIconVersion(null);
+    } catch (err) {
+      setIconError(err instanceof Error ? err.message : 'Could not remove the picture.');
+    }
+  };
+
   // ---- Git handler ----
 
   const handleViewGitStatus = async () => {
@@ -855,6 +891,28 @@ export default function SettingsView() {
               Saved
             </span>
           )}
+        </FieldRow>
+
+        <FieldRow label="Workspace Picture">
+          <WorkspaceAvatar name={workspaceName || config?.name || ''} path={config?.path ?? ''} iconVersion={config?.icon_version} size={36} />
+          <input
+            ref={iconInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            onChange={handleIconChosen}
+            style={{ display: 'none' }}
+          />
+          <Button variant="ghost" onClick={() => iconInputRef.current?.click()}>
+            {config?.icon_version ? 'Change...' : 'Choose Picture...'}
+          </Button>
+          {config?.icon_version && (
+            <Button variant="ghost" onClick={handleRemoveIcon}>
+              Remove
+            </Button>
+          )}
+          <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: iconError ? 'var(--color-critical)' : 'var(--color-text-muted)', minWidth: 0 }}>
+            {iconError ?? 'Helps you tell workspaces apart in the sidebar. Stays on this computer.'}
+          </span>
         </FieldRow>
 
         <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -1139,6 +1197,12 @@ export default function SettingsView() {
           </Button>
         </div>
       </Modal>
+
+      <WorkspaceIconCrop
+        file={iconFile}
+        onClose={() => setIconFile(null)}
+        onSaved={(iconVersion) => { applyIconVersion(iconVersion); setIconFile(null); }}
+      />
 
       {/* Re-initialize confirm modal */}
       <Modal
