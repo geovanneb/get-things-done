@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
 import { useRecorder } from './RecordingProvider';
+import { systemAudioSupport } from '@/utils/desktop';
 
 const inputStyle: React.CSSProperties = { padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' };
 const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
@@ -20,11 +21,14 @@ export function RecordMeetingModal({ isOpen, onClose }: { isOpen: boolean; onClo
   const [deviceId, setDeviceId] = useState('');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [voiceCleanup, setVoiceCleanup] = useState(true);
+  const [systemAudio, setSystemAudio] = useState(true);
+  const [systemSupport, setSystemSupport] = useState<string | null>(null);
   const [told, setTold] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
     setTold(false);
+    void systemAudioSupport().then(setSystemSupport);
     void navigator.mediaDevices?.enumerateDevices().then((all) => setDevices(all.filter((d) => d.kind === 'audioinput'))).catch(() => setDevices([]));
   }, [isOpen]);
 
@@ -50,8 +54,16 @@ export function RecordMeetingModal({ isOpen, onClose }: { isOpen: boolean; onClo
           <input type="checkbox" checked={voiceCleanup} onChange={(e) => setVoiceCleanup(e.target.checked)} />
           <span>Clean up the voice<br /><span style={hintStyle}>Good for a laptop microphone. Turn it off for a conference microphone, which usually does this itself.</span></span>
         </label>
+        {systemSupport === 'yes' ? (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={systemAudio} onChange={(e) => setSystemAudio(e.target.checked)} />
+            <span>Also record the computer&apos;s sound<br /><span style={hintStyle}>The other people in a video call, also when you wear headphones. The first time, the system asks to allow it.</span></span>
+          </label>
+        ) : (
+          <p style={hintStyle}>{systemSupport ?? 'Only the microphone is recorded, so people heard through headphones are not.'}</p>
+        )}
         <p style={hintStyle}>
-          Only the microphone is recorded, so people heard through headphones are not. The audio is saved in your workspace as it
+          The audio is saved in your workspace as it
           arrives, and stays on this computer unless the workspace folder is synced. It is removed once its transcript is in a
           digest, unless Keep recordings is on in Settings.
         </p>
@@ -61,7 +73,7 @@ export function RecordMeetingModal({ isOpen, onClose }: { isOpen: boolean; onClo
         </label>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!told || !date} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, deviceId, voiceCleanup }); onClose(); }}>Start recording</Button>
+          <Button variant="primary" disabled={!told || !date} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio }); onClose(); }}>Start recording</Button>
         </div>
       </div>
     </Modal>

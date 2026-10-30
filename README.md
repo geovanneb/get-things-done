@@ -788,8 +788,12 @@ settings.
   and in the browser (Chrome or Edge, with the dashboard opened at localhost). While it
   runs, the top bar shows the time and **Stop** on every page. Tell
   everyone first: the dialog asks each time. A banner shows on every page with what was
-  captured and what is saved. Only the microphone is recorded, so people heard through
-  headphones are not. Audio is saved as it arrives, about 115 MB an hour; what the page
+  captured and what is saved. In the desktop app it also records the computer's own
+  sound, so the other people in a video call are recorded too, also when you wear
+  headphones (Windows, and macOS 14.2 or later, which asks once for System Audio
+  Recording). With speakers instead of headphones the microphone hears the call as
+  well; headphones give the cleanest recording. In a browser only the microphone is
+  recorded. Audio is saved as it arrives, about 115 MB an hour; what the page
   has not sent yet is lost if the page crashes, so the banner warns when the server stops
   answering. In the desktop app the recording keeps going with the window closed, and the
   computer stays awake. A recording whose page is gone is never cleaned up: it stays

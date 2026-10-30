@@ -3,6 +3,7 @@
 import { BrowserWindow, IpcMainInvokeEvent, dialog, ipcMain, shell, systemPreferences } from 'electron';
 import { classifyLink } from './links';
 import type { RecordingCommand } from './recording-commands';
+import { systemAudioSupport } from './systemAudio';
 
 /** Asks the system for the microphone. `granted`, or what the user should do: the system only ever asks once. */
 async function microphoneAccess(): Promise<string> {
@@ -47,6 +48,11 @@ export function registerBridge(
   ipcMain.handle('gtd:microphone-access', async (event) => {
     if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
     return microphoneAccess();
+  });
+
+  ipcMain.handle('gtd:system-audio-support', async (event) => {
+    trusted(event);
+    return systemAudioSupport();
   });
 
   ipcMain.handle('gtd:recording-state', async (event, active: unknown) => {

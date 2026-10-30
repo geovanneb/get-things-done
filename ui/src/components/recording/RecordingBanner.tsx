@@ -8,6 +8,17 @@ function clock(seconds: number): string {
   return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
 }
 
+function Meter({ label, level }: { label: string; level: number }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+      <span style={{ width: 70 }}>{label}</span>
+      <div aria-hidden style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--color-surface-hover)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${Math.min(100, Math.sqrt(level) * 100)}%`, background: 'var(--color-success, var(--color-text-muted))' }} />
+      </div>
+    </div>
+  );
+}
+
 /** Shows on every view while a recording runs: what is captured, what is really saved, and how to stop. */
 export function RecordingBanner() {
   const r = useRecorder();
@@ -33,11 +44,11 @@ export function RecordingBanner() {
             <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.status === 'saving' ? 'Saving…' : 'Recording'} {r.title}</span>
             <span style={{ fontFamily: 'var(--font-mono)' }}>{clock(r.elapsed)}</span>
           </div>
-          <div aria-hidden style={{ height: 4, borderRadius: 2, background: 'var(--color-surface-hover)', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${Math.min(100, Math.sqrt(r.level) * 100)}%`, background: 'var(--color-success, var(--color-text-muted))' }} />
-          </div>
-          <p style={line}>Saved {clock(r.saved)} of {clock(r.captured)} captured. Microphone only: people heard through headphones are not recorded.</p>
+          <Meter label="Microphone" level={r.level} />
+          {r.systemLevel !== null && <Meter label="Computer" level={r.systemLevel} />}
+          <p style={line}>Saved {clock(r.saved)} of {clock(r.captured)} captured.{r.systemLevel === null ? ' Microphone only: people heard through headphones are not recorded.' : ''}</p>
           {r.gap > 0 && <p role="status" style={{ ...line, color: 'var(--color-warning)' }}>{clock(r.gap)} of this meeting was not captured, for example while the computer slept.</p>}
+          {r.lost.map((text) => <p key={text} role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{text}</p>)}
           {r.warning && <p role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{r.warning}</p>}
           <div style={{ display: 'flex', gap: 8 }}>
             <Button size="sm" variant="primary" disabled={r.status === 'saving'} onClick={() => void r.stop()}>Stop and save</Button>

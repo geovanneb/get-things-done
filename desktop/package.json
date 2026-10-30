@@ -56,7 +56,8 @@
       "entitlements": "build-resources/entitlements.mac.plist",
       "entitlementsInherit": "build-resources/entitlements.mac.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Get Things Done records the meetings you choose to record, and saves them in your workspace."
+        "NSMicrophoneUsageDescription": "Get Things Done records the meetings you choose to record, and saves them in your workspace.",
+        "NSAudioCaptureUsageDescription": "Get Things Done records the sound of a meeting you choose to record, such as the other people in a call, and saves it in your workspace."
       }
     },
     "win": {
