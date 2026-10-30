@@ -60,7 +60,7 @@ export interface TranscriptionSettings {
 
 export interface DownloadProgress {
   model: string;
-  status: 'downloading' | 'verifying' | 'failed' | 'cancelled';
+  status: 'queued' | 'downloading' | 'verifying' | 'failed' | 'cancelled';
   received: number;
   total: number;
   file: string;
@@ -212,6 +212,8 @@ function notify(now = false): void {
 interface Job { progress: DownloadProgress; abort: AbortController; bytes: Map<string, number>; lock: HeldLock | null }
 /** The download this dashboard runs (claimed before anything is awaited), and how the last one of each model ended. */
 let active: Job | null = null;
+/** Models waiting for the download before them, in the order they were asked for, with the service that took them. */
+const waiting: { id: string; service: TranscriptionModelService }[] = [];
 /** True while this dashboard removes a model: claimed before anything is awaited, like a download. */
 let removing = false;
 const lastOutcome = new Map<string, DownloadProgress>();
@@ -334,7 +336,9 @@ export class TranscriptionModelService {
         size: files.reduce((sum, f) => sum + f.size, 0),
         installed,
         partial: installed ? 0 : await this.partialBytes(m),
-        download: active?.progress.model === m.id ? active.progress : lastOutcome.get(m.id) ?? null,
+        download: active?.progress.model === m.id ? active.progress
+          : waiting.some((w) => w.id === m.id) ? { model: m.id, status: 'queued', received: 0, total: 0, file: '' }
+            : lastOutcome.get(m.id) ?? null,
         speed: installed ? speeds[m.id] ?? null : null,
       });
     }
@@ -358,12 +362,24 @@ export class TranscriptionModelService {
 
   /**
    * Starts downloading a model, and the voice-activity model when it is missing: only what is not installed yet.
-   * Returns at once; progress arrives as change events and in the view. One download at a time, across dashboards.
+   * Returns at once; progress arrives as change events and in the view. One download at a time, across dashboards:
+   * while this dashboard downloads a model, another one waits its turn here.
    */
   async download(id: string): Promise<TranscriptionView> {
     const model = this.find(id);
     if (model.id === this.vad.id) throw httpError(400, 'The voice-activity model is downloaded with a transcription model');
-    if (active) throw httpError(409, active.progress.model === id ? 'This model is already downloading' : `Another model is downloading (${active.progress.model}); wait for it or cancel it first`);
+    if (active?.progress.model === id) throw httpError(409, 'This model is already downloading');
+    if (active) {
+      if (!waiting.some((w) => w.id === id)) waiting.push({ id, service: this });
+      lastOutcome.delete(id);
+      notify(true);
+      return this.view();
+    }
+    return this.start(id);
+  }
+
+  private async start(id: string): Promise<TranscriptionView> {
+    const model = this.find(id);
     if (removing) throw httpError(409, 'A model is being removed; try again in a moment');
     // Claimed before the first await, so two requests can never both start.
     const job: Job = { progress: { model: id, status: 'downloading', received: 0, total: 0, file: '' }, abort: new AbortController(), bytes: new Map(), lock: null };
@@ -373,6 +389,7 @@ export class TranscriptionModelService {
       for (const m of [this.vad, model]) if (!await this.installed(m.id)) parts.push(m);
       if (parts.length === 0) {
         active = null;
+        await this.startWaiting();
         return this.view();
       }
       await fsp.mkdir(this.dir(), { recursive: true });
@@ -384,6 +401,7 @@ export class TranscriptionModelService {
     } catch (err) {
       if (active === job) active = null;
       if (job.lock) await this.unlock(job.lock);
+      await this.startWaiting();
       throw err;
     }
     return this.view();
@@ -396,11 +414,28 @@ export class TranscriptionModelService {
       console.error(`[transcription] Could not release the download lock: ${(err as Error).message}`);
     } finally {
       if (active === job) active = null;
+      await this.startWaiting();
       notify(true);
     }
   }
 
+  /** The next model that waits. One that cannot start says why on its card, and the one after it goes on. */
+  private async startWaiting(): Promise<void> {
+    while (!active && waiting.length > 0) {
+      const { id, service } = waiting.shift()!;
+      await service.start(id).catch((err: Error) => {
+        lastOutcome.set(id, { model: id, status: 'failed', received: 0, total: 0, file: '', message: err.message });
+      });
+    }
+  }
+
   async cancel(id: string): Promise<TranscriptionView> {
+    const queued = waiting.findIndex((w) => w.id === id);
+    if (queued >= 0) {
+      waiting.splice(queued, 1);
+      notify(true);
+      return this.view();
+    }
     if (!active || active.progress.model !== id) throw httpError(409, 'Nothing is downloading for this model');
     active.abort.abort();
     return this.view();
@@ -685,7 +720,7 @@ export class TranscriptionModelService {
 
   /** For tests: waits until no download runs in this process. */
   static async settled(): Promise<void> {
-    while (active) await new Promise((r) => setTimeout(r, 20));
+    while (active || waiting.length > 0) await new Promise((r) => setTimeout(r, 20));
     await new Promise((r) => setTimeout(r, 20));
   }
 }

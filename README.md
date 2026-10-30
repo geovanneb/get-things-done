@@ -823,7 +823,8 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
 - **Language**: Auto detects the language of each part of a meeting, so a meeting
   that switches between English and Japanese comes out right; for the most accurate
   transcript of a meeting in one language, choose that language.
-- Downloads show their progress, can be cancelled and continue where they stopped;
+- Downloads show their progress, can be cancelled and continue where they stopped. Press
+  Download on a second model while one runs and it waits its turn;
   every file is checked against its pinned checksum before it is used. On a computer
   with little memory, Settings suggests the lighter model.
 - Behind a company proxy: downloads use Node's built-in `fetch`, which ignores the usual
