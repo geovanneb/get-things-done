@@ -783,7 +783,9 @@ settings.
   AAC, FLAC or AIFF. Uploads stream to disk. A meeting with a recording waits in the
   queue for its transcript, made on this computer with the model chosen in **Settings >
   Transcription** (see below); the transcript then goes into the digest with the meeting.
-- **Record** in the top bar (or **Record a meeting** on the Routines page, in ⌘K search,
+- **Meetings**, in the left menu, is where recording, the live transcript, the queue and
+  its transcripts are. The Meeting digest card in Routines keeps the schedule and settings.
+- **Record** in the top bar (or **Record a meeting** on the Meetings page, in ⌘K search,
   or in the desktop app's menu-bar menu) records the microphone, in the desktop app
   and in the browser (Chrome or Edge, with the dashboard opened at localhost). While it
   runs, the top bar shows the time and **Stop** on every page. Tell
@@ -841,7 +843,7 @@ in the transcription engine, so you know it works on this computer. The engine
 process for each job, so the model's memory and any crash stay out of the dashboard.
 
 Recordings in the meeting queue are transcribed one at a time, oldest first, once a
-model is downloaded; the Routines page shows each one's progress.
+model is downloaded; the Meetings page shows each one's progress.
 
 - The transcript becomes a file of the meeting, `<recording>.transcript.md`: each part
   with speech, with its start and end time. Speakers are not told apart yet.
@@ -852,6 +854,13 @@ model is downloaded; the Routines page shows each one's progress.
   this transcript** to let the digest take it as it is, or **Try again** to replace it.
 - One transcription runs at a time across every dashboard on the workspace. If a
   dashboard stops in the middle, the recording goes back in line and starts again.
+- **Live transcript:** choose a model under **Live transcript while recording** in
+  Settings > Transcription (one much faster than real time, see **Test speed**), and the
+  text appears on the Meetings page as people speak. If it covered the whole recording
+  and is the chosen model, the transcript is ready at Stop. If it is another model, the
+  chosen model transcribes the recording again after the meeting: the live text stays
+  readable, the meeting waits, and **Use the live transcript** skips the wait. If a live
+  transcript stops or falls behind, the recording is simply transcribed after the meeting.
 - A recording stays in the queue until its meeting goes into a digest. Once the digest
   is checked to hold the complete transcript, the recording goes with the queue folder.
   **Keep recordings after transcription** in Settings keeps it with the digest's

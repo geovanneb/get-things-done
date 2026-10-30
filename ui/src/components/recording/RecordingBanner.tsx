@@ -1,4 +1,5 @@
 import type React from 'react';
+import { Link } from 'react-router-dom';
 import { useRecorder } from './RecordingProvider';
 import Button from '@/components/common/Button';
 
@@ -48,6 +49,7 @@ export function RecordingBanner() {
           {r.systemLevel !== null && <Meter label="Computer" level={r.systemLevel} />}
           <p style={line}>Saved {clock(r.saved)} of {clock(r.captured)} captured.{r.systemLevel === null ? ' Microphone only: people heard through headphones are not recorded.' : ''}</p>
           {r.gap > 0 && <p role="status" style={{ ...line, color: 'var(--color-warning)' }}>{clock(r.gap)} of this meeting was not captured, for example while the computer slept.</p>}
+          <Link to="/meetings" style={{ ...line, color: 'var(--color-accent)' }}>Open Meetings for the transcript</Link>
           {r.lost.map((text) => <p key={text} role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{text}</p>)}
           {r.warning && <p role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{r.warning}</p>}
           <div style={{ display: 'flex', gap: 8 }}>

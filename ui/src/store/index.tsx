@@ -31,6 +31,7 @@ export type DataScope =
   | 'routines'
   | 'profile'
   | 'transcription'
+  | 'live-transcript'
   | 'other';
 
 export type DataVersions = Record<DataScope, number>;
@@ -43,6 +44,7 @@ const initialVersions: DataVersions = {
   'context-updates': 0,
   routines: 0,
   transcription: 0,
+  'live-transcript': 0,
   profile: 0,
   other: 0,
 };

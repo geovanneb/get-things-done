@@ -6,7 +6,7 @@ import { MAX_RECORDING_BYTES, MeetingDigestService, queueId, type Upload } from 
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
 import { MeetingRecordingService } from '../services/meetingRecording';
 import { MeetingLiveTranscriptService } from '../services/meetingLiveTranscript';
-import { topLevelName } from '../utils/files';
+import { fileInside, sendFile, topLevelName } from '../utils/files';
 
 const router = Router();
 const service = new MeetingDigestService();
@@ -71,6 +71,19 @@ router.put('/:id/recording', express.raw({ type: 'application/octet-stream', lim
 router.get('/:id/recording/transcript', async (req: Request, res: Response) => {
   const from = typeof req.query['from'] === 'string' && /^\d{1,9}$/.test(req.query['from']) ? Number(req.query['from']) : 0;
   res.json(await liveTranscript.read(queueId(param(req, 'id')), from));
+});
+
+// GET /api/meeting-queue/:id/transcripts/:file  a recording's transcript or live draft, as text to read
+router.get('/:id/transcripts/:file', async (req: Request, res: Response) => {
+  const id = queueId(param(req, 'id'));
+  const name = topLevelName(param(req, 'file'));
+  const meeting = await service.loadMeeting(id);
+  // Only a transcript of a recording: this is not a way to read any file of the meeting.
+  const known = meeting.files.some((f) => f.recording?.transcript === name || f.recording?.draft?.transcript === name);
+  if (!known) { res.status(404).json({ error: 'Not found', message: 'No such transcript in this meeting' }); return; }
+  // The sender every attachment uses: a transcript is text someone said, never something a browser should run.
+  res.type('text/plain; charset=utf-8');
+  sendFile(res, await fileInside(await service.meetingFolder(id), name), false);
 });
 
 // POST /api/meeting-queue/:id/recording/finish  { token, offset, generation, queue } or { recover: true, generation, queue }

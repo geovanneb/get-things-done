@@ -56,8 +56,13 @@ router.post('/system-cleanup/run', async (_req: Request, res: Response) => {
 router.get('/meeting-digest', async (_req: Request, res: Response) => {
   // With the transcription running in this dashboard, if any, and its progress.
   // Which models are downloaded: a recording fixed to one that is not waits, and the card says which to download.
-  const installed = (await new TranscriptionModelService().view().catch(() => null))?.models.filter((m) => m.installed).map((m) => m.id) ?? null;
-  res.json({ ...await service.meetingDigest(), transcription: transcription.progress(), installed_models: installed });
+  const models = (await new TranscriptionModelService().view().catch(() => null))?.models.filter((m) => m.installed) ?? null;
+  res.json({
+    ...await service.meetingDigest(), transcription: transcription.progress(),
+    installed_models: models ? models.map((m) => m.id) : null,
+    // How fast each is on this computer, when tested: for how long a recording will take.
+    model_speeds: Object.fromEntries((models ?? []).flatMap((m) => (m.speed ? [[m.id, m.speed.realtime_x]] : []))),
+  });
 });
 
 // PUT /api/routines/meeting-digest  { enabled?, schedule?, max_meetings? }  missing ones keep their value

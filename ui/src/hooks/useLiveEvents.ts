@@ -50,10 +50,14 @@ export function useLiveEvents(): void {
 
     source.addEventListener('file_change', handleFileChange as EventListener);
     source.addEventListener('transcription', handleTranscription);
+    // More live transcript, or its status changed: the page reads on from its own number, so a missed notice costs nothing.
+    const handleLive = () => dispatch({ type: 'DATA_CHANGED', payload: 'live-transcript' });
+    source.addEventListener('live-transcript', handleLive);
 
     return () => {
       source?.removeEventListener('file_change', handleFileChange as EventListener);
       source?.removeEventListener('transcription', handleTranscription);
+      source?.removeEventListener('live-transcript', handleLive);
       source?.close();
     };
   }, [dispatch]);

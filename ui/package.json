@@ -20,7 +20,8 @@
     "test:setup": "tsx src/utils/setup.test.ts",
     "test:icon-crop": "tsx src/utils/iconCrop.test.ts",
     "test:recording-upload": "tsx src/utils/recordingUpload.test.ts",
-    "test:transcription-speed": "tsx src/utils/transcriptionSpeed.test.ts"
+    "test:transcription-speed": "tsx src/utils/transcriptionSpeed.test.ts",
+    "test:live-transcript": "tsx src/utils/liveTranscript.test.ts"
   },
   "dependencies": {
     "date-fns": "^3.6.0",

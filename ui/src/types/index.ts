@@ -726,6 +726,8 @@ export interface MeetingDigest {
   transcription: TranscriptionProgress | null;
   /** Downloaded transcription models; null when unknown. */
   installed_models: string[] | null;
+  /** Seconds of speech per second of work on this computer, for the tested models. */
+  model_speeds: Record<string, number>;
   queue_problems: { id: string; reason: string }[];
   max_meetings_limit: number;
 }
@@ -769,7 +771,7 @@ export interface TranscriptionModel {
   speed: { realtime_x: number; load_ms: number | null; measured_at: string } | null;
 }
 
-export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; updated_at: string | null }
+export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; updated_at: string | null }
 
 export interface Transcription {
   models: TranscriptionModel[];

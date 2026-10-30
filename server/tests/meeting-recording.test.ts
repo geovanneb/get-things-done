@@ -396,4 +396,43 @@ test('over HTTP: audio only as raw bytes, the token in a header, and Finish then
   assert.equal(((await gap.json()) as { details: { offset: number } }).details.offset, 20);
   assert.equal((await post(`/${id}/recording/finish`, { token: TOKEN, offset: 20 })).status, 200);
   assert.equal((await post(`/${id}/queue`, {})).status, 200);
+
+});
+
+test('over HTTP: only a recording\'s transcript can be read, as text a browser will not run', async (t) => {
+  const ws = await workspace(t);
+  const app = express();
+  app.use('/api/meeting-queue', meetingQueueRoutes);
+  app.use(errorHandler);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((r) => server.once('listening', r));
+  t.after(() => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/meeting-queue`;
+  const id = await draft();
+  const dir = folder(ws, id);
+  await queue.withQueue(async () => {
+    await fsp.writeFile(path.join(dir, 'said.transcript.md'), '<script>alert(1)</script>');
+    await fsp.writeFile(path.join(dir, 'said.wav'), 'audio');
+    await fsp.writeFile(path.join(dir, 'notes.md'), 'notes');
+    const m = await queue.loadMeeting(id);
+    const sha256 = 'a'.repeat(64);
+    m.files.push(
+      { name: 'said.wav', size: 5, sha256, recording: { status: 'done', transcript: 'said.transcript.md', transcript_sha256: sha256 } },
+      { name: 'said.transcript.md', size: 25, sha256 },
+      { name: 'notes.md', size: 5, sha256 },
+    );
+    await queue.saveMeeting(m);
+  });
+  const read = await fetch(`${base}/${id}/transcripts/said.transcript.md`);
+  assert.equal(read.status, 200);
+  assert.match(read.headers.get('content-type') ?? '', /^text\/plain/);
+  assert.match(read.headers.get('content-security-policy') ?? '', /sandbox/);
+  assert.equal(read.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal((await fetch(`${base}/${id}/transcripts/notes.md`)).status, 404, 'not any file of the meeting');
+  assert.notEqual((await fetch(`${base}/${id}/transcripts/..%2F..%2Fsecret.md`)).status, 200);
+
+  await fsp.writeFile(path.join(ws, 'secret.md'), 'not of this meeting');
+  await fsp.rm(path.join(dir, 'said.transcript.md'));
+  await fsp.symlink(path.join(ws, 'secret.md'), path.join(dir, 'said.transcript.md'));
+  assert.notEqual((await fetch(`${base}/${id}/transcripts/said.transcript.md`)).status, 200, 'a link never leads out of the meeting');
 });

@@ -247,7 +247,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
           if (phase.current === 'stopping') return; // Stop is on it, and says what happened
           release(running);
           ended();
-          update({ status: 'failed', error: `${uploader.failed} It is on the Routines page, to finish or discard.`, warning: null, saved: uploader.saved / BYTES_PER_SECOND, level: 0 });
+          update({ status: 'failed', error: `${uploader.failed} It is on the Meetings page, to finish or discard.`, warning: null, saved: uploader.saved / BYTES_PER_SECOND, level: 0 });
           return;
         }
         const systemLevel = meters.system && systemOn ? meters.system() : null;
@@ -288,7 +288,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       await uploader.flush().catch(() => {});
       clearInterval(showSaved);
       if (uploader.failed) {
-        update({ status: 'failed', error: `${uploader.failed} It is on the Routines page, to finish or discard.` });
+        update({ status: 'failed', error: `${uploader.failed} It is on the Meetings page, to finish or discard.` });
         return;
       }
       await apiPost(`/api/meeting-queue/${meetingId}/recording/finish`, { token, offset: uploader.saved, generation, queue: true });
@@ -297,7 +297,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       setState((current) => ({ ...idle, notice: `"${current.title}" is saved and waits for its transcript.${missing}` }));
     };
     const running = run()
-      .catch((err: Error) => update({ status: 'failed', error: `${err.message} The audio is saved: finish it on the Routines page.` }))
+      .catch((err: Error) => update({ status: 'failed', error: `${err.message} The audio is saved: finish it on the Meetings page.` }))
       .finally(ended);
     stopping.current = running;
     return running;
@@ -312,7 +312,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     const res = id ? await fetch(`/api/meeting-queue/${id}`, { method: 'DELETE' }).catch(() => null) : null;
     ended();
     if (id && !res?.ok) {
-      update({ status: 'failed', error: 'The recording could not be deleted just now. It is on the Routines page: remove it there.', warning: null });
+      update({ status: 'failed', error: 'The recording could not be deleted just now. It is on the Meetings page: remove it there.', warning: null });
       return;
     }
     setState(idle);

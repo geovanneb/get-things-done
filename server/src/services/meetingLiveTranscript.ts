@@ -277,7 +277,7 @@ export class MeetingLiveTranscriptService {
     const generation = meeting.live?.generation ?? null;
     const job = generation ? jobs.get(generation) : undefined;
     if (!generation || !job) {
-      return { generation, status: 'unavailable', reason: generation ? 'There is no live transcript of this recording in this dashboard.' : null, next: 0, segments: [] };
+      return { generation, status: 'unavailable', reason: generation ? 'The live text of this recording is only in the dashboard that records it.' : null, next: 0, segments: [] };
     }
     // Only what is saved to the file: the page never sees a stretch that a reload could not show again.
     const start = Math.max(0, Math.min(Number.isSafeInteger(from) ? from : 0, job.saved));
