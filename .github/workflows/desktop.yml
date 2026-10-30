@@ -100,6 +100,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # electron-builder treats an empty CSC_LINK as a certificate path (the project folder) and fails.
+          # Pull requests hide this because electron-builder skips signing there, so pushes to main broke.
+          if [ "$MAC_SIGNING" != 'true' ]; then
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY_ID APPLE_API_ISSUER
+          fi
           args=()
           if [ "$MAC_SIGNING" = 'true' ]; then
             # Only signed builds check for updates (see src/update-controller.ts).
