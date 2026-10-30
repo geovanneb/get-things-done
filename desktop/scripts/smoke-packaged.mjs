@@ -98,6 +98,11 @@ const env = process.platform === 'win32'
   : { HOME: home, PATH: '/bin', TMPDIR: tmp };
 // No update checks: the smoke test must not depend on the network or on published releases.
 env.GTD_DISABLE_UPDATES = '1';
+// With a models folder, the app also downloads a model and transcribes speech with it: only Electron shows what the
+// engine may not do there. The model and the speed test's sample are the only downloads.
+const models = process.env['GTD_SMOKE_MODELS'];
+const MODEL = 'sensevoice-2024-07-17';
+if (models) env.ESB_MODELS_PATH = path.resolve(models);
 
 // The app reads its port from desktop.json in its user data folder.
 const userData = path.join(tmp, 'user-data');
@@ -158,6 +163,21 @@ try {
   // The worker starts as Electron running as Node and loads the native engine from inside the app (no model needed).
   const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
   check('the transcription engine loads inside the app', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));
+
+  if (models) {
+    const model = async () => (await (await fetch(`${base}/api/transcription`)).json()).models.find((m) => m.id === MODEL);
+    if (!(await model()).installed) {
+      const started = await fetch(`${base}/api/transcription/models/${MODEL}/download`, { method: 'POST' });
+      check('the app starts downloading a model', started.ok, await started.text());
+    }
+    const until = Date.now() + 10 * 60_000;
+    let state = await model();
+    while (!state.installed && state.download?.status !== 'failed' && Date.now() < until) { await sleep(2000); state = await model(); }
+    check('the app downloads a model', state.installed === true, JSON.stringify(state.download));
+    const speed = await fetch(`${base}/api/transcription/models/${MODEL}/speed-test`, { method: 'POST' });
+    const measured = await speed.text();
+    check('the app transcribes with it', speed.ok && JSON.parse(measured).realtime_x > 0, measured);
+  }
 
   const git = await (await fetch(`${base}/api/workspace/git/enabled`)).json();
   check('git works without git on PATH (bundled git)', git.git_installed === true && git.git_enabled === true, JSON.stringify(git));

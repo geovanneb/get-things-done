@@ -127,7 +127,12 @@ export async function runSpeedTest(engine: TranscriptionEngine, id: string, fetc
   try {
     await fsp.writeFile(wav, Buffer.concat([wavHeader(body.length), body]), { mode: 0o600 });
     const started = Date.now();
-    const result = await engine.transcribe(wav, { model: id, language: 'auto' });
+    // Shown to the user as it is, like the download's: a failed engine is what the test is there to find.
+    const result = await engine.transcribe(wav, { model: id, language: 'auto' }).catch((err: Error & { statusCode?: number }) => {
+      throw err.statusCode ? err : httpError(424, `The speed test failed: ${err.message}`);
+    });
+    // The sample is speech, so an engine that hears none is not working, however fast it was.
+    if (result.segments.length === 0) throw httpError(424, 'The speed test failed: the model found no speech in the sample.');
     const work = (Date.now() - started - (result.load_ms ?? 0)) / 1000;
     const seconds = body.length / BYTES_PER_SECOND;
     const speed: SpeedResult = {

@@ -161,6 +161,10 @@ jobs:
           done
 
       - name: Smoke-test the packaged app
+        env:
+          # Also downloads a model and transcribes with it. Not for a release: the same code passed this on main, and
+          # a model host being down must not stop signed installers.
+          GTD_SMOKE_MODELS: ${{ !inputs.release_tag && format('{0}/models', runner.temp) || '' }}
         run: npm run smoke --prefix desktop
 
       - uses: actions/upload-artifact@v7
