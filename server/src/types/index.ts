@@ -202,6 +202,8 @@ export interface WorkspaceConfig {
   name: string;
   git_enabled: boolean;
   schema_versions: Record<string, string>;
+  /** Set when the workspace has a picture; changes with it. */
+  icon_version: string | null;
 }
 
 export interface GitStatus {

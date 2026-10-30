@@ -16,7 +16,8 @@
     "test:review-choices": "tsx src/utils/reviewChoices.test.ts",
     "test:meeting-action": "tsx src/utils/meetingAction.test.ts",
     "test:desktop-bridge": "tsx src/utils/desktop.test.ts",
-    "test:setup": "tsx src/utils/setup.test.ts"
+    "test:setup": "tsx src/utils/setup.test.ts",
+    "test:icon-crop": "tsx src/utils/iconCrop.test.ts"
   },
   "dependencies": {
     "date-fns": "^3.6.0",

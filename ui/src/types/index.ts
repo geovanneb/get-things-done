@@ -373,6 +373,8 @@ export interface WorkspaceConfig {
   git_enabled: boolean;
   /** False when no git program is installed. Older servers leave it out. */
   git_installed?: boolean;
+  /** Set when the workspace has a picture; changes with it. Older servers leave it out. */
+  icon_version?: string | null;
 }
 
 /** A workspace opened on this machine before, as listed by `GET /api/workspace/recent`. */
@@ -382,6 +384,7 @@ export interface RecentWorkspace {
   current: boolean;
   available: boolean;
   last_opened: string | null;
+  icon_version?: string | null;
 }
 
 export interface OrgChartMember {

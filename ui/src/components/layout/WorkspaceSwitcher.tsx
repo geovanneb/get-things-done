@@ -4,34 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../../store';
 import { apiGet, apiPost } from '../../utils/api';
 import type { RecentWorkspace } from '../../types';
-
-/** Same folder, same color, on every machine: recognisable at a glance in the rail. */
-function workspaceHue(path: string): number {
-  let h = 0;
-  for (let i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
+import WorkspaceAvatar from './WorkspaceAvatar';
 
 /** The last two folders of a path, enough to tell two workspaces with the same name apart. */
 function shortPath(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path;
-}
-
-function WorkspaceAvatar({ name, path, size = 24 }: { name: string; path: string; size?: number }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: size, height: size, flexShrink: 0, borderRadius: 'var(--radius-sm)',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        background: `oklch(0.62 0.13 ${workspaceHue(path)})`, color: 'white',
-        fontSize: size >= 24 ? 'var(--text-sm)' : 'var(--text-xs)', fontWeight: 700, lineHeight: 1,
-      }}
-    >
-      {(name.trim()[0] ?? '?').toUpperCase()}
-    </span>
-  );
 }
 
 function IconChevron() {
@@ -167,7 +145,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
       onMouseLeave={(e) => { if (!open) e.currentTarget.style.background = 'transparent'; }}
     >
       <span style={{ position: 'relative', display: 'inline-flex' }}>
-        <WorkspaceAvatar name={name} path={path} size={collapsed ? 28 : 26} />
+        <WorkspaceAvatar name={name} path={path} iconVersion={workspace?.icon_version} size={collapsed ? 28 : 26} />
         <span
           aria-hidden="true"
           style={{ position: 'absolute', right: -2, bottom: -2, width: 8, height: 8, borderRadius: '50%', background: healthColor, boxShadow: '0 0 0 2px var(--nav-bg)' }}
@@ -226,7 +204,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
                 onFocus={(e) => { if (!w.current) e.currentTarget.style.background = 'var(--color-surface-hover)'; }}
                 onBlur={(e) => { if (!w.current) e.currentTarget.style.background = 'transparent'; }}
               >
-                <WorkspaceAvatar name={w.name} path={w.path} size={26} />
+                <WorkspaceAvatar name={w.name} path={w.path} iconVersion={w.icon_version} size={26} />
                 <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                   <span className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: w.current ? 600 : 500 }}>{w.name}</span>
                   <span className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>

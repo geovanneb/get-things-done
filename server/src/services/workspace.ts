@@ -5,6 +5,7 @@ import * as os from 'os';
 import { WorkspaceConfig } from '../types';
 import { ScaffoldOptions, WorkspaceProfile, scaffoldWorkspace } from './scaffold';
 import { quoteYaml, unquoteYaml } from '../utils/yamlScalar';
+import { workspaceIconVersion } from './workspaceIcon';
 
 const ESB_CONFIG_DIR = path.join(os.homedir(), '.gtd');
 const ESB_CONFIG_FILE = path.join(ESB_CONFIG_DIR, 'config.json');
@@ -39,6 +40,8 @@ export interface RecentWorkspace {
   /** False when the folder is gone or no longer holds a workspace. */
   available: boolean;
   last_opened: string | null;
+  /** Set when the workspace has a picture; changes with it. */
+  icon_version: string | null;
 }
 
 function readConfigFile(): EsbConfig {
@@ -121,6 +124,7 @@ export class WorkspaceService {
       current: current !== null && samePath(p, current),
       available: this.isExistingWorkspace(p),
       last_opened: lastOpened,
+      icon_version: workspaceIconVersion(p),
     });
     if (current) list.push(describe(current, entries.find((e) => samePath(e.path, current!))?.last_opened ?? null));
     for (const e of entries) {
@@ -206,7 +210,7 @@ export class WorkspaceService {
       }
     }
 
-    return { path: workspacePath, name, git_enabled, schema_versions };
+    return { path: workspacePath, name, git_enabled, schema_versions, icon_version: workspaceIconVersion(workspacePath) };
   }
 
   updateWorkspaceName(newName: string): void {

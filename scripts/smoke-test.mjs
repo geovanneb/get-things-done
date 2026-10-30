@@ -89,6 +89,26 @@ try {
     !htmlPreview.headers.get('content-security-policy')?.includes('allow-scripts') &&
     !htmlPreview.headers.get('content-security-policy')?.includes('allow-same-origin'));
 
+  // Workspace picture: a cropped PNG kept in the home config, never in the workspace folder.
+  const putIcon = (image) => fetch(`${base}/api/workspace/icon`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }),
+  });
+  const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+  const wsFilesBefore = fs.readdirSync(ws).sort().join(',');
+  const iconSaved = await (await putIcon(tinyPng)).json();
+  const iconConfig = await (await fetch(`${base}/api/workspace`)).json();
+  const iconImage = await fetch(`${base}/api/workspace/icon`);
+  check('a workspace picture is saved and served as a PNG',
+    Boolean(iconSaved.icon_version) && iconConfig.icon_version === iconSaved.icon_version &&
+    iconImage.headers.get('content-type') === 'image/png' && iconImage.headers.get('x-content-type-options') === 'nosniff');
+  check('the workspace picture is stored outside the workspace folder',
+    fs.readdirSync(ws).sort().join(',') === wsFilesBefore && fs.readdirSync(path.join(home, '.gtd', 'workspace-icons')).length === 1);
+  const svgIcon = await putIcon(`data:image/png;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>').toString('base64')}`);
+  check('a workspace picture that is not a PNG is refused', svgIcon.status === 400);
+  await fetch(`${base}/api/workspace/icon`, { method: 'DELETE' });
+  check('removing the workspace picture brings back the letter',
+    (await (await fetch(`${base}/api/workspace`)).json()).icon_version === null && (await fetch(`${base}/api/workspace/icon`)).status === 404);
+
   const ui = await fetch(`${base}/board`);
   check('UI is served for app routes', ui.ok && (await ui.text()).includes('<div id="root">'));
 
