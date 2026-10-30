@@ -10,10 +10,12 @@ import {
   Schedule, ScheduleError, addDays, describeSchedule, isDateOnly, localDate, nextOccurrences, occurrencesBetween, parseSchedule,
 } from './routineSchedule';
 import { CleanupRunResult, CleanupView, SYSTEM_CLEANUP_ID, SYSTEM_CLEANUP_TITLE, SystemCleanupService, parseSettings } from './systemCleanupService';
+import { DigestRunResult, DigestView, MEETING_DIGEST_ID, MEETING_DIGEST_TITLE, MeetingDigestService } from './meetingDigestService';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
 const systemCleanup = new SystemCleanupService();
+const meetingDigest = new MeetingDigestService();
 
 /**
  * Routines: things that should happen on a schedule, such as a task that has to be on the
@@ -748,6 +750,12 @@ export class RoutineService {
       // Unreadable settings: the Routines page shows the problem; the user's routines still ran.
       if (trigger !== 'timer') console.error(`[routines] System cleanup: ${(err as Error).message}`);
     }
+    try {
+      const result = await meetingDigest.runIfDue(now);
+      if (result?.did_something) runs.push(this.digestRun(result, trigger, now));
+    } catch (err) {
+      if (trigger !== 'timer') console.error(`[routines] Meeting digest: ${(err as Error).message}`);
+    }
     await this.appendRuns(runs);
     return runs;
   }
@@ -759,6 +767,35 @@ export class RoutineService {
       ...(result.context_update ? { context_update: result.context_update } : {}),
       ...(result.cleaned.length ? { cleaned: result.cleaned } : {}),
     };
+  }
+
+  private digestRun(result: DigestRunResult, trigger: RunTrigger, now: Date): RoutineRun {
+    return {
+      routine_id: MEETING_DIGEST_ID, routine_title: MEETING_DIGEST_TITLE, trigger, at: now.toISOString(), status: result.status,
+      occurrences: [occurrenceKey(now)], skipped: [], created: [], message: result.message,
+      ...(result.context_update ? { context_update: result.context_update } : {}),
+    };
+  }
+
+  // ---- meeting digest ------------------------------------------------------------
+
+  async meetingDigest(now = new Date()): Promise<DigestView> {
+    return meetingDigest.view(now);
+  }
+
+  /** Under the run lock, so settings never change halfway through a run. */
+  async updateMeetingDigest(input: unknown, now = new Date()): Promise<DigestView> {
+    return this.mutate(() => meetingDigest.update(input, now));
+  }
+
+  async runMeetingDigestNow(now = new Date()): Promise<RoutineRun> {
+    const result = await this.serialized(async () => this.withLock(async () => {
+      const run = this.digestRun(await meetingDigest.runNow(now), 'manual', now);
+      await this.appendRuns([run]);
+      return run;
+    }));
+    if (!result) throw httpError(409, 'Another routine run is in progress; try again in a moment');
+    return result;
   }
 
   // ---- system cleanup ------------------------------------------------------------

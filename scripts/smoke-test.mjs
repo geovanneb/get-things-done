@@ -554,6 +554,22 @@ try {
     check('a Word document gets a readable text copy next to it',
       docUp.status === 201 && docSaved.transcript === 'sync.text.md' && docSaved.transcript_complete === true && docCopy.includes('  Fictional Speaker 0:03\n  Fictional words.'),
       `up=${docUp.status} copy=${docSaved.transcript}`);
+    // A fictional meeting through the queue into a digest.
+    const queued = await (await json('POST', '/api/meeting-queue', { title: 'Fictional standup', meeting_date: '2026-10-28' })).json();
+    const queueForm = new FormData();
+    queueForm.append('file', new Blob(['WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Fictional Speaker>Standup words.</v>\n']), 'standup.vtt');
+    const queueUp = await fetch(`${base}/api/meeting-queue/${queued.id}/files`, { method: 'POST', body: queueForm });
+    const queuedNow = await (await json('POST', `/api/meeting-queue/${queued.id}/queue`)).json();
+    const digestRun = await json('POST', '/api/routines/meeting-digest/run');
+    const digestBody = await digestRun.json();
+    const digestUpdate = digestBody.context_update ? await (await fetch(`${base}/api/context-updates/${digestBody.context_update}`)).json() : {};
+    const queueAfter = await (await fetch(`${base}/api/meeting-queue`)).json();
+    const digestNames = (digestUpdate.material_files ?? []).map((f) => f.name).sort().join(',');
+    check('a queued meeting becomes a meeting digest with its transcript and the list of meetings',
+      queueUp.status === 201 && queuedNow.status === 'queued' && digestRun.status === 201
+      && digestUpdate.origin === 'meetings' && digestUpdate.kind === 'daily-digest' && digestUpdate.digest_meetings?.[0]?.id === queued.id
+      && digestNames === `${queued.id}-standup.transcript.md,${queued.id}-standup.vtt,meetings.md` && queueAfter.meetings?.length === 0,
+      `up=${queueUp.status} run=${digestRun.status} ${digestBody.message} files=${digestNames}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

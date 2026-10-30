@@ -30,10 +30,11 @@ export class WatcherService {
       ignored: (filePath, stats) => {
         if (IGNORED_PATH.test(filePath)) return true;
         if (skipDirs.some((dir) => filePath === dir || filePath.startsWith(dir + path.sep))) return true;
-        // Only Markdown files matter, plus the routine and system cleanup run state: a failed run writes no task, and the
+        // Only Markdown files matter, plus the routine, system cleanup and meeting digest run state: a failed run writes no task, and the
         // dashboard must still show it. Directories must pass so their contents are watched.
         const routineState = filePath.endsWith(path.join('.situation-board', 'routines', 'state.json'))
-          || filePath.endsWith(path.join('.situation-board', 'routines', 'system-cleanup-state.json'));
+          || filePath.endsWith(path.join('.situation-board', 'routines', 'system-cleanup-state.json'))
+          || filePath.endsWith(path.join('.situation-board', 'routines', 'meeting-digest-state.json'));
         return Boolean(stats?.isFile()) && !filePath.endsWith('.md') && !routineState;
       },
       persistent: true,

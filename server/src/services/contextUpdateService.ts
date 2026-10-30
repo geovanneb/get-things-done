@@ -177,12 +177,22 @@ export interface ContextUpdate {
   keep_materials: boolean;
   /** Who opened this update: 'system-cleanup' for the memory review, null for an import by the user. */
   origin: string | null;
-  /** What the analysis is about: 'memory-review' reviews the existing memory instead of new material. */
+  /** What the analysis is about: 'memory-review' reviews the existing memory; 'daily-digest' is meetings from the queue. */
   kind: string | null;
+  /** For a meeting digest: which queued meeting each file came from. Written by the dashboard only; kept after the materials go. */
+  digest_meetings: DigestMeeting[];
   proposals: UpdateProposal[];
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
+}
+
+/** One meeting a digest was made from, as it was queued, and the files it brought. */
+export interface DigestMeeting {
+  id: string;
+  title: string;
+  meeting_date: string;
+  files: { source: string; file: string; sha256: string }[];
 }
 
 export interface ProposalDetail extends UpdateProposal {
@@ -433,11 +443,25 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     keep_materials: data['keep_materials'] === true,
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
+    digest_meetings: normalizeDigestMeetings(data['digest_meetings']),
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
     meeting_records: normalizeRecords(data['meeting_records']),
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
   };
+}
+
+function normalizeDigestMeetings(value: unknown): DigestMeeting[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).flatMap((entry) => {
+    const m = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    if (typeof m['id'] !== 'string') return [];
+    const files = Array.isArray(m['files']) ? (m['files'] as unknown[]).flatMap((f) => {
+      const o = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
+      return typeof o['file'] === 'string' ? [{ source: str(o['source']), file: o['file'] as string, sha256: str(o['sha256']) }] : [];
+    }) : [];
+    return [{ id: m['id'] as string, title: str(m['title']), meeting_date: str(m['meeting_date'], true), files }];
+  });
 }
 
 /**
@@ -549,6 +573,12 @@ export class ContextUpdateService {
   private async requireNoRun(id: string, action: string): Promise<void> {
     if (await isAnalysisRunning(workspaceService.getWorkspacePath(), updateId(id))) {
       throw httpError(409, `Cannot ${action} while an analysis is running for this update; stop it first`);
+    }
+    // A meeting digest whose meetings are still leaving the queue: the queue deletes them only once this
+    // update holds their files, so nothing may change it until then (it takes a moment, or the next run).
+    const batch = await fsp.readFile(path.join(workspaceService.getWorkspacePath(), '.situation-board', 'routines', 'meeting-digest-batch.json'), 'utf-8').catch(() => '');
+    if (batch.includes(`"${updateId(id)}"`)) {
+      throw httpError(409, `Cannot ${action} while the meeting digest is still moving its meetings into this update; try again in a moment`);
     }
   }
 
@@ -828,6 +858,112 @@ export class ContextUpdateService {
     };
     await this.write(path.join(dir, 'update.md'), data, notes, {});
     return (await this.read(id)).update;
+  }
+
+  /**
+   * A meeting digest, built where nothing can see it and published by writing update.md last: until then the
+   * folder is no update (the list, the dashboard and the agent commands need update.md), so it cannot be analyzed,
+   * edited or removed half-built. `onReserved` hears the id before anything is written, so a crash can be
+   * cleaned up with discardUnpublished. Files are read one at a time from `from` and saved under `name`, which
+   * the caller makes unique; transcripts get their readable copies as in an upload.
+   */
+  async createDigest(
+    input: { title: string; source_date: string; notes: string; meetingsText: string; meetings: DigestMeeting[]; files: { name: string; from: string; sha256: string }[] },
+    system: { origin: string; kind: string },
+    onReserved: (id: string) => Promise<void>,
+  ): Promise<ContextUpdate> {
+    if (!isDateOnly(input.source_date)) throw httpError(400, 'Invalid source_date: use YYYY-MM-DD');
+    await fsp.mkdir(this.rootDir(), { recursive: true });
+    await workspaceEntry(workspaceService.getWorkspacePath(), this.rootDir());
+    let id = '';
+    let dir = '';
+    for (let attempt = 0; attempt < 20; attempt++) {
+      id = await this.nextId();
+      dir = path.join(this.rootDir(), id);
+      try { await fsp.mkdir(dir); break; } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        id = '';
+      }
+    }
+    if (!id) throw httpError(409, 'Could not reserve a new context update id; try again');
+    await onReserved(id);
+    const materials = path.join(dir, 'materials');
+    await fsp.mkdir(materials);
+    const transcripts: UpdateTranscript[] = [];
+    const problems: { source: string; reason: string }[] = [];
+    await saveAttachment(materials, 'meetings.md', Buffer.from(input.meetingsText, 'utf-8'), 'update.md');
+    // Every original first, then the readable copies: a copy takes a free name, so it can never replace an
+    // original saved after it (a "talk.vtt" next to a "talk.transcript.md").
+    for (const file of input.files) {
+      const buffer = await fsp.readFile(file.from);
+      if (sha256(buffer) !== file.sha256) throw new Error(`${file.name} changed while the digest was being made`);
+      if (await fsp.lstat(path.join(materials, file.name)).then(() => true, () => false)) throw new Error(`The file name ${file.name} is used twice`);
+      const saved = await saveAttachment(materials, file.name, buffer, 'update.md');
+      if (saved.name !== file.name) throw new Error(`The file name ${file.name} cannot be used`);
+    }
+    for (const file of input.files) {
+      const buffer = await fsp.readFile(path.join(materials, file.name));
+      if (sha256(buffer) !== file.sha256) throw new Error(`${file.name} was not saved as queued`);
+      const prepared = prepareTranscript(file.name, buffer);
+      if (prepared && 'content' in prepared) transcripts.push(await this.saveTranscript(materials, file.name, buffer, prepared));
+      if (prepared && 'problem' in prepared) problems.push({ source: file.name, reason: prepared.problem });
+    }
+    const data: Record<string, unknown> = {
+      schema_version: '1.0',
+      id,
+      type: 'context-update',
+      title: input.title,
+      origin: system.origin,
+      kind: system.kind,
+      status: 'ready',
+      source_date: input.source_date,
+      created_at: new Date().toISOString(),
+      materials: await this.materialList(dir),
+      ...(transcripts.length ? { transcripts } : {}),
+      ...(problems.length ? { transcript_problems: problems } : {}),
+      digest_meetings: input.meetings,
+      proposals: [],
+    };
+    await this.write(path.join(dir, 'update.md'), data, input.notes, {});
+    return (await this.read(id)).update;
+  }
+
+  /** True while the update's folder exists, published or not. Only a missing folder means no. */
+  async exists(id: string): Promise<boolean> {
+    try {
+      await fsp.lstat(await workspaceEntry(workspaceService.getWorkspacePath(), this.updateDir(id)));
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw err;
+    }
+  }
+
+  /** True once a digest's update.md is written. Only a missing file means no; any other error is passed on. */
+  async published(id: string): Promise<boolean> {
+    try {
+      const file = await workspaceEntry(workspaceService.getWorkspacePath(), path.join(this.updateDir(id), 'update.md'));
+      if (!(await fsp.lstat(file)).isFile()) throw new Error(`${id}/update.md is not a regular file`);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw err;
+    }
+  }
+
+  /**
+   * Removes a digest that was never published: a folder this service reserved for it, without update.md.
+   * A published update, or anything that is not a plain folder, is left alone.
+   */
+  async discardUnpublished(id: string): Promise<void> {
+    let dir: string;
+    try { dir = await workspaceEntry(workspaceService.getWorkspacePath(), this.updateDir(id)); } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw err;
+    }
+    const st = await fsp.lstat(dir);
+    if (!st.isDirectory() || await this.published(id)) throw new Error(`${id} is not an unfinished digest; it was left alone`);
+    await fsp.rm(dir, { recursive: true });
   }
 
   private async materialList(dir: string): Promise<UpdateMaterial[]> {

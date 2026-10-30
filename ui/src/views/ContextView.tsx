@@ -14,7 +14,7 @@ import { useAppDispatch, useDataVersion } from '@/store';
 import ImportUpdateModal from '@/components/context-updates/ImportUpdateModal';
 import UpdatesList from '@/components/context-updates/UpdatesList';
 import UpdateDetail from '@/components/context-updates/UpdateDetail';
-import type { ContextNote, ContextUpdate } from '@/types';
+import type { ContextNote, ContextUpdate, QueuedMeeting } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -418,6 +418,11 @@ export default function ContextView() {
     navigate(`/context/updates/${update.id}`);
   };
 
+  const handleQueued = (meeting: QueuedMeeting) => {
+    setImportOpen(false);
+    dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'success', message: `"${meeting.title}" is in the meeting queue. The Meeting digest routine (Routines) collects it into the next digest.` } });
+  };
+
   return (
     <div className="context-layout" style={{ display: 'flex', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       <Sidebar notes={notes} activeCategory={showUpdates ? null : activeCategory}
@@ -483,7 +488,7 @@ export default function ContextView() {
         </div>
       </div>
 
-      <ImportUpdateModal isOpen={importOpen} onClose={() => setImportOpen(false)} onCreated={handleImported} />
+      <ImportUpdateModal isOpen={importOpen} onClose={() => setImportOpen(false)} onCreated={handleImported} onQueued={handleQueued} />
 
       <NoteModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}
         initial={selectedNote} mode={modalMode} onSaved={handleSaved} />

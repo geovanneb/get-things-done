@@ -194,6 +194,12 @@ dashboard's weekly System cleanup job. It has no new material: `/gtd-context-ana
 reviews the existing memory for duplicates, misplaced and obsolete notes. Proposals
 may then also `remove` a file; the dashboard does that after approval, never you.
 
+An update with `origin: meetings` and `kind: daily-digest` is a meeting digest: the
+dashboard's Meeting digest job collected meetings from the queue
+(`context-updates/meeting-queue/`, raw material like every other update). Its
+`materials/meetings.md` lists the meetings; `/gtd-context-analyze` drafts one meeting
+record per meeting.
+
 ## Schema references
 
 All frontmatter structures are documented in `.schemas/`. Refer to these when creating new files:

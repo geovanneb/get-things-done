@@ -9,9 +9,10 @@ import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
 import RoutineEditor from '@/components/routines/RoutineEditor';
 import { SystemCleanupCard, SystemCleanupEditor } from '@/components/routines/SystemCleanup';
+import { MeetingDigestCard, MeetingDigestEditor } from '@/components/routines/MeetingDigest';
 import { apiDelete, apiPatch, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
-import type { Routine, RoutineRun, SystemCleanup } from '@/types';
+import type { MeetingDigest, Routine, RoutineRun, SystemCleanup } from '@/types';
 
 const TRIGGER_LABEL: Record<RoutineRun['trigger'], string> = {
   startup: 'Dashboard started',
@@ -179,11 +180,13 @@ export default function RoutinesView() {
   const { data: routines, loading, error, refetch } = useApi<Routine[]>('/api/routines', [routinesVersion, tasksVersion]);
   const { data: runs, refetch: refetchRuns } = useApi<RoutineRun[]>('/api/routines/history?limit=30', [routinesVersion, tasksVersion]);
   const { data: cleanup, error: cleanupError, refetch: refetchCleanup } = useApi<SystemCleanup>('/api/routines/system-cleanup', [routinesVersion, useDataVersion('context-updates')]);
+  const { data: digest, error: digestError, refetch: refetchDigest } = useApi<MeetingDigest>('/api/routines/meeting-digest', [routinesVersion, useDataVersion('context-updates')]);
   const [cleanupOpen, setCleanupOpen] = React.useState(false);
+  const [digestOpen, setDigestOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Routine | null>(null);
   const [editorOpen, setEditorOpen] = React.useState(false);
 
-  const refresh = React.useCallback(() => { refetch(); refetchRuns(); refetchCleanup(); }, [refetch, refetchRuns, refetchCleanup]);
+  const refresh = React.useCallback(() => { refetch(); refetchRuns(); refetchCleanup(); refetchDigest(); }, [refetch, refetchRuns, refetchCleanup, refetchDigest]);
   const openEditor = (routine: Routine | null) => { setEditing(routine); setEditorOpen(true); };
 
   if (loading && !routines) return <LoadingSpinner text="Loading routines..." />;
@@ -207,7 +210,11 @@ export default function RoutinesView() {
       <section aria-labelledby="built-in">
         <h2 id="built-in" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 12px' }}>Built-in</h2>
         {cleanupError && <div role="alert" style={{ ...cardStyle, borderColor: 'var(--color-critical)', color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>System cleanup does not run: {cleanupError}</div>}
-        {cleanup && <SystemCleanupCard job={cleanup} onEdit={() => setCleanupOpen(true)} onChanged={refresh} />}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {cleanup && <SystemCleanupCard job={cleanup} onEdit={() => setCleanupOpen(true)} onChanged={refresh} />}
+          {digestError && <div role="alert" style={{ ...cardStyle, borderColor: 'var(--color-critical)', color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>Meeting digest does not run: {digestError}</div>}
+          {digest && <MeetingDigestCard job={digest} onEdit={() => setDigestOpen(true)} onChanged={refresh} />}
+        </div>
       </section>
 
       <section aria-labelledby="your-routines">
@@ -235,6 +242,7 @@ export default function RoutinesView() {
         <RunHistory runs={runs ?? []} />
       </section>
 
+      <MeetingDigestEditor isOpen={digestOpen} job={digest ?? null} onClose={() => setDigestOpen(false)} onSaved={refresh} />
       <SystemCleanupEditor isOpen={cleanupOpen} job={cleanup ?? null} onClose={() => setCleanupOpen(false)} onSaved={refresh} />
       <RoutineEditor isOpen={editorOpen} routine={editing} onClose={() => setEditorOpen(false)} onSaved={refresh} />
     </div>
