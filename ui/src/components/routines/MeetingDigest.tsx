@@ -256,7 +256,7 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
             As soon as a digest is made, the dashboard runs the analysis with {runner?.label ?? 'Claude Code'} on your own plan, as
             <strong> Run analysis</strong> on the digest&apos;s page does, so the proposals are ready when you look. Nothing changes in
             your context until you approve each proposal. If another run is going, it starts after it; if it cannot start, the
-            reason shows here and you start it yourself.
+            card says why and you start it yourself.
           </p>
           {draft.auto_analyze && runner && runner.problems.length > 0 && (
             <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{runner.problems[0]!.message}</p>
