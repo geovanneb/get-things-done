@@ -6,7 +6,8 @@ import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { RoutineService } from '../src/services/routineService';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
-import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings } from '../src/services/meetingDigestService';
+import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, type DigestRunner } from '../src/services/meetingDigestService';
+import type { AgentRun } from '../src/services/agentRunner';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -331,6 +332,88 @@ test('long meetings: a digest holds at most max_characters of readable text, and
 
   assert.throws(() => parseSettings({ max_characters: 1000 }), /50000 to 4000000/);
   assert.equal(parseSettings({}).max_characters, 400_000);
+});
+
+/** A runner that starts nothing: each start does what `next` says, and the runs it started are remembered. */
+function fakeRunner() {
+  const started: string[] = [];
+  const runs = new Map<string, AgentRun>();
+  let next: 'start' | 'busy' | 'refuse' = 'start';
+  const runner: DigestRunner = {
+    startAnalysis: async (id: string) => {
+      if (next === 'busy') throw new Error('Another run is going (CU-2026-0099). Wait for it, or stop it first.');
+      if (next === 'refuse') throw new Error('Claude Code is not signed in.');
+      started.push(id);
+      const run = { update_id: id, status: 'running' } as AgentRun;
+      runs.set(id, run);
+      return run;
+    },
+    get: async (id: string) => runs.get(id) ?? null,
+  };
+  return { runner, started, runs, set: (mode: 'start' | 'busy' | 'refuse') => { next = mode; } };
+}
+
+test('automatic analysis: off by default; when on, each new digest is started once, waits for another run, and a refusal is not retried', async (t) => {
+  await workspace(t);
+  const fake = fakeRunner();
+  const quiet = (r: { did_something: boolean } | null) => !r || !r.did_something;
+  const service = new MeetingDigestService(fake.runner);
+  assert.equal(parseSettings({}).auto_analyze, false);
+  assert.throws(() => parseSettings({ auto_analyze: 'yes' }), /auto_analyze/);
+
+  await queueMeeting(service, 'Sync', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const off = await service.runNow(new Date('2026-10-26T18:00:00'));
+  assert.deepEqual(fake.started, [], 'off: nothing starts');
+  const first = off.context_update!;
+  const close = async (id: string) => {
+    const file = path.join(process.env.ESB_WORKSPACE_PATH!, 'context-updates', id, 'update.md');
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace(/status: \w+/, 'status: done'));
+  };
+
+  // Switched on while a digest is open and has never had a run: the next check starts it, once.
+  await service.update({ auto_analyze: true });
+  const caught = await service.runIfDue(new Date('2026-10-26T18:01:00'));
+  assert.deepEqual(fake.started, [first]);
+  assert.match(caught!.message, new RegExp(`Started the analysis of ${first}`));
+  assert.ok(quiet(await service.runIfDue(new Date('2026-10-26T18:02:00'))), 'never twice');
+  assert.equal((await service.readState()).analysis?.status, 'started');
+  await close(first);
+
+  // A new digest while another run is going: it waits, quietly, and starts on a later check.
+  await queueMeeting(service, 'Review', '2026-10-27', [['b.md', Buffer.from('B')]]);
+  fake.set('busy');
+  const made = await service.runNow(new Date('2026-10-27T18:00:00'));
+  const second = made.context_update!;
+  assert.match(made.message, new RegExp(`Made digest ${second}.*waits for another run`));
+  assert.ok(quiet(await service.runIfDue(new Date('2026-10-27T18:01:00'))), 'still waiting: out of the history');
+  fake.set('start');
+  assert.match((await service.runIfDue(new Date('2026-10-27T18:02:00')))!.message, new RegExp(`Started the analysis of ${second}`));
+  assert.deepEqual(fake.started, [first, second]);
+  await close(second);
+
+  // A refusal other than a busy runner is reported once, not retried, until automatic analysis is switched on again.
+  await queueMeeting(service, 'Planning', '2026-10-28', [['c.md', Buffer.from('C')]]);
+  fake.set('refuse');
+  const refused = await service.runNow(new Date('2026-10-28T18:00:00'));
+  const third = refused.context_update!;
+  assert.equal(refused.status, 'error');
+  assert.match(refused.message, /could not start: Claude Code is not signed in\. Start it from the digest's page/);
+  fake.set('start');
+  assert.ok(quiet(await service.runIfDue(new Date('2026-10-28T18:01:00'))), 'not retried by itself');
+  await service.update({ auto_analyze: false });
+  await service.update({ auto_analyze: true });
+  await service.runIfDue(new Date('2026-10-28T18:02:00'));
+  assert.deepEqual(fake.started, [first, second, third]);
+  await close(third);
+
+  // A digest that already had a run, started by hand, is left alone.
+  await queueMeeting(service, 'Retro', '2026-10-29', [['d.md', Buffer.from('D')]]);
+  fake.set('busy');
+  const fourth = (await service.runNow(new Date('2026-10-29T18:00:00'))).context_update!;
+  fake.runs.set(fourth, { update_id: fourth, status: 'failed' } as AgentRun);
+  fake.set('start');
+  assert.ok(quiet(await service.runIfDue(new Date('2026-10-29T18:01:00'))));
+  assert.ok(!fake.started.includes(fourth));
 });
 
 test('the schedule: first check counts from now, missed runs collapse into one, switched off makes nothing', async (t) => {

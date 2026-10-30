@@ -5,9 +5,9 @@ import Button from '@/components/common/Button';
 import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
 import { dateInputStyle, sectionLabelStyle, fieldLabelStyle } from '@/components/task-form/styles';
-import { apiDelete, apiPost, apiPut } from '@/utils/api';
+import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
-import type { MeetingDigest, MeetingDigestSettings, RoutineRun, RoutineWeekday } from '@/types';
+import type { MeetingDigest, MeetingDigestSettings, RoutineRun, RoutineWeekday, RunnerStatus } from '@/types';
 
 const WEEKDAYS: { id: RoutineWeekday; short: string }[] = [
   { id: 'mon', short: 'Mon' }, { id: 'tue', short: 'Tue' }, { id: 'wed', short: 'Wed' }, { id: 'thu', short: 'Thu' },
@@ -64,7 +64,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 4 }}>
             {job.summary}. Collects the meetings you queued into one context update, at most {settings.max_meetings} at a time
             and about {hours} hour{hours > 1 ? 's' : ''} of meetings.
-            A day without queued meetings makes nothing.
+            A day without queued meetings makes nothing.{settings.auto_analyze ? ' Each new digest is analyzed automatically.' : ''}
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <span>Next: {settings.enabled ? (job.next_run_at ? formatWhen(job.next_run_at) : 'no more runs') : 'paused'}</span>
@@ -75,6 +75,11 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
             <div style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>
               Digest <Link to={`/context/updates/${job.open_digest}`} style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{job.open_digest}</Link> is waiting for you.
               No new digest starts until it is done; queued meetings wait.
+            </div>
+          )}
+          {settings.auto_analyze && state.analysis && state.analysis.update_id === job.open_digest && (
+            <div style={{ fontSize: 'var(--text-xs)', marginTop: 4, color: state.analysis.status === 'not_started' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
+              {state.analysis.message}
             </div>
           )}
           {failed && state.last_message && (
@@ -142,12 +147,20 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
   const [max, setMax] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [runner, setRunner] = React.useState<RunnerStatus | null>(null);
 
   // Filled once when the editor opens: the job is fetched again on every queue or update change, and a
   // background refresh must not undo what is being edited.
   const loaded = job !== null;
   const settings = React.useRef(job?.settings);
   settings.current = job?.settings;
+  React.useEffect(() => {
+    if (!isOpen) return;
+    let live = true;
+    apiGet<RunnerStatus>('/api/runner').then((s) => { if (live) setRunner(s); }, () => { if (live) setRunner(null); });
+    return () => { live = false; };
+  }, [isOpen]);
+
   React.useEffect(() => {
     if (!isOpen) { setDraft(null); return; }
     if (!loaded || !settings.current) return;
@@ -184,8 +197,8 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
           A built-in routine for meetings. Add a meeting to the queue from <strong>Import</strong> in Context updates; on the days
-          below, the queued meetings become one context update. Run the analyze command on it, and an agent drafts a record per
-          meeting and proposes context changes for you to approve. No AI runs by itself.
+          below, the queued meetings become one context update. The analysis drafts a record per meeting and proposes context
+          changes for you to approve: you run it, or the dashboard starts it for you (below).
         </p>
 
         <section aria-labelledby="md-schedule">
@@ -231,6 +244,23 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
             days are spread over several digests; a full-day meeting is about 250,000 characters. A meeting longer than this
             on its own gets a digest of its own.
           </p>
+        </section>
+
+        <section aria-labelledby="md-analysis">
+          <h3 id="md-analysis" style={{ ...sectionLabelStyle, margin: 0 }}>Analysis</h3>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 8, fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={draft.auto_analyze} onChange={(e) => setDraft({ ...draft, auto_analyze: e.target.checked })} style={{ marginTop: 3 }} />
+            <span>Analyze each new digest automatically</span>
+          </label>
+          <p style={hintStyle}>
+            As soon as a digest is made, the dashboard runs the analysis with {runner?.label ?? 'Claude Code'} on your own plan, as
+            <strong> Run analysis</strong> on the digest&apos;s page does, so the proposals are ready when you look. Nothing changes in
+            your context until you approve each proposal. If another run is going, it starts after it; if it cannot start, the
+            reason shows here and you start it yourself.
+          </p>
+          {draft.auto_analyze && runner && runner.problems.length > 0 && (
+            <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{runner.problems[0]!.message}</p>
+          )}
         </section>
 
         {error && <div role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</div>}

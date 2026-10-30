@@ -741,8 +741,10 @@ importing straight away: the transcript or notes go into a queue
 **Meeting digest** routine (Routines page, settings in
 `.situation-board/routines/meeting-digest.json`) turns the queued meetings into one
 context update, tagged **Meeting digest**, every working day at 18:00 by default. Run
-`/gtd-context-analyze` on it, and the agent drafts one meeting record per meeting and
-proposes context changes, as for any update. No AI runs by itself.
+`/gtd-context-analyze` on it (or **Run analysis** on its page), and the agent drafts one
+meeting record per meeting and proposes context changes, as for any update. No AI runs
+by itself unless you switch on **Analyze each new digest automatically** in its
+settings.
 
 - A day without queued meetings makes nothing. Missed days (the computer was off) make
   one digest the next time the dashboard starts; a digest covering several days says
@@ -756,6 +758,12 @@ proposes context changes, as for any update. No AI runs by itself.
   so long days are spread over several digests, and a meeting longer than that on its
   own gets a digest of its own. The agent reads one meeting at a time, long transcripts
   in parts.
+- **Automatic analysis** (off by default): as soon as a digest is made, the dashboard
+  runs the analysis with your installed Claude Code on your own plan, so the proposals
+  are ready the next morning. If another run is going, it starts after it. If it cannot
+  start (Claude Code not installed, not signed in, or the folder not trusted), the card
+  says why and nothing is retried by itself; a digest that already had a run is never
+  started again automatically. Nothing changes in your context until you approve.
 - Each meeting keeps its own date, and the digest records which queued meeting each
   file came from. A meeting whose file changed since it was queued stays in the queue,
   with the reason.

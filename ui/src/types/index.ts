@@ -675,6 +675,8 @@ export interface MeetingDigestSettings {
   max_meetings: number;
   /** Readable text per digest, in characters; a meeting averages about 30,000 an hour. */
   max_characters: number;
+  /** Start the analysis of each new digest with the dashboard runner. Off by default. */
+  auto_analyze: boolean;
   updated_at: string | null;
 }
 
@@ -685,7 +687,10 @@ export interface MeetingDigest {
   defaults: MeetingDigestSettings;
   summary: string;
   next_run_at: string | null;
-  state: { checked_at?: string; last_run_at?: string; last_status?: 'ok' | 'error'; last_message?: string; last_context_update?: string };
+  state: {
+    checked_at?: string; last_run_at?: string; last_status?: 'ok' | 'error'; last_message?: string; last_context_update?: string;
+    analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started'; message: string; at: string };
+  };
   open_digest: string | null;
   queue: QueuedMeeting[];
   queue_problems: { id: string; reason: string }[];
