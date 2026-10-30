@@ -8,7 +8,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
 import { moveToTrash } from './trash';
 import { isAnalysisRunning } from './runState';
-import { docxMarkdown, docxText } from '../utils/docx';
+import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 import { TaskService } from './taskService';
 import type { Task } from '../types';
@@ -97,7 +97,7 @@ export interface UpdateTranscript {
 }
 
 /** A transcript copy prepared in memory, before anything is written. */
-interface PreparedTranscript { content: string; complete: boolean; kind: 'webvtt' | 'docx' }
+interface PreparedTranscript { content: string; complete: boolean; kind: 'webvtt' | 'docx'; missing?: string[] }
 
 export interface UpdateProposal {
   id: string;
@@ -475,7 +475,7 @@ function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | {
     const read = docxText(buffer);
     if (!read.ok) return { problem: read.problem };
     if (!read.text.paragraphs.some((p) => p.trim())) return { problem: 'The Word document has no text in its body, so no readable copy was made.' };
-    return { content: docxMarkdown(name, sha256(buffer), read.text), complete: read.text.missing.length === 0, kind: 'docx' };
+    return { content: docxMarkdown(name, sha256(buffer), read.text), complete: read.text.missing.length === 0, kind: 'docx', missing: read.text.missing };
   }
   if (!['.vtt', '.txt', '.md'].includes(ext)) return null;
   const text = decodeText(buffer.length > MAX_CONVERT_BYTES ? buffer.subarray(0, 64) : buffer);
@@ -487,6 +487,24 @@ function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | {
   if (!parsed) return ext === '.vtt' ? { problem: 'The file does not start with WEBVTT, so no readable copy was made.' } : null;
   if (parsed.cues.length === 0) return { problem: 'No cue could be read, so no readable copy was made.' };
   return { content: transcriptMarkdown(name, sha256(buffer), parsed), complete: parsed.problems.length === 0, kind: 'webvtt' };
+}
+
+/**
+ * Roughly how much an agent reads for one file, in characters: a transcript by its readable copy, other text by
+ * its length, anything else by its size, so a deck or a PDF is counted high rather than low. An incomplete copy
+ * sends the agent to the original as well, so both count, unless a Word copy lacks only pictures: it still holds
+ * all the text.
+ */
+export function readableSize(name: string, buffer: Buffer): number {
+  const prepared = prepareTranscript(name, buffer);
+  if (prepared && 'content' in prepared) {
+    const onlyPictures = prepared.kind === 'docx' && (prepared.missing ?? []).every((m) => m === PICTURES);
+    if (prepared.complete || onlyPictures) return prepared.content.length;
+    const source = buffer.length <= MAX_CONVERT_BYTES ? decodeText(buffer) : null;
+    return prepared.content.length + (source !== null ? source.length : buffer.length);
+  }
+  const text = buffer.length <= MAX_CONVERT_BYTES ? decodeText(buffer) : null;
+  return text !== null ? text.length : buffer.length;
 }
 
 /** The name of a file in `dir` with exactly these bytes, if any. Only files of the same size are read. */

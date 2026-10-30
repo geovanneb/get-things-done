@@ -750,7 +750,12 @@ proposes context changes, as for any update. No AI runs by itself.
 - While a digest waits for your review, no new one starts: meetings wait in the queue
   instead of piling up as stale digests. **Make digest now** does not wait for the
   schedule.
-- The oldest meetings go first, at most 10 per digest (up to 20); the rest wait.
+- The oldest meetings go first, at most 10 per digest (up to 20) and 400,000 characters
+  of readable text, about a day and a half of meetings (a full-day meeting is about
+  250,000; changeable in Settings); the rest wait. One analysis reads the whole digest,
+  so long days are spread over several digests, and a meeting longer than that on its
+  own gets a digest of its own. The agent reads one meeting at a time, long transcripts
+  in parts.
 - Each meeting keeps its own date, and the digest records which queued meeting each
   file came from. A meeting whose file changed since it was queued stays in the queue,
   with the reason.

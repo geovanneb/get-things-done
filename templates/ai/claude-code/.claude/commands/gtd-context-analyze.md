@@ -35,9 +35,14 @@ If the frontmatter has `origin: meetings` and `kind: daily-digest`, the dashboar
 Meeting digest job collected meetings from the meeting queue into this update. Follow
 the steps as usual, and:
 
-- Read `materials/meetings.md` first: it lists each meeting with its date, title and
-  files. Add one meeting record per listed meeting, with that meeting's date, even when
+- Read `materials/meetings.md` first: it lists each meeting with its date, title, files
+  and roughly how much text they hold (`text_characters`; a full-day meeting is about
+  250,000). Add one meeting record per listed meeting, with that meeting's date, even when
   it changes nothing in the context.
+- Work one meeting at a time, in the order listed: read its files (Step 3), write down
+  its candidate facts and its meeting record, then go to the next meeting. Decide the
+  proposals (Step 5) only after the last one, so a long day does not crowd out the
+  first meetings.
 - Use each meeting's own date, not `source_date`, for "not older than what is there"
   (Step 5). `source_date` is only the earliest meeting. When two meetings disagree,
   prefer the later one only when the dates differ; on the same day, say so in the
@@ -68,6 +73,11 @@ When the copy matches and `complete` is true, read it instead of its source (cit
 transcript's times as evidence); when `complete` is false, it lists what it could not read, so read
 the source as well. Speaker labels are what the file says, not
 identities: link a speaker to a stakeholder only when the material makes it clear.
+
+A long transcript (an hour or more of meeting) does not fit in one read: read it in
+parts, in order, and note the candidate facts from each part before the next. Never stop
+part way and treat the rest as read. If you only skimmed part of a file, say which part
+in the summary.
 
 If you cannot read a file (audio, video, encrypted, corrupt), do not guess its content.
 Record it under `unread` with the reason, and carry on with the rest.

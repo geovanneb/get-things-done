@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as zlib from 'node:zlib';
-import { crc32, docxMarkdown, docxText } from '../src/utils/docx';
+import { crc32, docxMarkdown, docxText, SKIPPED_TEXT } from '../src/utils/docx';
+import { readableSize } from '../src/services/contextUpdateService';
 
 /** A minimal fictional .docx: a ZIP with the given entries. `size`, `crc` and `flags` override what the headers state. */
 function zip(entries: { name: string; data: Buffer; store?: boolean; size?: number; flags?: number; crc?: number; descriptor?: 'plain' | 'signed'; descriptorCrc?: number }[]): Buffer {
@@ -123,7 +124,7 @@ test('alternative versions, symbols and imported content make the copy incomplet
   const MC = 'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"';
   const alt = read(`<w:p><w:r><mc:AlternateContent ${MC}><mc:Choice Requires="w14">${t('Approve')}</mc:Choice><mc:Fallback>${t('Do not approve')}</mc:Fallback></mc:AlternateContent></w:r></w:p>`);
   assert.deepEqual(alt.paragraphs, ['']);
-  assert.deepEqual(alt.missing, ['alternative versions of content']);
+  assert.deepEqual(alt.missing, ['alternative versions of content', SKIPPED_TEXT], 'both versions hold text the copy does not show');
   const sym = read(p(t('A'), '<w:noBreakHyphen/>', t('B'), '<w:sym w:font="Wingdings" w:char="F0FC"/>', '<w:softHyphen/>'));
   assert.deepEqual(sym.paragraphs, ['A‑B'], 'a non-breaking hyphen is kept, a soft hyphen is invisible');
   assert.deepEqual(sym.missing, ['symbols']);
@@ -241,4 +242,26 @@ test('literal line endings are read as LF, a CR reference stays', () => {
   assert.deepEqual(r.paragraphs, ['A\nB\nC', 'D\nE\nF', 'G\rH']);
   const md = docxMarkdown('x.docx', 'h', r);
   assert.ok(md.includes('\n  G\n  H\n'), 'every line is indented, a CR included');
+});
+
+test('readable size: a copy alone when it holds all the text, the original too when it does not', () => {
+  const words = 'Fictional discussion of the pilot. '.repeat(200);
+  const plain = docx(p(t(words)));
+  const pictured = docx(p(t(words)) + '<w:p><w:r><w:drawing/></w:r></w:p>');
+  const table = docx(p(t(words)) + '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>');
+  const copy = (b: Buffer) => { const r = docxText(b); assert.ok(r.ok); return docxMarkdown('notes.docx', 'x'.repeat(64), r.text).length; };
+  assert.equal(readableSize('notes.docx', plain), copy(plain));
+  assert.equal(readableSize('notes.docx', pictured), copy(pictured), 'pictures only: all the text is in the copy');
+  assert.equal(readableSize('notes.docx', table), copy(table) + table.length, 'a table: the original counts as well');
+  // A text box inside a picture holds text the copy skips: it is named, and the original counts as well.
+  const boxed = docx(p(t('Short.')) + `<w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml"><v:textbox><w:txbxContent>${p(t(words))}</w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>`);
+  const boxedText = docxText(boxed);
+  assert.ok(boxedText.ok && boxedText.text.missing.includes(SKIPPED_TEXT), JSON.stringify(boxedText.ok && boxedText.text.missing));
+  assert.equal(readableSize('notes.docx', boxed), copy(boxed) + boxed.length);
+
+  // A transcript whose copy stops early counts with its whole source, so it cannot slip past a digest's text budget.
+  const broken = Buffer.from(`WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Jane Doe>Hello.</v>\n\nnot a timing line\n${'Fictional discussion. '.repeat(30_000)}\n`);
+  assert.ok(readableSize('talk.vtt', broken) > broken.length, `${readableSize('talk.vtt', broken)}`);
+  assert.equal(readableSize('notes.md', Buffer.from('Short notes.')), 'Short notes.'.length);
+  assert.equal(readableSize('deck.pdf', Buffer.alloc(1000)), 1000, 'anything else by its size');
 });

@@ -570,6 +570,12 @@ try {
       && digestUpdate.origin === 'meetings' && digestUpdate.kind === 'daily-digest' && digestUpdate.digest_meetings?.[0]?.id === queued.id
       && digestNames === `${queued.id}-standup.transcript.md,${queued.id}-standup.vtt,meetings.md` && queueAfter.meetings?.length === 0,
       `up=${queueUp.status} run=${digestRun.status} ${digestBody.message} files=${digestNames}`);
+    const budget = await json('PUT', '/api/routines/meeting-digest', { max_characters: 200000 });
+    const budgetBody = await budget.json();
+    const badBudget = await json('PUT', '/api/routines/meeting-digest', { max_characters: 1000 });
+    check('the text per digest is saved, and a value out of range is refused',
+      budget.status === 200 && budgetBody.settings?.max_characters === 200000 && badBudget.status === 400,
+      `saved=${budget.status} ${budgetBody.settings?.max_characters} bad=${badBudget.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }
