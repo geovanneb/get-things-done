@@ -64,7 +64,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 4 }}>
             {job.summary}. Collects the meetings you queued into one context update, at most {settings.max_meetings} at a time
             and about {hours} hour{hours > 1 ? 's' : ''} of meetings.
-            A day without queued meetings makes nothing.{settings.auto_analyze ? ' Each new digest is analyzed automatically.' : ''}
+            A day without queued meetings makes nothing.{settings.after_each_meeting ? ' Also right after each meeting.' : ''}{settings.auto_analyze ? ' Each new digest is analyzed automatically.' : ''}
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <span>Next: {settings.enabled ? (job.next_run_at ? formatWhen(job.next_run_at) : 'no more runs') : 'paused'}</span>
@@ -219,6 +219,14 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
           <p style={hintStyle}>
             After your last meeting of the day is a good time. If the computer was off, one digest is made the next time the
             dashboard starts; nothing in the queue is lost. While a digest waits for your review, new meetings wait in the queue.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={draft.after_each_meeting} onChange={(e) => setDraft({ ...draft, after_each_meeting: e.target.checked })} style={{ marginTop: 3 }} />
+            <span>Also make a digest right after each meeting</span>
+          </label>
+          <p style={hintStyle}>
+            Within a minute of a meeting being queued, any day and time, when no digest waits for your review. Meetings queued
+            while one waits go into the next digest as soon as it is done. Useful with automatic analysis below.
           </p>
         </section>
 

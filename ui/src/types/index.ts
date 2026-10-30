@@ -677,6 +677,8 @@ export interface MeetingDigestSettings {
   max_characters: number;
   /** Start the analysis of each new digest with the dashboard runner. Off by default. */
   auto_analyze: boolean;
+  /** Also make a digest as soon as a meeting is queued and no digest waits for review. Off by default. */
+  after_each_meeting: boolean;
   updated_at: string | null;
 }
 

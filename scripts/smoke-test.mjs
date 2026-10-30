@@ -598,9 +598,11 @@ try {
       `saved=${budget.status} ${budgetBody.settings?.max_characters} bad=${badBudget.status}`);
     // Never switched on here: that would start a real analysis with the Claude Code installed on this machine.
     const badAuto = await json('PUT', '/api/routines/meeting-digest', { auto_analyze: 'yes' });
+    const badAfter = await json('PUT', '/api/routines/meeting-digest', { after_each_meeting: 'yes' });
     const digestNow = await (await fetch(`${base}/api/routines/meeting-digest`)).json();
-    check('automatic analysis is off unless switched on, and only true or false is accepted',
-      badAuto.status === 400 && digestNow.settings?.auto_analyze === false, `bad=${badAuto.status} auto=${digestNow.settings?.auto_analyze}`);
+    check('automatic analysis and digests right after a meeting are off unless switched on, and only true or false is accepted',
+      badAuto.status === 400 && digestNow.settings?.auto_analyze === false && badAfter.status === 400 && digestNow.settings?.after_each_meeting === false,
+      `bad=${badAuto.status} auto=${digestNow.settings?.auto_analyze} badAfter=${badAfter.status} after=${digestNow.settings?.after_each_meeting}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

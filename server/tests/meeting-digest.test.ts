@@ -440,6 +440,74 @@ test('automatic analysis: off by default; when on, each new digest is started on
   assert.ok(!fake.started.includes(fourth));
 });
 
+test('right after a meeting: a digest within a check of queueing, meetings wait while one is open, and a failure waits for a change', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  assert.equal(parseSettings({}).after_each_meeting, false);
+  assert.throws(() => parseSettings({ after_each_meeting: 1 }), /after_each_meeting/);
+  const close = async (id: string) => {
+    const file = path.join(ws, 'context-updates', id, 'update.md');
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace(/status: \w+/, 'status: done'));
+  };
+  // Saturday 2026-10-31: the default schedule (working days at 18:00) never falls in these checks.
+  const at = (time: string) => new Date(`2026-10-31T${time}:00`);
+  assert.equal(await service.runIfDue(at('09:00')), null, 'first check');
+
+  // Off: a queued meeting waits for the schedule.
+  const a = await queueMeeting(service, 'Sync', '2026-10-31', [['a.md', Buffer.from('A')]]);
+  assert.equal(await service.runIfDue(at('09:01')), null);
+  assert.equal((await updates.list()).length, 0);
+
+  // On: the next check makes it.
+  await service.update({ after_each_meeting: true });
+  const first = await service.runIfDue(at('09:02'));
+  assert.deepEqual((await updates.get(first!.context_update!)).digest_meetings.map((m) => m.id), [a]);
+
+  // Two more meetings while that digest is open wait, and go into one digest as soon as it is done.
+  const b = await queueMeeting(service, 'Review', '2026-10-31', [['b.md', Buffer.from('B')]]);
+  const c = await queueMeeting(service, 'Planning', '2026-10-31', [['c.md', Buffer.from('C')]]);
+  assert.equal(await service.runIfDue(at('09:03')), null, 'a digest is open: they wait, quietly');
+  await close(first!.context_update!);
+  const second = await service.runIfDue(at('09:04'));
+  assert.deepEqual((await updates.get(second!.context_update!)).digest_meetings.map((m) => m.id), [b, c]);
+  await close(second!.context_update!);
+
+  // A meeting whose file changed cannot go into a digest: reported once, then not retried until the queue changes.
+  const d = await queueMeeting(service, 'Changed', '2026-10-31', [['d.md', Buffer.from('D')]]);
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue', d, 'd.md'), 'edited');
+  assert.equal((await service.runIfDue(at('09:05')))!.status, 'error');
+  assert.equal(await service.runIfDue(at('09:06')), null, 'same queue: not retried');
+  const e = await queueMeeting(service, 'Next', '2026-10-31', [['e.md', Buffer.from('E')]]);
+  const third = await service.runIfDue(at('09:07'));
+  assert.deepEqual((await updates.get(third!.context_update!)).digest_meetings.map((m) => m.id), [e]);
+  await close(third!.context_update!);
+
+  // Not retried by the schedule either: Monday 18:00 passes quietly with the same queue.
+  const f = await queueMeeting(service, 'Changed again', '2026-11-02', [['g.md', Buffer.from('G')]]);
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue', f, 'g.md'), 'edited');
+  assert.equal((await service.runIfDue(new Date('2026-11-02T17:00:00')))!.status, 'error');
+  assert.equal(await service.runIfDue(new Date('2026-11-02T18:01:00')), null, 'the scheduled run keeps the skip');
+  assert.equal(await service.runIfDue(new Date('2026-11-02T18:02:00')), null);
+  await service.removeMeeting(f);
+
+  // Paused: nothing, however long the queue.
+  await service.removeMeeting(d);
+  await service.update({ enabled: false });
+  await queueMeeting(service, 'Later', '2026-10-31', [['f.md', Buffer.from('F')]]);
+  assert.equal(await service.runIfDue(at('09:08')), null);
+  assert.equal((await updates.list()).filter((u) => u.status !== 'done').length, 0);
+});
+
+test('right after a meeting: the first check after a start already makes the digest for meetings waiting', async (t) => {
+  const ws = await workspace(t);
+  await fsp.writeFile(path.join(ws, '.situation-board', 'routines', 'meeting-digest.json'), JSON.stringify({ after_each_meeting: true }));
+  const service = new MeetingDigestService();
+  const a = await queueMeeting(service, 'Sync', '2026-10-31', [['a.md', Buffer.from('A')]]);
+  const first = await service.runIfDue(new Date('2026-10-31T09:00:00'));
+  assert.deepEqual((await updates.get(first!.context_update!)).digest_meetings.map((m) => m.id), [a]);
+  assert.ok((await service.readState()).checked_at, 'the schedule counts from now');
+});
+
 test('the schedule: first check counts from now, missed runs collapse into one, switched off makes nothing', async (t) => {
   await workspace(t);
   const service = new MeetingDigestService();
