@@ -791,10 +791,10 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
 
 - **Whisper large-v3-turbo** (the default): the most accurate, in English and
   Japanese alike, with full punctuation and 99 languages. It takes longer (about 4
-  times real time, so an 8-hour meeting takes about 2 hours) and needs about 4 GB of
-  memory while it transcribes.
-- **SenseVoice**: very fast (about 80 times real time, so an 8-hour meeting takes about
-  6 minutes) and light (under 1 GB), a little less accurate, in English, Japanese,
+  times faster than real time, so an 8-hour meeting takes about 2 hours) and needs
+  about 4 GB of memory while it transcribes.
+- **SenseVoice**: very fast (about 80 times faster than real time, so an 8-hour meeting
+  takes about 6 minutes) and light (under 1 GB), a little less accurate, in English, Japanese,
   Chinese, Korean and Cantonese.
 - **Language**: Auto detects the language of each part of a meeting, so a meeting
   that switches between English and Japanese comes out right; for the most accurate
@@ -802,6 +802,10 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
 - Downloads show their progress, can be cancelled and continue where they stopped;
   every file is checked against its pinned checksum before it is used. On a computer
   with little memory, Settings suggests the lighter model.
+- Behind a company proxy: downloads use Node's built-in `fetch`, which ignores the usual
+  proxy variables unless told otherwise. Set `NODE_USE_ENV_PROXY=1` together with
+  `HTTPS_PROXY` (Node 22.21 or later, or 24), and `NODE_EXTRA_CA_CERTS` for a company
+  certificate, before starting the dashboard. Never turn certificate checks off.
 
 Speeds were measured on an Apple Silicon Mac. Transcribing recordings arrives in a
 next version.

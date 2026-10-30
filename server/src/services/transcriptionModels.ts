@@ -2,7 +2,8 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
-import { createHash, Hash } from 'crypto';
+import { createHash, Hash, randomUUID } from 'crypto';
+import { finished } from 'stream/promises';
 import { EventEmitter } from 'events';
 import { atomicWrite } from '../utils/atomicWrite';
 import { processAlive } from './runState';
@@ -65,6 +66,9 @@ export interface TranscriptionView {
   defaults: TranscriptionSettings;
   /** The voice-activity model every transcription needs; downloaded with the first model. */
   vad_installed: boolean;
+  vad_size: number;
+  /** Another dashboard on this computer is downloading: its progress shows there. */
+  downloading_elsewhere: boolean;
   models_dir: string;
   total_memory_gb: number;
   /** Set when this computer has little memory for the default model. */
@@ -89,7 +93,7 @@ export const CATALOG: CatalogModel[] = [
     summary: 'Most accurate. Takes longer.',
     languages: '99 languages, including English and Japanese',
     pros: ['The most accurate transcripts, in English and Japanese alike', 'Full punctuation', '99 languages'],
-    cons: ['Slower: about 4 times real time, so an 8-hour meeting takes about 2 hours', 'Needs about 4 GB of memory while transcribing', 'A 1 GB download'],
+    cons: ['Slower: about 4 times faster than real time, so an 8-hour meeting takes about 2 hours', 'Needs about 4 GB of memory while transcribing', 'A 1 GB download'],
     memory_gb: 4,
     files: [
       { name: 'turbo-encoder.int8.onnx', url: `${HF}/${WHISPER_REPO}/resolve/${WHISPER_COMMIT}/turbo-encoder.int8.onnx`, size: 674716297, sha256: 'b02dcdf54f348741e93fe732b67d933c8dcb6735655f710640143081db38878b' },
@@ -102,7 +106,7 @@ export const CATALOG: CatalogModel[] = [
     name: 'SenseVoice',
     summary: 'Very fast and light. A little less accurate.',
     languages: 'English, Japanese, Chinese, Korean and Cantonese',
-    pros: ['Very fast: about 80 times real time, so an 8-hour meeting takes about 6 minutes', 'Light: under 1 GB of memory', 'A 240 MB download'],
+    pros: ['Very fast: about 80 times faster than real time, so an 8-hour meeting takes about 6 minutes', 'Light: under 1 GB of memory', 'A 240 MB download'],
     cons: ['A little less accurate: small slips and less punctuation', 'Five languages only'],
     memory_gb: 1,
     files: [
@@ -130,6 +134,8 @@ const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', langu
 /** Below this much memory the default model leaves little room, and the lighter one is suggested. */
 const LOW_MEMORY_BYTES = 8.5 * 1024 ** 3;
 const STALL_MS = 60_000;
+/** At most this much downloaded data waits in memory for the disk. */
+const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
 const ATTEMPTS = 3;
 
 function httpError(status: number, message: string): Error {
@@ -169,11 +175,18 @@ function notify(now = false): void {
   }, 500);
 }
 
-/** A running download: its progress, how to stop it, and the bytes on disk per file. */
-interface Job { progress: DownloadProgress; abort: AbortController; bytes: Map<string, number> }
-/** The download this dashboard runs, and how the last one of each model ended. */
+/** A running download: its progress, how to stop it, the bytes on disk per file, and the lock it holds. */
+interface Job { progress: DownloadProgress; abort: AbortController; bytes: Map<string, number>; lock: Lock | null }
+interface Lock { file: string; token: string }
+/** The download this dashboard runs (claimed before anything is awaited), and how the last one of each model ended. */
 let active: Job | null = null;
 const lastOutcome = new Map<string, DownloadProgress>();
+
+/** A lock file whose holder never finished writing it (a crash, a full disk) is taken over after this long. */
+const INCOMPLETE_LOCK_MS = 10_000;
+const { O_WRONLY, O_CREAT, O_TRUNC, O_APPEND, O_RDONLY } = fs.constants;
+/** Not on Windows, which has no symbolic links of this kind; the lstat checks cover it there. */
+const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 
 export class TranscriptionModelService {
   constructor(private readonly catalog: CatalogModel[] = CATALOG, private readonly vad: CatalogModel = VAD, private readonly fetchImpl: typeof fetch = fetch) {}
@@ -185,6 +198,21 @@ export class TranscriptionModelService {
     const model = id === this.vad.id ? this.vad : this.catalog.find((m) => m.id === id);
     if (!model) throw httpError(404, `Unknown model: ${id}`);
     return model;
+  }
+
+  /**
+   * A model's folder, made when needed: a real folder directly in the models folder, never a link. The models
+   * folder itself may be a link (to another disk, say); nothing below it may.
+   */
+  private async ownDir(id: string, create: boolean): Promise<string> {
+    const dir = this.modelDir(id);
+    if (create) {
+      await fsp.mkdir(this.dir(), { recursive: true });
+      await fsp.mkdir(dir).catch((err: NodeJS.ErrnoException) => { if (err.code !== 'EEXIST') throw err; });
+    }
+    const st = await fsp.lstat(dir);
+    if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`${dir} is not a plain folder, so nothing is written there.`);
+    return dir;
   }
 
   async readSettings(): Promise<TranscriptionSettings> {
@@ -204,15 +232,16 @@ export class TranscriptionModelService {
     return this.view();
   }
 
-  /** Installed: `installed.json` lists exactly the catalog's files and hashes, and each file is there with its size. */
+  /** Installed: `installed.json` lists exactly the catalog's files and hashes, and each is there as a plain file of its size. */
   async installed(id: string): Promise<boolean> {
     const model = this.find(id);
     try {
-      const record = JSON.parse(await fsp.readFile(path.join(this.modelDir(id), 'installed.json'), 'utf-8')) as { files?: { name: string; sha256: string }[] };
+      const dir = await this.ownDir(id, false);
+      const record = JSON.parse(await fsp.readFile(path.join(dir, 'installed.json'), 'utf-8')) as { files?: { name: string; sha256: string }[] };
       const recorded = new Map((record.files ?? []).map((f) => [f.name, f.sha256]));
       for (const file of model.files) {
         if (recorded.get(file.name) !== file.sha256) return false;
-        const st = await fsp.lstat(path.join(this.modelDir(id), file.name));
+        const st = await fsp.lstat(path.join(dir, file.name));
         if (!st.isFile() || st.size !== file.size) return false;
       }
       return true;
@@ -229,15 +258,22 @@ export class TranscriptionModelService {
   private async partialBytes(model: CatalogModel): Promise<number> {
     let total = 0;
     for (const file of model.files) {
-      const done = await fsp.lstat(path.join(this.modelDir(model.id), file.name)).then((s) => (s.size === file.size ? s.size : 0), () => 0);
-      const part = await fsp.lstat(path.join(this.modelDir(model.id), `${file.name}.part`)).then((s) => s.size, () => 0);
+      const done = await fsp.lstat(path.join(this.modelDir(model.id), file.name)).then((s) => (s.isFile() && s.size === file.size ? s.size : 0), () => 0);
+      const part = await fsp.lstat(path.join(this.modelDir(model.id), `${file.name}.part`)).then((s) => (s.isFile() ? s.size : 0), () => 0);
       total += done || part;
     }
     return total;
   }
 
+  /** Who holds the download lock, when it is another live dashboard. */
+  private async otherHolder(): Promise<boolean> {
+    const holder = await this.readLock();
+    return Boolean(holder && holder.token !== active?.lock?.token && holder.pid !== undefined && processAlive(holder.pid) && holder.pid !== process.pid);
+  }
+
   async view(): Promise<TranscriptionView> {
     const settings = await this.readSettings();
+    const vadInstalled = await this.installed(this.vad.id);
     const models: ModelView[] = [];
     for (const m of this.catalog) {
       const { files, ...rest } = m;
@@ -257,7 +293,9 @@ export class TranscriptionModelService {
       models,
       settings,
       defaults: { ...DEFAULTS },
-      vad_installed: await this.installed(this.vad.id),
+      vad_installed: vadInstalled,
+      vad_size: this.vad.files.reduce((sum, f) => sum + f.size, 0),
+      downloading_elsewhere: !active && await this.otherHolder(),
       models_dir: this.dir(),
       total_memory_gb: Math.round((total / 1024 ** 3) * 10) / 10,
       memory_hint: total < LOW_MEMORY_BYTES && heavy && heavy.memory_gb > 2 && light
@@ -267,28 +305,46 @@ export class TranscriptionModelService {
   }
 
   /**
-   * Starts downloading a model, and the voice-activity model when it is missing. Returns at once; progress
-   * arrives as change events and in the view. One download at a time, across dashboards.
+   * Starts downloading a model, and the voice-activity model when it is missing: only what is not installed yet.
+   * Returns at once; progress arrives as change events and in the view. One download at a time, across dashboards.
    */
   async download(id: string): Promise<TranscriptionView> {
     const model = this.find(id);
     if (model.id === this.vad.id) throw httpError(400, 'The voice-activity model is downloaded with a transcription model');
     if (active) throw httpError(409, active.progress.model === id ? 'This model is already downloading' : `Another model is downloading (${active.progress.model}); wait for it or cancel it first`);
-    if (await this.installed(id) && await this.installed(this.vad.id)) return this.view();
-    await fsp.mkdir(this.dir(), { recursive: true });
-    await this.lock();
-    const parts = [...(await this.installed(this.vad.id) ? [] : [this.vad]), model];
-    const total = parts.reduce((sum, m) => sum + m.files.reduce((s, f) => s + f.size, 0), 0);
-    const job: Job = { progress: { model: id, status: 'downloading', received: 0, total, file: '' }, abort: new AbortController(), bytes: new Map() };
+    // Claimed before the first await, so two requests can never both start.
+    const job: Job = { progress: { model: id, status: 'downloading', received: 0, total: 0, file: '' }, abort: new AbortController(), bytes: new Map(), lock: null };
     active = job;
-    lastOutcome.delete(id);
-    notify(true);
-    void this.run(job, parts).finally(async () => {
-      if (active === job) active = null;
-      await this.unlock();
+    try {
+      const parts: CatalogModel[] = [];
+      for (const m of [this.vad, model]) if (!await this.installed(m.id)) parts.push(m);
+      if (parts.length === 0) {
+        active = null;
+        return this.view();
+      }
+      await fsp.mkdir(this.dir(), { recursive: true });
+      job.lock = await this.lock();
+      job.progress.total = parts.reduce((sum, m) => sum + m.files.reduce((s, f) => s + f.size, 0), 0);
+      lastOutcome.delete(id);
       notify(true);
-    });
+      void this.run(job, parts).finally(() => this.finish(job));
+    } catch (err) {
+      if (active === job) active = null;
+      if (job.lock) await this.unlock(job.lock);
+      throw err;
+    }
     return this.view();
+  }
+
+  private async finish(job: Job): Promise<void> {
+    try {
+      if (job.lock) await this.unlock(job.lock);
+    } catch (err) {
+      console.error(`[transcription] Could not release the download lock: ${(err as Error).message}`);
+    } finally {
+      if (active === job) active = null;
+      notify(true);
+    }
   }
 
   async cancel(id: string): Promise<TranscriptionView> {
@@ -297,12 +353,21 @@ export class TranscriptionModelService {
     return this.view();
   }
 
-  /** Removes a model's files, verified or partial. Not while it downloads. */
+  /** Removes a model's files, verified or partial. Not while any dashboard downloads. */
   async remove(id: string): Promise<TranscriptionView> {
     const model = this.find(id);
     if (model.id === this.vad.id) throw httpError(400, 'The voice-activity model is kept for every transcription model');
-    if (active?.progress.model === id) throw httpError(409, 'Cancel the download first');
-    await fsp.rm(this.modelDir(id), { recursive: true, force: true });
+    if (active) throw httpError(409, active.progress.model === id ? 'Cancel the download first' : 'Wait for the download to finish first');
+    await fsp.mkdir(this.dir(), { recursive: true });
+    const lock = await this.lock('Another dashboard is downloading a model; wait for it to finish first');
+    try {
+      const st = await fsp.lstat(this.modelDir(id)).catch(() => null);
+      // A link is removed as a link: its target is never touched.
+      if (st?.isSymbolicLink()) await fsp.unlink(this.modelDir(id));
+      else if (st) await fsp.rm(this.modelDir(id), { recursive: true, force: true });
+    } finally {
+      await this.unlock(lock);
+    }
     lastOutcome.delete(id);
     notify(true);
     return this.view();
@@ -311,14 +376,11 @@ export class TranscriptionModelService {
   private async run(job: Job, parts: CatalogModel[]): Promise<void> {
     try {
       for (const model of parts) {
-        if (await this.installed(model.id)) continue;
-        const dir = this.modelDir(model.id);
-        await fsp.mkdir(dir, { recursive: true });
+        const dir = await this.ownDir(model.id, true);
         // A new install starts without the record, so a half-replaced model never counts as installed.
         await fsp.rm(path.join(dir, 'installed.json'), { force: true });
         for (const file of model.files) await this.fetchFile(job, dir, file);
-        job.progress = { ...job.progress, status: 'verifying', file: '' };
-        notify();
+        this.check(job);
         await atomicWrite(path.join(dir, 'installed.json'), JSON.stringify({ id: model.id, files: model.files.map((f) => ({ name: f.name, sha256: f.sha256 })), installed_at: new Date().toISOString() }, null, 2));
       }
       lastOutcome.delete(job.progress.model);
@@ -334,40 +396,55 @@ export class TranscriptionModelService {
     }
   }
 
+  private check(job: Job): void {
+    if (job.abort.signal.aborted) throw new Error('Cancelled.');
+  }
+
   /** Downloads one file into place: resumed from `<file>.part`, checked by size and SHA-256, then renamed. */
   private async fetchFile(job: Job, dir: string, file: ModelFile): Promise<void> {
     const target = path.join(dir, file.name);
-    const done = await fsp.lstat(target).catch(() => null);
-    if (done?.isFile() && done.size === file.size && await hashFile(target) === file.sha256) {
-      this.setBytes(job, file.name, file.size);
-      return;
-    }
     const part = `${target}.part`;
+    const done = await fsp.lstat(target).catch(() => null);
+    if (done && !done.isFile()) throw new Error(`${file.name} is not a plain file in the models folder, so nothing is written there.`);
+    if (done?.size === file.size) {
+      this.setBytes(job, file.name, file.size, 'verifying');
+      if (await hashFile(target, job.abort.signal) === file.sha256) return;
+    }
     let lastError: Error | null = null;
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-      if (job.abort.signal.aborted) throw new Error('Cancelled.');
+      this.check(job);
       try {
         await this.fetchInto(job, file, part);
+        this.setBytes(job, file.name, file.size, 'verifying');
         const got = await fsp.lstat(part);
-        if (got.size !== file.size) throw new Error(`${file.name} has ${got.size} bytes instead of ${file.size}.`);
-        if (await hashFile(part) !== file.sha256) {
+        if (!got.isFile() || got.size !== file.size) throw new Error(`${file.name} has ${got.size} bytes instead of ${file.size}.`);
+        if (await hashFile(part, job.abort.signal) !== file.sha256) {
           await fsp.rm(part, { force: true });
           throw new Error(`${file.name} does not match its checksum, so it was removed.`);
         }
+        this.check(job);
+        const now = await fsp.lstat(target).catch(() => null);
+        if (now && !now.isFile()) throw new Error(`${file.name} is not a plain file in the models folder, so nothing is written there.`);
         await fsp.rename(part, target);
         return;
       } catch (err) {
         lastError = err as Error;
-        if (job.abort.signal.aborted || /checksum/.test(lastError.message)) throw lastError;
+        if (job.abort.signal.aborted || /checksum|plain file|not a plain/.test(lastError.message)) throw lastError;
         await new Promise((r) => setTimeout(r, 1000 * attempt));
       }
     }
     throw lastError ?? new Error(`${file.name} could not be downloaded.`);
   }
 
-  /** Appends the rest of a file to `part`, from where it stopped. A server that ignores the range starts it over. */
+  /**
+   * Writes the rest of a file to `part`, from where it stopped. The part is opened without following links and
+   * must be a plain file with one name; a server that ignores the range starts it over. Every write error, a full
+   * disk included, ends the attempt cleanly.
+   */
   private async fetchInto(job: Job, file: ModelFile, part: string): Promise<void> {
-    let have = await fsp.lstat(part).then((s) => s.size, () => 0);
+    const existing = await fsp.lstat(part).catch(() => null);
+    if (existing && (!existing.isFile() || existing.nlink !== 1)) throw new Error(`${path.basename(part)} is not a plain file in the models folder, so nothing is written there.`);
+    let have = existing?.size ?? 0;
     if (have > file.size) {
       await fsp.rm(part, { force: true });
       have = 0;
@@ -379,39 +456,102 @@ export class TranscriptionModelService {
     const signal = AbortSignal.any([job.abort.signal, stall.signal]);
     try {
       const res = await this.fetchImpl(file.url, { headers: have ? { Range: `bytes=${have}-` } : {}, redirect: 'follow', signal });
+      const refuse = async (message: string) => { await res.body?.cancel().catch(() => {}); return new Error(message); };
       if (res.status === 416) {
         // The part is not a prefix the server recognizes: start over.
         await fsp.rm(part, { force: true });
-        throw new Error(`${file.name}: the download could not be continued and starts over.`);
+        throw await refuse(`${file.name}: the download could not be continued and starts over.`);
       }
       let append = false;
       if (res.status === 206) {
         const range = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(res.headers.get('content-range') ?? '');
-        if (!range || Number(range[1]) !== have) throw new Error(`${file.name}: the server sent a different part of the file.`);
+        const valid = range && Number(range[1]) === have && Number(range[2]) === file.size - 1 && (range[3] === '*' || Number(range[3]) === file.size);
+        if (!valid) throw await refuse(`${file.name}: the server sent a different part of the file.`);
         append = true;
       } else if (res.status !== 200) {
-        throw new Error(`${file.name}: the download failed (HTTP ${res.status}).`);
+        throw await refuse(`${file.name}: the download failed (HTTP ${res.status}).`);
       }
       if (!res.body) throw new Error(`${file.name}: the server sent no data.`);
-      if (!append) this.setBytes(job, file.name, 0);
-      const out = fs.createWriteStream(part, { flags: append ? 'a' : 'w', mode: 0o600 });
-      const done = new Promise<void>((resolve, reject) => { out.on('finish', resolve); out.on('error', reject); });
-      let written = append ? have : 0;
-      try {
-        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-          clearTimeout(timer);
-          timer = setTimeout(() => stall.abort(), STALL_MS);
-          written += chunk.length;
-          if (written > file.size) throw new Error(`${file.name} is larger than expected.`);
-          if (!out.write(chunk)) await new Promise<void>((r) => out.once('drain', () => r()));
-          this.setBytes(job, file.name, written);
+      // The network is read eagerly, from the moment the answer arrives, into a queue that a writer drains: a stream
+      // that fails throws away what it still holds, so everything that arrived reaches the disk before the error, and
+      // the next attempt continues there.
+      const queue: Uint8Array[] = [];
+      let queued = 0;
+      let readError: unknown = null;
+      let ended = false;
+      let wake: (() => void) | null = null;
+      const signalWriter = () => { const w = wake; wake = null; w?.(); };
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      const reading = (async () => {
+        try {
+          for (;;) {
+            while (queued > MAX_QUEUED_BYTES) await new Promise((r) => setTimeout(r, 10));
+            const { value, done } = await reader.read();
+            if (done) break;
+            clearTimeout(timer);
+            timer = setTimeout(() => stall.abort(), STALL_MS);
+            queue.push(value);
+            queued += value.length;
+            signalWriter();
+          }
+        } catch (err) {
+          readError = err;
+        } finally {
+          ended = true;
+          signalWriter();
         }
+      })();
+      const handle = await fsp.open(part, O_WRONLY | O_CREAT | O_NOFOLLOW | (append ? O_APPEND : O_TRUNC), 0o600).catch(async (err: unknown) => {
+        await reader.cancel().catch(() => {});
+        await reading;
+        throw err;
+      });
+      // Once the stream exists it owns the handle and closes it; before that, the handle is closed here.
+      let stream: fs.WriteStream | null = null;
+      try {
+        const st = await handle.stat();
+        if (!st.isFile() || st.nlink !== 1) throw new Error(`${path.basename(part)} is not a plain file in the models folder, so nothing is written there.`);
+        let written = append ? have : 0;
+        this.setBytes(job, file.name, written);
+        const out = handle.createWriteStream();
+        stream = out;
+        let writeError: Error | null = null;
+        out.on('error', (err) => { writeError = err; });
+        try {
+          for (;;) {
+            const chunk = queue.shift();
+            if (!chunk) {
+              if (ended) break;
+              await new Promise<void>((r) => { wake = r; });
+              continue;
+            }
+            queued -= chunk.length;
+            written += chunk.length;
+            if (written > file.size) throw new Error(`${file.name} is larger than expected.`);
+            if (writeError) throw writeError;
+            await new Promise<void>((resolve, reject) => out.write(chunk, (err) => (err ? reject(err) : resolve())));
+            this.setBytes(job, file.name, written);
+          }
+        } finally {
+          if (!ended) await reader.cancel().catch(() => {});
+          await reading;
+        }
+        if (readError) throw readError;
+        if (writeError) throw writeError;
       } finally {
-        out.end();
-        await done;
+        if (!ended) await reader.cancel().catch(() => {});
+        await reading;
+        if (!stream) await handle.close().catch(() => {});
+        else {
+          stream.end();
+          await finished(stream).catch(() => {});
+        }
       }
     } catch (err) {
       if (stall.signal.aborted && !job.abort.signal.aborted) throw new Error(`${file.name}: no data for a minute, so the download stopped.`, { cause: err });
+      if (job.abort.signal.aborted) throw new Error('Cancelled.', { cause: err });
+      if ((err as NodeJS.ErrnoException).code === 'ELOOP') throw new Error(`${path.basename(part)} is not a plain file in the models folder, so nothing is written there.`, { cause: err });
+      if ((err as NodeJS.ErrnoException).code === 'ENOSPC') throw new Error(`The disk is full while writing ${file.name}.`, { cause: err });
       throw err;
     } finally {
       clearTimeout(timer);
@@ -419,36 +559,71 @@ export class TranscriptionModelService {
   }
 
   /** Records how much of one file is on disk, and the job's total progress from that. */
-  private setBytes(job: Job, name: string, bytes: number): void {
+  private setBytes(job: Job, name: string, bytes: number, status: DownloadProgress['status'] = 'downloading'): void {
     job.bytes.set(name, bytes);
     let received = 0;
     for (const n of job.bytes.values()) received += n;
-    job.progress = { ...job.progress, status: 'downloading', received, file: name };
+    job.progress = { ...job.progress, status, received, file: name };
     notify();
   }
 
   private lockFile(): string { return path.join(this.dir(), 'download.lock'); }
 
-  /** One download across every dashboard using this folder; a lock left by a process that is gone is taken over. */
-  private async lock(): Promise<void> {
+  private async readLock(): Promise<{ pid?: number; token?: string; incomplete: boolean; mtime: number } | null> {
+    let raw: string;
+    let mtime: number;
+    try {
+      [raw, mtime] = await Promise.all([fsp.readFile(this.lockFile(), 'utf-8'), fsp.lstat(this.lockFile()).then((s) => s.mtimeMs)]);
+    } catch {
+      return null;
+    }
+    try {
+      const o = JSON.parse(raw) as { pid?: unknown; token?: unknown };
+      if (typeof o.pid === 'number' && typeof o.token === 'string') return { pid: o.pid, token: o.token, incomplete: false, mtime };
+    } catch { /* an unfinished or damaged lock */ }
+    return { incomplete: true, mtime };
+  }
+
+  /**
+   * Takes the download lock: one download or removal at a time across every dashboard using this folder. The lock
+   * names its holder and a token, so only the holder releases it. A lock whose holder is gone, or that was never
+   * finished, is taken over by moving it aside first: of two dashboards taking over at once, only one move succeeds.
+   */
+  private async lock(busy = 'Another dashboard is downloading a model; wait for it to finish'): Promise<Lock> {
     const file = this.lockFile();
-    for (let attempt = 0; attempt < 2; attempt++) {
+    const token = `${process.pid}-${randomUUID()}`;
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        await fsp.writeFile(file, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }), { flag: 'wx' });
-        return;
+        const handle = await fsp.open(file, 'wx', 0o600);
+        try { await handle.writeFile(JSON.stringify({ pid: process.pid, token, at: new Date().toISOString() })); } finally { await handle.close(); }
+        return { file, token };
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-        const holder = await fsp.readFile(file, 'utf-8').then((t) => JSON.parse(t) as { pid?: number }, () => ({} as { pid?: number }));
-        if (holder.pid && holder.pid !== process.pid && processAlive(holder.pid)) throw httpError(409, 'Another dashboard is downloading a model; wait for it to finish');
-        await fsp.rm(file, { force: true });
       }
+      const holder = await this.readLock();
+      if (!holder) continue;
+      const stale = holder.incomplete ? Date.now() - holder.mtime > INCOMPLETE_LOCK_MS
+        : !processAlive(holder.pid) || (holder.pid === process.pid && holder.token !== active?.lock?.token);
+      if (!stale) throw httpError(409, holder.incomplete ? 'Another dashboard is starting a download; try again in a moment' : busy);
+      const aside = `${file}.stale-${token}`;
+      try { await fsp.rename(file, aside); } catch { continue; }
+      // Moved aside: if it was not the stale lock seen above (another dashboard took over in between), put it back.
+      const moved = await fsp.readFile(aside, 'utf-8').catch(() => '');
+      const same = holder.incomplete ? !/"token"/.test(moved) : moved.includes(`"${holder.token}"`);
+      if (!same) {
+        await fsp.link(aside, file).catch(() => {});
+        await fsp.rm(aside, { force: true });
+        throw httpError(409, busy);
+      }
+      await fsp.rm(aside, { force: true });
     }
     throw httpError(409, 'The download lock could not be taken; try again');
   }
 
-  private async unlock(): Promise<void> {
-    const holder = await fsp.readFile(this.lockFile(), 'utf-8').then((t) => JSON.parse(t) as { pid?: number }, () => null);
-    if (holder?.pid === process.pid) await fsp.rm(this.lockFile(), { force: true });
+  /** Releases the lock only when it is still ours. */
+  private async unlock(lock: Lock): Promise<void> {
+    const holder = await this.readLock();
+    if (holder?.token === lock.token) await fsp.rm(lock.file, { force: true });
   }
 
   /** For tests: waits until no download runs in this process. */
@@ -458,8 +633,17 @@ export class TranscriptionModelService {
   }
 }
 
-async function hashFile(file: string): Promise<string> {
+/** The SHA-256 of a plain file, read without following links; stops when the download is cancelled. */
+async function hashFile(file: string, signal?: AbortSignal): Promise<string> {
   const hash: Hash = createHash('sha256');
-  for await (const chunk of fs.createReadStream(file)) hash.update(chunk as Buffer);
+  const handle = await fsp.open(file, O_RDONLY | O_NOFOLLOW);
+  try {
+    for await (const chunk of handle.createReadStream({ autoClose: false })) {
+      if (signal?.aborted) throw new Error('Cancelled.');
+      hash.update(chunk as Buffer);
+    }
+  } finally {
+    await handle.close().catch(() => {});
+  }
   return hash.digest('hex');
 }

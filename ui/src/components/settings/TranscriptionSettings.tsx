@@ -19,10 +19,13 @@ function size(bytes: number): string {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
 }
 
-function ModelCard({ model, chosen, busy, onChoose, onAction }: {
+function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onAction }: {
   model: TranscriptionModel;
   chosen: boolean;
   busy: boolean;
+  /** The model is here but the voice-activity model every transcription needs is not. */
+  vadMissing: boolean;
+  vadSize: number;
   onChoose: () => void;
   onAction: (action: 'download' | 'cancel' | 'delete') => void;
 }) {
@@ -72,7 +75,10 @@ function ModelCard({ model, chosen, busy, onChoose, onAction }: {
         {running
           ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
           : model.installed
-            ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAction('delete')}>Delete</Button>
+            ? <>
+              {vadMissing && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAction('delete')}>Delete</Button>
+            </>
             : <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>
               {model.partial > 0 ? `Continue download (${size(model.partial)} of ${size(model.size)})` : `Download (${size(model.size)})`}
             </Button>}
@@ -90,11 +96,18 @@ export default function TranscriptionSettings() {
   const { data, error, refetch } = useApi<Transcription>('/api/transcription', [dataVersions.transcription]);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
+  // A download in another dashboard sends its notices there: look again every few seconds until it ends.
+  const elsewhere = data?.downloading_elsewhere ?? false;
+  React.useEffect(() => {
+    if (!elsewhere) return;
+    const timer = setInterval(refetch, 5000);
+    return () => clearInterval(timer);
+  }, [elsewhere, refetch]);
 
   if (error) return <p role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</p>;
   if (!data) return null;
 
-  const downloading = data.models.some((m) => m.download?.status === 'downloading' || m.download?.status === 'verifying');
+  const downloading = data.downloading_elsewhere || data.models.some((m) => m.download?.status === 'downloading' || m.download?.status === 'verifying');
   const save = async (patch: Partial<Transcription['settings']>) => {
     setSaving(true);
     setNotice(null);
@@ -117,16 +130,22 @@ export default function TranscriptionSettings() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-        Meeting recordings are transcribed on this computer, offline: nothing is sent anywhere. Choose a model and download it
-        once. <strong>{data.defaults.model === data.settings.model ? 'The default, ' : ''}{chosen?.name ?? 'The chosen model'}</strong>
+        Meeting recordings will be transcribed on this computer, offline: nothing is sent anywhere. Choose a model and download
+        it once. <strong>{data.defaults.model === data.settings.model ? 'The default, ' : ''}{chosen?.name ?? 'The chosen model'}</strong>
         {chosen && chosen.memory_gb > 2 ? ' is the most accurate but takes longer; ' : ' '}you can change it here at any time.
       </p>
+      {data.downloading_elsewhere && (
+        <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+          Another dashboard on this computer is downloading a model; its progress shows there.
+        </p>
+      )}
       {data.memory_hint && (
         <p role="note" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-warning)' }}>{data.memory_hint}</p>
       )}
       <div role="radiogroup" aria-label="Transcription model" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {data.models.map((m) => (
           <ModelCard key={m.id} model={m} chosen={m.id === data.settings.model} busy={saving || (downloading && m.download === null)}
+            vadMissing={!data.vad_installed} vadSize={data.vad_size}
             onChoose={() => void save({ model: m.id })} onAction={(a) => void act(m, a)} />
         ))}
       </div>

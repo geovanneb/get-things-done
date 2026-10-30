@@ -743,6 +743,9 @@ export interface Transcription {
   settings: TranscriptionSettings;
   defaults: TranscriptionSettings;
   vad_installed: boolean;
+  vad_size: number;
+  /** Another dashboard on this computer is downloading; its progress shows there. */
+  downloading_elsewhere: boolean;
   models_dir: string;
   total_memory_gb: number;
   memory_hint: string | null;

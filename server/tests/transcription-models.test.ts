@@ -181,9 +181,9 @@ test('cancel keeps what was downloaded; one download at a time, also across dash
   assert.ok(view.partial > 0, 'the part is kept');
 
   // Another dashboard holds the lock: refused. A lock left by a process that is gone is taken over.
-  await fsp.writeFile(path.join(dir, 'download.lock'), JSON.stringify({ pid: process.ppid }));
+  await fsp.writeFile(path.join(dir, 'download.lock'), JSON.stringify({ pid: process.ppid, token: 'other' }));
   await assert.rejects(service.download('fictional-model'), /Another dashboard is downloading/);
-  await fsp.writeFile(path.join(dir, 'download.lock'), JSON.stringify({ pid: 2 ** 22 + 12345 }));
+  await fsp.writeFile(path.join(dir, 'download.lock'), JSON.stringify({ pid: 2 ** 22 + 12345, token: 'gone' }));
   await service.download('fictional-model');
   await TranscriptionModelService.settled();
   assert.equal(await service.installed('fictional-model'), true);
@@ -198,4 +198,104 @@ test('settings are saved outside the workspace and only known values are accepte
   assert.match(await fsp.readFile(path.join(dir, 'settings.json'), 'utf-8'), /sensevoice-2024-07-17/);
   await assert.rejects(service.updateSettings({ language: 'de' }), /Invalid language/);
   assert.equal(view.models.find((m) => m.id === 'whisper-large-v3-turbo')!.size, 674716297 + 361080764 + 816730);
+});
+
+test('safety: write errors end cleanly, links are never followed, and two starts or a stale lock cannot run twice', async (t) => {
+  const dir = await modelsFolder(t);
+  const { base, requests } = await fileServer(t, files);
+  const service = new TranscriptionModelService(catalog(base).models, catalog(base).vad);
+  const outcome = async () => (await service.view()).models[0]!.download;
+
+  // A folder where the part should be: the download fails with a reason, the server keeps running, the lock is released.
+  await fsp.mkdir(path.join(dir, 'fictional-model', 'encoder.onnx.part'), { recursive: true });
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  assert.equal((await outcome())?.status, 'failed');
+  assert.match((await outcome())!.message!, /not a plain file/);
+  await assert.rejects(fsp.access(path.join(dir, 'download.lock')));
+  await fsp.rm(path.join(dir, 'fictional-model', 'encoder.onnx.part'), { recursive: true });
+
+  // A part that is a link to a file elsewhere: refused, and the file elsewhere is untouched.
+  const elsewhere = path.join(await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-elsewhere-')), 'keep.txt');
+  t.after(() => fsp.rm(path.dirname(elsewhere), { recursive: true, force: true }));
+  await fsp.writeFile(elsewhere, 'sentinel');
+  await fsp.symlink(elsewhere, path.join(dir, 'fictional-model', 'encoder.onnx.part'));
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  assert.match((await outcome())!.message!, /not a plain file/);
+  assert.equal(await fsp.readFile(elsewhere, 'utf-8'), 'sentinel');
+  await fsp.unlink(path.join(dir, 'fictional-model', 'encoder.onnx.part'));
+
+  // A model folder that is a link: nothing is written through it, and removing it removes only the link.
+  await fsp.rm(path.join(dir, 'fictional-model'), { recursive: true, force: true });
+  await fsp.symlink(path.dirname(elsewhere), path.join(dir, 'fictional-model'));
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  assert.match((await outcome())!.message!, /not a plain folder/);
+  await service.remove('fictional-model');
+  assert.equal(await fsp.readFile(elsewhere, 'utf-8'), 'sentinel');
+
+  // Two starts at once: one runs, the other is refused.
+  const both = await Promise.allSettled([service.download('fictional-model'), service.download('fictional-model')]);
+  assert.deepEqual(both.map((r) => r.status).sort(), ['fulfilled', 'rejected']);
+  await TranscriptionModelService.settled();
+  assert.equal(await service.installed('fictional-model'), true);
+  assert.equal(requests.filter((r) => r.path === 'encoder.onnx').length, 1, 'fetched once');
+});
+
+test('locks: an unfinished lock is taken over once old, another dashboard blocks downloads and removal', async (t) => {
+  const dir = await modelsFolder(t);
+  const { base } = await fileServer(t, files);
+  const service = new TranscriptionModelService(catalog(base).models, catalog(base).vad);
+  const lock = path.join(dir, 'download.lock');
+
+  await fsp.writeFile(lock, '');
+  await assert.rejects(service.download('fictional-model'), /starting a download/, 'a fresh, unfinished lock: someone is writing it');
+  const old = new Date(Date.now() - 60_000);
+  await fsp.utimes(lock, old, old);
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  assert.equal(await service.installed('fictional-model'), true, 'an old, unfinished lock is taken over');
+
+  await fsp.writeFile(lock, JSON.stringify({ pid: process.ppid, token: 'other' }));
+  assert.equal((await service.view()).downloading_elsewhere, true);
+  await assert.rejects(service.remove('fictional-model'), /Another dashboard is downloading/);
+  assert.equal(await service.installed('fictional-model'), true, 'nothing removed');
+  assert.equal(await fsp.readFile(lock, 'utf-8'), JSON.stringify({ pid: process.ppid, token: 'other' }), 'the other lock is left alone');
+});
+
+test('a missing voice-activity model is downloaded alone, with progress counting only what is fetched', async (t) => {
+  const dir = await modelsFolder(t);
+  const { base, requests } = await fileServer(t, files);
+  const service = new TranscriptionModelService(catalog(base).models, catalog(base).vad);
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  await fsp.rm(path.join(dir, 'silero-vad'), { recursive: true });
+  assert.equal((await service.view()).vad_installed, false);
+  const before = requests.length;
+  const started = await service.download('fictional-model');
+  assert.equal(started.models[0]!.download?.total, vadBytes.length, 'only the missing file counts');
+  await TranscriptionModelService.settled();
+  assert.deepEqual(requests.slice(before).map((r) => r.path), ['vad.onnx']);
+  assert.equal((await service.view()).vad_installed, true);
+});
+
+test('a range answer for a different part of the file is refused', async (t) => {
+  const dir = await modelsFolder(t);
+  const server = http.createServer((req, res) => {
+    const data = (files as Record<string, Buffer>)[(req.url ?? '/').slice(1)]!;
+    if (req.headers.range) { res.writeHead(206, { 'Content-Range': `bytes 100000-100009/${data.length}` }); res.end(data.subarray(100000, 100010)); return; }
+    res.writeHead(200).end(data);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise<void>((r) => server.close(() => r())));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  await fsp.mkdir(path.join(dir, 'fictional-model'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'fictional-model', 'encoder.onnx.part'), encoder.subarray(0, 100000));
+  const service = new TranscriptionModelService(catalog(base).models, catalog(base).vad);
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  const d = (await service.view()).models[0]!.download;
+  assert.equal(d?.status, 'failed');
+  assert.match(d!.message!, /different part of the file/);
 });
