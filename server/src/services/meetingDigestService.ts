@@ -600,11 +600,12 @@ export class MeetingDigestService {
    * With automatic analysis on, starts the analysis of the open digest while it is ready and has never had a run.
    * Another run going (the runner does one at a time) means trying again on the next check; any other refusal (not
    * installed, not signed in, folder not trusted) is reported once and not retried, and a digest that had a run,
-   * even a failed one, is never started again by itself: the user starts it from the digest's page.
+   * even a failed one, is never started again by itself: the user starts it from the digest's page. A paused job
+   * starts nothing on its own; "Make digest now" is the user's own click, so its digest is analyzed even then.
    */
   private async analyzeIfWanted(now: Date, manual: boolean): Promise<DigestRunResult | null> {
     const settings = await this.readSettings().catch(() => null);
-    if (!settings?.auto_analyze) return null;
+    if (!settings?.auto_analyze || (!settings.enabled && !manual)) return null;
     if (await this.readBatch().catch(() => true)) return null; // a digest is still being handed over, or the batch is damaged
     const updates = await contextUpdateService.list().catch(() => []);
     const open = updates.find((u) => u.origin === DIGEST_ORIGIN && u.kind === DIGEST_KIND && u.status !== 'done');

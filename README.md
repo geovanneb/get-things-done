@@ -763,7 +763,9 @@ settings.
   are ready the next morning. If another run is going, it starts after it. If it cannot
   start (Claude Code not installed, not signed in, or the folder not trusted), the card
   says why and nothing is retried by itself; a digest that already had a run is never
-  started again automatically. Nothing changes in your context until you approve.
+  started again automatically. While the routine is paused nothing starts on its own;
+  **Make digest now** with automatic analysis on still analyzes the digest it makes.
+  Nothing changes in your context until you approve.
 - Each meeting keeps its own date, and the digest records which queued meeting each
   file came from. A meeting whose file changed since it was queued stays in the queue,
   with the reason.

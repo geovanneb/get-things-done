@@ -406,6 +406,20 @@ test('automatic analysis: off by default; when on, each new digest is started on
   assert.deepEqual(fake.started, [first, second, third]);
   await close(third);
 
+  // Paused while waiting for another run: nothing starts on its own, not even from a new service after a restart.
+  await queueMeeting(service, 'Standup', '2026-10-29', [['p.md', Buffer.from('P')]]);
+  fake.set('busy');
+  const paused = (await service.runNow(new Date('2026-10-29T09:00:00'))).context_update!;
+  await service.update({ enabled: false });
+  fake.set('start');
+  const restarted = new MeetingDigestService(fake.runner);
+  assert.ok(quiet(await restarted.runIfDue(new Date('2026-10-29T09:01:00'))));
+  assert.ok(!fake.started.includes(paused), 'paused: no run');
+  await restarted.update({ enabled: true });
+  await restarted.runIfDue(new Date('2026-10-29T09:02:00'));
+  assert.ok(fake.started.includes(paused), 'resumed: it starts');
+  await close(paused);
+
   // A digest that already had a run, started by hand, is left alone.
   await queueMeeting(service, 'Retro', '2026-10-29', [['d.md', Buffer.from('D')]]);
   fake.set('busy');
