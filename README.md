@@ -758,6 +758,11 @@ settings.
   so long days are spread over several digests, and a meeting longer than that on its
   own gets a digest of its own. The agent reads one meeting at a time, long transcripts
   in parts.
+- **Right after each meeting** (off by default): next to the schedule, a digest is made
+  within a minute of a meeting being queued, any day and time, when no digest waits for
+  review. Meetings queued while one waits go into the next digest as soon as it is done.
+  A digest that cannot be made (a queued file changed) is tried again only once the
+  queue changes.
 - **Automatic analysis** (off by default): as soon as a digest is made, the dashboard
   runs the analysis with your installed Claude Code on your own plan, so the proposals
   are ready the next morning. If another run is going, it starts after it. If it cannot

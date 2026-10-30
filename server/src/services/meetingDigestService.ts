@@ -69,6 +69,8 @@ export interface DigestSettings {
   max_characters: number;
   /** Start the analysis of each new digest with the dashboard runner (the user's installed Claude Code). Off by default. */
   auto_analyze: boolean;
+  /** Also make a digest as soon as a meeting is queued and no digest waits for review, next to the schedule. Off by default. */
+  after_each_meeting: boolean;
   updated_at: string | null;
 }
 
@@ -79,6 +81,8 @@ export interface DigestState {
   last_status?: 'ok' | 'error';
   last_message?: string;
   last_context_update?: string;
+  /** The queue as it was when a digest right after a meeting could not be made: not tried again until the queue changes. */
+  after_meeting_skip?: string;
   /** The automatic analysis of the open digest: started, waiting for another run to end, or not started (and why). */
   analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started'; message: string; at: string };
 }
@@ -163,6 +167,7 @@ export function defaultSettings(): DigestSettings {
     max_meetings: 10,
     max_characters: MAX_CHARACTERS_DEFAULT,
     auto_analyze: false,
+    after_each_meeting: false,
     updated_at: null,
   };
 }
@@ -179,6 +184,7 @@ export function parseSettings(input: unknown, base: DigestSettings = defaultSett
   }
   if (o['enabled'] !== undefined && typeof o['enabled'] !== 'boolean') throw httpError(400, 'Invalid enabled');
   if (o['auto_analyze'] !== undefined && typeof o['auto_analyze'] !== 'boolean') throw httpError(400, 'Invalid auto_analyze');
+  if (o['after_each_meeting'] !== undefined && typeof o['after_each_meeting'] !== 'boolean') throw httpError(400, 'Invalid after_each_meeting');
   let max = base.max_meetings;
   if (o['max_meetings'] !== undefined) {
     const n = typeof o['max_meetings'] === 'string' && o['max_meetings'].trim() ? Number(o['max_meetings']) : o['max_meetings'];
@@ -202,6 +208,7 @@ export function parseSettings(input: unknown, base: DigestSettings = defaultSett
     max_meetings: max,
     max_characters: chars,
     auto_analyze: o['auto_analyze'] === undefined ? base.auto_analyze : o['auto_analyze'] as boolean,
+    after_each_meeting: o['after_each_meeting'] === undefined ? base.after_each_meeting : o['after_each_meeting'] as boolean,
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
 }
@@ -580,11 +587,31 @@ export class MeetingDigestService {
       await this.writeJson('meeting-digest-state.json', { ...state, disabled: false, checked_at: now.toISOString() });
       return recovered;
     }
-    if (occurrencesBetween(settings.schedule, new Date(checked), now).length === 0) return recovered;
+    const scheduled = occurrencesBetween(settings.schedule, new Date(checked), now).length > 0;
+    // Right after a meeting: whenever no digest waits for review and meetings are queued, on every check. So a
+    // meeting gets its digest within a minute of being queued, and meetings that queued up while a digest was open
+    // go into the next one as soon as it is done, also after a restart.
+    const queue = !scheduled && settings.after_each_meeting ? await this.waitingQueue() : null;
+    if (!scheduled && (!queue || queue === state.after_meeting_skip)) return recovered;
     const result = await this.make(settings, now);
     // Advanced even after an error: retrying every minute would repeat the same failure. "Make digest now" retries.
-    await this.writeJson('meeting-digest-state.json', { ...state, checked_at: now.toISOString(), ...this.stateFor(result, now) });
+    // A digest right after a meeting that could not be made is tried again only once the queue changes.
+    const next: DigestState = { ...state, checked_at: now.toISOString(), ...this.stateFor(result, now) };
+    if (queue && result.status === 'error' && !result.context_update) next.after_meeting_skip = queue;
+    else delete next.after_meeting_skip;
+    await this.writeJson('meeting-digest-state.json', next);
     return combine(recovered, result);
+  }
+
+  /**
+   * The queued meetings, as one string that changes whenever the queue does, when a digest right after a meeting
+   * can be made: no digest is open and at least one meeting is queued. Null otherwise.
+   */
+  private async waitingQueue(): Promise<string | null> {
+    if (await this.openDigest()) return null;
+    const { meetings } = await this.readQueue();
+    const queued = meetings.filter((m) => m.status === 'queued' && !m.held);
+    return queued.length ? queued.map((m) => `${m.id}@${m.queued_at ?? ''}:${m.files.map((f) => f.sha256).join(',')}`).join('|') : null;
   }
 
   /** Makes a digest straight away, whatever the schedule says. The caller holds the routine lock. */
