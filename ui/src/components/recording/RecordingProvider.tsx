@@ -3,7 +3,7 @@ import { apiPost } from '@/utils/api';
 import { microphoneAccess, reportRecording } from '@/utils/desktop';
 import { mixSources } from '@/utils/recordingMix';
 import { BYTES_PER_SECOND, RecordingUploader, type SendResult } from '@/utils/recordingUpload';
-import type { QueuedMeeting } from '@/types';
+import type { MeetingParticipant, QueuedMeeting } from '@/types';
 
 /**
  * The recorder, above the routes, so moving around the dashboard never stops it. The microphone goes to an AudioWorklet
@@ -11,7 +11,7 @@ import type { QueuedMeeting } from '@/types';
  * saved, because only saved audio survives a crash of the page; a gap in the capture is shown, never hidden.
  */
 
-export interface RecordingOptions { title: string; date: string; deviceId: string; voiceCleanup: boolean; systemAudio: boolean }
+export interface RecordingOptions { title: string; date: string; participants: MeetingParticipant[]; deviceId: string; voiceCleanup: boolean; systemAudio: boolean }
 
 export type RecorderStatus = 'idle' | 'starting' | 'recording' | 'saving' | 'failed';
 
@@ -143,7 +143,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     reportRecording(false);
   }, []);
 
-  const start = useCallback(async ({ title, date, deviceId, voiceCleanup, systemAudio }: RecordingOptions) => {
+  const start = useCallback(async ({ title, date, participants, deviceId, voiceCleanup, systemAudio }: RecordingOptions) => {
     if (phase.current !== 'idle') return;
     phase.current = 'starting';
     reportRecording(true);
@@ -179,7 +179,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       silent.connect(context.destination);
 
       // The meeting comes last, so a blocked microphone leaves nothing behind.
-      const meeting = await apiPost<QueuedMeeting>('/api/meeting-queue', { title, meeting_date: date });
+      const meeting = await apiPost<QueuedMeeting>('/api/meeting-queue', { title, meeting_date: date, participants });
       created = meeting.id;
       const token = crypto.randomUUID();
       const opened = await apiPost<{ generation: string; offset: number }>(`/api/meeting-queue/${meeting.id}/recording`, { token });

@@ -3,7 +3,8 @@ import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
 import Input, { Textarea } from '@/components/common/Input';
 import { apiPost } from '@/utils/api';
-import type { ContextUpdate, QueuedMeeting } from '@/types';
+import { ParticipantsField } from '@/components/meetings/ParticipantsField';
+import type { ContextUpdate, MeetingParticipant, QueuedMeeting } from '@/types';
 import { HelpBox, formatBytes, hardToRead } from './shared';
 
 const MAX_FILE = 50 * 1024 * 1024;
@@ -91,6 +92,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
   const [mode, setMode] = useState<'update' | 'meeting'>('update');
   const [title, setTitle] = useState('');
   const [sourceDate, setSourceDate] = useState(today);
+  const [participants, setParticipants] = useState<MeetingParticipant[]>([]);
   const [notes, setNotes] = useState('');
   const [text, setText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -99,7 +101,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
 
   useEffect(() => {
     if (!isOpen) return;
-    setMode('update'); setTitle(''); setSourceDate(today()); setNotes(''); setText(''); setFiles([]); setSaving(null); setError(null);
+    setMode('update'); setTitle(''); setSourceDate(today()); setParticipants([]); setNotes(''); setText(''); setFiles([]); setSaving(null); setError(null);
   }, [isOpen]);
 
   const addFiles = (incoming: File[]) => {
@@ -117,6 +119,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
       const meeting = await apiPost<QueuedMeeting>('/api/meeting-queue', {
         title: title.trim() || (files[0] ? files[0].name.replace(/\.[^.]+$/, '') : 'Meeting'),
         meeting_date: sourceDate,
+        participants,
       });
       meetingId = meeting.id;
       const all = text.trim()
@@ -256,6 +259,8 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
             <Input type="date" value={sourceDate} onChange={setSourceDate} aria-label={mode === 'meeting' ? 'Meeting date' : 'Date of the material'} />
           </div>
         </div>
+
+        {mode === 'meeting' && <ParticipantsField value={participants} onChange={setParticipants} />}
 
         {mode === 'update' && (
           <div>

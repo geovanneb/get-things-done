@@ -39,7 +39,7 @@ router.get('/', async (_req: Request, res: Response) => {
   res.json(await service.readQueue());
 });
 
-// POST /api/meeting-queue  { title?, meeting_date? }  a draft meeting; add files, then queue it
+// POST /api/meeting-queue  { title?, meeting_date?, participants? }  a draft meeting; add files, then queue it
 router.post('/', async (req: Request, res: Response) => {
   res.status(201).json(await service.createMeeting(body(req)));
 });

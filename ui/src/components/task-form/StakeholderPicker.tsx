@@ -4,13 +4,16 @@ import type { Stakeholder } from '@/types';
 import { chipStyle, chipRemoveStyle, dateInputStyle, dropdownStyle, dropdownItemStyle, sectionLabelStyle } from './styles';
 
 interface StakeholderPickerProps {
-  selected: Stakeholder[];
+  selected: Pick<Stakeholder, 'id' | 'name'>[];
   onAdd: (s: Stakeholder) => void;
   onRemove: (id: string) => void;
   label?: string;
+  placeholder?: string;
+  /** Also takes any typed name: Enter or leaving the field adds it, unless it is a stakeholder's name. */
+  onAddName?: (name: string) => void;
 }
 
-export default function StakeholderPicker({ selected, onAdd, onRemove, label = 'Stakeholders' }: StakeholderPickerProps) {
+export default function StakeholderPicker({ selected, onAdd, onRemove, label = 'Stakeholders', placeholder = 'Search stakeholders...', onAddName }: StakeholderPickerProps) {
   const [query, setQuery] = React.useState('');
   const [allStakeholders, setAllStakeholders] = React.useState<Stakeholder[]>([]);
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
@@ -54,6 +57,14 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
     setDropdownOpen(false);
   };
 
+  const commitTyped = () => {
+    const typed = query.trim();
+    if (!typed || !onAddName) return;
+    const known = allStakeholders.find((s) => s.name?.toLowerCase() === typed.toLowerCase());
+    if (known) handleAdd(known);
+    else { onAddName(typed); setQuery(''); }
+  };
+
   return (
     <div>
       <label style={sectionLabelStyle} id={labelId}>
@@ -93,7 +104,9 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search stakeholders..."
+          onKeyDown={(e) => { if (e.key === 'Enter' && onAddName) { e.preventDefault(); commitTyped(); } }}
+          onBlur={commitTyped}
+          placeholder={placeholder}
           aria-autocomplete="list"
           aria-controls={`${labelId}-listbox`}
           style={dateInputStyle}
