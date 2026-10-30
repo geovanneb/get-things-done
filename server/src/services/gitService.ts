@@ -62,6 +62,24 @@ function createGit(baseDir?: string): SimpleGit {
   return git.env({ ...inherited, ...env });
 }
 
+const LOCK_TRIES = 6;
+const LOCK_WAIT_MS = 150;
+
+/**
+ * Runs a git command that needs the index, again if another git holds it for a moment: a `git status` takes that lock
+ * briefly, and the dashboard asks for one as it opens. A lock that stays is still reported, for a person to look at.
+ */
+async function waitingForIndex<T>(run: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      if (attempt >= LOCK_TRIES || !/index\.lock/.test(String(err))) throw err;
+      await new Promise((r) => setTimeout(r, LOCK_WAIT_MS));
+    }
+  }
+}
+
 export class GitService {
   private getGit(): SimpleGit {
     const workspacePath = workspaceService.getWorkspacePath();
@@ -175,7 +193,7 @@ export class GitService {
   async stageFile(filePath: string): Promise<void> {
     const git = await this.requireGit();
     // `--` so a file name is never read as an option.
-    await git.raw(['add', '--', filePath]);
+    await waitingForIndex(() => git.raw(['add', '--', filePath]));
   }
 
   async commit(message: string): Promise<void> {
@@ -184,6 +202,6 @@ export class GitService {
     }
     const git = await this.requireGit();
     // NEVER auto-push
-    await git.commit(message);
+    await waitingForIndex(() => git.commit(message));
   }
 }
