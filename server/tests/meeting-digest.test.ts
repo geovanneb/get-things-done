@@ -1,4 +1,5 @@
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
+import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
@@ -605,4 +606,59 @@ test('recordings: a WAV waits for its transcript and the digest leaves it; a bro
   await fsp.utimes(path.join(dir, '.upload-old'), old, old);
   await service.runNow(new Date());
   assert.deepEqual((await fsp.readdir(dir)).filter((n) => n.startsWith('.upload-')), ['.upload-fresh']);
+});
+
+test('a digest still being built by a live dashboard is left alone; one whose dashboard is gone is recovered', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const id = await queueMeeting(service, 'Weekly sync', '2026-10-28', [['notes.md', Buffer.from('Notes A')]]);
+  const write = (pid: number) => fsp.writeFile(batchFile(ws), JSON.stringify({ ...JSON.parse(batch([[id, [[`${id}-notes.md`, 'Notes A']]]], null)), owner: { pid, token: 'other-build' } }));
+
+  // Another live process (this test's parent stands in for it) is building: nothing is discarded or made.
+  await write(process.ppid);
+  const busy = await service.runNow(new Date('2026-10-28T18:00:00'));
+  assert.equal(busy.status, 'error');
+  assert.match(busy.message, /A digest is being made right now/);
+  await fsp.access(batchFile(ws));
+  assert.equal(await service.runIfDue(new Date('2026-10-28T18:00:00')), null, 'a scheduled check waits quietly');
+  await fsp.access(batchFile(ws));
+
+  // A batch of this very process that no build of it runs was left by a crash: it is recovered and the digest made.
+  await write(process.pid);
+  const made = await service.runNow(new Date('2026-10-28T18:00:00'));
+  assert.equal(made.status, 'ok', made.message);
+  assert.match(made.message, /Discarded a digest that was interrupted[\s\S]*Made digest/);
+});
+
+test('uploads: a file the manifest never recorded is removed, a live upload keeps an old draft, and a filling disk stops an upload', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const meeting = await service.createMeeting({ title: 'Workshop', meeting_date: '2026-10-30' });
+  const dir = path.join(ws, 'context-updates', 'meeting-queue', meeting.id);
+
+  // Renamed into place, then the dashboard stopped before the manifest named it.
+  await fsp.writeFile(path.join(dir, 'orphan.wav'), 'left behind');
+  await service.addFile(meeting.id, 'notes.md', Buffer.from('Fictional notes.'));
+  assert.deepEqual((await fsp.readdir(dir)).filter((n) => !n.startsWith('.')).sort(), ['meeting.md', 'notes.md']);
+
+  // Two days on, the draft is old, but an upload is still arriving: the draft stays.
+  const later = new Date(Date.now() + 2 * 86_400_000);
+  await fsp.writeFile(path.join(dir, '.upload-live'), 'arriving');
+  await fsp.utimes(path.join(dir, '.upload-live'), later, later);
+  await service.runNow(later);
+  await fsp.access(path.join(dir, 'meeting.md'));
+  // Once that upload is gone, the abandoned draft goes.
+  await fsp.rm(path.join(dir, '.upload-live'));
+  await service.runNow(later);
+  await assert.rejects(fsp.access(dir));
+
+  // An upload without its length: the disk fills while it arrives, so it is stopped before the spare space.
+  const other = await service.createMeeting({ title: 'Other', meeting_date: '2026-10-30' });
+  const otherDir = path.join(ws, 'context-updates', 'meeting-queue', other.id);
+  let free = 2_100_000_000;
+  const statfs = mock.method(createRequire(__filename)('fs/promises'), 'statfs', async () => ({ bavail: free, bsize: 1 }));
+  t.after(() => statfs.mock.restore());
+  const filling = Readable.from((function* () { for (let i = 0; i < 40; i++) { free -= 10_000_000; yield Buffer.alloc(4 * 1024 * 1024, 1); } })());
+  await assert.rejects(service.writeUpload(other.id, 'long.wav', filling), /disk is nearly full/);
+  assert.deepEqual((await fsp.readdir(otherDir)).filter((n) => n.startsWith('.upload-')), [], 'nothing of it is kept');
 });

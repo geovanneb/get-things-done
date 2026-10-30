@@ -13,6 +13,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, topLevelName, workspaceEntry } from '../utils/files';
 import { Schedule, ScheduleError, describeSchedule, localDate, nextOccurrences, occurrencesBetween, parseSchedule } from './routineSchedule';
 import { reserveIds, reservedSequence } from './idReservations';
+import { processAlive } from './runState';
 import { AgentRunnerService } from './agentRunner';
 import { readWavFormat, WavError } from './transcription/wav';
 
@@ -73,6 +74,11 @@ const SPARE_DISK_BYTES = 2_000_000_000;
 /** An upload file nobody has written to for this long was abandoned (a crash or a dropped connection). */
 const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
 const UPLOAD_PREFIX = '.upload-';
+/** While an upload streams, free disk space is checked again after each this much. */
+const DISK_CHECK_BYTES = 64 * 1024 * 1024;
+
+/** Bytes promised to uploads still streaming in this process, so two at once do not both count the same free space. */
+let promisedBytes = 0;
 
 /** Formats the transcription can read: WAV everywhere (read directly); more on a Mac, through its own converter. */
 const WAV = new Set(['.wav']);
@@ -177,7 +183,22 @@ export interface DigestView {
 
 interface BatchMeeting { id: string; files: { file: string; sha256: string }[] }
 /** The digest being made: which meetings, exactly which files (saved name and hash) it must hold, and how far it got. */
-interface Batch { meetings: string[]; expected: BatchMeeting[]; update_id: string | null; published: boolean; started_at: string }
+interface Batch { meetings: string[]; expected: BatchMeeting[]; update_id: string | null; published: boolean; started_at: string; owner?: BatchOwner }
+/** The dashboard building the digest, and its build's token: only it may change the batch while it lives. */
+interface BatchOwner { pid: number; token: string }
+
+/** The builds this process is running, by token; a batch of ours that is not among them was left by a crash. */
+const building = new Set<string>();
+
+/** Whether the batch's builder is still at work: another live dashboard, or a build of this one. */
+function liveBuilder(batch: Batch): boolean {
+  const owner = batch.owner;
+  if (!owner) return false;
+  return owner.pid === process.pid ? building.has(owner.token) : processAlive(owner.pid);
+}
+
+/** What recovery answers while another build is still at work: nothing to do now, and nothing to make either. */
+const BUSY: DigestRunResult = { status: 'ok', message: 'A digest is being made right now; this check waits for it.', did_something: false };
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
@@ -433,7 +454,12 @@ export class MeetingDigestService {
     const updateId = typeof o['update_id'] === 'string' && /^CU-\d{4}-\d{4}$/.test(o['update_id']) ? o['update_id'] : null;
     if (!Array.isArray(o['expected']) || expected.length !== o['expected'].length || expected.length === 0
       || (o['update_id'] !== null && !updateId) || (o['published'] === true && !updateId)) throw damaged();
-    return { meetings: expected.map((e) => e.id), expected, update_id: updateId, published: o['published'] === true, started_at: str(o['started_at']) };
+    const owner = obj(o['owner']);
+    const pid = owner['pid'];
+    return {
+      meetings: expected.map((e) => e.id), expected, update_id: updateId, published: o['published'] === true, started_at: str(o['started_at']),
+      ...(typeof pid === 'number' && Number.isInteger(pid) && pid > 0 && typeof owner['token'] === 'string' && owner['token'] ? { owner: { pid, token: owner['token'] } } : {}),
+    };
   }
 
   private async clearBatch(): Promise<void> {
@@ -615,20 +641,36 @@ export class MeetingDigestService {
     const limit = kind.recording ? MAX_RECORDING_BYTES : MAX_FILE_BYTES;
     if (expected > limit + 1024 * 1024) throw httpError(413, kind.recording ? 'The recording is larger than 4 GB' : 'The file is larger than 50 MB');
     const dir = await this.inWorkspace(this.meetingDir(id));
-    const disk = await fsp.statfs(dir).catch(() => null);
-    if (disk && disk.bavail * disk.bsize < expected + SPARE_DISK_BYTES) {
+    const freeBytes = async () => { const d = await fsp.statfs(dir).catch(() => null); return d ? d.bavail * d.bsize : Infinity; };
+    if (await freeBytes() < promisedBytes + expected + SPARE_DISK_BYTES) {
       throw httpError(507, `Not enough free disk space for this upload: it needs ${Math.ceil((expected + SPARE_DISK_BYTES) / 1e9)} GB free, including room for the transcription.`);
     }
+    // A request without its length, or a disk that other work fills, is caught as the upload arrives: it stops
+    // before it eats into the space kept for the transcription.
+    const full = () => httpError(507, 'Not enough free disk space for this upload: the disk is nearly full, so it was stopped and not kept.');
+    promisedBytes += expected;
+    try {
+      return await this.streamUpload(dir, source, limit, kind.recording, async (written) => await freeBytes() < promisedBytes - Math.min(written, expected) + SPARE_DISK_BYTES ? full() : null);
+    } finally {
+      promisedBytes -= expected;
+    }
+  }
+
+  /** Writes the upload file, checking `diskFull(bytes written)` after every DISK_CHECK_BYTES. */
+  private async streamUpload(dir: string, source: Readable, limit: number, recording: boolean, diskFull: (written: number) => Promise<Error | null>): Promise<Upload> {
     const file = path.join(dir, `${UPLOAD_PREFIX}${randomUUID()}`);
     const handle = await fsp.open(file, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600);
     const hash = createHash('sha256');
     let size = 0;
+    let checked = 0;
     const count = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         size += chunk.length;
-        if (size > limit) { callback(httpError(413, kind.recording ? 'The recording is larger than 4 GB' : 'The file is larger than 50 MB')); return; }
+        if (size > limit) { callback(httpError(413, recording ? 'The recording is larger than 4 GB' : 'The file is larger than 50 MB')); return; }
         hash.update(chunk);
-        callback(null, chunk);
+        if (size - checked < DISK_CHECK_BYTES) { callback(null, chunk); return; }
+        checked = size;
+        diskFull(size).then((err) => callback(err, err ? undefined : chunk), (err: Error) => callback(err));
       },
     });
     try {
@@ -666,14 +708,33 @@ export class MeetingDigestService {
       const ext = path.extname(base);
       const stem = base.slice(0, base.length - ext.length) || 'file';
       const dir = await this.inWorkspace(this.meetingDir(id));
+      await this.dropOrphans(meeting, dir);
       let name = base;
       for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
         || await fsp.lstat(path.join(dir, name)).then(() => true, () => false); n++) name = `${stem}-${n}${ext}`;
       await fsp.rename(upload.path, path.join(dir, name));
       meeting.files.push({ name, size: upload.size, sha256: upload.sha256, ...(kind.recording ? { recording: { status: 'pending' as const } } : {}) });
-      await this.writeMeeting(meeting);
+      try {
+        await this.writeMeeting(meeting);
+      } catch (err) {
+        // Not recorded, so not kept: a file the manifest does not name would only take space.
+        await fsp.rm(path.join(dir, name), { force: true });
+        throw err;
+      }
       return this.readMeeting(id);
     });
+  }
+
+  /**
+   * Removes files of a draft that its manifest does not name: an upload renamed into place by a dashboard that
+   * stopped before it recorded it. Hidden work files (uploads still arriving) are left alone. Call under the lock.
+   */
+  private async dropOrphans(meeting: QueuedMeeting, dir: string): Promise<void> {
+    const named = new Set(meeting.files.map((f) => f.name));
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isFile() || entry.name === MANIFEST || entry.name.startsWith('.') || named.has(entry.name)) continue;
+      await fsp.rm(path.join(dir, entry.name), { force: true });
+    }
   }
 
   /** Puts a draft meeting, or one on hold, in the queue: from now on the next digest can take it. */
@@ -682,6 +743,7 @@ export class MeetingDigestService {
       const meeting = await this.readMeeting(id);
       if (meeting.status === 'queued' && !meeting.held) return meeting;
       if (meeting.files.length === 0) throw httpError(409, 'Add at least one file before queueing the meeting');
+      if (meeting.status === 'draft') await this.dropOrphans(meeting, await this.inWorkspace(this.meetingDir(id)));
       await this.writeMeeting({ ...meeting, status: 'queued', held: null, queued_at: meeting.queued_at ?? now.toISOString() });
       return this.readMeeting(id);
     });
@@ -716,6 +778,7 @@ export class MeetingDigestService {
 
   private async due(now: Date): Promise<DigestRunResult | null> {
     const recovered = await this.recover();
+    if (recovered === BUSY) return null;
     if (recovered?.status === 'error') return this.stopped(recovered, now, false);
     const settings = await this.readSettings();
     const state = await this.readState();
@@ -767,6 +830,7 @@ export class MeetingDigestService {
   /** Makes a digest straight away, whatever the schedule says. The caller holds the routine lock. */
   async runNow(now: Date): Promise<DigestRunResult> {
     const recovered = await this.recover();
+    if (recovered === BUSY) return { status: 'error', message: 'A digest is being made right now, in this or another dashboard; try again when it is done.', did_something: false };
     if (recovered?.status === 'error') return this.stopped(recovered, now, true);
     const result = await this.make(await this.readSettings(), now);
     await this.writeJson('meeting-digest-state.json', { ...await this.readState(), ...this.stateFor(result, now) });
@@ -836,6 +900,9 @@ export class MeetingDigestService {
         return { status: 'error', message: (err as Error).message, did_something: true };
       }
       if (!batch) return null;
+      // A build still at work (in another dashboard, or this one) is left to finish: taking over would let two
+      // builders write the same batch. Its dashboard gone, the batch is recovered as usual.
+      if (liveBuilder(batch)) return BUSY;
       try {
         if (batch.update_id && await contextUpdateService.published(batch.update_id)) {
           // Recorded before anything else, so a digest removed while this recovery fails is held, not made again.
@@ -938,6 +1005,25 @@ export class MeetingDigestService {
    * lock: build the digest, which may copy large files. Under the lock again: hand the meetings over, or clean up.
    */
   private async make(settings: DigestSettings, now: Date): Promise<DigestRunResult> {
+    const token = randomUUID();
+    building.add(token);
+    try {
+      return await this.build(settings, now, token);
+    } finally {
+      building.delete(token);
+    }
+  }
+
+  /** Under the queue lock: runs `fn` only while the batch is still this build's; otherwise this build stops. */
+  private async asOwner<T>(token: string, fn: (batch: Batch) => Promise<T>): Promise<T> {
+    return this.exclusive(async () => {
+      const batch = await this.readBatch();
+      if (!batch || batch.owner?.token !== token) throw new Error('This digest was taken over by a later check; it stops here');
+      return fn(batch);
+    });
+  }
+
+  private async build(settings: DigestSettings, now: Date, token: string): Promise<DigestRunResult> {
     try {
       const plan = await this.exclusive(async (): Promise<DigestRunResult | MakePlan> => {
         if (await this.readBatch()) throw new Error('An earlier digest is not finished yet');
@@ -1010,6 +1096,7 @@ export class MeetingDigestService {
           update_id: null,
           published: false,
           started_at: now.toISOString(),
+          owner: { pid: process.pid, token },
         };
         await this.writeJson('meeting-digest-batch.json', batch);
         return { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters };
@@ -1024,13 +1111,13 @@ export class MeetingDigestService {
             meetingsText: meetingsMarkdown(digestMeetings, new Map(chosen.map((c) => [c.meeting.id, c.characters]))),
             meetings: digestMeetings,
             files,
-          }, { origin: DIGEST_ORIGIN, kind: DIGEST_KIND }, async (id) => {
+          }, { origin: DIGEST_ORIGIN, kind: DIGEST_KIND }, (id) => this.asOwner(token, async () => {
             batch.update_id = id;
             await this.writeJson('meeting-digest-batch.json', batch);
-          });
+          }));
         } catch (err) {
           // When it cannot be told whether the digest was published, the batch file stays and the next run decides.
-          if (!batch.update_id || !await contextUpdateService.published(batch.update_id)) await this.exclusive(async () => {
+          if (!batch.update_id || !await contextUpdateService.published(batch.update_id)) await this.asOwner(token, async () => {
             // Not published: remove what was written, and the meetings stay queued.
             if (batch.update_id) {
               await contextUpdateService.discardUnpublished(batch.update_id).catch((discard: Error) => {
@@ -1042,7 +1129,7 @@ export class MeetingDigestService {
           });
           // Published, but reading it back failed: finish the handoff as usual.
         }
-        const kept = await this.exclusive(async () => {
+        const kept = await this.asOwner(token, async () => {
           batch.published = true;
           await this.writeJson('meeting-digest-batch.json', batch);
           return this.release(batch);
@@ -1073,12 +1160,16 @@ export class MeetingDigestService {
     for (const entry of entries) {
       if (!entry.isDirectory() || !QUEUE_ID.test(entry.name)) continue;
       const dir = path.join(queueDir!, entry.name);
-      // An upload nobody has written to for a day was cut off: its file goes. One still arriving keeps being written.
+      // An upload nobody has written to for a day was cut off: its file goes. One still arriving keeps being written,
+      // and keeps its meeting too, however old the draft is.
+      let uploading = false;
       for (const name of await fsp.readdir(dir).catch(() => [] as string[])) {
         if (!name.startsWith(UPLOAD_PREFIX)) continue;
         const st = await fsp.lstat(path.join(dir, name)).catch(() => null);
         if (st?.isFile() && now.getTime() - st.mtime.getTime() > STALE_UPLOAD_MS) await fsp.rm(path.join(dir, name), { force: true });
+        else if (st) uploading = true;
       }
+      if (uploading) continue;
       const manifest = await fsp.lstat(path.join(dir, MANIFEST)).catch(() => null);
       let stale: boolean;
       if (!manifest) {
