@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as zlib from 'node:zlib';
 import { crc32, docxMarkdown, docxText, SKIPPED_TEXT } from '../src/utils/docx';
-import { readableSize } from '../src/services/contextUpdateService';
+import { IMAGE_CHARACTERS, readableSize } from '../src/services/contextUpdateService';
 
 /** A minimal fictional .docx: a ZIP with the given entries. `size`, `crc` and `flags` override what the headers state. */
 function zip(entries: { name: string; data: Buffer; store?: boolean; size?: number; flags?: number; crc?: number; descriptor?: 'plain' | 'signed'; descriptorCrc?: number }[]): Buffer {
@@ -276,4 +276,6 @@ test('readable size: a copy alone when it holds all the text, the original too w
   assert.ok(readableSize('talk.vtt', broken) > broken.length, `${readableSize('talk.vtt', broken)}`);
   assert.equal(readableSize('notes.md', Buffer.from('Short notes.')), 'Short notes.'.length);
   assert.equal(readableSize('deck.pdf', Buffer.alloc(1000)), 1000, 'anything else by its size');
+  // A photo of a whiteboard or a slide counts as about one look at a picture, not as its megabytes.
+  for (const name of ['board.jpg', 'Board.JPEG', 'slide.png', 'photo.heic', 'shot.webp']) assert.equal(readableSize(name, Buffer.alloc(3_000_000)), IMAGE_CHARACTERS, name);
 });

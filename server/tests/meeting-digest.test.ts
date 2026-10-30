@@ -329,6 +329,16 @@ test('long meetings: a digest holds at most max_characters of readable text, and
   assert.deepEqual((await updates.get(alone.context_update!)).digest_meetings.map((m) => m.id), [broken]);
   assert.ok((await service.readQueue()).meetings.some((m) => m.id === after));
 
+  // A 3 MB photo of a whiteboard counts as one look at a picture: its meeting shares the digest with the next one.
+  await close(alone.context_update!);
+  await service.runNow(new Date('2026-11-01T18:30:00'));
+  const leftover = (await updates.list()).find((u) => u.status === 'ready');
+  if (leftover) await close(leftover.id);
+  const board = await queueMeeting(service, 'Whiteboard', '2026-11-02', [['board.jpg', Buffer.alloc(3_000_000, 1)], ['notes.md', Buffer.from('Notes.')]]);
+  const next = await queueMeeting(service, 'Next', '2026-11-03', [['e.md', Buffer.from('More.')]]);
+  const shared = await service.runNow(new Date('2026-11-03T18:00:00'));
+  assert.deepEqual((await updates.get(shared.context_update!)).digest_meetings.map((m) => m.id), [board, next]);
+
   assert.throws(() => parseSettings({ max_characters: 1000 }), /50000 to 4000000/);
   assert.equal(parseSettings({}).max_characters, 400_000);
 });
