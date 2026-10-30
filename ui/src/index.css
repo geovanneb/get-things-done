@@ -367,7 +367,7 @@ input, textarea, select {
 .markdown-view img { max-width: 100%; }
 
 /* App header: compacts step by step as its own width shrinks (follows the collapsible sidebar).
-   The page title truncates; Search, then Open Claude Code, then New task fall back to icons.
+   The page title truncates; Search, then Open Claude Code, then Record and New task fall back to icons.
    Accessible names stay the same (aria-label / title on each button). */
 .app-header { container: app-header / inline-size; }
 .app-header__search { min-width: 200px; padding: 0 12px; }
@@ -380,9 +380,16 @@ input, textarea, select {
   .app-header__compact-icon { display: inline-flex; }
   .app-header__label--claude { display: none; }
 }
+@container app-header (max-width: 520px) {
+  .app-header__label--record { display: none; }
+}
 @container app-header (max-width: 440px) {
   .app-header__label--new { display: none; }
 }
+/* The dot in the top bar while a recording runs. Still for people who ask for less motion. */
+@keyframes recording-pulse { 50% { opacity: 0.35; } }
+.recording-dot { animation: recording-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .recording-dot { animation: none; } }
 
 /* @-mentions (task Objective) */
 .mention-picker {

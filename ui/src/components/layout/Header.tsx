@@ -4,6 +4,7 @@ import { useAppState, useAppDispatch } from '../../store';
 import Button from '../common/Button';
 import GitIndicator from '../common/GitIndicator';
 import { apiPost } from '../../utils/api';
+import { RecordButton } from '@/components/recording/RecordButton';
 
 const VIEW_LABELS: Record<string, string> = {
   '/situation': 'Situation',
@@ -209,6 +210,8 @@ export default function Header() {
           </span>
           <span className="app-header__label app-header__label--claude">Open Claude Code</span>
         </Button>
+
+        <RecordButton />
 
         <Button variant="primary" size="sm" onClick={handleNewTask}
           icon={

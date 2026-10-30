@@ -16,7 +16,13 @@ export interface DesktopBridge {
   systemAudioSupport?(): Promise<string>;
   /** Tells the app a recording runs, so it stays awake and asks before quitting. */
   recordingState?(active: boolean): void;
+  /** Calls `listener` when the app's menu-bar menu asks the page for something about recording. Returns an unsubscribe. */
+  onRecordingCommand?(listener: () => void): () => void;
+  /** Takes the menu's pending recording command, once: `open` the record dialog or `stop` the recording. */
+  takeRecordingCommand?(): Promise<string | null>;
 }
+
+export type RecordingCommand = 'open' | 'stop';
 
 export function desktopBridge(): DesktopBridge | undefined {
   const bridge = (globalThis as { gtdDesktop?: DesktopBridge }).gtdDesktop;
@@ -41,6 +47,23 @@ export async function systemAudioSupport(): Promise<string> {
 
 export function reportRecording(active: boolean): void {
   desktopBridge()?.recordingState?.(active);
+}
+
+/**
+ * Runs `handler` for each recording command from the desktop app's menu-bar menu: one waiting from before the page
+ * was ready, then each new one. A command is taken once, so two listeners never both act on it. No-op in a browser.
+ */
+export function onRecordingCommand(handler: (command: RecordingCommand) => void): () => void {
+  const bridge = desktopBridge();
+  if (!bridge?.onRecordingCommand || !bridge.takeRecordingCommand) return () => undefined;
+  const take = () => {
+    void bridge.takeRecordingCommand!().then((command) => {
+      if (command === 'open' || command === 'stop') handler(command);
+    }).catch(() => undefined);
+  };
+  const unsubscribe = bridge.onRecordingCommand(take);
+  take();
+  return unsubscribe;
 }
 
 export async function pickFolder(): Promise<string | null> {

@@ -9,4 +9,12 @@ contextBridge.exposeInMainWorld('gtdDesktop', {
   microphoneAccess: (): Promise<string> => ipcRenderer.invoke('gtd:microphone-access'),
   systemAudioSupport: (): Promise<string> => ipcRenderer.invoke('gtd:system-audio-support'),
   recordingState: (active: boolean): void => { void ipcRenderer.invoke('gtd:recording-state', active === true); },
+  // The menu-bar menu pings the page; the page then takes the command (see recording-commands.ts). The ping carries
+  // nothing, and the listener never sees the IPC event.
+  onRecordingCommand: (listener: () => void): (() => void) => {
+    const ping = (): void => listener();
+    ipcRenderer.on('gtd:recording-command', ping);
+    return () => { ipcRenderer.removeListener('gtd:recording-command', ping); };
+  },
+  takeRecordingCommand: (): Promise<string | null> => ipcRenderer.invoke('gtd:take-recording-command'),
 });
