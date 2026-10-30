@@ -59,7 +59,7 @@ jobs:
               console.error('Files that must not ship:', leaked);
               process.exit(1);
             }
-            for (const required of ['bin/gtd.js', 'dist/cli/index.js', 'dist/server/index.js', 'dist/server/services/scaffold.js', 'dist/ui/index.html', 'templates/workspace/gitignore']) {
+            for (const required of ['bin/gtd.js', 'dist/cli/index.js', 'dist/server/index.js', 'dist/server/services/scaffold.js', 'dist/server/services/transcription/worker.js', 'dist/ui/index.html', 'templates/workspace/gitignore']) {
               if (!files.includes(required)) {
                 console.error('Missing from tarball:', required);
                 process.exit(1);
@@ -67,6 +67,55 @@ jobs:
             }
             console.log('Tarball OK:', files.length, 'files');
           "
+
+  transcription:
+    name: Transcription (real model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Every run, not only on a cache miss: the app's own downloader fetches SenseVoice (240 MB) and the
+      # voice-activity model from their pinned addresses and checks every byte, as Settings does.
+      - name: Download the test model with the app's downloader
+        env:
+          ESB_MODELS_PATH: ${{ runner.temp }}/models
+        run: |
+          node -e "
+            const { TranscriptionModelService } = require('./dist/server/services/transcriptionModels.js');
+            const service = new TranscriptionModelService();
+            (async () => {
+              await service.download('sensevoice-2024-07-17');
+              await TranscriptionModelService.settled();
+              const model = (await service.view()).models.find((m) => m.id === 'sensevoice-2024-07-17');
+              if (!model.installed || !(await service.installed('silero-vad'))) { console.error(model.download); process.exit(1); }
+              console.log('Model installed and verified');
+            })();
+          "
+      # Two short samples that come with the model, pinned by commit and checksum; downloaded, never committed.
+      - name: Download the sample recordings
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/audio"
+          base=https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/test_wavs
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/audio/en.wav" "$base/en.wav"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/audio/ja.wav" "$base/ja.wav"
+          cd "$RUNNER_TEMP/audio"
+          echo "eb1eb008904465b74c304aad8342e8c7d3c6e61ffe9f66adcaca9cf0f76a93f4  en.wav" | sha256sum -c -
+          echo "460bd8dccb0d2a5f4e29c628f837be4082d13defc64c3fc21dd1b6bb0e119095  ja.wav" | sha256sum -c -
+      - name: Transcribe them in the worker
+        working-directory: server
+        env:
+          STT_TEST_MODELS: ${{ runner.temp }}/models
+          STT_TEST_AUDIO: ${{ runner.temp }}/audio
+        run: node --import tsx --test --test-name-pattern="real model" tests/transcription-engine.test.ts
 
   audit:
     name: Dependency audit

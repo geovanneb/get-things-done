@@ -29,6 +29,16 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
   onChoose: () => void;
   onAction: (action: 'download' | 'cancel' | 'delete') => void;
 }) {
+  const [check, setCheck] = React.useState<{ running: boolean; ok?: boolean; message?: string }>({ running: false });
+  const runCheck = async () => {
+    setCheck({ running: true });
+    try {
+      const result = await apiPost<{ ok: boolean; message: string }>(`/api/transcription/models/${model.id}/check`);
+      setCheck({ running: false, ok: result.ok, message: result.message });
+    } catch (err) {
+      setCheck({ running: false, ok: false, message: (err as Error).message });
+    }
+  };
   const d = model.download;
   const running = d?.status === 'downloading' || d?.status === 'verifying';
   const percent = d && d.total ? Math.floor((d.received / d.total) * 100) : 0;
@@ -71,13 +81,17 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
       {!running && d?.message && (
         <p role="alert" style={{ ...hintStyle, color: d.status === 'failed' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{d.message}</p>
       )}
+      {check.message && (
+        <p role={check.ok ? 'status' : 'alert'} style={{ ...hintStyle, color: check.ok ? 'var(--color-success)' : 'var(--color-critical)' }}>{check.message}</p>
+      )}
       <div style={{ display: 'flex', gap: 8 }}>
         {running
           ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
           : model.installed
             ? <>
               {vadMissing && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAction('delete')}>Delete</Button>
+              {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running} loading={check.running} onClick={() => void runCheck()}>Check</Button>}
+              <Button size="sm" variant="ghost" disabled={busy || check.running} onClick={() => onAction('delete')}>Delete</Button>
             </>
             : <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>
               {model.partial > 0 ? `Continue download (${size(model.partial)} of ${size(model.size)})` : `Download (${size(model.size)})`}

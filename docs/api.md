@@ -314,6 +314,8 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 | `PUT` | `/api/transcription/settings` | Body: `model` (a catalog id) and/or `language` (`auto`, `en` or `ja`) |
 | `POST` | `/api/transcription/models/:id/download` | Start downloading a model, with the voice-activity model when missing. Returns `202`; progress arrives as `transcription` events on `/api/events` and in `GET /api/transcription`. `409` while another download runs, in this or another dashboard |
 | `POST` | `/api/transcription/models/:id/cancel` | Stop the download; what was downloaded is kept and the next download continues from there |
+| `GET` | `/api/transcription/engine` | Whether the transcription engine loads on this computer, and its version (no model needed): `{ available, version, error }` |
+| `POST` | `/api/transcription/models/:id/check` | Load a downloaded model in the transcription worker: `{ ok, load_ms, message }`. `409` when it is not downloaded |
 | `DELETE` | `/api/transcription/models/:id` | Remove a model's files. `409` while it downloads |
 | `PUT` | `/api/context-updates/:id/keep-materials` | Keep the material after the update is done, or release it. Body: `{ "keep": true }` |
 | `PUT` | `/api/context-updates/:id/decisions` | Save review decisions on proposals: `accepted`, `rejected` or `null`, with an optional `reviewer_note` |

@@ -141,6 +141,10 @@ try {
 
   // The smoke test's own git makes the workspace a repository; the app must use its bundled git for the rest.
   execFileSync('git', ['init', '-q'], { cwd: workspace });
+  // The worker starts as Electron running as Node and loads the native engine from inside the app (no model needed).
+  const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
+  check('the transcription engine loads inside the app', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));
+
   const git = await (await fetch(`${base}/api/workspace/git/enabled`)).json();
   check('git works without git on PATH (bundled git)', git.git_installed === true && git.git_enabled === true, JSON.stringify(git));
   const staged = await fetch(`${base}/api/workspace/git/stage`, {

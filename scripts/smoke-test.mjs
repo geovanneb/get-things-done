@@ -603,6 +603,9 @@ try {
     check('automatic analysis and digests right after a meeting are off unless switched on, and only true or false is accepted',
       badAuto.status === 400 && digestNow.settings?.auto_analyze === false && badAfter.status === 400 && digestNow.settings?.after_each_meeting === false,
       `bad=${badAuto.status} auto=${digestNow.settings?.auto_analyze} badAfter=${badAfter.status} after=${digestNow.settings?.after_each_meeting}`);
+    // The engine loads in its worker on this machine (no model needed).
+    const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
+    check('the transcription engine loads in its worker', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));
     // Read only: never downloads a model or writes settings into the real home folder.
     const stt = await (await fetch(`${base}/api/transcription`)).json();
     const badLanguage = await json('PUT', '/api/transcription/settings', { language: 'de' });
