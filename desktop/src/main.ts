@@ -243,7 +243,20 @@ if (!app.requestSingleInstanceLock()) {
         callback(mayRecord(contents, media.securityOrigin ?? details.requestingUrl, media.mediaTypes ?? [], details.isMainFrame));
         return;
       }
+      // The computer's sound comes through a display capture: the handler below decides what it really gets.
+      if (permission === 'display-capture') {
+        callback(mayRecord(contents, details.requestingUrl, undefined, details.isMainFrame));
+        return;
+      }
       callback(permission === 'clipboard-sanitized-write');
+    });
+    // The computer's sound, for a recording the main window starts: its own page as the picture (no screen access is
+    // needed for that, and the page stops it at once) and the system's loopback as the sound. Anything else gets nothing.
+    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+      const frame = request.frame;
+      const allowed = Boolean(frame && mainWindow && frame === mainWindow.webContents.mainFrame && request.audioRequested
+        && classifyLink(request.securityOrigin, new URL(appUrl).origin) === 'app');
+      callback(allowed && frame ? { video: frame, audio: 'loopback' } : {});
     });
     session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => {
       if (permission !== 'media') return true;
