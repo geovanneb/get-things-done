@@ -4,9 +4,9 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
-import type { ChildProcess } from 'node:child_process';
+import { fork, type ChildProcess } from 'node:child_process';
 import { readWavFormat, wavChunks, WavError } from '../src/services/transcription/wav';
-import { TranscriptionEngine, type WorkerLauncher } from '../src/services/transcription/engine';
+import { TranscriptionEngine, launchWorker, type WorkerLauncher } from '../src/services/transcription/engine';
 import { TranscriptionModelService } from '../src/services/transcriptionModels';
 import type { WorkerReply, WorkerRequest } from '../src/services/transcription/protocol';
 
@@ -89,7 +89,7 @@ test('WAV: PCM and float, any channel count, read in chunks as mono, with odd ch
 function fakeWorker(answer: (request: WorkerRequest, reply: (r: WorkerReply) => void, child: EventEmitter & { exitCode: number | null }) => void) {
   const runs: { request: WorkerRequest | null; killed: boolean }[] = [];
   const launcher: WorkerLauncher = () => {
-    const child = Object.assign(new EventEmitter(), { exitCode: null as number | null, signalCode: null as string | null, stderr: new EventEmitter() });
+    const child = Object.assign(new EventEmitter(), { exitCode: null as number | null, signalCode: null as string | null, stderr: new EventEmitter(), connected: true });
     const run = { request: null as WorkerRequest | null, killed: false };
     runs.push(run);
     Object.assign(child, {
@@ -98,7 +98,12 @@ function fakeWorker(answer: (request: WorkerRequest, reply: (r: WorkerReply) => 
         setImmediate(() => answer(request, (r) => child.emit('message', r), child));
         return true;
       },
-      kill: () => { run.killed = true; child.signalCode = 'SIGTERM'; return true; },
+      kill: () => {
+        if (!run.killed) setImmediate(() => { child.signalCode = 'SIGTERM'; child.emit('exit', null, 'SIGTERM'); });
+        run.killed = true;
+        return true;
+      },
+      disconnect: () => { child.connected = false; },
     });
     return child as unknown as ChildProcess;
   };
@@ -163,4 +168,71 @@ test('real model: the worker transcribes English and Japanese samples with Sense
   const ja = await engine.transcribe(path.join(realAudio!, 'ja.wav'), { model: 'sensevoice-2024-07-17', language: 'ja' });
   assert.match(ja.segments.map((s) => s.text).join(''), /中学/);
   assert.ok(en.segments.every((s) => s.end > s.start && s.start >= 0));
+});
+
+test('a worker that ignores the stop signal is killed before the next job may start; the real worker exits when the dashboard goes away', async (t) => {
+  const dir = await tmp(t);
+  // A real child that ignores SIGTERM and never answers.
+  const stubborn = path.join(dir, 'stubborn.cjs');
+  await fsp.writeFile(stubborn, "process.on('SIGTERM', () => {}); process.on('disconnect', () => {}); setInterval(() => {}, 1000);");
+  let child: ChildProcess | null = null;
+  const launcher: WorkerLauncher = () => (child = fork(stubborn, [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] }));
+  const engine = new TranscriptionEngine(new TranscriptionModelService(), launcher);
+  const run = (engine as unknown as { run: (r: WorkerRequest, ms: number, on: () => void) => Promise<void> }).run.bind(engine);
+  const started = Date.now();
+  // Long enough for the child to be running and ignoring SIGTERM when the stop comes, also on a busy machine.
+  await assert.rejects(run({ type: 'version' }, 2000, () => {}), /took too long/);
+  assert.ok(child!.exitCode !== null || child!.signalCode !== null, 'the worker has really exited before the job is over');
+  assert.equal(child!.signalCode, 'SIGKILL', 'killed outright after ignoring the polite signal');
+  assert.ok(Date.now() - started >= 5000, 'it was given its grace period first');
+
+  // The real worker, with nothing to do: when the dashboard disconnects, it exits.
+  const worker = launchWorker();
+  const exited = new Promise<number | null>((resolve) => worker.once('exit', (code) => resolve(code)));
+  await new Promise((r) => setTimeout(r, 300));
+  worker.disconnect();
+  const code = await Promise.race([exited, new Promise<'alive'>((r) => setTimeout(() => r('alive'), 5000))]);
+  assert.notEqual(code, 'alive', 'the worker exits on its own');
+});
+
+test('messages a worker sends after its job ended are ignored', async (t) => {
+  await installedModels(t);
+  let late: (() => void) | null = null;
+  const chatty = fakeWorker((_request, reply) => {
+    late = () => { reply({ type: 'progress', done: 5, total: 10 }); reply({ type: 'segment', start: 0, end: 1, text: 'too late' }); };
+  });
+  const engine = new TranscriptionEngine(new TranscriptionModelService(), chatty.launcher);
+  const run = (engine as unknown as { run: (r: WorkerRequest, ms: number, on: (reply: WorkerReply) => void, s?: AbortSignal) => Promise<void> }).run.bind(engine);
+  const controller = new AbortController();
+  const seen: WorkerReply[] = [];
+  const job = run({ type: 'version' }, 60_000, (reply) => seen.push(reply), controller.signal);
+  await new Promise((r) => setTimeout(r, 20));
+  controller.abort();
+  await assert.rejects(job, /Cancelled/);
+  late!();
+  assert.deepEqual(seen, [], 'nothing reaches the cancelled job');
+});
+
+test('a model in use cannot be removed, from this dashboard or another one; a lease left by a process that is gone does not count', async (t) => {
+  const dir = await installedModels(t);
+  // A fictional installed model: files and the record the downloader writes.
+  const service = new TranscriptionModelService();
+  const model = 'sensevoice-2024-07-17';
+  await fsp.mkdir(path.join(dir, model), { recursive: true });
+  const { CATALOG } = await import('../src/services/transcriptionModels');
+  const entry = CATALOG.find((m) => m.id === model)!;
+  // installed() checks names, recorded hashes and sizes: sparse files of the right size are enough here.
+  for (const f of entry.files) { const h = await fsp.open(path.join(dir, model, f.name), 'w'); await h.truncate(f.size); await h.close(); }
+  await fsp.writeFile(path.join(dir, model, 'installed.json'), JSON.stringify({ id: model, files: entry.files.map((f) => ({ name: f.name, sha256: f.sha256 })) }));
+  assert.equal(await service.installed(model), true);
+
+  const release = await service.lease(model);
+  await assert.rejects(service.remove(model), /in use/);
+  await release();
+  // Another dashboard's lease (a live process) blocks too; a lease from a process that is gone does not.
+  await fsp.writeFile(path.join(dir, model, `.lease-${process.ppid}-other`), '{}');
+  await assert.rejects(service.remove(model), /in use/);
+  await fsp.rename(path.join(dir, model, `.lease-${process.ppid}-other`), path.join(dir, model, `.lease-${2 ** 22 + 777}-gone`));
+  await service.remove(model);
+  assert.equal(await service.installed(model), false);
 });

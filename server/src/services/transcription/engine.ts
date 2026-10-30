@@ -39,12 +39,35 @@ const CHECK_TIMEOUT_MS = 5 * 60 * 1000;
 const transcriptionTimeout = (seconds: number) => Math.max(10 * 60 * 1000, seconds * 1000 * 1.5);
 
 let busy = false;
+/** Workers still running, so the dashboard can end them when it shuts down. */
+const running = new Set<ChildProcess>();
+/** After asking a worker to stop, how long it gets before it is killed outright. */
+const STOP_GRACE_MS = 3000;
+
+/** Ends a worker and waits until it has really exited: a polite signal first, then a forced kill. */
+async function stop(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) { running.delete(child); return; }
+  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+  try { if (child.connected) child.disconnect(); } catch { /* already closed */ }
+  child.kill('SIGTERM');
+  const timeout = (ms: number) => new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms).unref());
+  if (await Promise.race([exited.then(() => 'exited' as const), timeout(STOP_GRACE_MS)]) === 'timeout') {
+    child.kill('SIGKILL');
+    await Promise.race([exited, timeout(STOP_GRACE_MS)]);
+  }
+  running.delete(child);
+}
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
 }
 
 export class TranscriptionEngine {
+  /** Ends every running worker; called when the dashboard shuts down. */
+  static async stopAll(): Promise<void> {
+    await Promise.all([...running].map((child) => stop(child)));
+  }
+
   constructor(private readonly models = new TranscriptionModelService(), private readonly launcher: WorkerLauncher = launchWorker) {}
 
   /** Whether the engine loads on this computer (no model needed). */
@@ -60,13 +83,18 @@ export class TranscriptionEngine {
 
   /** Loads an installed model in the worker: it works, and how long it took. */
   async check(id: string): Promise<{ ok: boolean; load_ms: number | null; message: string }> {
-    const model = await this.engineModel(id);
-    let loadMs: number | null = null;
+    const release = await this.models.lease(id);
     try {
-      await this.run({ type: 'check', model }, CHECK_TIMEOUT_MS, (reply) => { if (reply.type === 'loaded') loadMs = reply.ms; });
-      return { ok: true, load_ms: loadMs, message: `Works: loaded in ${((loadMs ?? 0) / 1000).toFixed(1)} s.` };
-    } catch (err) {
-      return { ok: false, load_ms: null, message: (err as Error).message };
+      const model = await this.engineModel(id);
+      let loadMs: number | null = null;
+      try {
+        await this.run({ type: 'check', model }, CHECK_TIMEOUT_MS, (reply) => { if (reply.type === 'loaded') loadMs = reply.ms; });
+        return { ok: true, load_ms: loadMs, message: `Works: loaded in ${((loadMs ?? 0) / 1000).toFixed(1)} s.` };
+      } catch (err) {
+        return { ok: false, load_ms: null, message: (err as Error).message };
+      }
+    } finally {
+      await release();
     }
   }
 
@@ -76,12 +104,23 @@ export class TranscriptionEngine {
     options: { model?: string; language?: string; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {},
   ): Promise<TranscriptResult> {
     const settings = await this.models.readSettings();
-    const model = await this.engineModel(options.model ?? settings.model);
+    const id = options.model ?? settings.model;
+    // Held until the worker has exited, so the model cannot be removed while it is in use, from any dashboard.
+    const release = await this.models.lease(id);
+    try {
+      return await this.transcribeLeased(wav, id, options.language ?? settings.language, options);
+    } finally {
+      await release();
+    }
+  }
+
+  private async transcribeLeased(wav: string, id: string, language: string, options: { onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal }): Promise<TranscriptResult> {
+    const model = await this.engineModel(id);
     const format = await readWavFormat(wav);
     const segments: Segment[] = [];
     let loadMs: number | null = null;
     let seconds = format.duration;
-    await this.run({ type: 'transcribe', model, wav, language: options.language ?? settings.language }, transcriptionTimeout(format.duration), (reply) => {
+    await this.run({ type: 'transcribe', model, wav, language }, transcriptionTimeout(format.duration), (reply) => {
       if (reply.type === 'loaded') loadMs = reply.ms;
       if (reply.type === 'segment') {
         const segment = { start: reply.start, end: reply.end, text: reply.text };
@@ -122,6 +161,7 @@ export class TranscriptionEngine {
       busy = false;
       throw new Error(`The transcription engine could not start: ${(err as Error).message}`, { cause: err });
     }
+    running.add(child);
     let stderr = '';
     child.stderr?.on('data', (d: Buffer) => { if (stderr.length < 4000) stderr += d.toString(); });
     try {
@@ -132,7 +172,6 @@ export class TranscriptionEngine {
           settled = true;
           clearTimeout(timer);
           signal?.removeEventListener('abort', onAbort);
-          if (child.exitCode === null && child.signalCode === null) child.kill();
           if (err) reject(err); else resolve();
         };
         const timer = setTimeout(() => finish(new Error('The transcription took too long and was stopped.')), timeoutMs);
@@ -140,6 +179,8 @@ export class TranscriptionEngine {
         if (signal?.aborted) { onAbort(); return; }
         signal?.addEventListener('abort', onAbort, { once: true });
         child.on('message', (reply: WorkerReply) => {
+          // Once the job has ended (done, failed, cancelled, timed out), whatever the worker still sends is ignored.
+          if (settled) return;
           if (reply.type === 'error') { finish(new Error(reply.message)); return; }
           try { onReply(reply); } catch (err) { finish(err as Error); return; }
           if (reply.type === 'done' || reply.type === 'version') finish();
@@ -148,9 +189,12 @@ export class TranscriptionEngine {
         child.on('exit', (code, sig) => finish(new Error(
           `The transcription engine stopped unexpectedly (${sig ?? `exit code ${code}`}).${stderr.trim() ? ` ${stderr.trim().split('\n').slice(-3).join(' ')}` : ''}`,
         )));
-        child.send(request);
+        if (!child.connected) { finish(new Error('The transcription engine could not start.')); return; }
+        child.send(request, (err) => { if (err) finish(new Error(`The transcription engine could not start: ${err.message}`)); });
       });
     } finally {
+      // The next job starts only once this worker has really exited, so two never hold a model's memory at once.
+      await stop(child);
       busy = false;
     }
   }

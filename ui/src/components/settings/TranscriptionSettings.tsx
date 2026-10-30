@@ -91,7 +91,7 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
             ? <>
               {vadMissing && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
               {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running} loading={check.running} onClick={() => void runCheck()}>Check</Button>}
-              <Button size="sm" variant="ghost" disabled={busy} onClick={() => onAction('delete')}>Delete</Button>
+              <Button size="sm" variant="ghost" disabled={busy || check.running} onClick={() => onAction('delete')}>Delete</Button>
             </>
             : <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>
               {model.partial > 0 ? `Continue download (${size(model.partial)} of ${size(model.size)})` : `Download (${size(model.size)})`}

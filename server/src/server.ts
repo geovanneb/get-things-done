@@ -16,6 +16,7 @@ import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 import { AgentRunnerService } from './services/agentRunner';
 import { transcriptionEvents } from './services/transcriptionModels';
+import { TranscriptionEngine } from './services/transcription/engine';
 
 export const HOST = '127.0.0.1';
 
@@ -87,13 +88,15 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     routineScheduler.stop();
     // A running analysis is stopped first, with everything it started, and its record saved.
     const runnerStopped = AgentRunnerService.stopAll().catch(() => {});
+    // A transcription worker is ended too, so nothing keeps running (or holding gigabytes) after the dashboard.
+    const transcriptionStopped = TranscriptionEngine.stopAll().catch(() => {});
 
     const serverClosed = new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
       // Idle keep-alive connections would otherwise hold close() open.
       server.closeIdleConnections();
     });
-    return Promise.all([runnerStopped, serverClosed]).then(() => undefined);
+    return Promise.all([runnerStopped, transcriptionStopped, serverClosed]).then(() => undefined);
   };
 
   return new Promise((resolve, reject) => {

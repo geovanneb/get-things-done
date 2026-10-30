@@ -374,6 +374,7 @@ export class TranscriptionModelService {
       await fsp.mkdir(this.dir(), { recursive: true });
       const lock = await this.lock('Another dashboard is downloading a model; wait for it to finish first');
       try {
+        if (await this.inUse(id)) throw httpError(409, 'This model is in use by a transcription or a check; try again when it has finished');
         const st = await fsp.lstat(this.modelDir(id)).catch(() => null);
         // A link is removed as a link: its target is never touched.
         if (st?.isSymbolicLink()) await fsp.unlink(this.modelDir(id));
@@ -387,6 +388,38 @@ export class TranscriptionModelService {
     lastOutcome.delete(id);
     notify(true);
     return this.view();
+  }
+
+  /**
+   * Marks an installed model as in use until the returned function is called, so it cannot be removed meanwhile,
+   * from this or another dashboard. A lease is a small file in the model's folder naming the process; it is taken
+   * under the download lock (which removal also holds), and one left by a process that is gone does not count.
+   */
+  async lease(id: string): Promise<() => Promise<void>> {
+    const model = this.find(id);
+    if (active || removing) throw httpError(409, 'A model is being downloaded or removed; try again when that has finished');
+    await fsp.mkdir(this.dir(), { recursive: true });
+    const lock = await this.lock('A model is being downloaded or removed; try again when that has finished');
+    let file: string;
+    try {
+      if (!await this.installed(model.id)) throw httpError(409, `${model.name} is not downloaded yet: download it in Settings > Transcription`);
+      file = path.join(await this.ownDir(model.id, false), `.lease-${process.pid}-${randomUUID()}`);
+      const handle = await fsp.open(file, O_WRONLY | O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, 0o600);
+      try { await handle.writeFile(JSON.stringify({ pid: process.pid, at: new Date().toISOString() })); } finally { await handle.close(); }
+    } finally {
+      await this.unlock(lock);
+    }
+    return async () => { await fsp.rm(file, { force: true }); };
+  }
+
+  /** True when a live process holds a lease on the model. */
+  private async inUse(id: string): Promise<boolean> {
+    const names = await fsp.readdir(this.modelDir(id)).catch(() => [] as string[]);
+    for (const name of names) {
+      const m = /^\.lease-(\d+)-/.exec(name);
+      if (m && processAlive(Number(m[1]))) return true;
+    }
+    return false;
   }
 
   private async run(job: Job, parts: CatalogModel[]): Promise<void> {

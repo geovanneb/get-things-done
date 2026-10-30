@@ -23,8 +23,11 @@ interface Sherpa {
 }
 
 function send(reply: WorkerReply): void {
-  process.send?.(reply);
+  if (process.connected) process.send?.(reply);
 }
+
+// The dashboard went away (it quit, crashed or ended this job): nothing is waiting for the result.
+process.on('disconnect', () => process.exit(0));
 
 function loadSherpa(): Sherpa {
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- native addon, loaded only inside the worker
@@ -119,6 +122,7 @@ process.once('message', (request: WorkerRequest) => {
     .catch((err: unknown) => send({ type: 'error', message: err instanceof WavError ? err.message : `The transcription engine failed: ${(err as Error)?.message ?? String(err)}` }))
     .finally(() => {
       // Let the last message reach the dashboard, then end: one job per process.
-      process.disconnect?.();
+      if (process.connected) process.disconnect();
+      else process.exit(0);
     });
 });
