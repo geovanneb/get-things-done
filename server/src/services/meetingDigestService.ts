@@ -2,7 +2,8 @@ import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { createHash } from 'crypto';
 import { WorkspaceService } from './workspace';
-import { ContextUpdateService, DigestMeeting, readableSize } from './contextUpdateService';
+import { ContextUpdateService, DigestMeeting, readableSizeOf } from './contextUpdateService';
+import { hashFile } from '../utils/fileHash';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, saveAttachment, topLevelName, workspaceEntry } from '../utils/files';
@@ -778,8 +779,7 @@ export class MeetingDigestService {
     if (!entry || entry.files.length !== want.files.length) return false;
     const savedAs = async (name: string, hash: string) => {
       const file = await contextUpdateService.materialPath(update.id, name).catch(() => null);
-      const content = file ? await fsp.readFile(file).catch(() => null) : null;
-      return Boolean(content && createHash('sha256').update(content).digest('hex') === hash);
+      return Boolean(file && (await hashFile(file).catch(() => null))?.sha256 === hash);
     };
     for (const f of want.files) {
       if (!entry.files.some((e) => e.file === f.file && e.sha256 === f.sha256)) return false;
@@ -825,10 +825,10 @@ export class MeetingDigestService {
           const dir = await this.inWorkspace(this.meetingDir(meeting.id)).catch(() => null);
           for (const file of meeting.files) {
             const from = dir ? await fileInside(dir, file.name).catch(() => null) : null;
-            const content = from ? await fsp.readFile(from).catch(() => null) : null;
-            if (!from || !content || createHash('sha256').update(content).digest('hex') !== file.sha256) { ok = false; break; }
+            const hash = from ? await hashFile(from).catch(() => null) : null;
+            if (!from || hash?.sha256 !== file.sha256) { ok = false; break; }
             files.push({ from, file });
-            size += readableSize(file.name, content);
+            size += await readableSizeOf(from, file.name);
           }
           if (!ok) { broken.push(meeting.id); continue; }
           if (chosen.length > 0 && characters + size > settings.max_characters) break;

@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import { createHash } from 'crypto';
 import { WorkspaceService } from './workspace';
@@ -9,6 +10,7 @@ import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelNa
 import { moveToTrash } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
+import { hashFile } from '../utils/fileHash';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 import { TaskService } from './taskService';
 import type { Task } from '../types';
@@ -495,6 +497,18 @@ function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | {
  */
 export const IMAGE_CHARACTERS = 6_000;
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.heif']);
+/** Recordings: an agent reads their transcript, never the audio, so they count as their transcript does. */
+export const AUDIO_EXTENSIONS = new Set(['.wav', '.m4a', '.mp3', '.aac', '.flac', '.aiff', '.aif', '.caf', '.ogg', '.opus', '.webm', '.wma']);
+
+/** readableSize for a file on disk, read only when it is small enough to be text; large files count by their size. */
+export async function readableSizeOf(file: string, name: string): Promise<number> {
+  const ext = path.extname(name).toLowerCase();
+  if (AUDIO_EXTENSIONS.has(ext)) return 0;
+  if (IMAGE_EXTENSIONS.has(ext)) return IMAGE_CHARACTERS;
+  const { size } = await fsp.stat(file);
+  if (size > MAX_CONVERT_BYTES) return size;
+  return readableSize(name, await fsp.readFile(file));
+}
 
 /**
  * Roughly how much an agent reads for one file, in characters: a transcript by its readable copy, other text by
@@ -920,15 +934,28 @@ export class ContextUpdateService {
     await saveAttachment(materials, 'meetings.md', Buffer.from(input.meetingsText, 'utf-8'), 'update.md');
     // Every original first, then the readable copies: a copy takes a free name, so it can never replace an
     // original saved after it (a "talk.vtt" next to a "talk.transcript.md").
+    // Copied as streams and checked afterwards: a recording can be gigabytes.
     for (const file of input.files) {
-      const buffer = await fsp.readFile(file.from);
-      if (sha256(buffer) !== file.sha256) throw new Error(`${file.name} changed while the digest was being made`);
-      if (await fsp.lstat(path.join(materials, file.name)).then(() => true, () => false)) throw new Error(`The file name ${file.name} is used twice`);
-      const saved = await saveAttachment(materials, file.name, buffer, 'update.md');
-      if (saved.name !== file.name) throw new Error(`The file name ${file.name} cannot be used`);
+      if (file.name !== topLevelName(file.name) || file.name.toLowerCase() === 'update.md') throw new Error(`The file name ${file.name} cannot be used`);
+      const target = path.join(materials, file.name);
+      try {
+        await fsp.copyFile(file.from, target, fs.constants.COPYFILE_EXCL);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`The file name ${file.name} is used twice`, { cause: err });
+        throw err;
+      }
+      if ((await hashFile(target)).sha256 !== file.sha256) throw new Error(`${file.name} changed while the digest was being made`);
     }
     for (const file of input.files) {
-      const buffer = await fsp.readFile(path.join(materials, file.name));
+      const target = path.join(materials, file.name);
+      const ext = path.extname(file.name).toLowerCase();
+      // A readable copy is made from transcripts and Word files only, and only up to the conversion limit.
+      if (!['.vtt', '.txt', '.md', '.docx'].includes(ext)) continue;
+      if ((await fsp.stat(target)).size > MAX_CONVERT_BYTES) {
+        if (ext === '.vtt' || ext === '.docx') problems.push({ source: file.name, reason: `The file is over ${MAX_CONVERT_BYTES / 1024 / 1024} MB, so no readable copy was made.` });
+        continue;
+      }
+      const buffer = await fsp.readFile(target);
       if (sha256(buffer) !== file.sha256) throw new Error(`${file.name} was not saved as queued`);
       const prepared = prepareTranscript(file.name, buffer);
       if (prepared && 'content' in prepared) transcripts.push(await this.saveTranscript(materials, file.name, buffer, prepared));
