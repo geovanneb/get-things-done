@@ -830,7 +830,11 @@ model is downloaded; the Routines page shows each one's progress.
   this transcript** to let the digest take it as it is, or **Try again** to replace it.
 - One transcription runs at a time across every dashboard on the workspace. If a
   dashboard stops in the middle, the recording goes back in line and starts again.
-- The recording itself is kept in the queue with its meeting.
+- A recording stays in the queue until its meeting goes into a digest. Once the digest
+  is checked to hold the complete transcript, the recording goes with the queue folder.
+  **Keep recordings after transcription** in Settings keeps it with the digest's
+  materials instead, and they stay after review. A partial transcript you chose to use
+  keeps its recording until the digest is done.
 
 ---
 

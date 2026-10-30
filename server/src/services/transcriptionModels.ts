@@ -44,7 +44,13 @@ export interface CatalogModel {
 export type TranscriptionLanguage = 'auto' | 'en' | 'ja';
 export const LANGUAGES: TranscriptionLanguage[] = ['auto', 'en', 'ja'];
 
-export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; updated_at: string | null }
+export interface TranscriptionSettings {
+  model: string;
+  language: TranscriptionLanguage;
+  /** Keep a recording after its complete transcript went into a digest. Off: the recording goes with the queue. */
+  keep_recordings: boolean;
+  updated_at: string | null;
+}
 
 export interface DownloadProgress {
   model: string;
@@ -135,7 +141,7 @@ export const VAD: CatalogModel = {
   ],
 };
 
-const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', updated_at: null };
+const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, updated_at: null };
 /** Below this much memory the default model leaves little room, and the lighter one is suggested. */
 const LOW_MEMORY_BYTES = 8.5 * 1024 ** 3;
 const STALL_MS = 60_000;
@@ -156,9 +162,11 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   const o = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   if (o['model'] !== undefined && !catalog.some((m) => m.id === o['model'])) throw httpError(400, 'Invalid model');
   if (o['language'] !== undefined && !LANGUAGES.includes(o['language'] as TranscriptionLanguage)) throw httpError(400, 'Invalid language: use auto, en or ja');
+  if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
   return {
     model: (o['model'] as string | undefined) ?? base.model,
     language: (o['language'] as TranscriptionLanguage | undefined) ?? base.language,
+    keep_recordings: (o['keep_recordings'] as boolean | undefined) ?? base.keep_recordings,
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
 }
@@ -224,6 +232,24 @@ export class TranscriptionModelService {
       return parseTranscriptionSettings(JSON.parse(await fsp.readFile(path.join(this.dir(), 'settings.json'), 'utf-8')), DEFAULTS, this.catalog);
     } catch {
       return { ...DEFAULTS };
+    }
+  }
+
+  /**
+   * Whether recordings are kept. Unlike readSettings, which falls back to the defaults, settings that exist but
+   * cannot be read count as keeping them: audio is removed only on a clear "not kept".
+   */
+  async keepRecordings(): Promise<boolean> {
+    let raw: string;
+    try {
+      raw = await fsp.readFile(path.join(this.dir(), 'settings.json'), 'utf-8');
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code !== 'ENOENT';
+    }
+    try {
+      return parseTranscriptionSettings(JSON.parse(raw), DEFAULTS, this.catalog).keep_recordings;
+    } catch {
+      return true;
     }
   }
 

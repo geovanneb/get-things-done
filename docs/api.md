@@ -314,7 +314,7 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 | `POST` | `/api/meeting-queue/:id/recordings/:file/retry` | Put a `stopped`, `failed` or `partial` recording back in line; a partial transcript is removed. `409` otherwise. Returns the meeting |
 | `POST` | `/api/meeting-queue/:id/recordings/:file/accept` | Use a `partial` transcript as it is, so a digest can take the meeting. `409` otherwise. Returns the meeting |
 | `GET` | `/api/transcription` | The offline transcription models on offer (pluses, minuses, size, memory), which are downloaded, download progress, the settings (`model`, `language`), the models folder, and a hint when this computer has little memory for the chosen model |
-| `PUT` | `/api/transcription/settings` | Body: `model` (a catalog id) and/or `language` (`auto`, `en` or `ja`) |
+| `PUT` | `/api/transcription/settings` | Body: `model` (a catalog id), `language` (`auto`, `en` or `ja`) and/or `keep_recordings` (keep a recording after its complete transcript went into a digest; default `false`) |
 | `POST` | `/api/transcription/models/:id/download` | Start downloading a model, with the voice-activity model when missing. Returns `202`; progress arrives as `transcription` events on `/api/events` and in `GET /api/transcription`. `409` while another download runs, in this or another dashboard |
 | `POST` | `/api/transcription/models/:id/cancel` | Stop the download; what was downloaded is kept and the next download continues from there |
 | `GET` | `/api/transcription/engine` | Whether the transcription engine loads on this computer, and its version (no model needed): `{ available, version, error }` |
