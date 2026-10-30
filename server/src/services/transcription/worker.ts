@@ -2,11 +2,13 @@
  * The transcription worker: a child process the dashboard starts for one job and ends afterwards, so the model's
  * memory (up to about 4 GB) and any crash of the native engine stay out of the dashboard.
  *
- * Messages in (one per process): { type: 'version' } | { type: 'check', model } | { type: 'transcribe', model, wav, language }
+ * Messages in (one request per process): { type: 'version' } | { type: 'check', model } | { type: 'transcribe', model, wav, language }
+ *               | { type: 'follow', model, wav, language }, then for a follow job { type: 'committed' | 'end', bytes }
  * Messages out: { type: 'version', version } | { type: 'loaded', ms } | { type: 'progress', done, total }
  *               | { type: 'segment', start, end, text } | { type: 'done', seconds, segments } | { type: 'error', message }
  */
-import type { EngineModel, WorkerRequest, WorkerReply } from './protocol';
+import * as fsp from 'fs/promises';
+import type { EngineModel, WorkerControl, WorkerRequest, WorkerReply } from './protocol';
 import { readWavFormat, wavChunks, WavError } from './wav';
 
 const SAMPLE_RATE = 16000;
@@ -50,32 +52,105 @@ async function load(sherpa: Sherpa, model: EngineModel, language: string): Promi
   return recognizer;
 }
 
+/** Speech segments of at most 20 seconds (Whisper reads at most 30), cut at half a second of silence. */
+function newVad(sherpa: Sherpa, model: EngineModel): SherpaVad {
+  return new sherpa.Vad({
+    sileroVad: { model: model.vad, threshold: 0.5, minSilenceDuration: 0.5, minSpeechDuration: 0.25, windowSize: 512, maxSpeechDuration: 20 },
+    sampleRate: SAMPLE_RATE, numThreads: 1, debug: 0,
+  }, 60);
+}
+
+/** Recognizes each finished speech segment and sends it; returns how many had text. */
+async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad): Promise<number> {
+  let found = 0;
+  while (!vad.isEmpty()) {
+    const segment = vad.front();
+    vad.pop();
+    const stream = recognizer.createStream();
+    stream.acceptWaveform({ samples: segment.samples, sampleRate: SAMPLE_RATE });
+    const result = await recognizer.decodeAsync(stream);
+    const text = result.text.trim();
+    if (text) {
+      found++;
+      send({ type: 'segment', start: segment.start / SAMPLE_RATE, end: (segment.start + segment.samples.length) / SAMPLE_RATE, text });
+    }
+  }
+  return found;
+}
+
+/** What the dashboard said about a recording being followed: saved so far, and sealed at. */
+const control = { committed: 0, end: null as number | null, wake: null as (() => void) | null };
+function onControl(message: WorkerControl): void {
+  if (message?.type === 'committed' && Number.isSafeInteger(message.bytes)) control.committed = Math.max(control.committed, message.bytes);
+  if (message?.type === 'end' && Number.isSafeInteger(message.bytes)) control.end = message.bytes;
+  control.wake?.();
+}
+
+/**
+ * Follows a recording as it is made. Reads only saved audio, waits when it has caught up, and once the recording is
+ * sealed reads up to the sealed size, flushes the last speech and says exactly how much audio it covered.
+ */
+async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'follow' }>): Promise<void> {
+  const recognizer = await load(sherpa, request.model, request.language);
+  const vad = newVad(sherpa, request.model);
+  const file = await fsp.open(request.wav, 'r');
+  const HEADER = 44;
+  const STEP = 2 * SAMPLE_RATE * 2; // two seconds of audio per read
+  let read = 0;
+  let segments = 0;
+  let pending = new Float32Array(0);
+  let lastProgress = 0;
+  try {
+    for (;;) {
+      const limit = control.end ?? control.committed;
+      if (control.end !== null && (control.end < read || control.end % 2 !== 0)) throw new Error('The recording was sealed before what was already transcribed');
+      if (read < limit) {
+        const size = Math.min(limit - read, STEP) & ~1;
+        const buffer = Buffer.alloc(size);
+        for (let got = 0; got < size;) {
+          const { bytesRead } = await file.read(buffer, got, size - got, HEADER + read + got);
+          if (bytesRead === 0) throw new Error('The recording is shorter than what was saved');
+          got += bytesRead;
+        }
+        const samples = new Float32Array(size / 2);
+        for (let i = 0; i < samples.length; i++) samples[i] = buffer.readInt16LE(i * 2) / 32768;
+        const all = new Float32Array(pending.length + samples.length);
+        all.set(pending);
+        all.set(samples, pending.length);
+        let i = 0;
+        for (; i + 512 <= all.length; i += 512) vad.acceptWaveform(all.subarray(i, i + 512));
+        pending = all.slice(i);
+        read += size;
+        segments += await decodeAll(recognizer, vad);
+        const done = read / (SAMPLE_RATE * 2);
+        if (done - lastProgress >= 5) {
+          lastProgress = done;
+          send({ type: 'progress', done, total: (control.end ?? control.committed) / (SAMPLE_RATE * 2) });
+        }
+        continue;
+      }
+      if (control.end !== null) break;
+      await new Promise<void>((resolve) => { control.wake = resolve; setTimeout(resolve, 1000); });
+      control.wake = null;
+    }
+  } finally {
+    await file.close();
+  }
+  if (pending.length) vad.acceptWaveform(pending);
+  vad.flush();
+  segments += await decodeAll(recognizer, vad);
+  send({ type: 'done', seconds: read / (SAMPLE_RATE * 2), segments, bytes: read });
+}
+
 async function transcribe(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'transcribe' }>): Promise<void> {
   const format = await readWavFormat(request.wav);
   const recognizer = await load(sherpa, request.model, request.language);
-  // Speech segments of at most 20 seconds (Whisper reads at most 30); silence between them is skipped.
-  const vad = new sherpa.Vad({
-    sileroVad: { model: request.model.vad, threshold: 0.5, minSilenceDuration: 0.5, minSpeechDuration: 0.25, windowSize: 512, maxSpeechDuration: 20 },
-    sampleRate: SAMPLE_RATE, numThreads: 1, debug: 0,
-  }, 60);
+  const vad = newVad(sherpa, request.model);
   const resampler = format.sampleRate === SAMPLE_RATE ? null : new sherpa.LinearResampler(format.sampleRate, SAMPLE_RATE);
   let segments = 0;
   let fed = 0;
   let pending = new Float32Array(0);
-  const decode = async () => {
-    while (!vad.isEmpty()) {
-      const segment = vad.front();
-      vad.pop();
-      const stream = recognizer.createStream();
-      stream.acceptWaveform({ samples: segment.samples, sampleRate: SAMPLE_RATE });
-      const result = await recognizer.decodeAsync(stream);
-      const text = result.text.trim();
-      if (text) {
-        segments++;
-        send({ type: 'segment', start: segment.start / SAMPLE_RATE, end: (segment.start + segment.samples.length) / SAMPLE_RATE, text });
-      }
-    }
-  };
+  const decode = async () => { segments += await decodeAll(recognizer, vad); };
   // The VAD takes 512 samples at a time; what is left over waits for the next chunk.
   const feed = async (samples: Float32Array) => {
     const all = new Float32Array(pending.length + samples.length);
@@ -114,10 +189,16 @@ async function handle(request: WorkerRequest): Promise<void> {
     send({ type: 'done', seconds: 0, segments: 0 });
     return;
   }
+  if (request.type === 'follow') {
+    await follow(sherpa, request);
+    return;
+  }
   await transcribe(sherpa, request);
 }
 
 process.once('message', (request: WorkerRequest) => {
+  // Whatever comes after the request is a control for a follow job; it may arrive while the model loads.
+  process.on('message', onControl);
   handle(request)
     .catch((err: unknown) => send({ type: 'error', message: err instanceof WavError ? err.message : `The transcription engine failed: ${(err as Error)?.message ?? String(err)}` }))
     .finally(() => {

@@ -503,7 +503,11 @@ export class MeetingDigestService {
    * finds the audio under a known, protected name. If the manifest cannot be written the file goes back. A recording
    * in neither place keeps its session: nothing that does not exist is ever recorded.
    */
-  async publishRecording(meeting: QueuedMeeting, file: { size: number; sha256: string }): Promise<void> {
+  async publishRecording(
+    meeting: QueuedMeeting,
+    file: { size: number; sha256: string },
+    transcript?: { content: (recordingName: string) => Buffer; model: string; language: string; seconds: number },
+  ): Promise<void> {
     const live = meeting.live!;
     const dir = await this.inWorkspace(this.meetingDir(meeting.id));
     const exists = (name: string) => fsp.lstat(path.join(dir, name)).then((st) => st.isFile() && st.size === file.size, () => false);
@@ -521,10 +525,33 @@ export class MeetingDigestService {
       throw httpError(409, 'The recording was not found where it should be: its session is kept. Try Finish again.');
     }
     const { live: _done, ...rest } = meeting;
-    const next: QueuedMeeting = { ...rest, files: [...meeting.files, { name, size: file.size, sha256: file.sha256, recording: { status: 'pending' as RecordingStatus }, capture: live.generation }] };
+    // A live transcript that covered all of it is its transcript at once: written here, under the lock, with the manifest.
+    let written: { name: string; size: number; sha256: string } | null = null;
+    if (transcript) {
+      // Optional: a transcript that cannot be written (a full disk) leaves the recording to the queue, never stuck.
+      try {
+        const stem = name.replace(/\.[^.]+$/, '') || 'recording';
+        let tname = `${stem}.transcript.md`;
+        for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === tname.toLowerCase())
+          || await fsp.lstat(path.join(dir, tname)).then(() => true, () => false); n++) tname = `${stem}-${n}.transcript.md`;
+        const content = transcript.content(name);
+        await atomicWrite(path.join(dir, tname), content);
+        written = { name: tname, size: content.length, sha256: createHash('sha256').update(content).digest('hex') };
+      } catch {
+        written = null;
+      }
+    }
+    const recording: RecordingState = written && transcript
+      ? { status: 'done', model: transcript.model, language: transcript.language, transcript: written.name, transcript_sha256: written.sha256, seconds: transcript.seconds }
+      : { status: 'pending' };
+    const next: QueuedMeeting = {
+      ...rest,
+      files: [...meeting.files, { name, size: file.size, sha256: file.sha256, recording, capture: live.generation }, ...(written ? [{ name: written.name, size: written.size, sha256: written.sha256 }] : [])],
+    };
     try {
       await this.writeMeeting(next);
     } catch (err) {
+      if (written) await fsp.rm(path.join(dir, written.name), { force: true }).catch(() => {});
       if (inPlace) await fsp.rename(path.join(dir, name), path.join(dir, hidden)).catch(() => {});
       throw err;
     }

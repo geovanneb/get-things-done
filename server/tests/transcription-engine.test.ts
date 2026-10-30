@@ -291,3 +291,20 @@ test('a worker that will not exit keeps the job slot and the model lease until i
   assert.match(outcome.message, /shutting down/);
   assert.equal(released, 2, 'its lease was given back');
 });
+
+test('a follow job whose worker never starts gives back the slot and the lease, and its end does not hang', async (t) => {
+  const dir = await installedModels(t);
+  void dir;
+  const launcher: WorkerLauncher = () => fork(path.join(os.tmpdir(), 'gtd-no-such-worker.js'), [], { execPath: '/nonexistent/node', stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  const engine = new TranscriptionEngine(new TranscriptionModelService(), launcher);
+  const session = await engine.follow('/fictional.wav', { model: 'sensevoice-2024-07-17', language: 'auto', onSegment: () => {} }).catch((err: Error) => err);
+  if (!(session instanceof Error)) {
+    const started = Date.now();
+    const result = await session.end(0, 5000);
+    assert.equal(result.ok, false);
+    assert.ok(Date.now() - started < 10_000, 'end returned');
+  }
+  // The slot is free again: a check can run.
+  for (let i = 0; i < 50 && TranscriptionEngine.isBusy(); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(TranscriptionEngine.isBusy(), false);
+});

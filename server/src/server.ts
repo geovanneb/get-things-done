@@ -17,6 +17,7 @@ import { FileWatchEvent } from './types';
 import { AgentRunnerService } from './services/agentRunner';
 import { transcriptionEvents } from './services/transcriptionModels';
 import { meetingTranscriptionEvents } from './services/meetingTranscription';
+import { liveTranscriptEvents } from './services/meetingLiveTranscript';
 import { TranscriptionEngine } from './services/transcription/engine';
 import { isKaizenNote, scheduleKaizenIntake } from './services/kaizenIntake';
 
@@ -76,6 +77,13 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
   };
 
   // Model downloads happen outside the workspace, so the watcher cannot see them: they send their own notice.
+  // Only where to read on from, never the text: the page fetches it, so a missed notice costs nothing.
+  const broadcastLive = (notice: { meeting: string; generation: string; next: number; status: string }): void => {
+    const data = JSON.stringify({ meeting: notice.meeting, generation: notice.generation, next: notice.next, status: notice.status });
+    // A page not reading its notices is skipped rather than buffered: it reads on from its number when it catches up.
+    for (const client of sseClients) if (client.writableLength < 64 * 1024) client.write(`event: live-transcript\ndata: ${data}\n\n`);
+  };
+
   const broadcastTranscription = (): void => {
     for (const client of sseClients) client.write('event: transcription\ndata: {}\n\n');
   };
@@ -83,6 +91,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
   const close = (): Promise<void> => {
     transcriptionEvents.off('change', broadcastTranscription);
     meetingTranscriptionEvents.off('change', broadcastTranscription);
+    liveTranscriptEvents.off('change', broadcastLive);
     for (const client of sseClients) {
       client.write('event: server_shutdown\ndata: {}\n\n');
       client.end();
@@ -125,6 +134,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       watcherService.on('change', onKaizenNote);
       transcriptionEvents.on('change', broadcastTranscription);
       meetingTranscriptionEvents.on('change', broadcastTranscription);
+      liveTranscriptEvents.on('change', broadcastLive);
 
       const workspaceService = new WorkspaceService();
       try {

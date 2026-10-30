@@ -3,6 +3,8 @@ import * as path from 'path';
 import { constants as fsConstants } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { withWorkspacePath, WorkspaceService } from './workspace';
+import { MeetingLiveTranscriptService } from './meetingLiveTranscript';
+import { audioTranscriptMarkdown } from './meetingTranscription';
 import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
 
 /**
@@ -94,8 +96,11 @@ async function liveFile(file: string): Promise<{ handle: fsp.FileHandle; saved: 
   }
 }
 
+/** No speech in more than this much audio makes a transcript suspicious, as in the queue's job. */
+const EMPTY_AUDIO_SECONDS = 60;
+
 export class MeetingRecordingService {
-  constructor(private readonly queue = new MeetingDigestService()) {}
+  constructor(private readonly queue = new MeetingDigestService(), private readonly live = new MeetingLiveTranscriptService(queue)) {}
 
   /** Starts recording into a draft meeting. Starting again with the same token returns the same session. */
   async start(id: string, token: string, now = new Date()): Promise<{ generation: string; offset: number }> {
@@ -118,7 +123,10 @@ export class MeetingRecordingService {
       await this.queue.saveMeeting(meeting);
       return this.opened(meeting);
     });
-    pinned.set(hashToken(token), new WorkspaceService().getWorkspacePath());
+    const workspace = new WorkspaceService().getWorkspacePath();
+    pinned.set(hashToken(token), workspace);
+    // Never waited for, and never fails the recording.
+    void this.live.start(id, opened.generation, workspace, opened.offset).catch(() => {});
     return opened;
   }
 
@@ -159,7 +167,7 @@ export class MeetingRecordingService {
         }
         const rest = block.subarray(overlap);
         // Sent again after a crash: the block may be on the disk's way only, so it is synced before it is acknowledged.
-        if (rest.length === 0) { await handle.datasync(); return { offset: saved }; }
+        if (rest.length === 0) { await handle.datasync(); this.live.committed(meeting.live.generation, saved); return { offset: saved }; }
         const others = meeting.files.filter((f) => f.recording).reduce((sum, f) => sum + f.size, 0);
         if (others + HEADER_BYTES + saved + rest.length > MAX_RECORDING_BYTES) throw httpError(413, 'A meeting holds at most 4 GB of recordings');
         const disk = await fsp.statfs(folder).catch(() => null);
@@ -173,6 +181,8 @@ export class MeetingRecordingService {
           if ((err as NodeJS.ErrnoException).code === 'ENOSPC') throw httpError(507, 'The disk is full: the recording stopped here, and what was saved is kept.');
           throw err;
         }
+        // Saved and synced: the live transcript may read this far.
+        this.live.committed(meeting.live.generation, saved + rest.length);
         return { offset: saved + rest.length };
       } finally {
         await handle.close();
@@ -223,14 +233,23 @@ export class MeetingRecordingService {
       if (!sealed) return this.queue.loadMeeting(id);
       generation = sealed.generation;
       try {
+        // The live transcript reads to the seal and lets go of the file before anything changes it. Without the lock.
+        const live = await this.live.finalize(sealed.generation, sealed.sealed_bytes!).catch(() => null);
         // Hashing gigabytes runs without the lock; nothing can change a sealed recording.
         const checked = await this.checkSealed(id, sealed);
-        return await this.queue.withQueue(async () => {
+        // Its own text is the transcript when it is the chosen model and found speech; otherwise the queue transcribes it.
+        const usable = live && live.model === live.mainModel && !(live.segments.length === 0 && live.seconds > EMPTY_AUDIO_SECONDS) ? live : null;
+        const published = await this.queue.withQueue(async () => {
           const meeting = await this.queue.loadMeeting(id);
           if (meeting.live?.generation !== sealed.generation || meeting.live.state !== 'finalizing') return meeting;
-          await this.queue.publishRecording(meeting, checked);
+          await this.queue.publishRecording(meeting, checked, usable ? {
+            content: (recordingName) => Buffer.from(audioTranscriptMarkdown(recordingName, checked.sha256, usable.model, usable.language, usable.seconds, usable.segments, true), 'utf-8'),
+            model: usable.model, language: usable.language, seconds: usable.seconds,
+          } : undefined);
           return this.queue.loadMeeting(id);
         });
+        await this.live.close(sealed.generation);
+        return published;
       } catch (err) {
         // Another Finish moved the file while this one read it: look again at where things stand.
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT' || attempt >= 2) throw err;

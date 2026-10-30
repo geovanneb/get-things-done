@@ -5,12 +5,14 @@ import { param } from '../utils/params';
 import { MAX_RECORDING_BYTES, MeetingDigestService, queueId, type Upload } from '../services/meetingDigestService';
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
 import { MeetingRecordingService } from '../services/meetingRecording';
+import { MeetingLiveTranscriptService } from '../services/meetingLiveTranscript';
 import { topLevelName } from '../utils/files';
 
 const router = Router();
 const service = new MeetingDigestService();
 const transcription = new MeetingTranscriptionService();
 const recording = new MeetingRecordingService(service);
+const liveTranscript = new MeetingLiveTranscriptService(service);
 
 /**
  * One file per request, streamed straight into its meeting's folder (recordings can be gigabytes): writeUpload checks
@@ -65,6 +67,12 @@ router.put('/:id/recording', express.raw({ type: 'application/octet-stream', lim
   res.json(await recording.append(queueId(param(req, 'id')), req.get('x-recording-token') ?? '', offset, req.body as Buffer));
 });
 
+// GET /api/meeting-queue/:id/recording/transcript?from=N  the live transcript of the recording being made, from segment N
+router.get('/:id/recording/transcript', async (req: Request, res: Response) => {
+  const from = typeof req.query['from'] === 'string' && /^\d{1,9}$/.test(req.query['from']) ? Number(req.query['from']) : 0;
+  res.json(await liveTranscript.read(queueId(param(req, 'id')), from));
+});
+
 // POST /api/meeting-queue/:id/recording/finish  { token, offset, generation, queue } or { recover: true, generation, queue }
 router.post('/:id/recording/finish', async (req: Request, res: Response) => {
   const { token, offset, recover, generation, queue } = req.body as { token?: string; offset?: number; recover?: boolean; generation?: string; queue?: boolean };
@@ -96,6 +104,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   const id = queueId(param(req, 'id'));
   await service.removeMeeting(id);
   transcription.forget(id);
+  liveTranscript.forget(id);
   res.status(204).send();
 });
 
