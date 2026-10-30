@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import { RoutineService, routineId } from '../services/routineService';
+import { MeetingTranscriptionService } from '../services/meetingTranscription';
 
 const router = Router();
 const service = new RoutineService();
+const transcription = new MeetingTranscriptionService();
 
 const body = (req: Request): Record<string, unknown> =>
   (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
@@ -51,7 +53,8 @@ router.post('/system-cleanup/run', async (_req: Request, res: Response) => {
 
 // GET /api/routines/meeting-digest  the built-in digest: settings, schedule, queue, open digest, last run
 router.get('/meeting-digest', async (_req: Request, res: Response) => {
-  res.json(await service.meetingDigest());
+  // With the transcription running in this dashboard, if any, and its progress.
+  res.json({ ...await service.meetingDigest(), transcription: transcription.progress() });
 });
 
 // PUT /api/routines/meeting-digest  { enabled?, schedule?, max_meetings? }  missing ones keep their value

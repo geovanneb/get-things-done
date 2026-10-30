@@ -655,6 +655,23 @@ export interface DigestMeeting {
   files: { source: string; file: string; sha256: string }[];
 }
 
+/** Where a recording's transcription stands; `partial` waits for "Use this transcript" or "Try again". */
+export interface RecordingState {
+  status: 'pending' | 'running' | 'done' | 'partial' | 'failed' | 'stopped';
+  started_at?: string;
+  model?: string;
+  language?: string;
+  /** The transcript made from it, a file of the same meeting. */
+  transcript?: string;
+  /** Seconds of audio. */
+  seconds?: number;
+  accepted?: boolean;
+  error?: string;
+}
+
+/** The transcription this dashboard is running; `done` and `total` are seconds of audio. */
+export interface TranscriptionProgress { meeting: string; file: string; done: number; total: number; started_at: string }
+
 export interface QueuedMeeting {
   id: string;
   title: string;
@@ -664,7 +681,7 @@ export interface QueuedMeeting {
   updated_at: string;
   queued_at: string | null;
   /** `recording` is set for a recording: the meeting waits for its transcript before a digest can take it. */
-  files: { name: string; size: number; sha256: string; recording?: { status: 'pending' } }[];
+  files: { name: string; size: number; sha256: string; recording?: RecordingState }[];
   /** Why it waits instead of going into the next digest; queue it again to clear. */
   held: string | null;
   in_digest: boolean;
@@ -696,6 +713,7 @@ export interface MeetingDigest {
   };
   open_digest: string | null;
   queue: QueuedMeeting[];
+  transcription: TranscriptionProgress | null;
   queue_problems: { id: string; reason: string }[];
   max_meetings_limit: number;
 }

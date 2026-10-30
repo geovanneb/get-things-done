@@ -309,7 +309,10 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 | `POST` | `/api/meeting-queue` | Start a meeting for the queue. Body: `title`, `meeting_date` (YYYY-MM-DD). Returns `201` with a `draft` |
 | `POST` | `/api/meeting-queue/:id/files` | Add one file to a draft meeting (multipart, field `file`; at most 10 files per meeting). Streamed to disk. A recording (WAV everywhere; M4A, MP3, AAC, FLAC, AIFF or CAF on macOS) up to 4 GB (4 GB of recordings per meeting) and marked `recording: { status: 'pending' }`: the meeting waits for its transcript before a digest takes it; a WAV must be PCM or 32-bit float. Anything else up to 50 MB (100 MB per meeting). `415` for a recording this computer cannot transcribe, `413` over the limit, `507` without enough free disk space, `409` for the same file twice. Returns `201` |
 | `POST` | `/api/meeting-queue/:id/queue` | The draft is complete, or a meeting on hold is queued again: the next digest can take it. `409` without a file |
-| `DELETE` | `/api/meeting-queue/:id` | Remove a meeting and its files from the queue. `409` while a digest is being made from it. Returns `204` |
+| `DELETE` | `/api/meeting-queue/:id` | Remove a meeting and its files from the queue. `409` while a digest is being made from it. Ends its transcription if one runs. Returns `204` |
+| `POST` | `/api/meeting-queue/:id/recordings/:file/stop` | Stop a recording's transcription (running or waiting): nothing of it is kept, and the recording becomes `stopped`. `409` when it is not being transcribed. Returns the meeting |
+| `POST` | `/api/meeting-queue/:id/recordings/:file/retry` | Put a `stopped`, `failed` or `partial` recording back in line; a partial transcript is removed. `409` otherwise. Returns the meeting |
+| `POST` | `/api/meeting-queue/:id/recordings/:file/accept` | Use a `partial` transcript as it is, so a digest can take the meeting. `409` otherwise. Returns the meeting |
 | `GET` | `/api/transcription` | The offline transcription models on offer (pluses, minuses, size, memory), which are downloaded, download progress, the settings (`model`, `language`), the models folder, and a hint when this computer has little memory for the chosen model |
 | `PUT` | `/api/transcription/settings` | Body: `model` (a catalog id) and/or `language` (`auto`, `en` or `ja`) |
 | `POST` | `/api/transcription/models/:id/download` | Start downloading a model, with the voice-activity model when missing. Returns `202`; progress arrives as `transcription` events on `/api/events` and in `GET /api/transcription`. `409` while another download runs, in this or another dashboard |
@@ -608,7 +611,7 @@ prefix.
 | `PUT` | `/api/routines/system-cleanup` | Update System cleanup settings |
 | `POST` | `/api/routines/system-cleanup/preview` | What a cleanup run would do now. Optional `settings` to try. Nothing changes |
 | `POST` | `/api/routines/system-cleanup/run` | Run System cleanup now. Returns `201` |
-| `GET` | `/api/routines/meeting-digest` | The Meeting digest job: settings, schedule, last run, the open digest and the meeting queue |
+| `GET` | `/api/routines/meeting-digest` | The Meeting digest job: settings, schedule, last run, the open digest and the meeting queue, with each recording's `recording` state (`pending`, `running`, `done`, `partial`, `failed` or `stopped`) and `transcription`: the job this dashboard runs (`meeting`, `file`, `done` and `total` seconds of audio), or `null` |
 | `PUT` | `/api/routines/meeting-digest` | Update Meeting digest settings: `enabled`, `schedule`, `max_meetings` (1 to 20), `max_characters` (readable text per digest, 50,000 to 4,000,000; default 400,000), `auto_analyze` (start the analysis of each new digest with the dashboard runner; default `false`), `after_each_meeting` (also make a digest within a minute of a meeting being queued, when no digest waits for review; default `false`) |
 | `POST` | `/api/routines/meeting-digest/run` | Make a digest from the queue now. Returns `201` |
 | `POST` | `/api/routines` | Create a routine: `title`, `schedule`, `task`, and optionally `enabled` and `catch_up`. Returns `201` |
