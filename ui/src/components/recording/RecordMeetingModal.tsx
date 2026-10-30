@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
 import { useRecorder } from './RecordingProvider';
+import { ParticipantsField } from '@/components/meetings/ParticipantsField';
 import { systemAudioSupport } from '@/utils/desktop';
+import { consentSentence, type RecordPrefill } from '@/utils/meetingParticipants';
+import type { MeetingParticipant } from '@/types';
 
 const inputStyle: React.CSSProperties = { padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' };
 const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
@@ -14,10 +17,11 @@ function today(): string {
 }
 
 /** Starts a recording: what it is called, which microphone, and a reminder to tell the others, each time. */
-export function RecordMeetingModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boolean; onClose: () => void; prefill: RecordPrefill | null }) {
   const { start } = useRecorder();
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(today);
+  const [participants, setParticipants] = useState<MeetingParticipant[]>([]);
   const [deviceId, setDeviceId] = useState('');
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [voiceCleanup, setVoiceCleanup] = useState(true);
@@ -27,10 +31,14 @@ export function RecordMeetingModal({ isOpen, onClose }: { isOpen: boolean; onClo
 
   useEffect(() => {
     if (!isOpen) return;
+    // A new meeting each time: the last one's people must not reach this reminder.
     setTold(false);
+    setTitle(prefill?.title ?? '');
+    setDate(today());
+    setParticipants(prefill?.participants ?? []);
     void systemAudioSupport().then(setSystemSupport);
     void navigator.mediaDevices?.enumerateDevices().then((all) => setDevices(all.filter((d) => d.kind === 'audioinput'))).catch(() => setDevices([]));
-  }, [isOpen]);
+  }, [isOpen, prefill]);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Record a meeting" size="sm">
@@ -43,6 +51,7 @@ export function RecordMeetingModal({ isOpen, onClose }: { isOpen: boolean; onClo
           Date
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
         </label>
+        <ParticipantsField value={participants} onChange={(next) => { setParticipants(next); setTold(false); }} />
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           Microphone
           <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} style={inputStyle}>
@@ -69,11 +78,11 @@ export function RecordMeetingModal({ isOpen, onClose }: { isOpen: boolean; onClo
         </p>
         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <input type="checkbox" checked={told} onChange={(e) => setTold(e.target.checked)} />
-          <span>I have told everyone in the meeting that it is being recorded.</span>
+          <span>{consentSentence(participants)}</span>
         </label>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!told || !date} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio }); onClose(); }}>Start recording</Button>
+          <Button variant="primary" disabled={!told || !date} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio }); onClose(); }}>Start recording</Button>
         </div>
       </div>
     </Modal>
