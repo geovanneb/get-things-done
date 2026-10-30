@@ -69,6 +69,19 @@ async function portClosed(base, deadline) {
   return false;
 }
 
+/**
+ * The end of the app's server log, which holds the real error behind a 500 (the response hides it, and the server's
+ * output goes to this file, not to the app's own). Its folder depends on the platform, and it is always under `dir`.
+ */
+function readServerLog(dir) {
+  try {
+    const found = fs.readdirSync(dir, { recursive: true }).find((f) => path.basename(String(f)) === 'server.log');
+    return found ? fs.readFileSync(path.join(dir, String(found)), 'utf-8').slice(-4000) : '(no server.log found)';
+  } catch (err) {
+    return `(could not be read: ${err instanceof Error ? err.message : String(err)})`;
+  }
+}
+
 const executable = findExecutable();
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gtd-packaged-'));
 const home = path.join(tmp, 'home');
@@ -95,6 +108,7 @@ fs.writeFileSync(path.join(userData, 'desktop.json'), JSON.stringify({ port }));
 console.log(`Starting ${executable} on port ${port}`);
 const child = spawn(executable, [`--user-data-dir=${userData}`], { env, stdio: ['ignore', 'pipe', 'pipe'] });
 let output = '';
+let serverLog = '';
 child.stdout.on('data', (d) => { output += d; });
 child.stderr.on('data', (d) => { output += d; });
 child.on('error', (error) => { output += `Spawn failed: ${error.message}\n`; });
@@ -163,11 +177,12 @@ try {
   }
   if (base) check('quitting the app stops its server', await portClosed(base, Date.now() + 15_000));
   child.kill('SIGKILL');
+  if (failures) serverLog = readServerLog(tmp);
   try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }); } catch { /* Windows may still hold files */ }
 }
 
 if (failures) {
-  console.error(`\n${failures} check(s) failed. App output:\n${output.slice(-4000)}`);
+  console.error(`\n${failures} check(s) failed. App output:\n${output.slice(-4000)}\nServer log:\n${serverLog}`);
   process.exit(1);
 }
 console.log('\nPackaged app smoke test passed');
