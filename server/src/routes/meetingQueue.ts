@@ -93,10 +93,14 @@ router.post('/:id/recordings/:file/:action', async (req: Request, res: Response)
   const id = queueId(param(req, 'id'));
   const file = topLevelName(param(req, 'file'));
   const action = param(req, 'action');
-  if (action === 'stop') res.json(await transcription.stop(id, file));
+  const body = (req.body ?? {}) as { generation?: unknown; draft_sha256?: unknown };
+  if (action === 'stop') res.json(await transcription.stop(id, file, typeof body.generation === 'string' ? body.generation : undefined));
   else if (action === 'retry') res.json(await transcription.retry(id, file));
   else if (action === 'accept') res.json(await transcription.accept(id, file));
-  else res.status(404).json({ error: 'Not found', message: 'Use stop, retry or accept' });
+  else if (action === 'use-live') {
+    if (typeof body.draft_sha256 !== 'string') { res.status(400).json({ error: 'Bad Request', message: 'draft_sha256 is required' }); return; }
+    res.json(await transcription.useLive(id, file, body.draft_sha256));
+  } else res.status(404).json({ error: 'Not found', message: 'Use stop, retry, accept or use-live' });
 });
 
 // DELETE /api/meeting-queue/:id  remove a meeting and its files from the queue

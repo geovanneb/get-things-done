@@ -163,6 +163,8 @@ export interface LiveRecording {
   name: string;
   /** How much audio was sealed, once finalizing. */
   sealed_bytes?: number;
+  /** The model and language to transcribe it with, fixed when it was sealed; every later Finish uses the same. */
+  target?: { model: string; language: string };
 }
 
 /** The manifest's record of a recording in progress. One that cannot be read is kept as damaged, never dropped: it protects audio. */
@@ -176,6 +178,7 @@ function parseLive(value: unknown): LiveRecording | undefined {
   return {
     generation: o['generation'] as string, token_sha256: o['token_sha256'] as string, state: o['state'] as LiveRecording['state'], started_at: text('started_at'), name: o['name'] as string,
     ...(o['state'] === 'finalizing' ? { sealed_bytes: o['sealed_bytes'] as number } : {}),
+    ...(parseTarget(o['target']) ? { target: parseTarget(o['target'])! } : {}),
   };
 }
 
@@ -204,7 +207,33 @@ export interface RecordingState {
   seconds?: number;
   /** A partial transcript the user chose to use as it is. */
   accepted?: boolean;
+  /** The live transcript was chosen as the transcript instead of waiting for the accurate one. */
+  accepted_live?: boolean;
   error?: string;
+  /**
+   * The live transcript, kept readable while the chosen model transcribes the recording again. A file of the meeting,
+   * but never a digest's input: only `transcript` is. It goes when a transcript is chosen.
+   */
+  draft?: TranscriptDraft;
+  /** The model and language to transcribe with, fixed when the recording was finished, whatever Settings say later. */
+  target?: { model: string; language: string };
+}
+
+export interface TranscriptDraft { transcript: string; transcript_sha256: string; model: string; language: string; seconds: number }
+
+/**
+ * The next state of a recording, carrying what must outlive every step of the queue: the draft and the target. Every
+ * change of a recording's state goes through here, so a step can never drop them by building a state from nothing.
+ */
+export function nextRecording(previous: RecordingState | undefined, next: RecordingState): RecordingState {
+  const { draft, target } = previous ?? {};
+  return { ...next, ...(draft && next.draft === undefined ? { draft } : {}), ...(target && next.target === undefined ? { target } : {}) };
+}
+
+/** Removes the draft: a transcript was chosen. */
+export function withoutDraft(state: RecordingState): RecordingState {
+  const { draft: _draft, ...rest } = state;
+  return rest;
 }
 
 const RECORDING_STATUSES: RecordingStatus[] = ['pending', 'running', 'done', 'partial', 'failed', 'stopped'];
@@ -227,8 +256,27 @@ function parseRecording(value: unknown): RecordingState | undefined {
     ...(text('transcript_sha256') ? { transcript_sha256: text('transcript_sha256') } : {}),
     ...(typeof o['seconds'] === 'number' ? { seconds: o['seconds'] } : {}),
     ...(o['accepted'] === true ? { accepted: true } : {}),
+    ...(o['accepted_live'] === true ? { accepted_live: true } : {}),
     ...(text('error') ? { error: text('error') } : {}),
+    ...(parseDraft(o['draft']) ? { draft: parseDraft(o['draft'])! } : {}),
+    ...(parseTarget(o['target']) ? { target: parseTarget(o['target'])! } : {}),
   };
+}
+
+const SHA256 = /^[0-9a-f]{64}$/;
+
+/** A draft only when every part of it is sound: a plain name, a hash, a model, a language and real seconds. */
+function parseDraft(value: unknown): TranscriptDraft | undefined {
+  const d = obj(value);
+  const ok = typeof d['transcript'] === 'string' && plainName(d['transcript']) && typeof d['transcript_sha256'] === 'string' && SHA256.test(d['transcript_sha256'])
+    && typeof d['model'] === 'string' && d['model'] && typeof d['language'] === 'string' && d['language']
+    && typeof d['seconds'] === 'number' && Number.isFinite(d['seconds']) && d['seconds'] >= 0;
+  return ok ? { transcript: d['transcript'] as string, transcript_sha256: d['transcript_sha256'] as string, model: d['model'] as string, language: d['language'] as string, seconds: d['seconds'] as number } : undefined;
+}
+
+function parseTarget(value: unknown): { model: string; language: string } | undefined {
+  const t = obj(value);
+  return typeof t['model'] === 'string' && t['model'] && typeof t['language'] === 'string' && t['language'] ? { model: t['model'] as string, language: t['language'] as string } : undefined;
 }
 
 /** A file streamed to disk, not yet part of its meeting. */
@@ -506,7 +554,7 @@ export class MeetingDigestService {
   async publishRecording(
     meeting: QueuedMeeting,
     file: { size: number; sha256: string },
-    transcript?: { content: (recordingName: string) => Buffer; model: string; language: string; seconds: number },
+    transcript?: { content: (recordingName: string) => Buffer; model: string; language: string; seconds: number; as: 'transcript' | 'draft' },
   ): Promise<void> {
     const live = meeting.live!;
     const dir = await this.inWorkspace(this.meetingDir(meeting.id));
@@ -541,9 +589,13 @@ export class MeetingDigestService {
         written = null;
       }
     }
-    const recording: RecordingState = written && transcript
-      ? { status: 'done', model: transcript.model, language: transcript.language, transcript: written.name, transcript_sha256: written.sha256, seconds: transcript.seconds }
-      : { status: 'pending' };
+    // The live text is the transcript when it came from the target model; from a faster one it is a draft, readable
+    // while the target model transcribes the recording again.
+    const target = live.target ? { target: live.target } : {};
+    const recording: RecordingState = !written || !transcript ? { status: 'pending', ...target }
+      : transcript.as === 'transcript'
+        ? { status: 'done', model: transcript.model, language: transcript.language, transcript: written.name, transcript_sha256: written.sha256, seconds: transcript.seconds, ...target }
+        : { status: 'pending', ...target, draft: { transcript: written.name, transcript_sha256: written.sha256, model: transcript.model, language: transcript.language, seconds: transcript.seconds } };
     const next: QueuedMeeting = {
       ...rest,
       files: [...meeting.files, { name, size: file.size, sha256: file.sha256, recording, capture: live.generation }, ...(written ? [{ name: written.name, size: written.size, sha256: written.sha256 }] : [])],
@@ -746,6 +798,19 @@ export class MeetingDigestService {
       return typeof o['name'] === 'string' && plainName(o['name']) && typeof o['sha256'] === 'string'
         ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording ? { recording } : {}), ...(typeof o['capture'] === 'string' ? { capture: o['capture'] } : {}) }] : [];
     }) : [];
+    // A live draft or target that is there but cannot be trusted, or a draft its meeting does not list as a file: the
+    // whole meeting is unreadable, so nothing transcribes, digests or cleans it, and every file stays for a person to see.
+    const listed = Array.isArray(data['files']) ? (data['files'] as unknown[]).map(obj) : [];
+    for (const o of listed) {
+      const r = obj(o['recording']);
+      const draft = r['draft'] === undefined ? null : parseDraft(r['draft']);
+      if ((r['draft'] !== undefined && !draft) || (r['target'] !== undefined && !parseTarget(r['target']))) {
+        throw httpError(400, `The queued meeting ${id} cannot be read: the record of its live transcript is damaged (${MANIFEST})`);
+      }
+      if (draft && !files.some((f) => f.name === draft.transcript && f.sha256 === draft.transcript_sha256)) {
+        throw httpError(400, `The queued meeting ${id} cannot be read: its live transcript is not among its files (${MANIFEST})`);
+      }
+    }
     const live = parseLive(data['live_recording']);
     return {
       id: path.basename(dir),
@@ -1294,7 +1359,9 @@ export class MeetingDigestService {
           let ok = meeting.files.length > 0;
           let size = 0;
           const dir = await this.inWorkspace(this.meetingDir(meeting.id)).catch(() => null);
-          for (const file of meeting.files) {
+          // A live draft is never a digest's input: only a chosen transcript is. (A meeting with one is not ready anyway.)
+          const drafts = new Set(meeting.files.flatMap((f) => (f.recording?.draft ? [f.recording.draft.transcript] : [])));
+          for (const file of meeting.files.filter((f) => !drafts.has(f.name))) {
             const from = dir ? await fileInside(dir, file.name).catch(() => null) : null;
             const hash = from ? await hashFile(from).catch(() => null) : null;
             if (!from || hash?.sha256 !== file.sha256) { ok = false; break; }

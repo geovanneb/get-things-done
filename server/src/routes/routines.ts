@@ -3,6 +3,7 @@ import { param } from '../utils/params';
 import { RoutineService, routineId } from '../services/routineService';
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
 
+import { TranscriptionModelService } from '../services/transcriptionModels';
 const router = Router();
 const service = new RoutineService();
 const transcription = new MeetingTranscriptionService();
@@ -54,7 +55,9 @@ router.post('/system-cleanup/run', async (_req: Request, res: Response) => {
 // GET /api/routines/meeting-digest  the built-in digest: settings, schedule, queue, open digest, last run
 router.get('/meeting-digest', async (_req: Request, res: Response) => {
   // With the transcription running in this dashboard, if any, and its progress.
-  res.json({ ...await service.meetingDigest(), transcription: transcription.progress() });
+  // Which models are downloaded: a recording fixed to one that is not waits, and the card says which to download.
+  const installed = (await new TranscriptionModelService().view().catch(() => null))?.models.filter((m) => m.installed).map((m) => m.id) ?? null;
+  res.json({ ...await service.meetingDigest(), transcription: transcription.progress(), installed_models: installed });
 });
 
 // PUT /api/routines/meeting-digest  { enabled?, schedule?, max_meetings? }  missing ones keep their value

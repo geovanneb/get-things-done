@@ -658,6 +658,14 @@ export interface DigestMeeting {
 /** Where a recording's transcription stands; `partial` waits for "Use this transcript" or "Try again". */
 export interface RecordingState {
   status: 'pending' | 'running' | 'done' | 'partial' | 'failed' | 'stopped';
+  /** The job running it, so Stop acts only on the one the page saw. */
+  generation?: string;
+  /** The live transcript, readable while the chosen model transcribes it again; never a digest's input. */
+  draft?: { transcript: string; transcript_sha256: string; model: string; language: string; seconds: number };
+  /** The model and language it is transcribed with, fixed when the recording was finished. */
+  target?: { model: string; language: string };
+  /** The live transcript was chosen instead of waiting for the accurate one. */
+  accepted_live?: boolean;
   started_at?: string;
   model?: string;
   language?: string;
@@ -716,6 +724,8 @@ export interface MeetingDigest {
   open_digest: string | null;
   queue: QueuedMeeting[];
   transcription: TranscriptionProgress | null;
+  /** Downloaded transcription models; null when unknown. */
+  installed_models: string[] | null;
   queue_problems: { id: string; reason: string }[];
   max_meetings_limit: number;
 }

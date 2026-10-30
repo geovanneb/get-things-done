@@ -20,7 +20,12 @@ async function workspace(t: { after: (fn: () => Promise<void> | void) => void })
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-record-'));
   const previous = process.env.ESB_WORKSPACE_PATH;
   process.env.ESB_WORKSPACE_PATH = dir;
+  // Finish reads the transcription settings: never this computer's own.
+  const models = process.env.ESB_MODELS_PATH;
+  process.env.ESB_MODELS_PATH = path.join(dir, '.models');
   t.after(async () => {
+    if (models === undefined) delete process.env.ESB_MODELS_PATH;
+    else process.env.ESB_MODELS_PATH = models;
     if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
     else process.env.ESB_WORKSPACE_PATH = previous;
     await fsp.rm(dir, { recursive: true, force: true });

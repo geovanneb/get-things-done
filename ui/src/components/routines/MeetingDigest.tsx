@@ -40,9 +40,9 @@ function minutes(seconds: number): string {
 }
 
 /** One recording of a queued meeting: where its transcription stands, and what can be done about it. */
-function RecordingLine({ meeting, file, state, progress, disabled, onAction }: {
-  meeting: QueuedMeeting; file: string; state: RecordingState; progress: TranscriptionProgress | null; disabled: boolean;
-  onAction: (action: 'stop' | 'retry' | 'accept', message: string) => void;
+function RecordingLine({ meeting, file, state, progress, disabled, installed, onAction }: {
+  meeting: QueuedMeeting; file: string; state: RecordingState; progress: TranscriptionProgress | null; disabled: boolean; installed: string[] | null;
+  onAction: (action: 'stop' | 'retry' | 'accept' | 'use-live', message: string, body?: Record<string, string>, stopFirst?: boolean) => void;
 }) {
   let text: string;
   let tone = 'var(--color-text-muted)';
@@ -50,11 +50,24 @@ function RecordingLine({ meeting, file, state, progress, disabled, onAction }: {
     text = progress && progress.total > 0
       ? `Transcribing: ${Math.min(99, Math.floor((progress.done / progress.total) * 100))}% of ${minutes(progress.total)}`
       : progress ? 'Transcribing: loading the model' : 'Transcribing in another dashboard';
+  } else if (state.status === 'pending' && state.target && installed && !installed.includes(state.target.model)) {
+    text = `Waits for ${state.target.model}, which is not downloaded: download it again in Settings > Transcription`;
+    tone = 'var(--color-warning)';
   } else if (state.status === 'pending') text = 'Waits for transcription; one recording at a time';
   else if (state.status === 'stopped') { text = 'Stopped: the meeting waits until you try again or remove it'; tone = 'var(--color-warning)'; }
   else if (state.status === 'failed') { text = `Failed: ${state.error ?? 'unknown error'}`; tone = 'var(--color-critical)'; }
   else if (state.accepted) text = 'Partial transcript, used as it is';
   else { text = `Partial transcript${state.error ? ` (${state.error})` : ''}: use it as it is, or try again`; tone = 'var(--color-warning)'; }
+  // A live transcript waits as a draft while the chosen model makes a more accurate one.
+  const draft = state.draft;
+  if (draft) {
+    const accurate = state.status === 'running' ? text.replace(/^Transcribing/, 'being made')
+      : state.status === 'pending' ? (tone === 'var(--color-warning)' ? `waits for ${state.target?.model}, which is not downloaded (Settings > Transcription)` : 'waits its turn')
+        : state.status === 'stopped' ? 'stopped'
+          : state.status === 'failed' ? `failed (${state.error ?? 'unknown error'})`
+            : 'partial: use one of them, or try again';
+    text = `Live transcript ready. The more accurate one${state.target ? ` (${state.target.model})` : ''}: ${accurate}`;
+  }
   return (
     <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
       <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '40%' }}>{file}</span>
@@ -63,8 +76,16 @@ function RecordingLine({ meeting, file, state, progress, disabled, onAction }: {
         <Button size="sm" variant="ghost" disabled={disabled}
           onClick={() => {
             if (state.status === 'running' && !window.confirm(`Stop transcribing ${file}? What was transcribed so far is not kept.`)) return;
-            onAction('stop', `${file} will not be transcribed until you try again.`);
+            onAction('stop', `${file} will not be transcribed until you try again.`, state.generation ? { generation: state.generation } : undefined);
           }}>Stop</Button>
+      )}
+      {draft && (
+        <Button size="sm" variant="ghost" disabled={disabled}
+          onClick={() => {
+            const running = state.status === 'running';
+            if (running && !window.confirm('Stop the more accurate transcript and use the live one instead?')) return;
+            onAction('use-live', `${meeting.title} uses its live transcript and can go into a digest.`, { draft_sha256: draft.transcript_sha256, ...(state.generation ? { generation: state.generation } : {}) }, running);
+          }}>Use the live transcript</Button>
       )}
       {state.status === 'partial' && !state.accepted && (
         <Button size="sm" variant="ghost" disabled={disabled}
@@ -99,6 +120,8 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
       onChanged();
     } catch (err) {
       setNotice({ text: (err as Error).message, error: true });
+      // Refused because things changed meanwhile: show them as they are now.
+      onChanged();
     } finally {
       setBusy(null);
     }
@@ -195,9 +218,12 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
               {m.status === 'queued' && m.files.filter((f) => f.recording && !(f.recording.status === 'done')).map((f) => (
                 <RecordingLine key={f.name} meeting={m} file={f.name} state={f.recording!}
                   progress={job.transcription?.meeting === m.id && job.transcription.file === f.name ? job.transcription : null}
-                  disabled={busy !== null || m.in_digest}
-                  onAction={(action, message) => act(`${action}-${m.id}-${f.name}`, async () => {
-                    await apiPost(`/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(f.name)}/${action}`);
+                  installed={job.installed_models} disabled={busy !== null || m.in_digest}
+                  onAction={(action, message, body, stopFirst) => act(`${action}-${m.id}-${f.name}`, async () => {
+                    const base = `/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(f.name)}`;
+                    // Stop exactly the job the page showed, then use the draft it showed.
+                    if (stopFirst) await apiPost(`${base}/stop`, { generation: body?.['generation'] });
+                    await apiPost(`${base}/${action}`, body);
                     return message;
                   })} />
               ))}
