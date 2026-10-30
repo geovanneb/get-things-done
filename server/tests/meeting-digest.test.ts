@@ -6,7 +6,8 @@ import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { RoutineService } from '../src/services/routineService';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
-import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, type DigestRunner } from '../src/services/meetingDigestService';
+import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, queueLimits, type DigestRunner } from '../src/services/meetingDigestService';
+import { spawn } from 'node:child_process';
 import type { AgentRun } from '../src/services/agentRunner';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
@@ -522,4 +523,39 @@ test('the schedule: first check counts from now, missed runs collapse into one, 
   await queueMeeting(service, 'Later', '2026-10-29', [['b.md', Buffer.from('B')]]);
   assert.equal(await service.runIfDue(new Date('2026-10-30T19:00:00')), null);
   assert.equal((await service.view()).queue.length, 1);
+});
+
+test('the queue lock holds across dashboards: a change waits for another process, then goes ahead; a lock left by a process that is gone is taken over', async (t) => {
+  const ws = await workspace(t);
+  const lockFile = path.join(ws, '.situation-board', 'routines', 'meeting-queue.lock');
+  const previous = queueLimits.lockWaitMs;
+  queueLimits.lockWaitMs = 300;
+  t.after(() => { queueLimits.lockWaitMs = previous; });
+  const service = new MeetingDigestService();
+
+  // A real second process holds the lock (as another dashboard would) until it is told to let go.
+  const other = spawn(process.execPath, ['-e', `
+    const fs = require('fs');
+    fs.writeFileSync(${JSON.stringify(lockFile)}, JSON.stringify({ pid: process.pid, token: 'other-dashboard' }), { flag: 'wx' });
+    process.stdout.write('held\\n');
+    process.stdin.on('data', () => { fs.rmSync(${JSON.stringify(lockFile)}); process.exit(0); });
+  `], { stdio: ['pipe', 'pipe', 'inherit'] });
+  t.after(() => { if (other.exitCode === null) other.kill(); });
+  await new Promise<void>((resolve) => other.stdout!.once('data', () => resolve()));
+  await assert.rejects(service.createMeeting({ title: 'Waits', meeting_date: '2026-10-30' }), /Another dashboard is changing the meeting queue/);
+  assert.equal((await service.readQueue()).meetings.length, 0, 'nothing was written while the other held the lock');
+
+  // Let go while a change waits: it goes ahead.
+  queueLimits.lockWaitMs = 5000;
+  const waiting = service.createMeeting({ title: 'After', meeting_date: '2026-10-30' });
+  await new Promise((r) => setTimeout(r, 100));
+  other.stdin!.write('go');
+  const made = await waiting;
+  assert.equal(made.title, 'After');
+  await assert.rejects(fsp.access(lockFile), 'released');
+
+  // A lock left by a process that is gone does not block.
+  await fsp.writeFile(lockFile, JSON.stringify({ pid: 2 ** 22 + 4242, token: 'crashed' }));
+  await service.createMeeting({ title: 'Taken over', meeting_date: '2026-10-30' });
+  assert.equal((await service.readQueue()).meetings.length, 2);
 });

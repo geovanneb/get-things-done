@@ -7,6 +7,7 @@ import { finished } from 'stream/promises';
 import { EventEmitter } from 'events';
 import { atomicWrite } from '../utils/atomicWrite';
 import { processAlive } from './runState';
+import { HeldLock, ownsToken, readLock, tryLock, unlock } from '../utils/fileLock';
 
 /**
  * Speech-to-text models for offline transcription: a fixed catalog, downloaded on request from Settings.
@@ -180,18 +181,13 @@ function notify(now = false): void {
 }
 
 /** A running download: its progress, how to stop it, the bytes on disk per file, and the lock it holds. */
-interface Job { progress: DownloadProgress; abort: AbortController; bytes: Map<string, number>; lock: Lock | null }
-interface Lock { file: string; token: string }
+interface Job { progress: DownloadProgress; abort: AbortController; bytes: Map<string, number>; lock: HeldLock | null }
 /** The download this dashboard runs (claimed before anything is awaited), and how the last one of each model ended. */
 let active: Job | null = null;
 /** True while this dashboard removes a model: claimed before anything is awaited, like a download. */
 let removing = false;
-/** The tokens of the download locks this process holds, for downloads and removals alike. */
-const ownedTokens = new Set<string>();
 const lastOutcome = new Map<string, DownloadProgress>();
 
-/** A lock file whose holder never finished writing it (a crash, a full disk) is taken over after this long. */
-const INCOMPLETE_LOCK_MS = 10_000;
 const { O_WRONLY, O_CREAT, O_TRUNC, O_APPEND, O_RDONLY } = fs.constants;
 /** Not on Windows, which has no symbolic links of this kind; the lstat checks cover it there. */
 const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
@@ -275,8 +271,8 @@ export class TranscriptionModelService {
 
   /** Who holds the download lock, when it is another live dashboard. */
   private async otherHolder(): Promise<boolean> {
-    const holder = await this.readLock();
-    return Boolean(holder && !holder.incomplete && !ownedTokens.has(holder.token!) && processAlive(holder.pid) && holder.pid !== process.pid);
+    const holder = await readLock(this.lockFile());
+    return Boolean(holder && !holder.incomplete && !ownsToken(this.lockFile(), holder.token!) && processAlive(holder.pid) && holder.pid !== process.pid);
   }
 
   async view(): Promise<TranscriptionView> {
@@ -626,94 +622,17 @@ export class TranscriptionModelService {
 
   private lockFile(): string { return path.join(this.dir(), 'download.lock'); }
 
-  /** The lock as it is now, with what identifies this very file: its inode and its exact content. */
-  private async readLock(file = this.lockFile()): Promise<{ pid?: number; token?: string; incomplete: boolean; mtime: number; ino: number; raw: string } | null> {
-    let raw: string;
-    let st: fs.Stats;
-    try {
-      st = await fsp.lstat(file);
-      raw = await fsp.readFile(file, 'utf-8');
-    } catch {
-      return null;
-    }
-    try {
-      const o = JSON.parse(raw) as { pid?: unknown; token?: unknown };
-      if (typeof o.pid === 'number' && Number.isInteger(o.pid) && o.pid > 0 && typeof o.token === 'string' && o.token) {
-        return { pid: o.pid, token: o.token, incomplete: false, mtime: st.mtimeMs, ino: st.ino, raw };
-      }
-    } catch { /* an unfinished or damaged lock */ }
-    return { incomplete: true, mtime: st.mtimeMs, ino: st.ino, raw };
+  /** One download or removal at a time across every dashboard using this folder; busy is refused at once (409). */
+  private async lock(busy = 'Another dashboard is downloading a model; wait for it to finish'): Promise<HeldLock> {
+    const result = await tryLock(this.lockFile());
+    if (result === 'starting') throw httpError(409, 'Another dashboard is starting a download; try again in a moment');
+    if (result === 'stuck') throw httpError(409, 'The download lock could not be taken; try again');
+    if (result === 'held') throw httpError(409, busy);
+    return result;
   }
 
-  /**
-   * Takes the download lock: one download or removal at a time across every dashboard using this folder. The lock
-   * names its holder and a token, so only the holder releases it. A lock whose holder is gone, or that was never
-   * finished or is damaged and old, is taken over under a short second lock: there it is read again and removed
-   * only if it is still the very file judged stale (same inode, same content), so a live lock is never removed.
-   */
-  private async lock(busy = 'Another dashboard is downloading a model; wait for it to finish'): Promise<Lock> {
-    const file = this.lockFile();
-    const token = `${process.pid}-${randomUUID()}`;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        const handle = await fsp.open(file, 'wx', 0o600);
-        ownedTokens.add(token);
-        try { await handle.writeFile(JSON.stringify({ pid: process.pid, token, at: new Date().toISOString() })); } finally { await handle.close(); }
-        return { file, token };
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      }
-      const holder = await this.readLock();
-      if (!holder) continue;
-      const stale = holder.incomplete ? Date.now() - holder.mtime > INCOMPLETE_LOCK_MS
-        : !processAlive(holder.pid) || (holder.pid === process.pid && !ownedTokens.has(holder.token!));
-      if (!stale) throw httpError(409, holder.incomplete ? 'Another dashboard is starting a download; try again in a moment' : busy);
-      await this.takeOver(holder.ino, holder.raw);
-    }
-    throw httpError(409, 'The download lock could not be taken; try again');
-  }
-
-  /**
-   * Removes the stale lock seen, under the takeover guard, if it is still that very file. The guard names its holder:
-   * it is cleared only when that process is gone (never by age while it lives, so a dashboard paused mid-takeover
-   * keeps it), and each dashboard removes only its own. Left open: two dashboards clearing the same dead holder's
-   * guard within the same instant, which needs operating-system file locks Node does not offer.
-   */
-  private async takeOver(ino: number, raw: string): Promise<void> {
-    const guard = `${this.lockFile()}.takeover`;
-    const mine = JSON.stringify({ pid: process.pid, token: randomUUID() });
-    try {
-      const created = await fsp.open(guard, 'wx', 0o600);
-      try { await created.writeFile(mine); } finally { await created.close(); }
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      const held = await this.readLock(guard);
-      const gone = held && (held.incomplete ? Date.now() - held.mtime > INCOMPLETE_LOCK_MS : !processAlive(held.pid));
-      if (gone) {
-        const again = await this.readLock(guard);
-        if (again && again.ino === held.ino && again.raw === held.raw) await fsp.rm(guard, { force: true });
-      }
-      await new Promise((r) => setTimeout(r, 50));
-      return;
-    }
-    try {
-      const now = await this.readLock();
-      if (now && now.ino === ino && now.raw === raw) await fsp.rm(this.lockFile(), { force: true });
-    } finally {
-      const held = await fsp.readFile(guard, 'utf-8').catch(() => '');
-      if (held === mine) await fsp.rm(guard, { force: true });
-    }
-  }
-
-  /** Releases the lock only when it is still ours. */
-  private async unlock(lock: Lock): Promise<void> {
-    try {
-      const holder = await this.readLock();
-      if (holder?.token === lock.token) await fsp.rm(lock.file, { force: true });
-    } finally {
-      // Forgotten only once the file is gone, so this process never takes its own live lock for a stale one.
-      ownedTokens.delete(lock.token);
-    }
+  private async unlock(held: HeldLock): Promise<void> {
+    await unlock(held);
   }
 
   /** For tests: waits until no download runs in this process. */

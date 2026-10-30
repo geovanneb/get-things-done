@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { WorkspaceService } from './workspace';
 import { ContextUpdateService, DigestMeeting, readableSizeOf } from './contextUpdateService';
 import { hashFile } from '../utils/fileHash';
+import { lock, unlock } from '../utils/fileLock';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, saveAttachment, topLevelName, workspaceEntry } from '../utils/files';
@@ -282,7 +283,42 @@ function serialized<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
+/** What the first, locked step of making a digest hands to the rest. */
+interface MakePlan {
+  batch: Batch;
+  digestMeetings: DigestMeeting[];
+  files: { name: string; from: string; sha256: string }[];
+  chosen: { meeting: QueuedMeeting; files: { from: string; file: QueuedFile }[]; characters: number }[];
+  queued: QueuedMeeting[];
+  broken: string[];
+  brokenNote: string;
+  problems: { id: string; reason: string }[];
+  unreadable: string;
+  characters: number;
+}
+
+/** How long a change to the queue waits for another dashboard's change to finish before it gives up (tests shorten it). */
+export const queueLimits = { lockWaitMs: 60_000 };
+
 export class MeetingDigestService {
+  /**
+   * One change to the meeting queue at a time: in this process (a chain) and across every dashboard using this
+   * workspace (a lock file next to the digest's other files). Uploads, queueing, removal, choosing a digest's
+   * meetings and handing them over all go through it.
+   */
+  private exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    return serialized(async () => {
+      const dir = await this.inWorkspace(this.routinesDir(), true);
+      const held = await lock(path.join(dir, 'meeting-queue.lock'), queueLimits.lockWaitMs, (reason) => httpError(409,
+        reason === 'held' ? 'Another dashboard is changing the meeting queue; try again in a moment' : 'The meeting queue is busy; try again in a moment'));
+      try {
+        return await operation();
+      } finally {
+        await unlock(held);
+      }
+    });
+  }
+
   constructor(private readonly runner: DigestRunner = new AgentRunnerService()) {}
 
   private routinesDir(): string {
@@ -494,7 +530,7 @@ export class MeetingDigestService {
     const title = typeof input.title === 'string' ? input.title.trim().replace(/\s+/g, ' ').slice(0, 200) : '';
     const meetingDate = typeof input.meeting_date === 'string' && input.meeting_date ? input.meeting_date : localDate(now);
     if (!isDateOnly(meetingDate)) throw httpError(400, 'Invalid meeting_date: use YYYY-MM-DD');
-    return serialized(async () => {
+    return this.exclusive(async () => {
       const queueDir = await this.inWorkspace(this.queueDir(), true);
       for (let attempt = 0; attempt < 20; attempt++) {
         const id = await this.nextQueueId(now);
@@ -515,7 +551,7 @@ export class MeetingDigestService {
 
   /** Adds one file to a draft meeting. The same file twice is refused. */
   async addFile(id: string, originalName: string, buffer: Buffer): Promise<QueuedMeeting> {
-    return serialized(async () => {
+    return this.exclusive(async () => {
       const meeting = await this.readMeeting(id);
       if (meeting.status !== 'draft') throw httpError(409, 'Files can only be added before the meeting is queued');
       if (meeting.files.length >= MAX_FILES_PER_MEETING) throw httpError(409, `A meeting holds at most ${MAX_FILES_PER_MEETING} files`);
@@ -537,7 +573,7 @@ export class MeetingDigestService {
 
   /** Puts a draft meeting, or one on hold, in the queue: from now on the next digest can take it. */
   async queue(id: string, now = new Date()): Promise<QueuedMeeting> {
-    return serialized(async () => {
+    return this.exclusive(async () => {
       const meeting = await this.readMeeting(id);
       if (meeting.status === 'queued' && !meeting.held) return meeting;
       if (meeting.files.length === 0) throw httpError(409, 'Add at least one file before queueing the meeting');
@@ -548,7 +584,7 @@ export class MeetingDigestService {
 
   /** Removes a meeting from the queue, files included. Not while a digest is being made from it. */
   async removeMeeting(id: string): Promise<void> {
-    return serialized(async () => {
+    return this.exclusive(async () => {
       let dir: string;
       try { dir = await this.inWorkspace(this.meetingDir(id)); } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') throw httpError(404, `Queued meeting not found: ${id}`);
@@ -689,7 +725,7 @@ export class MeetingDigestService {
 
   /** Finishes or discards a digest an earlier run did not complete. Null when there was none. */
   private async recover(): Promise<DigestRunResult | null> {
-    return serialized(async () => {
+    return this.exclusive(async () => {
       let batch: Batch | null;
       try { batch = await this.readBatch(); } catch (err) {
         return { status: 'error', message: (err as Error).message, did_something: true };
@@ -791,9 +827,14 @@ export class MeetingDigestService {
     return true;
   }
 
+  /**
+   * Makes a digest in three steps. Under the queue lock: choose the meetings, check their files and write the batch
+   * file, which reserves them (removal, uploads and every other change refuse a meeting named in it). Without the
+   * lock: build the digest, which may copy large files. Under the lock again: hand the meetings over, or clean up.
+   */
   private async make(settings: DigestSettings, now: Date): Promise<DigestRunResult> {
-    return serialized(async () => {
-      try {
+    try {
+      const plan = await this.exclusive(async (): Promise<DigestRunResult | MakePlan> => {
         if (await this.readBatch()) throw new Error('An earlier digest is not finished yet');
         const removed = await this.removeAbandoned(now);
         const open = await this.openDigest();
@@ -864,6 +905,10 @@ export class MeetingDigestService {
           started_at: now.toISOString(),
         };
         await this.writeJson('meeting-digest-batch.json', batch);
+        return { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters };
+      });
+      if ('status' in plan) return plan;
+      const { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters } = plan;
         try {
           await contextUpdateService.createDigest({
             title: digestTitle(digestMeetings),
@@ -878,7 +923,7 @@ export class MeetingDigestService {
           });
         } catch (err) {
           // When it cannot be told whether the digest was published, the batch file stays and the next run decides.
-          if (!batch.update_id || !await contextUpdateService.published(batch.update_id)) {
+          if (!batch.update_id || !await contextUpdateService.published(batch.update_id)) await this.exclusive(async () => {
             // Not published: remove what was written, and the meetings stay queued.
             if (batch.update_id) {
               await contextUpdateService.discardUnpublished(batch.update_id).catch((discard: Error) => {
@@ -887,13 +932,15 @@ export class MeetingDigestService {
             }
             await this.clearBatch();
             throw err;
-          }
+          });
           // Published, but reading it back failed: finish the handoff as usual.
         }
+        const kept = await this.exclusive(async () => {
+          batch.published = true;
+          await this.writeJson('meeting-digest-batch.json', batch);
+          return this.release(batch);
+        });
         const updateId = batch.update_id!;
-        batch.published = true;
-        await this.writeJson('meeting-digest-batch.json', batch);
-        const kept = await this.release(batch);
         const left = queued.length - chosen.length - broken.length;
         return {
           status: broken.length || problems.length || kept.length ? 'error' : 'ok',
@@ -903,10 +950,9 @@ export class MeetingDigestService {
           context_update: updateId,
           did_something: true,
         };
-      } catch (err) {
-        return { status: 'error', message: `The meeting digest failed: ${(err as Error).message}`, did_something: true };
-      }
-    });
+    } catch (err) {
+      return { status: 'error', message: `The meeting digest failed: ${(err as Error).message}`, did_something: true };
+    }
   }
 
   /** Removes drafts nobody touched for a day, and folders whose creation never finished. Returns how many. */
