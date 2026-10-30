@@ -492,6 +492,11 @@ export class AgentRunnerService {
     return null;
   }
 
+  /** For tests: true while a run holds the one-run slot. It is freed last, after the run's outcome is set and saved. */
+  static busy(): boolean {
+    return active !== null;
+  }
+
   /** The current or last run for an update in this workspace, or null when there was none. */
   async get(id: string): Promise<AgentRun | null> {
     const uid = updateId(id);
