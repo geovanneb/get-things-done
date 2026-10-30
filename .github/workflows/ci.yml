@@ -115,7 +115,7 @@ jobs:
         env:
           STT_TEST_MODELS: ${{ runner.temp }}/models
           STT_TEST_AUDIO: ${{ runner.temp }}/audio
-        run: node --import tsx --test --test-name-pattern="real model" tests/transcription-engine.test.ts
+        run: node --import tsx --test --test-concurrency=1 --test-name-pattern="real model" tests/transcription-engine.test.ts tests/meeting-acceptance.test.ts
 
   audit:
     name: Dependency audit
