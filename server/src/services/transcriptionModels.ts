@@ -50,6 +50,8 @@ export interface TranscriptionSettings {
   language: TranscriptionLanguage;
   /** Keep a recording after its complete transcript went into a digest. Off: the recording goes with the queue. */
   keep_recordings: boolean;
+  /** The model for a live transcript while recording; null: no live transcript. */
+  live_model: string | null;
   updated_at: string | null;
 }
 
@@ -144,7 +146,7 @@ export const VAD: CatalogModel = {
   ],
 };
 
-const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, updated_at: null };
+const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, updated_at: null };
 /** Below this much memory the default model leaves little room, and the lighter one is suggested. */
 const LOW_MEMORY_BYTES = 8.5 * 1024 ** 3;
 const STALL_MS = 60_000;
@@ -166,10 +168,12 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   if (o['model'] !== undefined && !catalog.some((m) => m.id === o['model'])) throw httpError(400, 'Invalid model');
   if (o['language'] !== undefined && !LANGUAGES.includes(o['language'] as TranscriptionLanguage)) throw httpError(400, 'Invalid language: use auto, en or ja');
   if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
+  if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'])) throw httpError(400, 'Invalid live_model: a catalog model, or null for no live transcript');
   return {
     model: (o['model'] as string | undefined) ?? base.model,
     language: (o['language'] as TranscriptionLanguage | undefined) ?? base.language,
     keep_recordings: (o['keep_recordings'] as boolean | undefined) ?? base.keep_recordings,
+    live_model: o['live_model'] === undefined ? base.live_model : (o['live_model'] as string | null),
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
 }

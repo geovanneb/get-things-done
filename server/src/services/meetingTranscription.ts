@@ -109,7 +109,8 @@ export class MeetingTranscriptionService {
   }
 
   private async next(): Promise<void> {
-    if (active) return;
+    // The engine is busy (a live transcript during a meeting, a speed test): waiting costs nothing, claiming would.
+    if (active || TranscriptionEngine.isBusy()) return;
     await this.recover().catch((err: Error) => console.error(`[transcription] Recovery: ${err.message}`));
     const settings = await this.models.readSettings();
     if (!await this.models.installedPath(settings.model)) return;
@@ -230,6 +231,11 @@ export class MeetingTranscriptionService {
     if (changed) await this.queue.saveMeeting(meeting);
     const folder = await this.queue.meetingFolder(meeting.id);
     await this.queue.dropUnrecorded(meeting, folder);
+    // A live transcript of a recording that is no longer being made (published, discarded, or never finished).
+    for (const name of await fsp.readdir(folder).catch(() => [] as string[])) {
+      const m = /^\.live-transcript-(.+)\.jsonl$/.exec(name);
+      if (m && m[1] !== meeting.live?.generation) await fsp.rm(path.join(folder, name), { force: true });
+    }
     const work = await workFolder(folder, false);
     for (const name of work ? await fsp.readdir(work) : []) {
       const m = /^([0-9a-f-]{36})-(\d+)\.wav$/.exec(name);

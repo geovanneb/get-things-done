@@ -4,7 +4,7 @@ import * as path from 'path';
 import { ChildProcess, fork } from 'child_process';
 import { CATALOG, TranscriptionModelService, VAD } from '../transcriptionModels';
 import { readWavFormat } from './wav';
-import type { EngineModel, WorkerReply, WorkerRequest } from './protocol';
+import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './protocol';
 
 /**
  * Runs the transcription worker (worker.ts) for one job at a time: a model check, or a WAV file to transcribe.
@@ -18,6 +18,18 @@ export interface TranscriptResult { segments: Segment[]; seconds: number; load_m
 export interface EngineStatus { available: boolean; version: string | null; error: string | null }
 
 export type WorkerLauncher = () => ChildProcess;
+
+/** A live transcript's job, while its recording is made. */
+export interface FollowSession {
+  /** Audio saved so far, in bytes after the header. Only this much is read. */
+  committed(bytes: number): void;
+  /** The recording is sealed at `bytes`: reads to there, and resolves once the worker has exited. */
+  end(bytes: number, deadlineMs: number): Promise<{ ok: true; bytes: number; seconds: number; segments: number } | { ok: false; message: string }>;
+  /** Ends the job without a result; resolves once the worker has exited. */
+  cancel(): Promise<void>;
+  /** Why the job stopped early, while the recording goes on; null while it runs. */
+  readonly failed: string | null;
+}
 
 /** Starts the worker as a Node process: the built worker.js next to this file, or worker.ts when run from source. */
 export const launchWorker: WorkerLauncher = () => {
@@ -47,7 +59,12 @@ const STOP_GRACE_MS = 3000;
 /** True once the shutdown began: no new job starts after that, not even one that was still preparing. */
 let closing = false;
 
-const hasExited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
+/** Workers that never started (a failed spawn emits `error` and `close`, never `exit`). */
+const neverStarted = new WeakSet<ChildProcess>();
+function watchSpawn(child: ChildProcess): void {
+  child.once('error', () => { if (child.pid === undefined) neverStarted.add(child); });
+}
+const hasExited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null || neverStarted.has(child);
 
 /**
  * Ends a worker: a polite signal first, then a forced kill. Waits a bounded time and says whether it has exited;
@@ -77,6 +94,11 @@ export class TranscriptionEngine {
   static async stopAll(): Promise<void> {
     closing = true;
     await Promise.all([...running].map((child) => stop(child)));
+  }
+
+  /** True while a job holds the one-job slot in this dashboard, such as a live transcript during a meeting. */
+  static isBusy(): boolean {
+    return busy;
   }
 
   /** For tests: opens the door again after stopAll(). */
@@ -145,6 +167,83 @@ export class TranscriptionEngine {
       if (reply.type === 'done') seconds = reply.seconds;
     }, options.signal, release);
     return { segments, seconds, load_ms: loadMs };
+  }
+
+  /**
+   * Follows a recording as it is made (worker `follow`), for a live transcript. It takes the one-job slot and the
+   * model's lease like any job, until its worker has really exited. Segments arrive as speech ends. `committed` passes
+   * on how much audio is saved; `end` seals it and resolves with exactly how much was read; `cancel` ends it, and
+   * resolves once the worker has exited.
+   */
+  async follow(wav: string, options: { model: string; language: string; onSegment: (s: Segment) => void; onProgress?: (done: number, total: number) => void }): Promise<FollowSession> {
+    if (closing) throw httpError(503, 'The dashboard is shutting down');
+    if (busy) throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true });
+    const release = await this.models.lease(options.model);
+    let model: EngineModel;
+    try { model = await this.engineModel(options.model); } catch (err) { await release(); throw err; }
+    if (busy || closing) { await release(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
+    busy = true;
+    let child: ChildProcess;
+    try {
+      child = this.launcher();
+    } catch (err) {
+      busy = false;
+      await release();
+      throw new Error(`The transcription engine could not start: ${(err as Error).message}`, { cause: err });
+    }
+    running.add(child);
+    watchSpawn(child);
+    let stderr = '';
+    child.stderr?.on('data', (d: Buffer) => { if (stderr.length < 4000) stderr += d.toString(); });
+    // The slot and the lease go back only once the worker has really exited, whatever ended it.
+    // `close` also comes after a failed spawn, which has no `exit`.
+    const exited = new Promise<void>((resolve) => {
+      child.once('exit', () => resolve());
+      child.once('close', () => { if (neverStarted.has(child)) resolve(); });
+    });
+    void exited.then(async () => { running.delete(child); busy = false; await release().catch(() => {}); });
+
+    let outcome: { ok: true; bytes: number; seconds: number; segments: number } | { ok: false; message: string } | null = null;
+    const settle = (value: NonNullable<typeof outcome>) => { if (!outcome) { outcome = value; for (const w of waiting) w(); } };
+    const waiting: (() => void)[] = [];
+    const ended = () => new Promise<void>((resolve) => { if (outcome) resolve(); else waiting.push(resolve); });
+    let loaded = false;
+    const loadTimer = setTimeout(() => { if (!loaded) { settle({ ok: false, message: 'The model took too long to load.' }); void stop(child); } }, CHECK_TIMEOUT_MS);
+    child.on('message', (reply: WorkerReply) => {
+      if (outcome) return;
+      if (reply.type === 'loaded') { loaded = true; clearTimeout(loadTimer); }
+      if (reply.type === 'segment') options.onSegment({ start: reply.start, end: reply.end, text: reply.text });
+      if (reply.type === 'progress') options.onProgress?.(reply.done, reply.total);
+      if (reply.type === 'error') settle({ ok: false, message: reply.message });
+      if (reply.type === 'done') settle({ ok: true, bytes: reply.bytes ?? -1, seconds: reply.seconds, segments: reply.segments });
+    });
+    child.on('error', (err) => settle({ ok: false, message: `The transcription engine could not start: ${err.message}` }));
+    child.once('exit', (code, sig) => {
+      clearTimeout(loadTimer);
+      settle({ ok: false, message: `The transcription engine stopped (${sig ?? `exit code ${code}`}).${stderr.trim() ? ` ${stderr.trim().split('\n').slice(-1)[0]}` : ''}` });
+    });
+    const sendControl = (control: WorkerControl) => { if (child.connected && !outcome) child.send(control, () => {}); };
+    if (child.connected) child.send({ type: 'follow', model, wav, language: options.language } satisfies WorkerRequest, () => {});
+    else settle({ ok: false, message: 'The transcription engine could not start.' });
+
+    return {
+      committed: (bytes: number) => sendControl({ type: 'committed', bytes }),
+      end: async (bytes: number, deadlineMs: number) => {
+        sendControl({ type: 'end', bytes });
+        const timer = new Promise<'late'>((r) => setTimeout(() => r('late'), Math.max(0, deadlineMs)));
+        const result = await Promise.race([ended().then(() => 'ended' as const), timer]);
+        if (result === 'late') settle({ ok: false, message: 'The live transcript did not finish in time.' });
+        await stop(child);
+        await exited;
+        return outcome!;
+      },
+      cancel: async () => {
+        settle({ ok: false, message: 'Stopped.' });
+        await stop(child);
+        await exited;
+      },
+      get failed() { return outcome && !outcome.ok ? outcome.message : null; },
+    };
   }
 
   /** The worker's view of an installed model: full paths of its files and the VAD model. */

@@ -11,12 +11,21 @@ export interface EngineModel {
 export type WorkerRequest =
   | { type: 'version' }
   | { type: 'check'; model: EngineModel }
-  | { type: 'transcribe'; model: EngineModel; wav: string; language: string };
+  | { type: 'transcribe'; model: EngineModel; wav: string; language: string }
+  /**
+   * Follows a recording as it is made: a 16 kHz mono 16-bit WAV that grows. The worker reads only audio the dashboard
+   * says is saved (`committed`), then everything up to `end` once the recording is sealed.
+   */
+  | { type: 'follow'; model: EngineModel; wav: string; language: string };
+
+/** Sent to a follow job after its request. Byte counts are of audio, after the 44-byte header. */
+export type WorkerControl = { type: 'committed'; bytes: number } | { type: 'end'; bytes: number };
 
 export type WorkerReply =
   | { type: 'version'; version: string }
   | { type: 'loaded'; ms: number }
   | { type: 'progress'; done: number; total: number }
   | { type: 'segment'; start: number; end: number; text: string }
-  | { type: 'done'; seconds: number; segments: number }
+  /** `bytes`: for a follow job, exactly how much audio it read, so the dashboard can tell it covered all of it. */
+  | { type: 'done'; seconds: number; segments: number; bytes?: number }
   | { type: 'error'; message: string };
