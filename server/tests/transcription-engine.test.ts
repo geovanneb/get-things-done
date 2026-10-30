@@ -110,6 +110,16 @@ function fakeWorker(answer: (request: WorkerRequest, reply: (r: WorkerReply) => 
   return { launcher, runs };
 }
 
+/** Fictional installed models: files of the right names and sizes (sparse) and the record the downloader writes. */
+async function fakeInstall(dir: string, ids: string[]): Promise<void> {
+  const { CATALOG, VAD } = await import('../src/services/transcriptionModels');
+  for (const entry of [...CATALOG, VAD].filter((m) => ids.includes(m.id))) {
+    await fsp.mkdir(path.join(dir, entry.id), { recursive: true });
+    for (const f of entry.files) { const h = await fsp.open(path.join(dir, entry.id, f.name), 'w'); await h.truncate(f.size); await h.close(); }
+    await fsp.writeFile(path.join(dir, entry.id, 'installed.json'), JSON.stringify({ id: entry.id, files: entry.files.map((f) => ({ name: f.name, sha256: f.sha256 })) }));
+  }
+}
+
 async function installedModels(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
   const dir = await tmp(t);
   const previous = process.env.ESB_MODELS_PATH;
@@ -235,4 +245,43 @@ test('a model in use cannot be removed, from this dashboard or another one; a le
   await fsp.rename(path.join(dir, model, `.lease-${process.ppid}-other`), path.join(dir, model, `.lease-${2 ** 22 + 777}-gone`));
   await service.remove(model);
   assert.equal(await service.installed(model), false);
+});
+
+test('a worker that will not exit keeps the job slot and the model lease until it really does; shutdown stops jobs still preparing', async (t) => {
+  await fakeInstall(await installedModels(t), ['sensevoice-2024-07-17', 'silero-vad']);
+  // A child that never answers and ignores every signal until the test lets it go.
+  let child: (EventEmitter & { exitCode: number | null; signalCode: string | null }) | null = null;
+  const launches: number[] = [];
+  const launcher: WorkerLauncher = () => {
+    launches.push(Date.now());
+    const c = Object.assign(new EventEmitter(), { exitCode: null as number | null, signalCode: null as string | null, connected: true, stderr: new EventEmitter() });
+    Object.assign(c, { send: () => true, kill: () => true, disconnect: () => { c.connected = false; } });
+    child = c;
+    return c as unknown as ChildProcess;
+  };
+  let released = 0;
+  const models = Object.assign(new TranscriptionModelService(), { lease: async () => async () => { released++; } });
+  const engine = new TranscriptionEngine(models, launcher);
+  const run = (engine as unknown as { run: (r: WorkerRequest, ms: number, on: () => void, s?: AbortSignal, after?: () => Promise<void>) => Promise<void> }).run.bind(engine);
+  await assert.rejects(run({ type: 'version' }, 50, () => {}, undefined, async () => { released++; }), /took too long/);
+  assert.equal(released, 0, 'the lease is kept while the worker lives');
+  assert.match((await engine.status()).error!, /already running/, 'and so is the job slot');
+  child!.signalCode = 'SIGKILL';
+  child!.emit('exit', null, 'SIGKILL');
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(released, 1, 'given back once it exited');
+
+  // A check still taking its lease when the shutdown starts never launches a worker.
+  let letGo!: () => void;
+  const slowLease = Object.assign(new TranscriptionModelService(), { lease: () => new Promise<() => Promise<void>>((resolve) => { letGo = () => resolve(async () => { released++; }); }) });
+  const preparing = new TranscriptionEngine(slowLease, launcher).check('sensevoice-2024-07-17');
+  await new Promise((r) => setTimeout(r, 10));
+  const before = launches.length;
+  await TranscriptionEngine.stopAll();
+  t.after(() => TranscriptionEngine.reopen());
+  letGo();
+  const outcome = await preparing.catch((err: Error) => ({ ok: false, message: err.message }));
+  assert.equal(launches.length, before, 'no worker started after the shutdown began');
+  assert.match(outcome.message, /shutting down/);
+  assert.equal(released, 2, 'its lease was given back');
 });
