@@ -1,10 +1,14 @@
 import { test } from 'node:test';
+
+// A background job that fails must be caught by the service, never left to crash the dashboard.
+const unhandled: unknown[] = [];
+process.on('unhandledRejection', (reason) => { unhandled.push(reason); });
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
-import { MeetingTranscriptionService } from '../src/services/meetingTranscription';
+import { MeetingTranscriptionService, transcriptionTimings } from '../src/services/meetingTranscription';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import type { Segment, TranscriptionEngine } from '../src/services/transcription/engine';
 import type { TranscriptionModelService } from '../src/services/transcriptionModels';
@@ -280,4 +284,111 @@ test('one job at a time across dashboards: a held transcription lock starts noth
   await MeetingTranscriptionService.settled();
   assert.equal(calls.length, 0);
   assert.equal((await recording(queue, id)).status, 'pending');
+});
+
+test('a manifest never points outside the meeting: a traversal name is ignored and a linked work folder is refused', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engine, calls } = fakeEngine(speaks(['x']));
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const id = await queueRecording(queue, 'Workshop');
+  const folder = path.join(ws, 'context-updates', 'meeting-queue', id);
+  const victim = path.join(ws, 'context-updates', 'victim.md');
+  await fsp.writeFile(victim, 'keep me');
+
+  // A hand-edited manifest: a partial recording whose transcript is "../../victim.md", and a file outside the folder.
+  const manifest = path.join(folder, 'meeting.md');
+  const text = await fsp.readFile(manifest, 'utf-8');
+  await fsp.writeFile(manifest, text.replace('status: pending', 'status: partial\n      transcript: ../../victim.md'));
+  assert.equal((await recording(queue, id)).status, 'partial', 'the edited manifest is read');
+  assert.equal((await recording(queue, id)).transcript, undefined, 'the traversal name is not read');
+  await job.retry(id, 'workshop.wav');
+  await MeetingTranscriptionService.settled();
+  assert.equal(await fsp.readFile(victim, 'utf-8'), 'keep me');
+
+  // A work folder that is a link to somewhere else: nothing there is touched, and the other meetings carry on.
+  const elsewhere = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-elsewhere-'));
+  t.after(() => fsp.rm(elsewhere, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(elsewhere, 'precious.wav'), 'x');
+  await fsp.rm(path.join(folder, '.transcribing'), { recursive: true, force: true });
+  await fsp.symlink(elsewhere, path.join(folder, '.transcribing'));
+  const other = await queueRecording(queue, 'Other');
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  assert.deepEqual(await fsp.readdir(elsewhere), ['precious.wav']);
+  assert.equal((await recording(queue, other)).status, 'done', 'one broken meeting does not hold up the next');
+  assert.ok(calls.length >= 1);
+});
+
+test('one recording that cannot be read fails on its own and the next meeting is transcribed', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engine } = fakeEngine(speaks(['Second meeting.']));
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const first = await queueRecording(queue, 'First');
+  const second = await queueRecording(queue, 'Second');
+  await fsp.rm(path.join(ws, 'context-updates', 'meeting-queue', first, 'workshop.wav'));
+
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  const r = await recording(queue, first);
+  assert.equal(r.status, 'failed');
+  assert.match(r.error!, /cannot be read/);
+  assert.equal((await recording(queue, second)).status, 'done');
+});
+
+test('a transcript written but never recorded is removed, so the next one keeps its name', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engine } = fakeEngine(speaks(['Again.']));
+  const id = await queueRecording(queue, 'Workshop');
+  const folder = path.join(ws, 'context-updates', 'meeting-queue', id);
+  // A dashboard wrote the transcript and stopped before the manifest named it.
+  await fsp.writeFile(path.join(folder, 'workshop.transcript.md'), 'orphan');
+  await new MeetingTranscriptionService(queue, fakeModels(), engine).tick();
+  await MeetingTranscriptionService.settled();
+  assert.equal((await recording(queue, id)).transcript, 'workshop.transcript.md');
+  assert.match(await fsp.readFile(path.join(folder, 'workshop.transcript.md'), 'utf-8'), /Again\./);
+  assert.deepEqual((await fsp.readdir(folder)).filter((n) => n.endsWith('.md')).sort(), ['meeting.md', 'workshop.transcript.md']);
+});
+
+test('a Stop from another dashboard ends a job that reports no progress, and work files of a live dashboard are kept', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const before = transcriptionTimings.ownerCheckMs;
+  transcriptionTimings.ownerCheckMs = 50;
+  t.after(() => { transcriptionTimings.ownerCheckMs = before; });
+  let started!: () => void;
+  const running = new Promise<void>((r) => { started = r; });
+  // Loading a model: no progress at all until it is told to stop.
+  const { engine } = fakeEngine((_wav, o) => new Promise((_resolve, reject) => {
+    started();
+    o.signal!.addEventListener('abort', () => reject(new Error('Cancelled.')));
+  }));
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const id = await queueRecording(queue, 'Workshop');
+  const work = path.join(ws, 'context-updates', 'meeting-queue', id, '.transcribing');
+  await fsp.mkdir(work, { recursive: true });
+  const live = `${'a'.repeat(8)}-aaaa-aaaa-aaaa-${'a'.repeat(12)}-${process.ppid}.wav`;
+  const gone = `${'b'.repeat(8)}-bbbb-bbbb-bbbb-${'b'.repeat(12)}-${2 ** 22 + 1}.wav`;
+  await fsp.writeFile(path.join(work, live), 'converting in another dashboard');
+  await fsp.writeFile(path.join(work, gone), 'left by a crash');
+
+  await job.tick();
+  await running;
+  assert.deepEqual((await fsp.readdir(work)).sort(), [live], 'only the work file of a dashboard that is gone was removed');
+  // Another dashboard stops it: only the manifest changes.
+  await queue.withQueue(async () => {
+    const m = await queue.loadMeeting(id);
+    m.files[0]!.recording = { status: 'stopped' };
+    await queue.saveMeeting(m);
+  });
+  await MeetingTranscriptionService.settled();
+  assert.equal(job.progress(), null, 'the job ended without any progress report');
+  assert.equal((await recording(queue, id)).status, 'stopped');
+});
+
+test('no background job left an unhandled rejection', async () => {
+  await MeetingTranscriptionService.settled();
+  assert.deepEqual(unhandled, []);
 });

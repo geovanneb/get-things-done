@@ -138,6 +138,12 @@ export interface QueuedFile {
   recording?: RecordingState;
 }
 
+/** A file name the queue may use: at the top of the meeting's folder, not hidden, not the manifest. */
+function plainName(name: string): boolean {
+  try { topLevelName(name); } catch { return false; }
+  return !name.startsWith('.') && name !== MANIFEST;
+}
+
 /** Where a recording's transcription stands. */
 export type RecordingStatus = 'pending' | 'running' | 'done' | 'partial' | 'failed' | 'stopped';
 
@@ -176,7 +182,7 @@ function parseRecording(value: unknown): RecordingState | undefined {
     ...(text('started_at') ? { started_at: text('started_at') } : {}),
     ...(text('model') ? { model: text('model') } : {}),
     ...(text('language') ? { language: text('language') } : {}),
-    ...(text('transcript') ? { transcript: text('transcript') } : {}),
+    ...(text('transcript') && plainName(text('transcript')!) ? { transcript: text('transcript') } : {}),
     ...(text('transcript_sha256') ? { transcript_sha256: text('transcript_sha256') } : {}),
     ...(typeof o['seconds'] === 'number' ? { seconds: o['seconds'] } : {}),
     ...(o['accepted'] === true ? { accepted: true } : {}),
@@ -446,6 +452,11 @@ export class MeetingDigestService {
     return this.writeMeeting(meeting);
   }
 
+  /** Removes files the meeting's manifest does not name (written by a dashboard that stopped); call under withQueue. */
+  dropUnrecorded(meeting: QueuedMeeting, dir: string): Promise<void> {
+    return this.dropOrphans(meeting, dir);
+  }
+
   /** A meeting's folder, refused when it or a folder above it is a link. */
   meetingFolder(id: string): Promise<string> {
     return this.inWorkspace(this.meetingDir(id));
@@ -605,7 +616,8 @@ export class MeetingDigestService {
     const files = Array.isArray(data['files']) ? (data['files'] as unknown[]).flatMap((f) => {
       const o = obj(f);
       const recording = parseRecording(o['recording']);
-      return typeof o['name'] === 'string' && typeof o['sha256'] === 'string'
+      // Only a plain name inside the meeting's folder: a hand-edited manifest never points the queue elsewhere.
+      return typeof o['name'] === 'string' && plainName(o['name']) && typeof o['sha256'] === 'string'
         ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording ? { recording } : {}) }] : [];
     }) : [];
     return {
