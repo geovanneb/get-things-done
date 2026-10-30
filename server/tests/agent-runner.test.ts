@@ -50,6 +50,10 @@ async function eventually(check: () => Promise<boolean>, ms = 2000): Promise<boo
   for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 20))) if (await check()) return true;
   return check();
 }
+/** Waits until the run has ended and its outcome is set: the runner finishes after the tool exits, sometimes over several ticks. */
+const ended = async (service: AgentRunnerService, id = 'CU-2026-0001') => {
+  assert.ok(await eventually(async () => (await service.get(id))?.status !== 'running'), 'the run ended');
+};
 const success = { exit_code: 0, result: { subtype: 'success', num_turns: 12, total_cost_usd: 0.5, permission_denials: [] }, stderr: '' };
 
 test('outcomes are explained in plain words; success needs both the update and the tool to say so', () => {
@@ -97,10 +101,12 @@ test('an analysis runs the workspace\'s own command, one at a time, and locks th
 
   await setStatus(ws, 'in_review'); // what the command does
   fake.end(success);
-  await settle();
+  await ended(service);
   const done = await service.get('CU-2026-0001');
   assert.deepEqual([done?.status, done?.turns, done?.usage_usd], ['succeeded', 12, 0.5]);
-  assert.equal(JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8')).status, 'succeeded');
+  // The record on disk is saved just after the outcome is set.
+  const saved = async () => JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8')).status === 'succeeded';
+  assert.ok(await eventually(saved), 'the outcome is saved');
   await updates.reopen('CU-2026-0001'); // unlocked again
   await setStatus(ws, 'in_review');
   await assert.rejects(service.startAnalysis('CU-2026-0001'), /while the update is "in_review"/, 'only a ready update is analyzed');
@@ -159,7 +165,7 @@ test('a stopped or interrupted run says what to do, and a failed final save does
   await fsp.rm(path.join(ws, '.situation-board', 'runs'), { recursive: true });
   await fsp.writeFile(path.join(ws, '.situation-board', 'runs'), 'not a folder'); // the record cannot be saved now
   fake.end(success);
-  await settle();
+  await ended(service);
   assert.equal((await service.get('CU-2026-0001'))?.status, 'failed', 'the outcome is kept in memory, and the next run is possible');
 });
 
@@ -289,7 +295,7 @@ test('the ended state wins over a "running" record left on disk, and a fast exit
   t.after(() => fsp.chmod(runs, 0o755).catch(() => {}));
   await setStatus(ws, 'in_review');
   fake.end(success);
-  await settle();
+  await ended(service);
   assert.equal((await service.get('CU-2026-0001'))?.status, 'succeeded');
   await fsp.chmod(runs, 0o755);
 
@@ -301,9 +307,11 @@ test('the ended state wins over a "running" record left on disk, and a fast exit
   };
   const fast = new AgentRunnerService(instant);
   await fast.startAnalysis('CU-2026-0001');
+  await ended(fast);
+  const onDisk = async () => JSON.parse(await fsp.readFile(path.join(runs, 'CU-2026-0001.json'), 'utf-8')).status as string;
+  assert.ok(await eventually(async () => await onDisk() === 'succeeded'), 'the end is saved');
   await new Promise((r) => setTimeout(r, 100));
-  const record = JSON.parse(await fsp.readFile(path.join(runs, 'CU-2026-0001.json'), 'utf-8'));
-  assert.equal(record.status, 'succeeded', 'the late "running" save did not land after the end');
+  assert.equal(await onDisk(), 'succeeded', 'the late "running" save did not land after the end');
 });
 
 test('stream lines that are not message objects are ignored, and a failed sign-in check start is reported, not thrown', posix, async (t) => {
@@ -447,7 +455,7 @@ test('apply runs the workspace\'s own command with the gate, for the accepted fi
   const data = parseMarkdown(await fsp.readFile(file, 'utf-8')).data as Record<string, unknown>;
   await fsp.writeFile(file, stringifyMarkdown('', { ...data, status: 'done', proposals: [{ id: 'P-01', action: 'update', target: 'context/strategy/plan/note.md', decision: 'accepted', outcome: 'applied' }] }));
   fake.end(success);
-  await settle();
+  await ended(service);
   const done = await service.get('CU-2026-0001');
   assert.equal(done?.status, 'succeeded');
   assert.match(done!.message, /accepted changes are written/);
@@ -464,7 +472,7 @@ test('success is checked against what was accepted at the start, and a half-done
     const data = parseMarkdown(await fsp.readFile(file, 'utf-8')).data as Record<string, unknown>;
     await fsp.writeFile(file, stringifyMarkdown('', { ...data, status, proposals }));
     fake.end(success);
-    await settle();
+    await ended(service);
     return (await service.get('CU-2026-0001'))!;
   };
   const accepted = { id: 'P-01', action: 'update', target: 'context/strategy/plan/note.md', decision: 'accepted' };
