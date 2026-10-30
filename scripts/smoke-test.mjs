@@ -603,6 +603,27 @@ try {
     check('automatic analysis and digests right after a meeting are off unless switched on, and only true or false is accepted',
       badAuto.status === 400 && digestNow.settings?.auto_analyze === false && badAfter.status === 400 && digestNow.settings?.after_each_meeting === false,
       `bad=${badAuto.status} auto=${digestNow.settings?.auto_analyze} badAfter=${badAfter.status} after=${digestNow.settings?.after_each_meeting}`);
+    // A recording streams into a queued meeting, which then waits for its transcript; an unsupported format is refused.
+    const wavData = Buffer.alloc(32000);
+    const wavHead = Buffer.alloc(44);
+    wavHead.write('RIFF', 0, 'ascii'); wavHead.writeUInt32LE(36 + wavData.length, 4); wavHead.write('WAVE', 8, 'ascii'); wavHead.write('fmt ', 12, 'ascii');
+    wavHead.writeUInt32LE(16, 16); wavHead.writeUInt16LE(1, 20); wavHead.writeUInt16LE(1, 22); wavHead.writeUInt32LE(16000, 24); wavHead.writeUInt32LE(32000, 28);
+    wavHead.writeUInt16LE(2, 32); wavHead.writeUInt16LE(16, 34); wavHead.write('data', 36, 'ascii'); wavHead.writeUInt32LE(wavData.length, 40);
+    const recorded = await (await json('POST', '/api/meeting-queue', { title: 'Fictional workshop', meeting_date: '2026-10-29' })).json();
+    const wavForm = new FormData();
+    wavForm.append('file', new Blob([Buffer.concat([wavHead, wavData])]), 'workshop.wav');
+    const wavUp = await fetch(`${base}/api/meeting-queue/${recorded.id}/files`, { method: 'POST', body: wavForm });
+    const wavMeeting = await wavUp.json();
+    const oggForm = new FormData();
+    oggForm.append('file', new Blob(['not audio']), 'clip.ogg');
+    const oggUp = await fetch(`${base}/api/meeting-queue/${recorded.id}/files`, { method: 'POST', body: oggForm });
+    await json('POST', `/api/meeting-queue/${recorded.id}/queue`);
+    const waitRun = await (await json('POST', '/api/routines/meeting-digest/run')).json();
+    const stillQueued = (await (await fetch(`${base}/api/meeting-queue`)).json()).meetings.some((m) => m.id === recorded.id);
+    check('a recording streams into a queued meeting, which waits for its transcript; an unsupported format is refused',
+      wavUp.status === 201 && wavMeeting.files?.[0]?.recording?.status === 'pending' && oggUp.status === 415
+      && /waits? for transcription|not done yet/.test(waitRun.message ?? '') && stillQueued,
+      `up=${wavUp.status} ogg=${oggUp.status} run=${waitRun.message}`);
     // The engine loads in its worker on this machine (no model needed).
     const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
     check('the transcription engine loads in its worker', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));

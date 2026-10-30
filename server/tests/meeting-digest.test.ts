@@ -1,4 +1,5 @@
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
+import { createRequire } from 'node:module';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
@@ -6,7 +7,9 @@ import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { RoutineService } from '../src/services/routineService';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
-import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, type DigestRunner } from '../src/services/meetingDigestService';
+import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, queueLimits, type DigestRunner } from '../src/services/meetingDigestService';
+import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import type { AgentRun } from '../src/services/agentRunner';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
@@ -522,4 +525,140 @@ test('the schedule: first check counts from now, missed runs collapse into one, 
   await queueMeeting(service, 'Later', '2026-10-29', [['b.md', Buffer.from('B')]]);
   assert.equal(await service.runIfDue(new Date('2026-10-30T19:00:00')), null);
   assert.equal((await service.view()).queue.length, 1);
+});
+
+test('the queue lock holds across dashboards: a change waits for another process, then goes ahead; a lock left by a process that is gone is taken over', async (t) => {
+  const ws = await workspace(t);
+  const lockFile = path.join(ws, '.situation-board', 'routines', 'meeting-queue.lock');
+  const previous = queueLimits.lockWaitMs;
+  queueLimits.lockWaitMs = 300;
+  t.after(() => { queueLimits.lockWaitMs = previous; });
+  const service = new MeetingDigestService();
+
+  // A real second process holds the lock (as another dashboard would) until it is told to let go.
+  const other = spawn(process.execPath, ['-e', `
+    const fs = require('fs');
+    fs.writeFileSync(${JSON.stringify(lockFile)}, JSON.stringify({ pid: process.pid, token: 'other-dashboard' }), { flag: 'wx' });
+    process.stdout.write('held\\n');
+    process.stdin.on('data', () => { fs.rmSync(${JSON.stringify(lockFile)}); process.exit(0); });
+  `], { stdio: ['pipe', 'pipe', 'inherit'] });
+  t.after(() => { if (other.exitCode === null) other.kill(); });
+  await new Promise<void>((resolve) => other.stdout!.once('data', () => resolve()));
+  await assert.rejects(service.createMeeting({ title: 'Waits', meeting_date: '2026-10-30' }), /Another dashboard is changing the meeting queue/);
+  assert.equal((await service.readQueue()).meetings.length, 0, 'nothing was written while the other held the lock');
+
+  // Let go while a change waits: it goes ahead.
+  queueLimits.lockWaitMs = 5000;
+  const waiting = service.createMeeting({ title: 'After', meeting_date: '2026-10-30' });
+  await new Promise((r) => setTimeout(r, 100));
+  other.stdin!.write('go');
+  const made = await waiting;
+  assert.equal(made.title, 'After');
+  await assert.rejects(fsp.access(lockFile), 'released');
+
+  // A lock left by a process that is gone does not block.
+  await fsp.writeFile(lockFile, JSON.stringify({ pid: 2 ** 22 + 4242, token: 'crashed' }));
+  await service.createMeeting({ title: 'Taken over', meeting_date: '2026-10-30' });
+  assert.equal((await service.readQueue()).meetings.length, 2);
+});
+
+/** A short fictional WAV: one second of 16 kHz mono silence. */
+function silentWav(seconds = 1): Buffer {
+  const data = Buffer.alloc(16000 * 2 * seconds);
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0, 'ascii'); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8, 'ascii');
+  head.write('fmt ', 12, 'ascii'); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(16000, 24); head.writeUInt32LE(32000, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+  head.write('data', 36, 'ascii'); head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+
+test('recordings: a WAV waits for its transcript and the digest leaves it; a broken one, an oversized file and a cut-off upload are handled', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const meeting = await service.createMeeting({ title: 'Workshop', meeting_date: '2026-10-30' });
+  const withRecording = await service.addFile(meeting.id, 'workshop.wav', silentWav());
+  assert.deepEqual(withRecording.files.map((f) => [f.name, f.recording?.status]), [['workshop.wav', 'pending']]);
+  await service.addFile(meeting.id, 'notes.md', Buffer.from('Fictional notes.'));
+  await service.queue(meeting.id);
+
+  // The digest does not take it yet, and says why.
+  const run = await service.runNow(new Date('2026-10-30T18:00:00'));
+  assert.equal(run.context_update, undefined);
+  assert.match(run.message, /No meetings ready for a digest\. 1 meeting waits for transcription/);
+
+  // A WAV the transcription cannot read is refused at upload, with the reason.
+  const other = await service.createMeeting({ title: 'Other', meeting_date: '2026-10-30' });
+  const adpcm = silentWav(); adpcm.writeUInt16LE(2, 20);
+  await assert.rejects(service.addFile(other.id, 'odd.wav', adpcm), /encoding \(2\) is not supported.*PCM WAV/);
+  await assert.rejects(service.addFile(other.id, 'clip.ogg', Buffer.from('x')), /cannot be transcribed yet/);
+
+  // An ordinary file over 50 MB is stopped as it streams, and nothing of it stays.
+  const dir = path.join(ws, 'context-updates', 'meeting-queue', other.id);
+  const big = Readable.from((function* () { for (let i = 0; i < 60; i++) yield Buffer.alloc(1024 * 1024, 1); })());
+  await assert.rejects(service.writeUpload(other.id, 'deck.pdf', big), /larger than 50 MB/);
+  assert.deepEqual((await fsp.readdir(dir)).filter((n) => n.startsWith('.upload-')), [], 'the partial upload is removed');
+
+  // A cut-off upload left behind is removed once nobody has written to it for a day; a fresh one stays.
+  await fsp.writeFile(path.join(dir, '.upload-old'), 'partial');
+  await fsp.writeFile(path.join(dir, '.upload-fresh'), 'arriving');
+  const old = new Date(Date.now() - 2 * 86_400_000);
+  await fsp.utimes(path.join(dir, '.upload-old'), old, old);
+  await service.runNow(new Date());
+  assert.deepEqual((await fsp.readdir(dir)).filter((n) => n.startsWith('.upload-')), ['.upload-fresh']);
+});
+
+test('a digest still being built by a live dashboard is left alone; one whose dashboard is gone is recovered', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const id = await queueMeeting(service, 'Weekly sync', '2026-10-28', [['notes.md', Buffer.from('Notes A')]]);
+  const write = (pid: number) => fsp.writeFile(batchFile(ws), JSON.stringify({ ...JSON.parse(batch([[id, [[`${id}-notes.md`, 'Notes A']]]], null)), owner: { pid, token: 'other-build' } }));
+
+  // Another live process (this test's parent stands in for it) is building: nothing is discarded or made.
+  await write(process.ppid);
+  const busy = await service.runNow(new Date('2026-10-28T18:00:00'));
+  assert.equal(busy.status, 'error');
+  assert.match(busy.message, /A digest is being made right now/);
+  await fsp.access(batchFile(ws));
+  assert.equal(await service.runIfDue(new Date('2026-10-28T18:00:00')), null, 'a scheduled check waits quietly');
+  await fsp.access(batchFile(ws));
+
+  // A batch of this very process that no build of it runs was left by a crash: it is recovered and the digest made.
+  await write(process.pid);
+  const made = await service.runNow(new Date('2026-10-28T18:00:00'));
+  assert.equal(made.status, 'ok', made.message);
+  assert.match(made.message, /Discarded a digest that was interrupted[\s\S]*Made digest/);
+});
+
+test('uploads: a file the manifest never recorded is removed, a live upload keeps an old draft, and a filling disk stops an upload', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const meeting = await service.createMeeting({ title: 'Workshop', meeting_date: '2026-10-30' });
+  const dir = path.join(ws, 'context-updates', 'meeting-queue', meeting.id);
+
+  // Renamed into place, then the dashboard stopped before the manifest named it.
+  await fsp.writeFile(path.join(dir, 'orphan.wav'), 'left behind');
+  await service.addFile(meeting.id, 'notes.md', Buffer.from('Fictional notes.'));
+  assert.deepEqual((await fsp.readdir(dir)).filter((n) => !n.startsWith('.')).sort(), ['meeting.md', 'notes.md']);
+
+  // Two days on, the draft is old, but an upload is still arriving: the draft stays.
+  const later = new Date(Date.now() + 2 * 86_400_000);
+  await fsp.writeFile(path.join(dir, '.upload-live'), 'arriving');
+  await fsp.utimes(path.join(dir, '.upload-live'), later, later);
+  await service.runNow(later);
+  await fsp.access(path.join(dir, 'meeting.md'));
+  // Once that upload is gone, the abandoned draft goes.
+  await fsp.rm(path.join(dir, '.upload-live'));
+  await service.runNow(later);
+  await assert.rejects(fsp.access(dir));
+
+  // An upload without its length: the disk fills while it arrives, so it is stopped before the spare space.
+  const other = await service.createMeeting({ title: 'Other', meeting_date: '2026-10-30' });
+  const otherDir = path.join(ws, 'context-updates', 'meeting-queue', other.id);
+  let free = 2_100_000_000;
+  const statfs = mock.method(createRequire(__filename)('fs/promises'), 'statfs', async () => ({ bavail: free, bsize: 1 }));
+  t.after(() => statfs.mock.restore());
+  const filling = Readable.from((function* () { for (let i = 0; i < 40; i++) { free -= 10_000_000; yield Buffer.alloc(4 * 1024 * 1024, 1); } })());
+  await assert.rejects(service.writeUpload(other.id, 'long.wav', filling), /disk is nearly full/);
+  assert.deepEqual((await fsp.readdir(otherDir)).filter((n) => n.startsWith('.upload-')), [], 'nothing of it is kept');
 });

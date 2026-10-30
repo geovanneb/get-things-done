@@ -779,6 +779,12 @@ settings.
   the next run finishes or undoes the digest, so no meeting is lost or digested twice.
   A digest deleted by hand before its meetings left the queue puts them **on hold**:
   they stay, and go into a digest only after you choose **Queue again**.
+- **Recordings** can go into the queue too, up to 4 GB: WAV, and on a Mac also M4A, MP3,
+  AAC, FLAC or AIFF. Uploads stream to disk. A meeting with a recording waits in the
+  queue for its transcript, made on this computer with the model chosen in **Settings >
+  Transcription**; transcribing arrives in a next version.
+- Every change to the queue takes one lock for the workspace, so two dashboards on the
+  same workspace never change it at the same time.
 - A meeting removed from the queue, and drafts left half-uploaded for a day, are
   deleted with their files.
 

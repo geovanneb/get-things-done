@@ -7,6 +7,13 @@ import type { ContextUpdate, QueuedMeeting } from '@/types';
 import { HelpBox, formatBytes, hardToRead } from './shared';
 
 const MAX_FILE = 50 * 1024 * 1024;
+/** A meeting recording, queued for transcription: up to 4 GB (decimal), as the server accepts. */
+const MAX_RECORDING = 4_000_000_000;
+const RECORDING = /\.(wav|m4a|mp3|aac|flac|aiff?|caf|ogg|opus|webm|wma|mp4|mov)$/i;
+const isRecording = (name: string) => RECORDING.test(name);
+/** The limit for a file: in a meeting for the digest a recording may be 4 GB; everything else 50 MB. */
+const limitFor = (file: File, meeting: boolean) => (meeting && isRecording(file.name) ? MAX_RECORDING : MAX_FILE);
+const limitLabel = (file: File, meeting: boolean) => (limitFor(file, meeting) === MAX_RECORDING ? '4 GB' : '50 MB');
 
 const labelStyle: React.CSSProperties = { display: 'block', marginBottom: 4, fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)' };
 const hintStyle: React.CSSProperties = { margin: '0 0 6px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.45 };
@@ -33,7 +40,7 @@ export async function uploadMaterial(updateId: string, file: File): Promise<stri
 
 /** Uploads one file to a meeting in the queue; resolves to an error message, or null when it worked. */
 async function uploadToMeeting(meetingId: string, file: File): Promise<string | null> {
-  if (file.size > MAX_FILE) return `${file.name} is larger than 50 MB`;
+  if (file.size > limitFor(file, true)) return `${file.name} is larger than ${limitLabel(file, true)}`;
   const form = new FormData();
   form.append('file', file);
   try {
@@ -100,7 +107,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
   };
 
   const hasContent = files.length > 0 || text.trim().length > 0;
-  const tooBig = files.filter((f) => f.size > MAX_FILE);
+  const tooBig = files.filter((f) => f.size > limitFor(f, mode === 'meeting'));
   const risky = files.filter((f) => hardToRead(f.name));
 
   const queueMeeting = async () => {
@@ -138,7 +145,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
 
   const save = async () => {
     if (!hasContent) { setError('Add at least one file or paste some text.'); return; }
-    if (tooBig.length) { setError(`Remove files over 50 MB: ${tooBig.map((f) => f.name).join(', ')}`); return; }
+    if (tooBig.length) { setError(`Remove files over their size limit: ${tooBig.map((f) => `${f.name} (${limitLabel(f, mode === 'meeting')})`).join(', ')}`); return; }
     setError(null);
     if (mode === 'meeting') { await queueMeeting(); return; }
     setSaving('Saving...');
@@ -202,12 +209,19 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
         <div>
           <label style={labelStyle}>Files</label>
           <DropZone onFiles={addFiles} />
+          {mode === 'meeting' && (
+            <p style={{ ...hintStyle, margin: '6px 0 0' }}>
+              A recording of the meeting can go in too, up to 4 GB: WAV, and on a Mac also M4A, MP3, AAC, FLAC or AIFF. It is
+              transcribed on this computer before a digest takes the meeting (choose the model in Settings &gt; Transcription);
+              transcribing arrives in a next version, and until then the meeting waits in the queue.
+            </p>
+          )}
           {files.length > 0 && (
             <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
               {files.map((f) => (
                 <li key={`${f.name}-${f.size}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
-                  <span style={{ fontSize: 'var(--text-xs)', color: f.size > MAX_FILE ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
+                  <span style={{ fontSize: 'var(--text-xs)', color: f.size > limitFor(f, mode === 'meeting') ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
                   <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))}
                     style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 4px', fontSize: 'var(--text-base)' }}>×</button>
                 </li>
