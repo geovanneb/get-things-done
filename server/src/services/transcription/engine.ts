@@ -230,8 +230,10 @@ export class TranscriptionEngine {
       committed: (bytes: number) => sendControl({ type: 'committed', bytes }),
       end: async (bytes: number, deadlineMs: number) => {
         sendControl({ type: 'end', bytes });
-        const timer = new Promise<'late'>((r) => setTimeout(() => r('late'), Math.max(0, deadlineMs)));
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        const timer = new Promise<'late'>((r) => { deadline = setTimeout(() => r('late'), Math.max(0, deadlineMs)); });
         const result = await Promise.race([ended().then(() => 'ended' as const), timer]);
+        clearTimeout(deadline);
         if (result === 'late') settle({ ok: false, message: 'The live transcript did not finish in time.' });
         await stop(child);
         await exited;

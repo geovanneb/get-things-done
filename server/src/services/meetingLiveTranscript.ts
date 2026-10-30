@@ -291,6 +291,12 @@ export class MeetingLiveTranscriptService {
     jobs.clear();
   }
 
+  /** For tests: ends every job, and waits for its worker and its writes. */
+  static async closeAll(): Promise<void> {
+    const service = new MeetingLiveTranscriptService();
+    await Promise.all([...jobs.keys()].map((generation) => service.close(generation)));
+  }
+
   /** For tests: the job of a recording, to run its watch now. */
   static job(generation: string): Job | undefined {
     return jobs.get(generation);
