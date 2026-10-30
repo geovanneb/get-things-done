@@ -603,6 +603,13 @@ try {
     check('automatic analysis and digests right after a meeting are off unless switched on, and only true or false is accepted',
       badAuto.status === 400 && digestNow.settings?.auto_analyze === false && badAfter.status === 400 && digestNow.settings?.after_each_meeting === false,
       `bad=${badAuto.status} auto=${digestNow.settings?.auto_analyze} badAfter=${badAfter.status} after=${digestNow.settings?.after_each_meeting}`);
+    // Read only: never downloads a model or writes settings into the real home folder.
+    const stt = await (await fetch(`${base}/api/transcription`)).json();
+    const badLanguage = await json('PUT', '/api/transcription/settings', { language: 'de' });
+    check('transcription lists the models with pluses and minuses, the accurate one first and chosen, and refuses an unknown language',
+      stt.models?.[0]?.id === 'whisper-large-v3-turbo' && stt.settings?.model && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
+      && ['auto', 'en', 'ja'].includes(stt.settings.language) && badLanguage.status === 400,
+      `models=${stt.models?.map((m) => m.id).join(',')} bad=${badLanguage.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

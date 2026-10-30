@@ -15,6 +15,7 @@ import { WorkspaceService } from './services/workspace';
 import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 import { AgentRunnerService } from './services/agentRunner';
+import { transcriptionEvents } from './services/transcriptionModels';
 
 export const HOST = '127.0.0.1';
 
@@ -66,7 +67,13 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     }
   };
 
+  // Model downloads happen outside the workspace, so the watcher cannot see them: they send their own notice.
+  const broadcastTranscription = (): void => {
+    for (const client of sseClients) client.write('event: transcription\ndata: {}\n\n');
+  };
+
   const close = (): Promise<void> => {
+    transcriptionEvents.off('change', broadcastTranscription);
     for (const client of sseClients) {
       client.write('event: server_shutdown\ndata: {}\n\n');
       client.end();
@@ -101,6 +108,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       watcherService.on('change', broadcastEvent);
       watcherService.on('add', broadcastEvent);
       watcherService.on('unlink', broadcastEvent);
+      transcriptionEvents.on('change', broadcastTranscription);
 
       const workspaceService = new WorkspaceService();
       try {

@@ -31,6 +31,7 @@ export type DataScope =
   | 'kaizen'
   | 'routines'
   | 'profile'
+  | 'transcription'
   | 'other';
 
 export type DataVersions = Record<DataScope, number>;
@@ -43,6 +44,7 @@ const initialVersions: DataVersions = {
   'context-updates': 0,
   kaizen: 0,
   routines: 0,
+  transcription: 0,
   profile: 0,
   other: 0,
 };
