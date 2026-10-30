@@ -4,6 +4,7 @@ import { constants as fsConstants } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { withWorkspacePath, WorkspaceService } from './workspace';
 import { MeetingLiveTranscriptService } from './meetingLiveTranscript';
+import { TranscriptionModelService } from './transcriptionModels';
 import { audioTranscriptMarkdown } from './meetingTranscription';
 import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
 
@@ -100,7 +101,11 @@ async function liveFile(file: string): Promise<{ handle: fsp.FileHandle; saved: 
 const EMPTY_AUDIO_SECONDS = 60;
 
 export class MeetingRecordingService {
-  constructor(private readonly queue = new MeetingDigestService(), private readonly live = new MeetingLiveTranscriptService(queue)) {}
+  constructor(
+    private readonly queue = new MeetingDigestService(),
+    private readonly live = new MeetingLiveTranscriptService(queue),
+    private readonly models = new TranscriptionModelService(),
+  ) {}
 
   /** Starts recording into a draft meeting. Starting again with the same token returns the same session. */
   async start(id: string, token: string, now = new Date()): Promise<{ generation: string; offset: number }> {
@@ -226,7 +231,9 @@ export class MeetingRecordingService {
           if (input.offset !== saved) throw httpError(409, 'Audio is still on its way', { offset: saved });
         }
         if (saved === 0) throw httpError(409, 'Nothing was recorded; discard this meeting instead');
-        meeting.live = { ...live, state: 'finalizing', sealed_bytes: saved };
+        // What to transcribe it with is fixed here, once: Settings may change before the queue gets to it.
+        const settings = await this.models.readSettings().catch(() => null);
+        meeting.live = { ...live, state: 'finalizing', sealed_bytes: saved, ...(settings ? { target: { model: settings.model, language: settings.language } } : {}) };
         await this.queue.saveMeeting(meeting);
         return meeting.live;
       });
@@ -238,13 +245,17 @@ export class MeetingRecordingService {
         // Hashing gigabytes runs without the lock; nothing can change a sealed recording.
         const checked = await this.checkSealed(id, sealed);
         // Its own text is the transcript when it is the chosen model and found speech; otherwise the queue transcribes it.
-        const usable = live && live.model === live.mainModel && !(live.segments.length === 0 && live.seconds > EMPTY_AUDIO_SECONDS) ? live : null;
+        // Covered everything and found speech: its text is kept, as the transcript when it is the target model and
+        // language, else as a draft while the target model transcribes again.
+        const usable = live && !(live.segments.length === 0 && live.seconds > EMPTY_AUDIO_SECONDS) ? live : null;
+        const target = sealed.target;
+        const final = Boolean(usable && target && usable.model === target.model && usable.language === target.language);
         const published = await this.queue.withQueue(async () => {
           const meeting = await this.queue.loadMeeting(id);
           if (meeting.live?.generation !== sealed.generation || meeting.live.state !== 'finalizing') return meeting;
           await this.queue.publishRecording(meeting, checked, usable ? {
             content: (recordingName) => Buffer.from(audioTranscriptMarkdown(recordingName, checked.sha256, usable.model, usable.language, usable.seconds, usable.segments, true), 'utf-8'),
-            model: usable.model, language: usable.language, seconds: usable.seconds,
+            model: usable.model, language: usable.language, seconds: usable.seconds, as: final ? 'transcript' : 'draft',
           } : undefined);
           return this.queue.loadMeeting(id);
         });

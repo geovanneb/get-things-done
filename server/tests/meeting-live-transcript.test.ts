@@ -62,7 +62,8 @@ function fakeEngine(o: FakeOptions = {}) {
 function services(ws: string, models: TranscriptionModelService, engine: TranscriptionEngine) {
   const queue = new MeetingDigestService();
   const live = new MeetingLiveTranscriptService(queue, models, engine);
-  const recording = new MeetingRecordingService(queue, live);
+  // The fake Settings for the target too: a test never reads this computer's own settings.
+  const recording = new MeetingRecordingService(queue, live, models);
   const folder = (id: string) => path.join(ws, 'context-updates', 'meeting-queue', id);
   return { queue, live, recording, folder };
 }
@@ -104,7 +105,6 @@ test('anything short of full coverage leaves the recording to the queue, untouch
     ['the worker read less than was sealed', { cover: (b: number) => b - 2 }, fakeModels()],
     ['the worker failed', { failWith: 'The engine stopped' }, fakeModels()],
     ['the engine was busy at the start', { busy: true }, fakeModels()],
-    ['the live model is not the chosen one', {}, fakeModels('fast', 'accurate')],
     ['no live transcript in Settings', {}, fakeModels(null)],
   ] as const) {
     const s = services(ws, models, fakeEngine(o).engine);
@@ -117,6 +117,16 @@ test('anything short of full coverage leaves the recording to the queue, untouch
     assert.deepEqual((await fsp.readdir(s.folder(id))).filter((n) => n.startsWith('.')), [], `${label}: no live files left`);
     await s.queue.removeMeeting(id);
   }
+});
+
+test('a live transcript from another model than the chosen one is kept as a draft, and the recording waits for the chosen one', async (t) => {
+  const ws = await workspace(t);
+  const s = services(ws, fakeModels('fast', 'accurate'), fakeEngine().engine);
+  const { id, generation, offset } = await record(s, 2);
+  const done = await s.recording.finish(id, { token: TOKEN, offset, generation, queue: true });
+  const r = done.files.find((f) => f.recording)!.recording!;
+  assert.deepEqual([r.status, r.draft?.model, r.target?.model], ['pending', 'fast', 'accurate']);
+  assert.equal(done.files.length, 2, 'the recording and its draft');
 });
 
 test('a Finish in a dashboard without the live job uses the queue, and a recovery cleans the old live file', async (t) => {

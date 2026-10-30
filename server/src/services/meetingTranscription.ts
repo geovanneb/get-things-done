@@ -3,7 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
-import { MeetingDigestService, QueuedMeeting, RecordingState } from './meetingDigestService';
+import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft } from './meetingDigestService';
 import { TranscriptionModelService, CATALOG } from './transcriptionModels';
 import { TranscriptionEngine, Segment } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
@@ -47,7 +47,7 @@ export interface TranscriptionProgress { meeting: string; file: string; done: nu
 /** Notices for the dashboard when a transcription starts, moves or ends. */
 export const meetingTranscriptionEvents = new EventEmitter();
 
-interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock }
+interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string }
 /** The job this dashboard runs; null when none. */
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
@@ -113,7 +113,6 @@ export class MeetingTranscriptionService {
     if (active || TranscriptionEngine.isBusy()) return;
     await this.recover().catch((err: Error) => console.error(`[transcription] Recovery: ${err.message}`));
     const settings = await this.models.readSettings();
-    if (!await this.models.installedPath(settings.model)) return;
     const routines = await this.queue.routinesFolder();
     const held = await tryLock(path.join(routines, 'transcription.lock'));
     if (typeof held === 'string') return;
@@ -130,7 +129,7 @@ export class MeetingTranscriptionService {
     // The job runs on its own: whatever happens in it is caught here, and it always gives back its lock.
     void (async () => {
       try {
-        await this.run(claimed, settings.model, settings.language);
+        await this.run(claimed, claimed.model, claimed.language);
       } catch (err) {
         console.error(`[transcription] ${claimed.meeting}/${claimed.file}: ${(err as Error).message}`);
       } finally {
@@ -147,9 +146,11 @@ export class MeetingTranscriptionService {
   }
 
   /** Stops a recording's transcription: it is never published, and the recording waits for "Try again". */
-  async stop(meetingId: string, file: string): Promise<QueuedMeeting> {
+  async stop(meetingId: string, file: string, generation?: string): Promise<QueuedMeeting> {
     const meeting = await this.change(meetingId, file, (r) => {
       if (r.status !== 'running' && r.status !== 'pending') throw httpError(409, 'This recording is not being transcribed');
+      // The page saw another job: never stop one it did not see.
+      if (generation && r.generation !== generation) throw httpError(409, 'The transcription changed meanwhile; look again');
       const { owner: _owner, generation: _generation, ...rest } = r;
       return { ...rest, status: 'stopped' };
     });
@@ -164,7 +165,7 @@ export class MeetingTranscriptionService {
       if (!['stopped', 'failed', 'partial'].includes(r.status)) throw httpError(409, 'Only a stopped, failed or partial transcription can be tried again');
       // A partial transcript gives way to the new one, so a digest never gets both.
       if (r.transcript) { dropped = r.transcript; m.files = m.files.filter((f) => f.name !== r.transcript); }
-      return { status: 'pending' };
+      return nextRecording(r, { status: 'pending' });
     });
     if (dropped) {
       const file = await fileInside(await this.queue.meetingFolder(meetingId), dropped).catch(() => null);
@@ -181,21 +182,56 @@ export class MeetingTranscriptionService {
 
   /** Uses a partial transcript as it is: the meeting can then go into a digest. The recording is kept. */
   async accept(meetingId: string, file: string): Promise<QueuedMeeting> {
-    return this.change(meetingId, file, (r) => {
+    return this.change(meetingId, file, (r, m, drop) => {
       if (r.status !== 'partial' || !r.transcript) throw httpError(409, 'Only a partial transcript can be used as it is');
-      return { ...r, accepted: true };
+      // One transcript is chosen; the live draft, if any, goes with this choice.
+      if (r.draft) { drop.push(r.draft.transcript); m.files = m.files.filter((f) => f.name !== r.draft!.transcript); }
+      return withoutDraft({ ...r, accepted: true });
+    });
+  }
+
+  /**
+   * Uses the live transcript (the draft) instead of waiting for the accurate one: it becomes the transcript, and the
+   * meeting can go into a digest. Not while the accurate one is being made; `draftSha256` must be the draft the page
+   * showed. The draft's file and the recording are checked against their hashes first.
+   */
+  async useLive(meetingId: string, file: string, draftSha256: string): Promise<QueuedMeeting> {
+    return this.change(meetingId, file, async (r, m, drop) => {
+      const draft = r.draft;
+      if (!draft) throw httpError(409, 'This recording has no live transcript to use');
+      if (draft.transcript_sha256 !== draftSha256) throw httpError(409, 'The live transcript changed meanwhile; look again');
+      if (r.status === 'running') throw httpError(409, 'The accurate transcript is being made; stop it first');
+      const folder = await this.queue.meetingFolder(meetingId);
+      const entry = m.files.find((f) => f.name === file)!;
+      const draftHash = await fileInside(folder, draft.transcript).then(hashFile).then((h) => h.sha256, () => null);
+      const sourceHash = await fileInside(folder, entry.name).then(hashFile).then((h) => h.sha256, () => null);
+      if (draftHash !== draft.transcript_sha256) throw httpError(409, 'The live transcript was changed or removed on disk, so it is not used.');
+      if (sourceHash !== entry.sha256) throw httpError(409, 'The recording changed since the live transcript was made: remove the meeting and add it again.');
+      // A partial transcript made meanwhile gives way to the chosen one.
+      if (r.transcript && r.transcript !== draft.transcript) { drop.push(r.transcript); m.files = m.files.filter((f) => f.name !== r.transcript); }
+      return {
+        status: 'done', model: draft.model, language: draft.language, transcript: draft.transcript, transcript_sha256: draft.transcript_sha256,
+        seconds: draft.seconds, accepted_live: true, ...(r.target ? { target: r.target } : {}),
+      };
     });
   }
 
   /** Changes one recording's state under the queue lock; never one held by a digest being made. */
-  private async change(meetingId: string, file: string, next: (r: RecordingState, meeting: QueuedMeeting) => RecordingState): Promise<QueuedMeeting> {
+  private async change(
+    meetingId: string, file: string,
+    next: (r: RecordingState, meeting: QueuedMeeting, drop: string[]) => RecordingState | Promise<RecordingState>,
+  ): Promise<QueuedMeeting> {
     return this.queue.withQueue(async () => {
       if ((await this.queue.reserved()).includes(meetingId)) throw httpError(409, 'A digest is being made from this meeting; try again in a moment');
       const meeting = await this.queue.loadMeeting(meetingId);
       const entry = meeting.files.find((f) => f.name === file);
       if (!entry?.recording) throw httpError(404, `No recording ${file} in this meeting`);
-      entry.recording = next(entry.recording, meeting);
+      const drop: string[] = [];
+      entry.recording = await next(entry.recording, meeting, drop);
       await this.queue.saveMeeting(meeting);
+      // Files no longer chosen go only once the manifest that leaves them out is saved, and only if still unnamed;
+      // a failure here leaves them to recovery, never undoes the choice.
+      await this.removeUnnamed(meetingId, drop).catch(() => {});
       return this.queue.loadMeeting(meetingId);
     });
   }
@@ -225,7 +261,7 @@ export class MeetingTranscriptionService {
       const ours = r.owner?.pid === process.pid;
       const owned = ours ? active?.generation === r.generation : r.owner && processAlive(r.owner.pid);
       if (owned) continue;
-      f.recording = { status: 'pending' };
+      f.recording = nextRecording(r, { status: 'pending' });
       changed = true;
     }
     if (changed) await this.queue.saveMeeting(meeting);
@@ -255,21 +291,26 @@ export class MeetingTranscriptionService {
         if (!folder) continue;
         // A recording that cannot be read fails on its own; the queue goes on with the next one.
         let entry: QueuedMeeting['files'][number] | undefined;
+        let use = { model, language };
         for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending')) {
+          // Its own target, fixed when it was finished; a model that is not downloaded keeps it waiting, and the others go on.
+          const wanted = candidate.recording?.target ?? { model, language };
+          if (!await this.models.installedPath(wanted.model)) continue;
+          use = wanted;
           const read = await fileInside(folder, candidate.name).then(hashFile).catch((err: Error) => err);
           const problem = read instanceof Error ? `The recording cannot be read (${read.message}); remove the meeting and add it again.`
             : read.sha256 !== candidate.sha256 ? 'The recording changed since it was added; remove the meeting and add it again.' : null;
           if (!problem) { entry = candidate; break; }
-          candidate.recording = { status: 'failed', error: problem };
+          candidate.recording = nextRecording(candidate.recording, { status: 'failed', error: problem });
           await this.queue.saveMeeting(meeting);
         }
         if (!entry) continue;
         const generation = randomUUID();
         const token = randomUUID();
-        entry.recording = { status: 'running', generation, owner: { pid: process.pid, token }, started_at: new Date().toISOString(), model, language };
+        entry.recording = nextRecording(entry.recording, { status: 'running', generation, owner: { pid: process.pid, token }, started_at: new Date().toISOString(), model: use.model, language: use.language });
         await this.queue.saveMeeting(meeting);
         return {
-          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock,
+          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language,
           progress: { meeting: meeting.id, file: entry.name, done: 0, total: 0, started_at: new Date().toISOString() },
         };
       }
@@ -341,18 +382,18 @@ export class MeetingTranscriptionService {
       if (!meeting || !entry || r?.status !== 'running' || r.generation !== job.generation || r.owner?.token !== job.token) return;
       const folder = await this.queue.meetingFolder(job.meeting);
       if ((await fileInside(folder, entry.name).then(hashFile).catch(() => null))?.sha256 !== entry.sha256) {
-        entry.recording = { status: 'failed', error: 'The recording changed or went missing while it was being transcribed.' };
+        entry.recording = nextRecording(r, { status: 'failed', error: 'The recording changed or went missing while it was being transcribed.' });
         await this.queue.saveMeeting(meeting);
         return;
       }
       // The engine was busy with something else, such as a speed test: nothing went wrong with this recording.
       if (error && segments.length === 0 && (error as { engineBusy?: boolean }).engineBusy) {
-        entry.recording = { status: 'pending' };
+        entry.recording = nextRecording(r, { status: 'pending' });
         await this.queue.saveMeeting(meeting);
         return;
       }
       if (error && segments.length === 0) {
-        entry.recording = { status: 'failed', model, language, error: error.message };
+        entry.recording = nextRecording(r, { status: 'failed', model, language, error: error.message });
         await this.queue.saveMeeting(meeting);
         return;
       }
@@ -364,20 +405,41 @@ export class MeetingTranscriptionService {
       const content = Buffer.from(audioTranscriptMarkdown(entry.name, entry.sha256, model, language, seconds, segments, complete), 'utf-8');
       const target = path.join(folder, name);
       await atomicWrite(target, content);
+      let replaced: string | null = null;
       try {
         const { sha256 } = await hashFile(target);
         meeting.files.push({ name, size: content.length, sha256 });
-        entry.recording = {
+        const result = nextRecording(r, {
           status: complete ? 'done' : 'partial', model, language, transcript: name, transcript_sha256: sha256, seconds,
           ...(error ? { error: error.message } : !complete ? { error: 'No speech was found in more than a minute of audio.' } : {}),
-        };
+        });
+        // A complete transcript is chosen over the live draft, in this same step. A partial one leaves both, for the
+        // user to choose between.
+        replaced = complete && result.draft ? result.draft.transcript : null;
+        if (replaced) meeting.files = meeting.files.filter((f) => f.name !== replaced);
+        entry.recording = replaced ? withoutDraft(result) : result;
         await this.queue.saveMeeting(meeting);
       } catch (err) {
         // Not recorded, so not kept; a crash right here leaves it to recovery, which removes unrecorded files.
         await fsp.rm(target, { force: true }).catch(() => {});
         throw err;
       }
+      // Saved: from here on nothing may undo it. The old draft goes now, or with the next recovery.
+      if (replaced) await this.removeUnnamed(job.meeting, [replaced]).catch(() => {});
     });
+  }
+
+  /** Removes files of a meeting that its manifest no longer names; call under the queue lock, after saving it. */
+  private async removeUnnamed(meetingId: string, names: string[]): Promise<void> {
+    if (names.length === 0) return;
+    const meeting = await this.queue.loadMeeting(meetingId).catch(() => null);
+    if (!meeting) return;
+    const folder = await this.queue.meetingFolder(meetingId);
+    for (const name of names) {
+      if (meeting.files.some((f) => f.name === name)) continue;
+      const file = await fileInside(folder, name).catch(() => null);
+      if (file) await fsp.rm(file, { force: true }).catch(() => {});
+    }
   }
 
   /** For tests: waits until no transcription runs in this process. */
