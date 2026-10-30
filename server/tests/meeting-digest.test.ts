@@ -8,6 +8,7 @@ import { RoutineService } from '../src/services/routineService';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, queueLimits, type DigestRunner } from '../src/services/meetingDigestService';
 import { spawn } from 'node:child_process';
+import { Readable } from 'node:stream';
 import type { AgentRun } from '../src/services/agentRunner';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
@@ -558,4 +559,50 @@ test('the queue lock holds across dashboards: a change waits for another process
   await fsp.writeFile(lockFile, JSON.stringify({ pid: 2 ** 22 + 4242, token: 'crashed' }));
   await service.createMeeting({ title: 'Taken over', meeting_date: '2026-10-30' });
   assert.equal((await service.readQueue()).meetings.length, 2);
+});
+
+/** A short fictional WAV: one second of 16 kHz mono silence. */
+function silentWav(seconds = 1): Buffer {
+  const data = Buffer.alloc(16000 * 2 * seconds);
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0, 'ascii'); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8, 'ascii');
+  head.write('fmt ', 12, 'ascii'); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(16000, 24); head.writeUInt32LE(32000, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+  head.write('data', 36, 'ascii'); head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+
+test('recordings: a WAV waits for its transcript and the digest leaves it; a broken one, an oversized file and a cut-off upload are handled', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const meeting = await service.createMeeting({ title: 'Workshop', meeting_date: '2026-10-30' });
+  const withRecording = await service.addFile(meeting.id, 'workshop.wav', silentWav());
+  assert.deepEqual(withRecording.files.map((f) => [f.name, f.recording?.status]), [['workshop.wav', 'pending']]);
+  await service.addFile(meeting.id, 'notes.md', Buffer.from('Fictional notes.'));
+  await service.queue(meeting.id);
+
+  // The digest does not take it yet, and says why.
+  const run = await service.runNow(new Date('2026-10-30T18:00:00'));
+  assert.equal(run.context_update, undefined);
+  assert.match(run.message, /No meetings ready for a digest\. 1 meeting waits for transcription/);
+
+  // A WAV the transcription cannot read is refused at upload, with the reason.
+  const other = await service.createMeeting({ title: 'Other', meeting_date: '2026-10-30' });
+  const adpcm = silentWav(); adpcm.writeUInt16LE(2, 20);
+  await assert.rejects(service.addFile(other.id, 'odd.wav', adpcm), /encoding \(2\) is not supported.*PCM WAV/);
+  await assert.rejects(service.addFile(other.id, 'clip.ogg', Buffer.from('x')), /cannot be transcribed yet/);
+
+  // An ordinary file over 50 MB is stopped as it streams, and nothing of it stays.
+  const dir = path.join(ws, 'context-updates', 'meeting-queue', other.id);
+  const big = Readable.from((function* () { for (let i = 0; i < 60; i++) yield Buffer.alloc(1024 * 1024, 1); })());
+  await assert.rejects(service.writeUpload(other.id, 'deck.pdf', big), /larger than 50 MB/);
+  assert.deepEqual((await fsp.readdir(dir)).filter((n) => n.startsWith('.upload-')), [], 'the partial upload is removed');
+
+  // A cut-off upload left behind is removed once nobody has written to it for a day; a fresh one stays.
+  await fsp.writeFile(path.join(dir, '.upload-old'), 'partial');
+  await fsp.writeFile(path.join(dir, '.upload-fresh'), 'arriving');
+  const old = new Date(Date.now() - 2 * 86_400_000);
+  await fsp.utimes(path.join(dir, '.upload-old'), old, old);
+  await service.runNow(new Date());
+  assert.deepEqual((await fsp.readdir(dir)).filter((n) => n.startsWith('.upload-')), ['.upload-fresh']);
 });

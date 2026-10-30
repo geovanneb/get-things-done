@@ -663,7 +663,8 @@ export interface QueuedMeeting {
   created_at: string;
   updated_at: string;
   queued_at: string | null;
-  files: { name: string; size: number; sha256: string }[];
+  /** `recording` is set for a recording: the meeting waits for its transcript before a digest can take it. */
+  files: { name: string; size: number; sha256: string; recording?: { status: 'pending' } }[];
   /** Why it waits instead of going into the next digest; queue it again to clear. */
   held: string | null;
   in_digest: boolean;

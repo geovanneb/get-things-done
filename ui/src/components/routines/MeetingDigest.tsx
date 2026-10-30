@@ -106,7 +106,8 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}</span>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
               <span title={m.held ?? undefined} style={{ fontSize: 'var(--text-xs)', color: m.held ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
-                {m.status === 'draft' ? 'uploading' : m.in_digest ? 'going into a digest' : m.held ? 'on hold' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
+                {m.status === 'draft' ? 'uploading' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
+                  : m.files.some((f) => f.recording?.status === 'pending') ? 'waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
               </span>
               {m.held && !m.in_digest && (
                 <Button size="sm" variant="ghost" disabled={busy !== null}

@@ -1,16 +1,20 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import { constants as fsConstants } from 'fs';
+import { Readable, Transform } from 'stream';
+import { pipeline } from 'stream/promises';
 import { WorkspaceService } from './workspace';
 import { ContextUpdateService, DigestMeeting, readableSizeOf } from './contextUpdateService';
 import { hashFile } from '../utils/fileHash';
 import { lock, unlock } from '../utils/fileLock';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
-import { fileInside, saveAttachment, topLevelName, workspaceEntry } from '../utils/files';
+import { fileInside, topLevelName, workspaceEntry } from '../utils/files';
 import { Schedule, ScheduleError, describeSchedule, localDate, nextOccurrences, occurrencesBetween, parseSchedule } from './routineSchedule';
 import { reserveIds, reservedSequence } from './idReservations';
 import { AgentRunnerService } from './agentRunner';
+import { readWavFormat, WavError } from './transcription/wav';
 
 const workspaceService = new WorkspaceService();
 const contextUpdateService = new ContextUpdateService();
@@ -56,8 +60,36 @@ export const MAX_MEETINGS_LIMIT = 20;
 export const MAX_CHARACTERS_DEFAULT = 400_000;
 export const MAX_CHARACTERS_RANGE = [50_000, 4_000_000] as const;
 const MAX_FILES_PER_MEETING = 10;
+/** Transcripts, notes, decks: 50 MB each, 100 MB in all. */
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_MEETING_BYTES = 100 * 1024 * 1024;
+/**
+ * A recording, up to 4 GB (decimal): an 8-hour meeting as 16 kHz mono WAV is 0.92 GB; at 44.1 kHz stereo it would be
+ * 5.1 GB and is refused: record or export at a lower rate, or split it. A meeting holds at most this plus its other files.
+ */
+export const MAX_RECORDING_BYTES = 4_000_000_000;
+/** Disk space an upload must leave free, on top of the upload itself: the transcription needs room too. */
+const SPARE_DISK_BYTES = 2_000_000_000;
+/** An upload file nobody has written to for this long was abandoned (a crash or a dropped connection). */
+const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000;
+const UPLOAD_PREFIX = '.upload-';
+
+/** Formats the transcription can read: WAV everywhere (read directly); more on a Mac, through its own converter. */
+const WAV = new Set(['.wav']);
+const MAC_RECORDINGS = new Set(['.m4a', '.mp3', '.aac', '.flac', '.aiff', '.aif', '.caf']);
+const OTHER_RECORDINGS = new Set(['.ogg', '.opus', '.webm', '.wma', '.mp4', '.mov']);
+
+/** Whether a file name is a recording, and if so whether this computer can transcribe it (and why not). */
+export function recordingKind(name: string): { recording: false } | { recording: true; supported: true } | { recording: true; supported: false; reason: string } {
+  const ext = path.extname(name).toLowerCase();
+  if (WAV.has(ext)) return { recording: true, supported: true };
+  if (MAC_RECORDINGS.has(ext)) {
+    return process.platform === 'darwin' ? { recording: true, supported: true }
+      : { recording: true, supported: false, reason: `${ext.slice(1).toUpperCase()} recordings can be transcribed on a Mac for now; on this computer, use WAV.` };
+  }
+  if (OTHER_RECORDINGS.has(ext)) return { recording: true, supported: false, reason: `${ext.slice(1).toUpperCase()} recordings cannot be transcribed yet; use WAV${process.platform === 'darwin' ? ', M4A, MP3, AAC, FLAC or AIFF' : ''}.` };
+  return { recording: false };
+}
 /** A meeting still being uploaded that saw no change for this long was abandoned; the next run removes it. */
 const ABANDONED_MS = 24 * 60 * 60 * 1000;
 const QUEUE_ID = /^MQ-\d{4}-\d{4}$/;
@@ -92,7 +124,16 @@ export interface DigestState {
 /** What the digest needs from the dashboard runner. */
 export type DigestRunner = Pick<AgentRunnerService, 'startAnalysis' | 'get'>;
 
-export interface QueuedFile { name: string; size: number; sha256: string }
+export interface QueuedFile {
+  name: string;
+  size: number;
+  sha256: string;
+  /** Set for a recording: the meeting waits for its transcript before a digest can take it. */
+  recording?: { status: 'pending' };
+}
+
+/** A file streamed to disk, not yet part of its meeting. */
+export interface Upload { path: string; size: number; sha256: string }
 
 export interface QueuedMeeting {
   id: string;
@@ -459,7 +500,9 @@ export class MeetingDigestService {
     if (!status || !isDateOnly(meetingDate)) throw httpError(400, `The queued meeting ${id} cannot be read (${MANIFEST})`);
     const files = Array.isArray(data['files']) ? (data['files'] as unknown[]).flatMap((f) => {
       const o = obj(f);
-      return typeof o['name'] === 'string' && typeof o['sha256'] === 'string' ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'] }] : [];
+      const recording = obj(o['recording']);
+      return typeof o['name'] === 'string' && typeof o['sha256'] === 'string'
+        ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording['status'] === 'pending' ? { recording: { status: 'pending' as const } } : {}) }] : [];
     }) : [];
     return {
       id: path.basename(dir),
@@ -549,23 +592,85 @@ export class MeetingDigestService {
     });
   }
 
-  /** Adds one file to a draft meeting. The same file twice is refused. */
+  /** Adds one file to a draft meeting from memory (tests and small files); uploads stream instead (writeUpload, commitUpload). */
   async addFile(id: string, originalName: string, buffer: Buffer): Promise<QueuedMeeting> {
+    const upload = await this.writeUpload(id, originalName, Readable.from([buffer]), buffer.length);
+    try {
+      return await this.commitUpload(id, originalName, upload);
+    } finally {
+      await fsp.rm(upload.path, { force: true });
+    }
+  }
+
+  /**
+   * Streams an upload into its meeting's folder as `.upload-<id>`: created new, never through a link, hashed as it
+   * is written, and stopped as soon as it passes its limit (4 GB for a recording, 50 MB for anything else). It is
+   * not part of the meeting until commitUpload. `expected` (the request's length) is checked against free disk space.
+   */
+  async writeUpload(id: string, originalName: string, source: Readable, expected = 0): Promise<Upload> {
+    const meeting = await this.readMeeting(id);
+    if (meeting.status !== 'draft') throw httpError(409, 'Files can only be added before the meeting is queued');
+    const kind = recordingKind(originalName);
+    if (kind.recording && !kind.supported) throw httpError(415, kind.reason);
+    const limit = kind.recording ? MAX_RECORDING_BYTES : MAX_FILE_BYTES;
+    if (expected > limit + 1024 * 1024) throw httpError(413, kind.recording ? 'The recording is larger than 4 GB' : 'The file is larger than 50 MB');
+    const dir = await this.inWorkspace(this.meetingDir(id));
+    const disk = await fsp.statfs(dir).catch(() => null);
+    if (disk && disk.bavail * disk.bsize < expected + SPARE_DISK_BYTES) {
+      throw httpError(507, `Not enough free disk space for this upload: it needs ${Math.ceil((expected + SPARE_DISK_BYTES) / 1e9)} GB free, including room for the transcription.`);
+    }
+    const file = path.join(dir, `${UPLOAD_PREFIX}${randomUUID()}`);
+    const handle = await fsp.open(file, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600);
+    const hash = createHash('sha256');
+    let size = 0;
+    const count = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        size += chunk.length;
+        if (size > limit) { callback(httpError(413, kind.recording ? 'The recording is larger than 4 GB' : 'The file is larger than 50 MB')); return; }
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    try {
+      await pipeline(source, count, handle.createWriteStream());
+    } catch (err) {
+      await fsp.rm(file, { force: true });
+      if ((err as NodeJS.ErrnoException).code === 'ENOSPC') throw httpError(507, 'The disk is full; the upload was not kept.');
+      throw err;
+    }
+    return { path: file, size, sha256: hash.digest('hex') };
+  }
+
+  /**
+   * Makes a streamed upload part of its meeting, under the queue lock: the meeting must still be a draft, the totals
+   * and the file count fit, it is not there twice, and a recording is one the transcription can read. The file is
+   * renamed into place, then the manifest records it. The caller removes `upload.path` if it is still there.
+   */
+  async commitUpload(id: string, originalName: string, upload: Upload): Promise<QueuedMeeting> {
     return this.exclusive(async () => {
       const meeting = await this.readMeeting(id);
       if (meeting.status !== 'draft') throw httpError(409, 'Files can only be added before the meeting is queued');
       if (meeting.files.length >= MAX_FILES_PER_MEETING) throw httpError(409, `A meeting holds at most ${MAX_FILES_PER_MEETING} files`);
-      if (buffer.length > MAX_FILE_BYTES) throw httpError(413, 'The file is larger than 50 MB');
-      if (meeting.files.reduce((sum, f) => sum + f.size, 0) + buffer.length > MAX_MEETING_BYTES) throw httpError(413, 'A meeting holds at most 100 MB of files');
-      const hash = createHash('sha256').update(buffer).digest('hex');
-      if (meeting.files.some((f) => f.sha256 === hash)) throw httpError(409, 'This file is already in the meeting');
+      const kind = recordingKind(originalName);
+      if (kind.recording && !kind.supported) throw httpError(415, kind.reason);
+      const others = meeting.files.filter((f) => !f.recording).reduce((sum, f) => sum + f.size, 0);
+      const recordings = meeting.files.filter((f) => f.recording).reduce((sum, f) => sum + f.size, 0);
+      if (kind.recording && recordings + upload.size > MAX_RECORDING_BYTES) throw httpError(413, 'A meeting holds at most 4 GB of recordings');
+      if (!kind.recording && others + upload.size > MAX_MEETING_BYTES) throw httpError(413, 'A meeting holds at most 100 MB of files');
+      if (meeting.files.some((f) => f.sha256 === upload.sha256)) throw httpError(409, 'This file is already in the meeting');
+      // A WAV recording is read by the transcription as it is, so it must be one it can read.
+      if (kind.recording && WAV.has(path.extname(originalName).toLowerCase())) {
+        await readWavFormat(upload.path).catch((err: Error) => { throw httpError(415, err instanceof WavError ? `${err.message} Export the recording as PCM WAV.` : err.message); });
+      }
       const base = safeName(originalName);
       const ext = path.extname(base);
       const stem = base.slice(0, base.length - ext.length) || 'file';
+      const dir = await this.inWorkspace(this.meetingDir(id));
       let name = base;
-      for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase()); n++) name = `${stem}-${n}${ext}`;
-      const saved = await saveAttachment(await this.inWorkspace(this.meetingDir(id)), name, buffer, MANIFEST);
-      meeting.files.push({ name: saved.name, size: buffer.length, sha256: hash });
+      for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
+        || await fsp.lstat(path.join(dir, name)).then(() => true, () => false); n++) name = `${stem}-${n}${ext}`;
+      await fsp.rename(upload.path, path.join(dir, name));
+      meeting.files.push({ name, size: upload.size, sha256: upload.sha256, ...(kind.recording ? { recording: { status: 'pending' as const } } : {}) });
       await this.writeMeeting(meeting);
       return this.readMeeting(id);
     });
@@ -655,7 +760,7 @@ export class MeetingDigestService {
   private async waitingQueue(): Promise<string | null> {
     if (await this.openDigest()) return null;
     const { meetings } = await this.readQueue();
-    const queued = meetings.filter((m) => m.status === 'queued' && !m.held);
+    const queued = meetings.filter(readyForDigest);
     return queued.length ? queued.map((m) => `${m.id}@${m.queued_at ?? ''}:${m.files.map((f) => f.sha256).join(',')}`).join('|') : null;
   }
 
@@ -839,17 +944,19 @@ export class MeetingDigestService {
         const removed = await this.removeAbandoned(now);
         const open = await this.openDigest();
         const { meetings, problems } = await this.readQueue();
-        const queued = meetings.filter((m) => m.status === 'queued' && !m.held);
+        const queued = meetings.filter(readyForDigest);
+        const transcribing = meetings.filter((m) => m.status === 'queued' && !m.held && waitsForTranscript(m)).length;
+        const waitNote = transcribing ? ` ${transcribing} meeting${transcribing === 1 ? ' waits' : 's wait'} for transcription.` : '';
         const unreadable = problems.length ? ` ${problems.length} queued meeting${problems.length === 1 ? '' : 's'} cannot be read: ${problems.map((p) => p.id).join(', ')}.` : '';
         if (open) {
           return {
             status: problems.length ? 'error' : 'ok',
-            message: `Digest ${open} is not done yet, so no new one was made; ${queued.length} meeting${queued.length === 1 ? '' : 's'} wait in the queue.${unreadable}`,
+            message: `Digest ${open} is not done yet, so no new one was made; ${queued.length} meeting${queued.length === 1 ? '' : 's'} wait in the queue.${waitNote}${unreadable}`,
             did_something: removed > 0 || problems.length > 0,
           };
         }
         if (queued.length === 0) {
-          return { status: problems.length ? 'error' : 'ok', message: `No meetings in the queue.${unreadable}`, did_something: removed > 0 || problems.length > 0 };
+          return { status: problems.length ? 'error' : 'ok', message: `${transcribing ? 'No meetings ready for a digest.' : 'No meetings in the queue.'}${waitNote}${unreadable}`, did_something: removed > 0 || problems.length > 0 };
         }
 
         // Check every file against its recorded hash before anything is written; a meeting that does not match stays queued.
@@ -966,6 +1073,12 @@ export class MeetingDigestService {
     for (const entry of entries) {
       if (!entry.isDirectory() || !QUEUE_ID.test(entry.name)) continue;
       const dir = path.join(queueDir!, entry.name);
+      // An upload nobody has written to for a day was cut off: its file goes. One still arriving keeps being written.
+      for (const name of await fsp.readdir(dir).catch(() => [] as string[])) {
+        if (!name.startsWith(UPLOAD_PREFIX)) continue;
+        const st = await fsp.lstat(path.join(dir, name)).catch(() => null);
+        if (st?.isFile() && now.getTime() - st.mtime.getTime() > STALE_UPLOAD_MS) await fsp.rm(path.join(dir, name), { force: true });
+      }
       const manifest = await fsp.lstat(path.join(dir, MANIFEST)).catch(() => null);
       let stale: boolean;
       if (!manifest) {
@@ -982,6 +1095,16 @@ export class MeetingDigestService {
     }
     return removed;
   }
+}
+
+/** A recording without its transcript yet: the meeting waits for it. */
+function waitsForTranscript(meeting: QueuedMeeting): boolean {
+  return meeting.files.some((f) => f.recording?.status === 'pending');
+}
+
+/** Queued, not on hold, and every recording transcribed: a digest can take it. */
+function readyForDigest(meeting: QueuedMeeting): boolean {
+  return meeting.status === 'queued' && !meeting.held && !waitsForTranscript(meeting);
 }
 
 /** The meetings a published digest did not fully hold: they stay queued, so nothing is lost. */
