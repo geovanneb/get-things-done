@@ -339,6 +339,12 @@ export class MeetingTranscriptionService {
         await this.queue.saveMeeting(meeting);
         return;
       }
+      // The engine was busy with something else, such as a speed test: nothing went wrong with this recording.
+      if (error && segments.length === 0 && (error as { engineBusy?: boolean }).engineBusy) {
+        entry.recording = { status: 'pending' };
+        await this.queue.saveMeeting(meeting);
+        return;
+      }
       if (error && segments.length === 0) {
         entry.recording = { status: 'failed', model, language, error: error.message };
         await this.queue.saveMeeting(meeting);

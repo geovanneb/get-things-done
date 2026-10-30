@@ -6,6 +6,7 @@ import { createHash, Hash, randomUUID } from 'crypto';
 import { finished } from 'stream/promises';
 import { EventEmitter } from 'events';
 import { atomicWrite } from '../utils/atomicWrite';
+import { readSpeeds, type SpeedResult } from './transcription/speedTest';
 import { processAlive } from './runState';
 import { HeldLock, ownsToken, readLock, tryLock, unlock } from '../utils/fileLock';
 
@@ -67,6 +68,8 @@ export interface ModelView extends Omit<CatalogModel, 'files' | 'engine'> {
   /** Bytes already on disk from an interrupted download; it resumes from there. */
   partial: number;
   download: DownloadProgress | null;
+  /** How fast it transcribed on this computer, when tested. */
+  speed: SpeedResult | null;
 }
 
 export interface TranscriptionView {
@@ -303,6 +306,7 @@ export class TranscriptionModelService {
 
   async view(): Promise<TranscriptionView> {
     const settings = await this.readSettings();
+    const speeds = await readSpeeds();
     const vadInstalled = await this.installed(this.vad.id);
     const models: ModelView[] = [];
     for (const m of this.catalog) {
@@ -314,6 +318,7 @@ export class TranscriptionModelService {
         installed,
         partial: installed ? 0 : await this.partialBytes(m),
         download: active?.progress.model === m.id ? active.progress : lastOutcome.get(m.id) ?? null,
+        speed: installed ? speeds[m.id] ?? null : null,
       });
     }
     const total = os.totalmem();

@@ -171,7 +171,7 @@ export class TranscriptionEngine {
   private async run(request: WorkerRequest, timeoutMs: number, onReply: (reply: WorkerReply) => void, signal?: AbortSignal, afterExit?: () => Promise<void>): Promise<void> {
     const giveBack = async () => { await afterExit?.().catch(() => {}); };
     if (closing) { await giveBack(); throw httpError(503, 'The dashboard is shutting down'); }
-    if (busy) { await giveBack(); throw httpError(409, 'A transcription is already running; wait for it to finish'); }
+    if (busy) { await giveBack(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
     busy = true;
     let child: ChildProcess;
     try {

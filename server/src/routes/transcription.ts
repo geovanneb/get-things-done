@@ -3,6 +3,8 @@ import { param } from '../utils/params';
 import { TranscriptionModelService } from '../services/transcriptionModels';
 import { TranscriptionEngine } from '../services/transcription/engine';
 
+import { runSpeedTest } from '../services/transcription/speedTest';
+
 const router = Router();
 const service = new TranscriptionModelService();
 const engine = new TranscriptionEngine(service);
@@ -35,6 +37,16 @@ router.get('/engine', async (_req: Request, res: Response) => {
 // POST /api/transcription/models/:id/check  loads an installed model in the worker: it works, and how fast it loads
 router.post('/models/:id/check', async (req: Request, res: Response) => {
   res.json(await engine.check(param(req, 'id')));
+});
+
+// POST /api/transcription/models/:id/speed-test  measures how fast the downloaded model transcribes on this computer
+router.post('/models/:id/speed-test', async (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!(await service.view()).models.some((m) => m.id === id && m.installed)) {
+    res.status(409).json({ error: 'Conflict', message: 'Download the model first' });
+    return;
+  }
+  res.json(await runSpeedTest(engine, id));
 });
 
 // DELETE /api/transcription/models/:id  removes the model's files

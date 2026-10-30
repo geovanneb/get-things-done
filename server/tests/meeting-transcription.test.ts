@@ -545,6 +545,25 @@ test('a recording stays in the queue when the digest does not hold its transcrip
   await fsp.access(path.join(ws, 'context-updates', 'meeting-queue', id, 'workshop.wav'));
 });
 
+test('an engine busy with something else, such as a speed test, leaves the recording waiting, not failed', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  let busy = true;
+  const { engine } = fakeEngine(async (wav, o) => {
+    if (busy) throw Object.assign(new Error('A transcription is already running; wait for it to finish'), { statusCode: 409, engineBusy: true });
+    return speaks(['Later.'])(wav, o);
+  });
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const id = await queueRecording(queue, 'Workshop');
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  assert.equal((await recording(queue, id)).status, 'pending');
+  busy = false;
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  assert.equal((await recording(queue, id)).status, 'done');
+});
+
 test('no background job left an unhandled rejection', async () => {
   await MeetingTranscriptionService.settled();
   assert.deepEqual(unhandled, []);

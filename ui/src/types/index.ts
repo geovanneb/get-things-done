@@ -755,6 +755,8 @@ export interface TranscriptionModel {
   /** Bytes on disk from an interrupted download; the next download continues from there. */
   partial: number;
   download: { model: string; status: 'downloading' | 'verifying' | 'failed' | 'cancelled'; received: number; total: number; file: string; message?: string } | null;
+  /** How fast it transcribed on this computer, when tested: seconds of speech per second of work. */
+  speed: { realtime_x: number; load_ms: number | null; measured_at: string } | null;
 }
 
 export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; updated_at: string | null }
