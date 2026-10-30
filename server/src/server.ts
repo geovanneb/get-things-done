@@ -16,6 +16,7 @@ import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 import { AgentRunnerService } from './services/agentRunner';
 import { transcriptionEvents } from './services/transcriptionModels';
+import { meetingTranscriptionEvents } from './services/meetingTranscription';
 import { TranscriptionEngine } from './services/transcription/engine';
 
 export const HOST = '127.0.0.1';
@@ -75,6 +76,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
 
   const close = (): Promise<void> => {
     transcriptionEvents.off('change', broadcastTranscription);
+    meetingTranscriptionEvents.off('change', broadcastTranscription);
     for (const client of sseClients) {
       client.write('event: server_shutdown\ndata: {}\n\n');
       client.end();
@@ -112,6 +114,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       watcherService.on('add', broadcastEvent);
       watcherService.on('unlink', broadcastEvent);
       transcriptionEvents.on('change', broadcastTranscription);
+      meetingTranscriptionEvents.on('change', broadcastTranscription);
 
       const workspaceService = new WorkspaceService();
       try {

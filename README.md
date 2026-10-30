@@ -782,7 +782,7 @@ settings.
 - **Recordings** can go into the queue too, up to 4 GB: WAV, and on a Mac also M4A, MP3,
   AAC, FLAC or AIFF. Uploads stream to disk. A meeting with a recording waits in the
   queue for its transcript, made on this computer with the model chosen in **Settings >
-  Transcription**; transcribing arrives in a next version.
+  Transcription** (see below); the transcript then goes into the digest with the meeting.
 - Every change to the queue takes one lock for the workspace, so two dashboards on the
   same workspace never change it at the same time.
 - A meeting removed from the queue, and drafts left half-uploaded for a day, are
@@ -790,7 +790,7 @@ settings.
 
 ### Offline transcription
 
-Meeting recordings will be transcribed on your computer, offline: nothing is sent
+Meeting recordings are transcribed on your computer, offline: nothing is sent
 anywhere. **Settings > Transcription** lists the speech-to-text models with their
 pluses and minuses; download one once (it is shared by every workspace and kept in
 `~/.gtd/models/`, outside the workspace).
@@ -817,7 +817,20 @@ Speeds were measured on an Apple Silicon Mac. **Check** on a downloaded model lo
 in the transcription engine, so you know it works on this computer. The engine
 ([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), Apache-2.0) runs in its own
 process for each job, so the model's memory and any crash stay out of the dashboard.
-Transcribing recordings arrives in a next version.
+
+Recordings in the meeting queue are transcribed one at a time, oldest first, once a
+model is downloaded; the Routines page shows each one's progress.
+
+- The transcript becomes a file of the meeting, `<recording>.transcript.md`: each part
+  with speech, with its start and end time. Speakers are not told apart yet.
+- **Stop** ends a transcription and keeps nothing of it; the meeting waits until you
+  choose **Try again** or remove it.
+- A transcription that ends part way (the engine stopped, or no speech was found in more
+  than a minute of audio) keeps what it found as a **partial** transcript: choose **Use
+  this transcript** to let the digest take it as it is, or **Try again** to replace it.
+- One transcription runs at a time across every dashboard on the workspace. If a
+  dashboard stops in the middle, the recording goes back in line and starts again.
+- The recording itself is kept in the queue with its meeting.
 
 ---
 

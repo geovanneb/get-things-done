@@ -3,9 +3,12 @@ import * as fsp from 'fs/promises';
 import multer from 'multer';
 import { param } from '../utils/params';
 import { MAX_RECORDING_BYTES, MeetingDigestService, queueId, type Upload } from '../services/meetingDigestService';
+import { MeetingTranscriptionService } from '../services/meetingTranscription';
+import { topLevelName } from '../utils/files';
 
 const router = Router();
 const service = new MeetingDigestService();
+const transcription = new MeetingTranscriptionService();
 
 /**
  * One file per request, streamed straight into its meeting's folder (recordings can be gigabytes): writeUpload checks
@@ -52,11 +55,27 @@ router.post('/:id/files', upload.single('file'), async (req: Request, res: Respo
 // POST /api/meeting-queue/:id/queue  the draft is complete: the next digest can take it
 router.post('/:id/queue', async (req: Request, res: Response) => {
   res.json(await service.queue(queueId(param(req, 'id'))));
+  // A recording in it starts transcribing now rather than at the next check.
+  void transcription.tick().catch(() => {});
+});
+
+// POST /api/meeting-queue/:id/recordings/:file/(stop|retry|accept)  a recording's transcription: stop it, try it
+// again, or use a partial transcript as it is
+router.post('/:id/recordings/:file/:action', async (req: Request, res: Response) => {
+  const id = queueId(param(req, 'id'));
+  const file = topLevelName(param(req, 'file'));
+  const action = param(req, 'action');
+  if (action === 'stop') res.json(await transcription.stop(id, file));
+  else if (action === 'retry') res.json(await transcription.retry(id, file));
+  else if (action === 'accept') res.json(await transcription.accept(id, file));
+  else res.status(404).json({ error: 'Not found', message: 'Use stop, retry or accept' });
 });
 
 // DELETE /api/meeting-queue/:id  remove a meeting and its files from the queue
 router.delete('/:id', async (req: Request, res: Response) => {
-  await service.removeMeeting(queueId(param(req, 'id')));
+  const id = queueId(param(req, 'id'));
+  await service.removeMeeting(id);
+  transcription.forget(id);
   res.status(204).send();
 });
 

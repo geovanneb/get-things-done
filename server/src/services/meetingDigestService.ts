@@ -135,7 +135,53 @@ export interface QueuedFile {
   size: number;
   sha256: string;
   /** Set for a recording: the meeting waits for its transcript before a digest can take it. */
-  recording?: { status: 'pending' };
+  recording?: RecordingState;
+}
+
+/** Where a recording's transcription stands. */
+export type RecordingStatus = 'pending' | 'running' | 'done' | 'partial' | 'failed' | 'stopped';
+
+export interface RecordingState {
+  status: RecordingStatus;
+  /** Changes each time a transcription starts; a result is kept only while it still matches. */
+  generation?: string;
+  /** The dashboard process running it, and its job token: a recording whose owner is gone goes back to pending. */
+  owner?: { pid: number; token: string };
+  started_at?: string;
+  model?: string;
+  language?: string;
+  /** The readable transcript made from it, a file of the meeting, and its hash. */
+  transcript?: string;
+  transcript_sha256?: string;
+  /** Seconds of audio, and how much of it the transcript covers. */
+  seconds?: number;
+  /** A partial transcript the user chose to use as it is. */
+  accepted?: boolean;
+  error?: string;
+}
+
+const RECORDING_STATUSES: RecordingStatus[] = ['pending', 'running', 'done', 'partial', 'failed', 'stopped'];
+
+/** A recording's state from the manifest; anything unreadable counts as pending, so it is transcribed again. */
+function parseRecording(value: unknown): RecordingState | undefined {
+  const o = obj(value);
+  if (!Object.keys(o).length) return undefined;
+  const status = RECORDING_STATUSES.includes(o['status'] as RecordingStatus) ? o['status'] as RecordingStatus : 'pending';
+  const owner = obj(o['owner']);
+  const text = (k: string) => (typeof o[k] === 'string' && o[k] ? o[k] as string : undefined);
+  return {
+    status,
+    ...(text('generation') ? { generation: text('generation') } : {}),
+    ...(typeof owner['pid'] === 'number' && typeof owner['token'] === 'string' ? { owner: { pid: owner['pid'], token: owner['token'] } } : {}),
+    ...(text('started_at') ? { started_at: text('started_at') } : {}),
+    ...(text('model') ? { model: text('model') } : {}),
+    ...(text('language') ? { language: text('language') } : {}),
+    ...(text('transcript') ? { transcript: text('transcript') } : {}),
+    ...(text('transcript_sha256') ? { transcript_sha256: text('transcript_sha256') } : {}),
+    ...(typeof o['seconds'] === 'number' ? { seconds: o['seconds'] } : {}),
+    ...(o['accepted'] === true ? { accepted: true } : {}),
+    ...(text('error') ? { error: text('error') } : {}),
+  };
 }
 
 /** A file streamed to disk, not yet part of its meeting. */
@@ -383,6 +429,38 @@ export class MeetingDigestService {
 
   constructor(private readonly runner: DigestRunner = new AgentRunnerService()) {}
 
+  // ---- for the transcription job (meetingTranscription.ts) -------------------------------------------------------
+
+  /** Runs a change to the queue under the queue lock, as every change to it does. */
+  withQueue<T>(operation: () => Promise<T>): Promise<T> {
+    return this.exclusive(operation);
+  }
+
+  /** A meeting as its manifest says now. */
+  loadMeeting(id: string): Promise<QueuedMeeting> {
+    return this.readMeeting(id);
+  }
+
+  /** Writes a meeting's manifest; call under withQueue. */
+  saveMeeting(meeting: QueuedMeeting): Promise<void> {
+    return this.writeMeeting(meeting);
+  }
+
+  /** A meeting's folder, refused when it or a folder above it is a link. */
+  meetingFolder(id: string): Promise<string> {
+    return this.inWorkspace(this.meetingDir(id));
+  }
+
+  /** The routines folder, made when missing. */
+  routinesFolder(): Promise<string> {
+    return this.inWorkspace(this.routinesDir(), true);
+  }
+
+  /** The meetings a digest being made holds: none of them may change. A damaged batch file throws. */
+  async reserved(): Promise<string[]> {
+    return (await this.readBatch())?.meetings ?? [];
+  }
+
   private routinesDir(): string {
     return path.join(workspaceService.getWorkspacePath(), '.situation-board', 'routines');
   }
@@ -526,9 +604,9 @@ export class MeetingDigestService {
     if (!status || !isDateOnly(meetingDate)) throw httpError(400, `The queued meeting ${id} cannot be read (${MANIFEST})`);
     const files = Array.isArray(data['files']) ? (data['files'] as unknown[]).flatMap((f) => {
       const o = obj(f);
-      const recording = obj(o['recording']);
+      const recording = parseRecording(o['recording']);
       return typeof o['name'] === 'string' && typeof o['sha256'] === 'string'
-        ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording['status'] === 'pending' ? { recording: { status: 'pending' as const } } : {}) }] : [];
+        ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording ? { recording } : {}) }] : [];
     }) : [];
     return {
       id: path.basename(dir),
@@ -713,7 +791,7 @@ export class MeetingDigestService {
       for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
         || await fsp.lstat(path.join(dir, name)).then(() => true, () => false); n++) name = `${stem}-${n}${ext}`;
       await fsp.rename(upload.path, path.join(dir, name));
-      meeting.files.push({ name, size: upload.size, sha256: upload.sha256, ...(kind.recording ? { recording: { status: 'pending' as const } } : {}) });
+      meeting.files.push({ name, size: upload.size, sha256: upload.sha256, ...(kind.recording ? { recording: { status: 'pending' as RecordingStatus } } : {}) });
       try {
         await this.writeMeeting(meeting);
       } catch (err) {
@@ -1188,9 +1266,14 @@ export class MeetingDigestService {
   }
 }
 
-/** A recording without its transcript yet: the meeting waits for it. */
-function waitsForTranscript(meeting: QueuedMeeting): boolean {
-  return meeting.files.some((f) => f.recording?.status === 'pending');
+/** A recording whose transcript is done, or partial and accepted as it is. */
+export function transcribed(recording: RecordingState): boolean {
+  return recording.status === 'done' || (recording.status === 'partial' && recording.accepted === true);
+}
+
+/** A recording without a usable transcript yet: the meeting waits for it. */
+export function waitsForTranscript(meeting: QueuedMeeting): boolean {
+  return meeting.files.some((f) => f.recording && !transcribed(f.recording));
 }
 
 /** Queued, not on hold, and every recording transcribed: a digest can take it. */

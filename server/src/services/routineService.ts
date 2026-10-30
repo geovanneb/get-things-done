@@ -11,11 +11,13 @@ import {
 } from './routineSchedule';
 import { CleanupRunResult, CleanupView, SYSTEM_CLEANUP_ID, SYSTEM_CLEANUP_TITLE, SystemCleanupService, parseSettings } from './systemCleanupService';
 import { DigestRunResult, DigestView, MEETING_DIGEST_ID, MEETING_DIGEST_TITLE, MeetingDigestService } from './meetingDigestService';
+import { MeetingTranscriptionService } from './meetingTranscription';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
 const systemCleanup = new SystemCleanupService();
 const meetingDigest = new MeetingDigestService();
+const meetingTranscription = new MeetingTranscriptionService();
 
 /**
  * Routines: things that should happen on a schedule, such as a task that has to be on the
@@ -756,6 +758,11 @@ export class RoutineService {
     } catch (err) {
       if (trigger !== 'timer') console.error(`[routines] Meeting digest: ${(err as Error).message}`);
     }
+    // Recordings in the queue are transcribed whether or not the digest is switched on. The job runs in the
+    // background: this only starts it (or puts back one left by a dashboard that is gone).
+    await meetingTranscription.tick().catch((err: Error) => {
+      if (trigger !== 'timer') console.error(`[routines] Transcription: ${err.message}`);
+    });
     await this.appendRuns(runs);
     return runs;
   }

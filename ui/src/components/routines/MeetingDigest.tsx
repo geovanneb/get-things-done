@@ -7,7 +7,7 @@ import Toggle from '@/components/common/Toggle';
 import { dateInputStyle, sectionLabelStyle, fieldLabelStyle } from '@/components/task-form/styles';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
-import type { MeetingDigest, MeetingDigestSettings, RoutineRun, RoutineWeekday, RunnerStatus } from '@/types';
+import type { MeetingDigest, MeetingDigestSettings, QueuedMeeting, RecordingState, RoutineRun, RoutineWeekday, RunnerStatus, TranscriptionProgress } from '@/types';
 
 const WEEKDAYS: { id: RoutineWeekday; short: string }[] = [
   { id: 'mon', short: 'Mon' }, { id: 'tue', short: 'Tue' }, { id: 'wed', short: 'Wed' }, { id: 'thu', short: 'Thu' },
@@ -25,6 +25,55 @@ const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var
 
 function formatWhen(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+/** A recording whose transcript can go into a digest: done, or partial and used as it is. */
+function transcribed(r: RecordingState): boolean {
+  return r.status === 'done' || (r.status === 'partial' && Boolean(r.accepted));
+}
+
+function minutes(seconds: number): string {
+  const m = Math.round(seconds / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+}
+
+/** One recording of a queued meeting: where its transcription stands, and what can be done about it. */
+function RecordingLine({ meeting, file, state, progress, disabled, onAction }: {
+  meeting: QueuedMeeting; file: string; state: RecordingState; progress: TranscriptionProgress | null; disabled: boolean;
+  onAction: (action: 'stop' | 'retry' | 'accept', message: string) => void;
+}) {
+  let text: string;
+  let tone = 'var(--color-text-muted)';
+  if (state.status === 'running') {
+    text = progress && progress.total > 0
+      ? `Transcribing: ${Math.min(99, Math.floor((progress.done / progress.total) * 100))}% of ${minutes(progress.total)}`
+      : progress ? 'Transcribing: loading the model' : 'Transcribing in another dashboard';
+  } else if (state.status === 'pending') text = 'Waits for transcription; one recording at a time';
+  else if (state.status === 'stopped') { text = 'Stopped: the meeting waits until you try again or remove it'; tone = 'var(--color-warning)'; }
+  else if (state.status === 'failed') { text = `Failed: ${state.error ?? 'unknown error'}`; tone = 'var(--color-critical)'; }
+  else if (state.accepted) text = 'Partial transcript, used as it is';
+  else { text = `Partial transcript${state.error ? ` (${state.error})` : ''}: use it as it is, or try again`; tone = 'var(--color-warning)'; }
+  return (
+    <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
+      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '40%' }}>{file}</span>
+      <span role="status" style={{ flex: 1, minWidth: 0, color: tone }}>{text}</span>
+      {(state.status === 'running' || state.status === 'pending') && (
+        <Button size="sm" variant="ghost" disabled={disabled}
+          onClick={() => {
+            if (state.status === 'running' && !window.confirm(`Stop transcribing ${file}? What was transcribed so far is not kept.`)) return;
+            onAction('stop', `${file} will not be transcribed until you try again.`);
+          }}>Stop</Button>
+      )}
+      {state.status === 'partial' && !state.accepted && (
+        <Button size="sm" variant="ghost" disabled={disabled}
+          onClick={() => onAction('accept', `${meeting.title} can now go into a digest with the partial transcript.`)}>Use this transcript</Button>
+      )}
+      {(state.status === 'stopped' || state.status === 'failed' || (state.status === 'partial' && !state.accepted)) && (
+        <Button size="sm" variant="ghost" disabled={disabled}
+          onClick={() => onAction('retry', `${file} waits for transcription again.`)}>Try again</Button>
+      )}
+    </div>
+  );
 }
 
 export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDigest; onEdit: () => void; onChanged: () => void }) {
@@ -102,12 +151,12 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
       {job.queue.length > 0 && (
         <ul aria-label="Meeting queue" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
           {job.queue.map((m) => (
-            <li key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
+            <li key={m.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}</span>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
               <span title={m.held ?? undefined} style={{ fontSize: 'var(--text-xs)', color: m.held ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
                 {m.status === 'draft' ? 'uploading' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
-                  : m.files.some((f) => f.recording?.status === 'pending') ? 'waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
+                  : m.files.some((f) => f.recording && !transcribed(f.recording)) ? 'waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
               </span>
               {m.held && !m.in_digest && (
                 <Button size="sm" variant="ghost" disabled={busy !== null}
@@ -121,6 +170,15 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
                   void act(`remove-${m.id}`, async () => { await apiDelete(`/api/meeting-queue/${m.id}`); });
                 }}
                 style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 4px', fontSize: 'var(--text-base)' }}>×</button>
+              {m.status === 'queued' && m.files.filter((f) => f.recording && !(f.recording.status === 'done')).map((f) => (
+                <RecordingLine key={f.name} meeting={m} file={f.name} state={f.recording!}
+                  progress={job.transcription?.meeting === m.id && job.transcription.file === f.name ? job.transcription : null}
+                  disabled={busy !== null || m.in_digest}
+                  onAction={(action, message) => act(`${action}-${m.id}-${f.name}`, async () => {
+                    await apiPost(`/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(f.name)}/${action}`);
+                    return message;
+                  })} />
+              ))}
             </li>
           ))}
         </ul>
