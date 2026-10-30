@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
@@ -14,6 +14,7 @@ import { useAppDispatch, useDataVersion } from '@/store';
 import ImportUpdateModal from '@/components/context-updates/ImportUpdateModal';
 import UpdatesList from '@/components/context-updates/UpdatesList';
 import UpdateDetail from '@/components/context-updates/UpdateDetail';
+import { filterUpdates, HISTORY_PAGE, type TypeFilter } from '@/utils/updateTypes';
 import type { ContextNote, ContextUpdate, QueuedMeeting } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -345,6 +346,19 @@ export default function ContextView() {
   const { data: updates, refetch: refetchUpdates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
   const updatesWaiting = (updates ?? []).filter((u) => ['ready', 'in_review', 'approved'].includes(u.status)).length;
   const [importOpen, setImportOpen] = useState(false);
+  // Kept here, not in the list, so opening an update and coming back keeps the filter and the page.
+  const [updateType, setUpdateType] = useState<TypeFilter>('all');
+  const [updateQuery, setUpdateQuery] = useState('');
+  const [historyShown, setHistoryShown] = useState(HISTORY_PAGE);
+  const updatesList = showUpdates && !updateId;
+  // List and detail share one scroll box: a detail starts at the top, and the list comes back where it was left.
+  const updatesScroll = useRef<HTMLDivElement>(null);
+  const listScrollTop = useRef(0);
+  useLayoutEffect(() => {
+    const box = updatesScroll.current;
+    if (box) box.scrollTop = updateId ? 0 : listScrollTop.current;
+  }, [updateId]);
+  const updatesShown = useMemo(() => filterUpdates(updates ?? [], updateType, updateQuery).length, [updates, updateType, updateQuery]);
   const dispatch = useAppDispatch();
   const [notes, setNotes] = useState<ContextNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -433,16 +447,21 @@ export default function ContextView() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 24px', borderBottom: '1px solid var(--color-border)', gap: 12, flexShrink: 0, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h1 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, margin: 0, color: 'var(--color-text)' }}>{categoryTitle}</h1>
-            {!showUpdates && (
+            {(!showUpdates || (updatesList && (updates?.length ?? 0) > 0)) && (
               <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 22, height: 22, padding: '0 6px', borderRadius: 99, background: 'var(--color-accent-subtle)', color: 'var(--color-accent)', fontSize: 'var(--text-xs)', fontWeight: 600 }}>
-                {filtered.length}
+                {showUpdates ? updatesShown : filtered.length}
               </span>
             )}
           </div>
           {/* Wraps the button under the search when the list area is narrow, instead of cutting it off */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+          {/* Grows to fill the row: sized by its content alone, the box wrapped even with room to spare. */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap', flex: '1 1 auto', minWidth: 0 }}>
             {!showUpdates && (
               <Input value={search} onChange={(v) => setSearch(v)} placeholder="Search notes..." aria-label="Search notes"
+                style={{ flex: '0 1 200px', minWidth: 140 }} />
+            )}
+            {updatesList && (updates?.length ?? 0) > 0 && (
+              <Input value={updateQuery} onChange={(v) => { setUpdateQuery(v); setHistoryShown(HISTORY_PAGE); }} placeholder="Search title or ID..." aria-label="Search updates"
                 style={{ flex: '0 1 200px', minWidth: 140 }} />
             )}
             <Button variant={showUpdates ? 'primary' : 'secondary'} onClick={() => setImportOpen(true)}
@@ -454,10 +473,14 @@ export default function ContextView() {
         </div>
 
         {showUpdates && (
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          <div ref={updatesScroll} style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
             {updateId
               ? <UpdateDetail key={updateId} id={updateId} onBack={() => navigate('/context/updates')} />
-              : <UpdatesList updates={updates ?? []} onOpen={(id) => navigate(`/context/updates/${id}`)} onImport={() => setImportOpen(true)} />}
+              : <UpdatesList updates={updates ?? []} type={updateType} query={updateQuery} historyShown={historyShown}
+                  onType={(t) => { setUpdateType(t); setHistoryShown(HISTORY_PAGE); }}
+                  onShowMore={() => setHistoryShown((n) => n + HISTORY_PAGE)}
+                  onClearFilters={() => { setUpdateType('all'); setUpdateQuery(''); setHistoryShown(HISTORY_PAGE); }}
+                  onOpen={(id) => { listScrollTop.current = updatesScroll.current?.scrollTop ?? 0; navigate(`/context/updates/${id}`); }} onImport={() => setImportOpen(true)} />}
           </div>
         )}
 
