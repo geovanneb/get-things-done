@@ -10,6 +10,10 @@ export interface DesktopBridge {
   pickFolder(): Promise<string | null>;
   /** Opens the current workspace in Finder or Explorer. */
   openWorkspaceFolder(): Promise<{ opened: boolean; error?: string }>;
+  /** Asks the system for the microphone: `granted`, or what the user should do. */
+  microphoneAccess?(): Promise<string>;
+  /** Tells the app a recording runs, so it stays awake and asks before quitting. */
+  recordingState?(active: boolean): void;
 }
 
 export function desktopBridge(): DesktopBridge | undefined {
@@ -19,6 +23,15 @@ export function desktopBridge(): DesktopBridge | undefined {
 
 export function isDesktopApp(): boolean {
   return desktopBridge() !== undefined;
+}
+
+/** `granted`, or a message for the user. In a browser, the browser itself asks when recording starts. */
+export async function microphoneAccess(): Promise<string> {
+  return (await desktopBridge()?.microphoneAccess?.()) ?? 'granted';
+}
+
+export function reportRecording(active: boolean): void {
+  desktopBridge()?.recordingState?.(active);
 }
 
 export async function pickFolder(): Promise<string | null> {

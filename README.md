@@ -783,9 +783,16 @@ settings.
   AAC, FLAC or AIFF. Uploads stream to disk. A meeting with a recording waits in the
   queue for its transcript, made on this computer with the model chosen in **Settings >
   Transcription** (see below); the transcript then goes into the digest with the meeting.
-- A meeting recorded in the dashboard is saved as it happens, block by block, into its
-  draft meeting. A recording whose page is gone is never cleaned up: it stays until you
-  finish or discard it.
+- **Record a meeting** on the Routines page records the microphone, in the desktop app
+  and in the browser (Chrome or Edge, with the dashboard opened at localhost). Tell
+  everyone first: the dialog asks each time. A banner shows on every page with what was
+  captured and what is saved. Only the microphone is recorded, so people heard through
+  headphones are not. Audio is saved as it arrives, about 115 MB an hour; what the page
+  has not sent yet is lost if the page crashes, so the banner warns when the server stops
+  answering. In the desktop app the recording keeps going with the window closed, and the
+  computer stays awake. A recording whose page is gone is never cleaned up: it stays
+  until you choose Finish or remove the meeting, and a new recording waits for that.
+  Stay on one workspace while recording.
 - Every change to the queue takes one lock for the workspace, so two dashboards on the
   same workspace never change it at the same time.
 - A meeting removed from the queue, and drafts left half-uploaded for a day, are

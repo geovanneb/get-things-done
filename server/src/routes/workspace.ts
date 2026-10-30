@@ -8,6 +8,7 @@ import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
 import { GitService, GitUnavailableError } from '../services/gitService';
 import { activateWorkspace } from '../services/workspaceActivation';
+import { MeetingRecordingService } from '../services/meetingRecording';
 import {
   InvalidIconError, decodeIcon, removeWorkspaceIcon, saveWorkspaceIcon, workspaceIconPath, workspaceIconVersion,
 } from '../services/workspaceIcon';
@@ -215,6 +216,13 @@ router.post('/switch', async (req: Request, res: Response) => {
   }
 
   const workspacePath = workspaceService.resolveUserPath(rawPath);
+
+  // Checked here, not in the page: another tab may be the one recording. No workspace yet means no recording.
+  const recording = await new MeetingRecordingService().running().catch(() => null);
+  if (recording) {
+    res.status(409).json({ error: `"${recording}" is being recorded. Stop the recording before switching workspaces.` });
+    return;
+  }
 
   const isValid = await workspaceService.validateWorkspacePath(workspacePath);
   if (!isValid) {

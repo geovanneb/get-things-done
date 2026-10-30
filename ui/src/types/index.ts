@@ -685,6 +685,8 @@ export interface QueuedMeeting {
   /** Why it waits instead of going into the next digest; queue it again to clear. */
   held: string | null;
   in_digest: boolean;
+  /** A recording in progress or interrupted: finish or discard it. */
+  live?: { generation: string; state: 'recording' | 'finalizing' | 'damaged'; started_at: string; saved_bytes: number; last_block_at: string | null };
 }
 
 export interface MeetingDigestSettings {

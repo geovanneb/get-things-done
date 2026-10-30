@@ -148,6 +148,9 @@ export interface QueuedFile {
   capture?: string;
 }
 
+/** What the dashboard sees of an open recording: never its token. */
+export interface LiveView { generation: string; state: LiveRecording['state']; started_at: string; saved_bytes: number; last_block_at: string | null }
+
 /** A recording in progress in a draft meeting. Its file is kept whatever happens, until the user finishes or discards it. */
 export interface LiveRecording {
   generation: string;
@@ -266,7 +269,7 @@ export interface DigestView {
   state: DigestState;
   /** The digest that is not done yet, if any: no new one starts until it is. */
   open_digest: string | null;
-  queue: QueuedMeeting[];
+  queue: (Omit<QueuedMeeting, 'live'> & { live?: LiveView })[];
   /** Queue folders that could not be read, with the reason. */
   queue_problems: { id: string; reason: string }[];
   defaults: DigestSettings;
@@ -527,6 +530,21 @@ export class MeetingDigestService {
     }
   }
 
+  /** A meeting for the dashboard: an open recording says how much is saved and when audio last arrived. */
+  private async withLiveView<T extends QueuedMeeting>(m: T): Promise<Omit<T, 'live'> & { live?: LiveView }> {
+    const { live, ...rest } = m;
+    if (!live) return rest;
+    const st = live.state === 'damaged' ? null
+      : await fsp.lstat(path.join(this.meetingDir(m.id), liveRecordingFile(live.generation))).catch(() => null);
+    return {
+      ...rest,
+      live: {
+        generation: live.generation, state: live.state, started_at: live.started_at,
+        saved_bytes: live.sealed_bytes ?? Math.max(0, (st?.size ?? 44) - 44), last_block_at: st ? st.mtime.toISOString() : null,
+      },
+    };
+  }
+
   /** Removes files the meeting's manifest does not name (written by a dashboard that stopped); call under withQueue. */
   dropUnrecorded(meeting: QueuedMeeting, dir: string): Promise<void> {
     return this.dropOrphans(meeting, dir);
@@ -656,7 +674,7 @@ export class MeetingDigestService {
       next_run_at: next ? next.toISOString() : null,
       state,
       open_digest: open,
-      queue: queue.meetings.map((m) => ({ ...m, in_digest: busy.has(m.id) })),
+      queue: await Promise.all(queue.meetings.map(async (m) => ({ ...await this.withLiveView(m), in_digest: busy.has(m.id) }))),
       queue_problems: queue.problems,
       defaults: defaultSettings(),
       max_meetings_limit: MAX_MEETINGS_LIMIT,

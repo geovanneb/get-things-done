@@ -101,7 +101,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(res.status === 409 ? `${target.name} is no longer a workspace. Open it from Settings to set it up again.` : body.error || `HTTP ${res.status}`);
+        setError(body.needs_init ? `${target.name} is no longer a workspace. Open it from Settings to set it up again.` : body.error || `HTTP ${res.status}`);
         return;
       }
       // Reset cached data and leave entity URLs whose IDs belong to the previous workspace.

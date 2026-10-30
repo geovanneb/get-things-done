@@ -58,6 +58,16 @@ export function startUpdateChecks(onReady: (version: string) => void, prepareFor
   return state;
 }
 
+/** Set while something must not be interrupted: an update waits and asks again later. */
+let holdUpdate: () => boolean = () => false;
+export function holdUpdatesWhile(check: () => boolean): void {
+  holdUpdate = check;
+}
+
 export function installNow(): void {
+  if (holdUpdate()) {
+    void dialog.showMessageBox({ type: 'info', message: 'A recording is in progress', detail: 'Stop it first, then restart to update from the tray menu.' });
+    return;
+  }
   void restart?.();
 }

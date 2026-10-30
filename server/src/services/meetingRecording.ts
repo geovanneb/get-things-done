@@ -2,6 +2,7 @@ import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { constants as fsConstants } from 'fs';
 import { createHash, randomUUID } from 'crypto';
+import { withWorkspacePath, WorkspaceService } from './workspace';
 import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
 
 /**
@@ -26,12 +27,25 @@ import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestSer
 const HEADER_BYTES = 44;
 const SAMPLE_RATE = 16_000;
 const MAX_FILES = 10;
+/** Audio newer than this means a page is recording: blocks arrive every few seconds. An interrupted recording does not count. */
+const RUNNING_MS = 30_000;
 
 function httpError(status: number, message: string, details?: unknown): Error {
   return Object.assign(new Error(message), { statusCode: status, ...(details === undefined ? {} : { details }) });
 }
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+/**
+ * The workspace of each recording this dashboard started. Its blocks and its Finish stay there, whatever workspace is
+ * selected meanwhile from any page, also after a long outage. After a restart of the dashboard the map is empty, and
+ * they go to the workspace selected then, which is refused unless it is the same one: the page then says so.
+ */
+const pinned = new Map<string, string>();
+const inWorkspaceOf = <T>(token: string | undefined, fn: () => Promise<T>): Promise<T> => {
+  const workspace = token ? pinned.get(hashToken(token)) : undefined;
+  return workspace ? withWorkspacePath(workspace, fn) : fn();
+};
 
 /** A 16 kHz mono 16-bit WAV header for this much audio. */
 export function wavHeader(dataBytes: number): Buffer {
@@ -86,7 +100,7 @@ export class MeetingRecordingService {
   /** Starts recording into a draft meeting. Starting again with the same token returns the same session. */
   async start(id: string, token: string, now = new Date()): Promise<{ generation: string; offset: number }> {
     if (typeof token !== 'string' || token.length < 16 || token.length > 200) throw httpError(400, 'A writer token is required');
-    return this.queue.withQueue(async () => {
+    const opened = await this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);
       if (meeting.status !== 'draft') throw httpError(409, 'A recording can only go into a meeting before it is queued');
       if (meeting.live) {
@@ -97,12 +111,25 @@ export class MeetingRecordingService {
       // Not judged by how recent its audio is: a page that was only quiet for a while could carry on next to a new one.
       const running = (await this.queue.readQueue()).meetings.find((m) => m.live?.state === 'recording');
       if (running) throw httpError(409, `Another recording is open ("${running.title}"): finish or discard it first`);
-      const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})/, '$1-');
+      const two = (n: number) => String(n).padStart(2, '0');
+      const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`;
       meeting.live = { generation: randomUUID(), token_sha256: hashToken(token), state: 'recording', started_at: now.toISOString(), name: `recording-${stamp}.wav` };
       // The session first: a file exists only with a session that protects it.
       await this.queue.saveMeeting(meeting);
       return this.opened(meeting);
     });
+    pinned.set(hashToken(token), new WorkspaceService().getWorkspacePath());
+    return opened;
+  }
+
+  /** The title of a recording audio arrived for just now. A workspace does not change under it, from any page. */
+  async running(now = new Date()): Promise<string | null> {
+    for (const m of (await this.queue.readQueue()).meetings) {
+      if (m.live?.state !== 'recording') continue;
+      const st = await fsp.lstat(path.join(await this.queue.meetingFolder(m.id), liveRecordingFile(m.live.generation))).catch(() => null);
+      if (st && now.getTime() - st.mtime.getTime() < RUNNING_MS) return m.title;
+    }
+    return null;
   }
 
   private async opened(meeting: QueuedMeeting): Promise<{ generation: string; offset: number }> {
@@ -115,7 +142,7 @@ export class MeetingRecordingService {
   async append(id: string, token: string, offset: number, block: Buffer): Promise<{ offset: number }> {
     if (!Number.isSafeInteger(offset) || offset < 0 || offset % 2 !== 0) throw httpError(400, 'Invalid offset');
     if (!Buffer.isBuffer(block) || block.length === 0 || block.length % 2 !== 0) throw httpError(400, 'A block of audio is whole 16-bit samples');
-    return this.queue.withQueue(async () => {
+    return inWorkspaceOf(token, () => this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);
       if (meeting.live?.state !== 'recording' || meeting.live.token_sha256 !== hashToken(token ?? '')) {
         throw httpError(409, 'This page no longer holds the recording');
@@ -150,16 +177,24 @@ export class MeetingRecordingService {
       } finally {
         await handle.close();
       }
-    });
+    }));
   }
 
   /**
    * Seals the recording and adds it to the meeting. With the token, `offset` must be what the server holds. With
    * `recover` (the user's Finish on an interrupted recording) what is stored is sealed, and any page still sending is
    * refused from then on; it needs the `generation` the user saw. Safe to repeat, and to run twice at once, also after
-   * a lost reply or a crash at any step.
+   * a lost reply or a crash at any step. With `queue`, the meeting is queued too, in the same workspace.
    */
-  async finish(id: string, input: { token?: string; offset?: number; recover?: boolean; generation?: string }): Promise<QueuedMeeting> {
+  async finish(id: string, input: { token?: string; offset?: number; recover?: boolean; generation?: string; queue?: boolean }): Promise<QueuedMeeting> {
+    return inWorkspaceOf(input.token, async () => {
+      const meeting = await this.seal(id, input);
+      if (input.token) pinned.delete(hashToken(input.token));
+      return input.queue && !meeting.live ? this.queue.queue(id) : meeting;
+    });
+  }
+
+  private async seal(id: string, input: { token?: string; offset?: number; recover?: boolean; generation?: string }): Promise<QueuedMeeting> {
     // Kept from the first look: if another Finish completes this one meanwhile, the next look must recognise it.
     let generation = input.generation;
     for (let attempt = 0; ; attempt++) {

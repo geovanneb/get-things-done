@@ -1,3 +1,5 @@
+import { RecordingProvider } from '@/components/recording/RecordingProvider';
+import { RecordingBanner } from '@/components/recording/RecordingBanner';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useAppDispatch } from './store';
@@ -106,7 +108,10 @@ export default function App() {
   return (
     <AppProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <RecordingProvider>
+          <AppRoutes />
+          <RecordingBanner />
+        </RecordingProvider>
       </BrowserRouter>
     </AppProvider>
   );

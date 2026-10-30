@@ -331,6 +331,37 @@ test('a disk that fills stops the recording and keeps what was saved; a damaged 
   await assert.rejects(fsp.access(folder(ws, empty)));
 });
 
+test('a recording in progress is known to the server, and an interrupted one stops counting', async (t) => {
+  const ws = await workspace(t);
+  const id = await draft('Being recorded');
+  assert.equal(await service.running(), null);
+  await service.start(id, TOKEN);
+  await service.append(id, TOKEN, 0, samples(10));
+  assert.equal(await service.running(), 'Being recorded');
+  const old = new Date(Date.now() - 60_000);
+  await fsp.utimes(live(ws, id), old, old);
+  assert.equal(await service.running(), null, 'its page is gone: it must not block switching workspaces forever');
+});
+
+test('a recording stays in its workspace when another one is selected, however long the outage', async (t) => {
+  const first = await workspace(t);
+  const id = await draft();
+  await service.start(id, TOKEN);
+  await service.append(id, TOKEN, 0, samples(10));
+
+  const second = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-record-other-'));
+  t.after(() => fsp.rm(second, { recursive: true, force: true }));
+  await fsp.mkdir(path.join(second, '.situation-board', 'routines'), { recursive: true });
+  await fsp.mkdir(path.join(second, 'context-updates'), { recursive: true });
+  process.env.ESB_WORKSPACE_PATH = second;
+
+  assert.deepEqual(await service.append(id, TOKEN, 20, samples(10)), { offset: 40 });
+  const done = await service.finish(id, { token: TOKEN, offset: 40, queue: true });
+  assert.deepEqual([done.status, done.files.length], ['queued', 1]);
+  await fsp.access(path.join(first, 'context-updates', 'meeting-queue', id, done.files[0]!.name));
+  await assert.rejects(fsp.access(path.join(second, 'context-updates', 'meeting-queue', id)));
+});
+
 test('over HTTP: audio only as raw bytes, the token in a header, and Finish then queue', async (t) => {
   const ws = await workspace(t);
   const app = express();

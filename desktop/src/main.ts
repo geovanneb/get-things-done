@@ -1,11 +1,11 @@
 // Electron main process: starts the same server as `gtd start` in a utility process and shows the dashboard in a window.
 // The app keeps running in the tray when the window is closed, so routines still run on schedule.
-import { app, BrowserWindow, Menu, Tray, dialog, nativeImage, session, shell, utilityProcess, UtilityProcess } from 'electron';
+import { app, BrowserWindow, Menu, Tray, dialog, nativeImage, powerSaveBlocker, session, shell, utilityProcess, UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { registerBridge } from './bridge';
 import { stopServer } from './server-lifecycle';
-import { installNow, startUpdateChecks } from './updates';
+import { holdUpdatesWhile, installNow, startUpdateChecks } from './updates';
 import { classifyLink } from './links';
 import { DEFAULT_PORT, findFreePort } from './port';
 
@@ -21,6 +21,9 @@ let tray: Tray | null = null;
 let server: UtilityProcess | null = null;
 let appUrl = '';
 let quitting = false;
+/** A recording runs in the window; set by the dashboard through the bridge. */
+let recording = false;
+let keepAwake: number | null = null;
 
 // ---- Settings kept by the desktop app (not the workspace) ----
 
@@ -127,6 +130,8 @@ function createWindow(): void {
   });
   guardContents(mainWindow);
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  // A page that is gone records nothing, whatever it last said.
+  mainWindow.webContents.on('render-process-gone', () => setRecording(false));
   // Closing the window keeps the app (and its routines) running in the tray. Quit from the tray or the app menu.
   mainWindow.on('close', (event) => {
     if (quitting) return;
@@ -134,6 +139,7 @@ function createWindow(): void {
     mainWindow?.hide();
   });
   mainWindow.on('closed', () => {
+    setRecording(false);
     mainWindow = null;
   });
   void mainWindow.loadURL(appUrl);
@@ -145,6 +151,27 @@ function showWindow(): void {
   if (mainWindow?.isMinimized()) mainWindow.restore();
   mainWindow?.show();
   mainWindow?.focus();
+}
+
+// ---- Recording ----
+
+/** While recording: the computer stays awake, the hidden window keeps working, and the tray says so. */
+function setRecording(active: boolean): void {
+  recording = active;
+  mainWindow?.webContents.setBackgroundThrottling(!active);
+  if (active && keepAwake === null) keepAwake = powerSaveBlocker.start('prevent-app-suspension');
+  if (!active && keepAwake !== null) {
+    powerSaveBlocker.stop(keepAwake);
+    keepAwake = null;
+  }
+  tray?.setToolTip(active ? `${APP_NAME}: recording` : APP_NAME);
+}
+
+/** The microphone only, for the app's own main window. Preview windows and any other page never get it. */
+function mayRecord(contents: Electron.WebContents | null, origin: string | undefined, types: string[] | undefined, isMainFrame: boolean): boolean {
+  if (!mainWindow || contents !== mainWindow.webContents || !origin || !isMainFrame) return false;
+  if (classifyLink(origin, new URL(appUrl).origin) !== 'app') return false;
+  return !types || (types.length > 0 && types.every((t) => t === 'audio'));
 }
 
 // ---- Tray ----
@@ -186,6 +213,14 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', (event) => {
     if (quitting) return;
+    if (recording) {
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning', buttons: ['Keep recording', 'Quit anyway'], defaultId: 0, cancelId: 0,
+        message: 'A recording is in progress',
+        detail: 'Stop it first to save everything. If you quit, what was already saved stays, and you can finish it on the Routines page.',
+      });
+      if (choice === 0) { event.preventDefault(); return; }
+    }
     quitting = true;
     if (!server) return;
     event.preventDefault();
@@ -193,15 +228,26 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
-    // The dashboard needs no camera, microphone, location or notifications yet. Copy buttons need clipboard writes.
+    // The dashboard needs no camera, location or notifications. Copy buttons need clipboard writes; recording a meeting
+    // needs the microphone, for the main window only.
     // Downloads (attachments, ZIPs) always ask where to save, starting in the Downloads folder.
     session.defaultSession.on('will-download', (_event, item) => {
       item.setSaveDialogOptions({ defaultPath: path.join(app.getPath('downloads'), item.getFilename()) });
     });
-    registerBridge(() => mainWindow, () => appUrl);
+    registerBridge(() => mainWindow, () => appUrl, setRecording);
+    holdUpdatesWhile(() => recording);
 
-    session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+      if (permission === 'media') {
+        const media = details as { securityOrigin?: string; mediaTypes?: string[] };
+        callback(mayRecord(contents, media.securityOrigin ?? details.requestingUrl, media.mediaTypes ?? [], details.isMainFrame));
+        return;
+      }
       callback(permission === 'clipboard-sanitized-write');
+    });
+    session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => {
+      if (permission !== 'media') return true;
+      return (details as { mediaType?: string }).mediaType === 'audio' && mayRecord(contents, origin, undefined, details.isMainFrame);
     });
 
     try {

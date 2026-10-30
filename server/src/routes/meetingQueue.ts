@@ -65,10 +65,11 @@ router.put('/:id/recording', express.raw({ type: 'application/octet-stream', lim
   res.json(await recording.append(queueId(param(req, 'id')), req.get('x-recording-token') ?? '', offset, req.body as Buffer));
 });
 
-// POST /api/meeting-queue/:id/recording/finish  { token, offset, generation } or { recover: true, generation }
+// POST /api/meeting-queue/:id/recording/finish  { token, offset, generation, queue } or { recover: true, generation, queue }
 router.post('/:id/recording/finish', async (req: Request, res: Response) => {
-  const { token, offset, recover, generation } = req.body as { token?: string; offset?: number; recover?: boolean; generation?: string };
-  res.json(await recording.finish(queueId(param(req, 'id')), { token, offset, recover: recover === true, generation }));
+  const { token, offset, recover, generation, queue } = req.body as { token?: string; offset?: number; recover?: boolean; generation?: string; queue?: boolean };
+  res.json(await recording.finish(queueId(param(req, 'id')), { token, offset, recover: recover === true, generation, queue: queue === true }));
+  if (queue === true) void transcription.tick().catch(() => {});
 });
 
 // POST /api/meeting-queue/:id/queue  the draft is complete: the next digest can take it
