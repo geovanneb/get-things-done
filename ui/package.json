@@ -18,7 +18,8 @@
     "test:meeting-action": "tsx src/utils/meetingAction.test.ts",
     "test:desktop-bridge": "tsx src/utils/desktop.test.ts",
     "test:setup": "tsx src/utils/setup.test.ts",
-    "test:icon-crop": "tsx src/utils/iconCrop.test.ts"
+    "test:icon-crop": "tsx src/utils/iconCrop.test.ts",
+    "test:recording-upload": "tsx src/utils/recordingUpload.test.ts"
   },
   "dependencies": {
     "date-fns": "^3.6.0",

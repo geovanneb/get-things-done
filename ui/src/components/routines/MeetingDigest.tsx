@@ -7,6 +7,8 @@ import Toggle from '@/components/common/Toggle';
 import { dateInputStyle, sectionLabelStyle, fieldLabelStyle } from '@/components/task-form/styles';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
+import { useRecorder } from '@/components/recording/RecordingProvider';
+import { RecordMeetingModal } from '@/components/recording/RecordMeetingModal';
 import type { MeetingDigest, MeetingDigestSettings, QueuedMeeting, RecordingState, RoutineRun, RoutineWeekday, RunnerStatus, TranscriptionProgress } from '@/types';
 
 const WEEKDAYS: { id: RoutineWeekday; short: string }[] = [
@@ -86,6 +88,8 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
   const drafts = job.queue.filter((m) => m.status === 'draft').length;
   const hours = Math.max(1, Math.round(settings.max_characters / CHARACTERS_PER_HOUR));
 
+  const recorder = useRecorder();
+  const [recording, setRecording] = React.useState(false);
   const act = async (kind: string, fn: () => Promise<string | void>) => {
     setBusy(kind);
     setNotice(null);
@@ -155,7 +159,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}</span>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
               <span title={m.held ?? undefined} style={{ fontSize: 'var(--text-xs)', color: m.held ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
-                {m.status === 'draft' ? 'uploading' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
+                {m.live ? (recorder.active && recorder.meetingId === m.id ? 'recording' : 'recording interrupted') : m.status === 'draft' ? 'uploading' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
                   : m.files.some((f) => f.recording && !transcribed(f.recording)) ? 'waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
               </span>
               {m.held && !m.in_digest && (
@@ -170,6 +174,24 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
                   void act(`remove-${m.id}`, async () => { await apiDelete(`/api/meeting-queue/${m.id}`); });
                 }}
                 style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 4px', fontSize: 'var(--text-base)' }}>×</button>
+              {m.live && !(recorder.active && recorder.meetingId === m.id) && (
+                <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
+                  <span role="status" style={{ flex: 1, minWidth: 0, color: 'var(--color-warning)' }}>
+                    {m.live.state === 'damaged' ? 'Its record cannot be read; the audio is kept. Removing the meeting discards it.'
+                      : `${Math.round(m.live.saved_bytes / 32_000 / 60)} min saved${m.live.last_block_at ? `, last audio ${formatRelativeTime(m.live.last_block_at)}` : ''}. It stays until you finish or discard it.`}
+                  </span>
+                  {m.live.state !== 'damaged' && (
+                    <Button size="sm" variant="ghost" disabled={busy !== null}
+                      onClick={() => {
+                        if (!window.confirm(`Finish "${m.title}" with what was saved? A page still recording it is stopped.`)) return;
+                        void act(`finish-${m.id}`, async () => {
+                          await apiPost(`/api/meeting-queue/${m.id}/recording/finish`, { recover: true, generation: m.live!.generation, queue: true });
+                          return `${m.title} is saved and waits for its transcript.`;
+                        });
+                      }}>Finish</Button>
+                  )}
+                </div>
+              )}
               {m.status === 'queued' && m.files.filter((f) => f.recording && !(f.recording.status === 'done')).map((f) => (
                 <RecordingLine key={f.name} meeting={m} file={f.name} state={f.recording!}
                   progress={job.transcription?.meeting === m.id && job.transcription.file === f.name ? job.transcription : null}
@@ -190,6 +212,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           onClick={() => act('run', async () => (await apiPost<RoutineRun>('/api/routines/meeting-digest/run')).message)}>
           Make digest now
         </Button>
+        <Button size="sm" variant="ghost" onClick={() => setRecording(true)} disabled={recorder.active}>Record a meeting</Button>
         <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>Settings</Button>
         {notice && (
           <span role={notice.error ? 'alert' : 'status'} style={{ fontSize: 'var(--text-xs)', color: notice.error ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
@@ -197,6 +220,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           </span>
         )}
       </div>
+      <RecordMeetingModal isOpen={recording} onClose={() => setRecording(false)} />
     </article>
   );
 }

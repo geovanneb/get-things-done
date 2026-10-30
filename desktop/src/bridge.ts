@@ -1,9 +1,25 @@
 // Main-process side of the preload bridge. Only the main window, showing the app's own pages, may call it,
 // and no call takes a path from the page: the workspace path comes from the server.
-import { BrowserWindow, IpcMainInvokeEvent, dialog, ipcMain, shell } from 'electron';
+import { BrowserWindow, IpcMainInvokeEvent, dialog, ipcMain, shell, systemPreferences } from 'electron';
 import { classifyLink } from './links';
 
-export function registerBridge(getWindow: () => BrowserWindow | null, getAppUrl: () => string): void {
+/** Asks the system for the microphone. `granted`, or what the user should do: the system only ever asks once. */
+async function microphoneAccess(): Promise<string> {
+  const blocked = 'The microphone is blocked for Get Things Done. Allow it in System Settings > Privacy & Security > Microphone, then try again.';
+  if (process.platform === 'darwin') {
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    if (status === 'granted') return 'granted';
+    if (status === 'not-determined') return (await systemPreferences.askForMediaAccess('microphone')) ? 'granted' : blocked;
+    return blocked;
+  }
+  if (process.platform === 'win32') {
+    return systemPreferences.getMediaAccessStatus('microphone') === 'denied'
+      ? 'The microphone is blocked. Allow desktop apps to use it in Windows Settings > Privacy & security > Microphone, then try again.' : 'granted';
+  }
+  return 'granted';
+}
+
+export function registerBridge(getWindow: () => BrowserWindow | null, getAppUrl: () => string, onRecording: (active: boolean) => void): void {
   const trusted = (event: IpcMainInvokeEvent): BrowserWindow => {
     const window = getWindow();
     const url = event.senderFrame?.url ?? '';
@@ -20,6 +36,16 @@ export function registerBridge(getWindow: () => BrowserWindow | null, getAppUrl:
       properties: ['openDirectory', 'createDirectory'],
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle('gtd:microphone-access', async (event) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    return microphoneAccess();
+  });
+
+  ipcMain.handle('gtd:recording-state', async (event, active: unknown) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    onRecording(active === true);
   });
 
   ipcMain.handle('gtd:open-workspace-folder', async (event) => {
