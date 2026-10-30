@@ -2,18 +2,19 @@ import type { ContextUpdate } from '@/types';
 
 /**
  * What kind of update it is, from who opened it. One list of types feeds the filter, the badge and the counts,
- * so a new kind of update (Kaizen next) is one more entry here.
+ * so a new kind of update is one more entry here.
  */
-export type UpdateType = 'imported' | 'meeting-digest' | 'memory-review' | 'other';
+export type UpdateType = 'imported' | 'meeting-digest' | 'memory-review' | 'kaizen' | 'other';
 
 export const UPDATE_TYPES: { id: UpdateType; label: string; hint: string }[] = [
   { id: 'imported', label: 'Imported', hint: 'Material you imported: files or a pasted transcript.' },
   { id: 'meeting-digest', label: 'Meeting digest', hint: 'Made by the Meeting digest routine from queued meetings.' },
   { id: 'memory-review', label: 'Memory review', hint: 'Opened by the weekly System cleanup job to review your memory. Set it up under Routines.' },
+  { id: 'kaizen', label: 'Kaizen', hint: 'Opened after a task needed rework: a change to how the agent works, so the mistake does not repeat.' },
   { id: 'other', label: 'Other', hint: 'Opened by something this version of the dashboard does not know.' },
 ];
 
-const BY_ORIGIN: Record<string, UpdateType> = { meetings: 'meeting-digest', 'system-cleanup': 'memory-review' };
+const BY_ORIGIN: Record<string, UpdateType> = { meetings: 'meeting-digest', 'system-cleanup': 'memory-review', kaizen: 'kaizen' };
 
 export function updateType(u: Pick<ContextUpdate, 'origin'>): UpdateType {
   if (!u.origin) return 'imported';

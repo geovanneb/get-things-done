@@ -209,6 +209,14 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
 }
 
 /** A date from frontmatter (YAML may already have turned it into a Date), or null. */
+/**
+ * When a Kaizen note was finished with, which starts its age: applied, rejected, or moved into a context update
+ * (that update then has its own cleanup rule).
+ */
+function kaizenDoneAt(status: unknown, note: { applied_at?: unknown; rejected_at?: unknown; moved_at?: unknown }): unknown {
+  return status === 'rejected' ? note.rejected_at : status === 'moved' ? note.moved_at : note.applied_at;
+}
+
 function when(value: unknown): Date | null {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value !== 'string' || !value) return null;
@@ -455,8 +463,8 @@ export class SystemCleanupService {
     }
     if (settings.rules.kaizen.enabled) {
       for (const { filename, proposal } of await kaizenService.listKaizenFiles().catch(() => [])) {
-        if (proposal.status !== 'applied' && proposal.status !== 'rejected') continue;
-        add('kaizen', proposal.id || filename, proposal.title, path.join(ws, 'kaizen', filename), ageDays(when(proposal.status === 'rejected' ? proposal.rejected_at : proposal.applied_at), now));
+        if (proposal.status !== 'applied' && proposal.status !== 'rejected' && proposal.status !== 'moved') continue;
+        add('kaizen', proposal.id || filename, proposal.title, path.join(ws, 'kaizen', filename), ageDays(when(kaizenDoneAt(proposal.status, proposal)), now));
       }
     }
     if (settings.rules.trash.enabled) {
@@ -525,8 +533,8 @@ export class SystemCleanupService {
     if (item.type === 'kaizen') {
       if (!st.isFile()) return false;
       const data = obj(parseMarkdown(await fsp.readFile(full, 'utf-8')).data);
-      if (data['status'] !== 'applied' && data['status'] !== 'rejected') return false;
-      if (!oldEnough(when(data['status'] === 'rejected' ? data['rejected_at'] : data['applied_at']))) return false;
+      if (data['status'] !== 'applied' && data['status'] !== 'rejected' && data['status'] !== 'moved') return false;
+      if (!oldEnough(when(kaizenDoneAt(data['status'], data)))) return false;
     }
     if (item.type === 'trash' && !oldEnough(trashedAt(path.basename(full)))) return false;
 

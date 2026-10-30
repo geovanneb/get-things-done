@@ -136,21 +136,24 @@ Then apply the fix, save the deliverable, and run Step 9 again to set the task b
 
 This is required for every correction, however small. A wording tweak is still rework.
 
-### Kaizen proposal
+### Kaizen note
 
 Before or after applying the fix, also record what went wrong so it does not repeat:
 
 1. Identify the root cause of the mistake — not the symptom, but why the instruction set did not prevent it.
 2. Determine the next available kaizen ID by listing `kaizen/` and incrementing from the highest existing number.
-3. Create a proposal at `kaizen/KAIZEN-YYYY-NNN.md` following `.schemas/kaizen.schema.json`. Do not copy the shape from a sibling kaizen file — a defect in the file you copy becomes a defect in yours. Include:
+3. Write a note at `kaizen/KAIZEN-YYYY-NNN.md` following `.schemas/kaizen.schema.json`. Do not copy the shape from a sibling kaizen file — a defect in the file you copy becomes a defect in yours. Include:
+   - `title`: a short name for the lesson
+   - `task_ref`: the task that triggered this note
+   - `symptom`: what went wrong in the task, as the executive saw it
    - `root_cause`: what instruction or signal was missing
-   - `proposed_fix`: the concrete change to a harness file that would prevent recurrence
-   - `files_affected`: the specific file(s) to update
-   - `created_at`: current ISO 8601 timestamp (required — the board shows it on the card)
-   - `task_ref`: the task that triggered this proposal
-4. The frontmatter needs **both** an opening `---` and a closing `---`. The board parses the block as a whole: with no closing fence the parse fails and every field falls back to empty, so the proposal renders as a blank card instead of failing loudly.
-5. Set the proposal `status` to `proposed`.
-6. Read the file back and confirm the frontmatter parses and the title is non-empty before you report the proposal as filed.
-7. Do not mark it `applied` — only apply it when the user runs `/gtd-kaizen <ID>`.
+   - `proposed_fix`: the concrete change that would prevent recurrence (a suggestion: the analysis drafts the real change)
+   - `files_affected`: the file(s) you think should change
+   - `area` (optional): instructions, templates, context or tasks
+   - `created_at`: current ISO 8601 timestamp
+4. The frontmatter needs **both** an opening `---` and a closing `---`. Without the closing fence the dashboard cannot read the note.
+5. Set the note `status` to `proposed`.
+6. Read the file back and confirm the frontmatter parses and the title is non-empty before you report the note as filed.
+7. Change nothing else. The dashboard opens a Kaizen context update from the note (Context > Updates): the executive runs `/gtd-context-analyze` on it, reviews each file change, and applies what they accept. Never edit the files yourself as part of the Kaizen.
 
-One mistake = one proposal. If multiple independent failures caused the same correction, write one proposal per root cause.
+One mistake = one note. If multiple independent failures caused the same correction, write one note per root cause.

@@ -463,6 +463,33 @@ test('apply runs the workspace\'s own command with the gate, for the accepted fi
   assert.ok(await eventually(() => fsp.access(path.dirname(gates.at(-1)!)).then(() => false, () => true)), 'the gate\'s private folder is gone after the run');
 });
 
+test('a Kaizen apply may write the accepted instruction file and template; any other update may not', async (t) => {
+  const ws = await workspace(t);
+  const gates: string[] = [];
+  const fake = fakeAdapter();
+  const adapter: AgentRunnerAdapter = { ...fake.adapter, start: (w, p, done, gate) => { if (gate) gates.push(gate.mcpConfig); return fake.adapter.start(w, p, done, gate); } };
+  const service = new AgentRunnerService(adapter);
+  const accepted = [
+    { id: 'P-01', action: 'update', target: 'CLAUDE.md', decision: 'accepted' },
+    { id: 'P-02', action: 'update', target: 'outputs/templates/plain-text/output.md', decision: 'accepted' },
+    { id: 'P-03', action: 'update', target: '.claude/commands/gtd-task.md', decision: 'accepted' },
+  ];
+  const allowed = async () => JSON.parse(await fsp.readFile(path.join(path.dirname(gates.at(-1)!), 'gate.json'), 'utf-8')).allowed as string[];
+
+  // An imported update: none of these is a context or stakeholder file, so there is nothing to apply.
+  await approved(ws, accepted);
+  await assert.rejects(service.start('CU-2026-0001', 'apply'), /Nothing to apply/);
+
+  const file = path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md');
+  const data = parseMarkdown(await fsp.readFile(file, 'utf-8')).data as Record<string, unknown>;
+  await fsp.writeFile(file, stringifyMarkdown('', { ...data, origin: 'kaizen', kind: 'kaizen' }));
+  await service.start('CU-2026-0001', 'apply');
+  assert.deepEqual(await allowed(), [path.join(ws, 'CLAUDE.md'), path.join(ws, 'outputs/templates/plain-text/output.md')],
+    'the instruction file and the template, never .claude/');
+  fake.end(success);
+  await ended(service);
+});
+
 test('success is checked against what was accepted at the start, and a half-done apply can continue', async (t) => {
   const ws = await workspace(t);
   const fake = fakeAdapter();

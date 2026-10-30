@@ -18,6 +18,9 @@ For each ID:
 2. Check the `status` field in the frontmatter:
    - `applied` — tell the user it has already been applied and move on.
    - `rejected` — confirm with the user before going any further.
+   - `moved` — the dashboard opened it as the context update named in `context_update`.
+     Tell the user to review and apply it there (Context > Updates, or
+     `/gtd-context-analyze <that id>`), and move on. Never apply a moved note here.
 3. Read the `root_cause`, `proposed_fix`, and `files_affected` fields carefully.
 4. Apply the change described in `proposed_fix` to the files listed in
    `files_affected`. Stay inside this workspace, and do not expand the scope

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import { Textarea } from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
@@ -140,6 +141,38 @@ function MeetingRecordCard({ record, reviewing, confirmation, onChoose, onCreate
   );
 }
 
+/**
+ * Why a Kaizen was opened, shown before the file changes: the executive judges the diagnosis first, then whether
+ * each change fixes it.
+ */
+function KaizenCard({ kaizen }: { kaizen: NonNullable<ContextUpdate['kaizen']> }) {
+  return (
+    <section aria-label="Root cause">
+      <h3 style={sectionLabel}>Why this Kaizen</h3>
+      <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 10, borderLeft: '3px solid var(--color-accent)' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+          {kaizen.task_ref
+            ? <span>After feedback on <Link to={`/board/task/${kaizen.task_ref}`} style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)' }}>{kaizen.task_ref}</Link></span>
+            : <span>The note does not name the task it came from.</span>}
+          {kaizen.area && <Badge variant="default">{kaizen.area}</Badge>}
+        </div>
+        {kaizen.symptom && (
+          <div>
+            <div style={{ ...sectionLabel, marginBottom: 2 }}>What went wrong</div>
+            <MarkdownView content={kaizen.symptom} compact />
+          </div>
+        )}
+        <div>
+          <div style={{ ...sectionLabel, marginBottom: 2 }}>Root cause</div>
+          {kaizen.root_cause
+            ? <MarkdownView content={kaizen.root_cause} compact />
+            : <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-warning)' }}>The note gives no root cause. Read the note under Materials before you accept any change.</p>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
   proposal: ContextUpdateProposal;
   reviewing: boolean;
@@ -186,6 +219,12 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
             )}
           </div>
           <code style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)', overflowWrap: 'anywhere' }}>{proposal.target}</code>
+          {proposal.app_provided && reviewing && !blocked && (
+            <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              This file came with the app. Once you change it, it is yours: <code style={{ fontFamily: 'var(--font-mono)' }}>gtd upgrade</code> keeps
+              your version and puts the next app version beside it as <code style={{ fontFamily: 'var(--font-mono)' }}>{proposal.target.split('/').pop()}.new</code>.
+            </p>
+          )}
 
           {proposal.rationale && (
             <div>
@@ -473,7 +512,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
           </span>
         </div>
         <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {u.kind === 'memory-review' ? 'review of your existing memory' : <>material from {u.source_date || 'unknown date'}</>} · {u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {u.kind === 'memory-review' ? 'review of your existing memory · ' : u.kaizen ? '' : <>material from {u.source_date || 'unknown date'} · </>}{u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.kaizen ? 'opened from task feedback' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}
           {u.applied_at && <> · finished {formatRelativeDate(u.applied_at)}</>}
         </div>
       </div>
@@ -513,6 +552,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
           </div>
         )}
       </section>
+
+      {u.kaizen && <KaizenCard kaizen={u.kaizen} />}
 
       {u.notes && (
         <section aria-label="Notes for the agent">
@@ -612,8 +653,9 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
             {u.proposals.length === 0 ? (
               <HelpBox title="Nothing worth changing">
-                The agent found nothing in this material that should change your context. That is a normal result: not
-                every meeting changes what is true. {reviewing && (records.length > 0 ? 'Confirm the meeting records you want to keep and approve, or close the update.' : 'Close the update to finish.')}
+                {u.kaizen
+                  ? 'The agent found no file change that would prevent this. Close the update, or add a note on what to change and analyze again.'
+                  : 'The agent found nothing in this material that should change your context. That is a normal result: not every meeting changes what is true.'}{' '}{reviewing && (records.length > 0 ? 'Confirm the meeting records you want to keep and approve, or close the update.' : 'Close the update to finish.')}
               </HelpBox>
             ) : (
               <>

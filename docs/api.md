@@ -575,6 +575,13 @@ GET /api/mentions/resolve?href=/stakeholders/people/stk-0001.md
 
 ## Kaizen
 
+A note an agent writes in `kaizen/` with `status: proposed` (after a task needed rework) is opened by the
+dashboard as a context update with `origin: kaizen` and `kind: kaizen`, right away or at the next start. The update
+carries the root cause in its `kaizen` field (`note`, `task_ref`, `symptom`, `root_cause`, `area`) and is reviewed
+and applied like any other update; its proposals may also change `CLAUDE.md`, `AGENTS.md`,
+`.github/copilot-instructions.md` and `outputs/templates/<slug>/output.md`. The note is marked `status: moved` with
+`context_update` and `moved_at`. The endpoints below still serve the notes, including those from before.
+
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/api/kaizen` | List improvement proposals |

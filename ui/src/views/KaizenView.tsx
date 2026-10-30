@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useDataVersion } from '../store';
 import { apiPatch } from '../utils/api';
@@ -7,7 +8,7 @@ import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
 import MarkdownView from '../components/common/MarkdownView';
-import { CommandBox } from '../components/context-updates/shared';
+import { CommandBox, HelpBox } from '../components/context-updates/shared';
 import { formatRelativeTime } from '../utils/format';
 
 /* ---- Status helpers -------------------------------------------------- */
@@ -15,6 +16,7 @@ const STATUS_CONFIG: Record<KaizenProposal['status'], { label: string; color: st
   proposed: { label: 'Proposed', color: 'var(--color-warning)', badgeVariant: 'warning' },
   applied:  { label: 'Applied',  color: 'var(--color-success)', badgeVariant: 'success' },
   rejected: { label: 'Rejected', color: 'var(--color-text-muted)', badgeVariant: 'default' },
+  moved:    { label: 'Moved',    color: 'var(--color-text-muted)', badgeVariant: 'default' },
 };
 
 /* ---- ID chip ---------------------------------------------------------- */
@@ -262,6 +264,7 @@ export default function KaizenView() {
   const proposed = data.filter((p) => p.status === 'proposed');
   const applied  = data.filter((p) => p.status === 'applied');
   const rejected = data.filter((p) => p.status === 'rejected');
+  const moved    = data.filter((p) => p.status === 'moved');
 
   return (
     <div style={{ padding: 24, maxWidth: 860, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -273,6 +276,14 @@ export default function KaizenView() {
           all at once, and run it in Claude Code.
         </p>
       </div>
+
+      {/* New proposals open as Kaizen context updates: reviewed file by file, like any other update. */}
+      <HelpBox title="New Kaizen proposals are context updates">
+        {moved.length > 0 ? `${moved.length} ${moved.length === 1 ? 'proposal now opens' : 'proposals now open'} as a context update. ` : ''}
+        Each one shows the root cause first, then the exact change to each file, which you accept one by one.{' '}
+        <Link to="/context/updates" style={{ color: 'var(--color-accent)' }}>Review them in Context updates</Link>.
+        {data.length > moved.length && ' Proposals below are from before and keep working as they did.'}
+      </HelpBox>
 
       {/* Proposed */}
       {proposed.length > 0 && (

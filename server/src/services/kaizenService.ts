@@ -10,7 +10,8 @@ const workspaceService = new WorkspaceService();
 export interface KaizenProposal {
   id: string;
   title: string;
-  status: 'proposed' | 'applied' | 'rejected';
+  /** moved: the dashboard opened a Kaizen context update from it (`context_update`); see kaizenIntake. */
+  status: 'proposed' | 'applied' | 'rejected' | 'moved';
   area: string;
   root_cause: string;
   proposed_fix: string;
@@ -18,6 +19,8 @@ export interface KaizenProposal {
   created_at: string;
   applied_at: string | null;
   rejected_at: string | null;
+  moved_at: string | null;
+  context_update: string | null;
   body: string;
 }
 
@@ -163,6 +166,8 @@ export class KaizenService {
         created_at: String(meta['created_at'] ?? ''),
         applied_at: meta['applied_at'] ? String(meta['applied_at']) : null,
         rejected_at: meta['rejected_at'] ? String(meta['rejected_at']) : null,
+        moved_at: meta['moved_at'] ? String(meta['moved_at']) : null,
+        context_update: meta['context_update'] ? String(meta['context_update']) : null,
         body,
       };
     } catch {

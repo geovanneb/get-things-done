@@ -13,7 +13,7 @@ is built the way it is, what it could collide with, and what risk remains.
 | Finished tasks | Off (30 days, archive) | Archive, trash or delete done tasks still on the board. |
 | Archived tasks | Off (365 days, trash) | Trash or delete. |
 | Finished context updates | Off (90 days, trash) | Only `done`; kept materials and pending removals are skipped. |
-| Closed kaizen | Off (90 days, trash) | Only `applied` with `applied_at`, or `rejected` with `rejected_at`. Legacy records without a closing date stay untouched. |
+| Closed kaizen | Off (90 days, trash) | Only `applied` with `applied_at`, `rejected` with `rejected_at`, or `moved` (opened as a context update) with `moved_at`. Legacy records without a closing date stay untouched. |
 | Trash | Off (30 days) | Permanently deletes entries the app named, by the time in the name. |
 
 ## UX decisions and where they come from

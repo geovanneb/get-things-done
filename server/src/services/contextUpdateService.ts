@@ -13,6 +13,7 @@ import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
 import { hashFile } from '../utils/fileHash';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 import { TaskService } from './taskService';
+import { readManifest } from './scaffold';
 import type { Task } from '../types';
 
 const workspaceService = new WorkspaceService();
@@ -44,7 +45,11 @@ const pendingUpdates = new Map<string, Promise<void>>();
  * confirmed record keeps the update out of the System cleanup. The materials stay unreviewed evidence.
  *
  * `origin` says who opened the update. Only the server sets it (the weekly memory review writes
- * `system-cleanup`); an import from the dashboard has none.
+ * `system-cleanup`, the meeting digest `meetings`, a Kaizen note `kaizen`); an import from the dashboard has none.
+ *
+ * A Kaizen (`kind: kaizen`) improves how the workspace works after a task needed rework. It carries the root cause
+ * analysis as its own fields, and its proposals may also change the agent instruction files and the output
+ * templates (see proposalTarget). It never removes files.
  * The agent commands (/gtd-context-analyze, /gtd-context-apply) move analyzing/in_review and applying/done;
  * the dashboard moves everything else.
  */
@@ -56,6 +61,15 @@ const CONTEXT_CATEGORIES = ['company', 'organization', 'strategy', 'programs', '
 const STAKEHOLDER_FOLDERS = ['people', 'groups', 'org-charts'];
 
 const ID_PATTERN = /^CU-\d{4}-\d{4}$/;
+const TASK_ID_PATTERN = /^TASK-\d{4}-\d{4}$/;
+
+export const KAIZEN_ORIGIN = 'kaizen';
+export const KAIZEN_KIND = 'kaizen';
+/**
+ * The agent instruction files a Kaizen may change: one per supported agent. `.claude/` stays out: agents may not
+ * edit it.
+ */
+const KAIZEN_INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md'];
 const PROPOSAL_ID_PATTERN = /^P-\d{2,3}$/;
 const RECORD_ID_PATTERN = /^M-\d{2,3}$/;
 /** A stakeholder id, or `me` for the workspace owner. */
@@ -183,6 +197,8 @@ export interface ContextUpdate {
   kind: string | null;
   /** For a meeting digest: which queued meeting each file came from. Written by the dashboard only; kept after the materials go. */
   digest_meetings: DigestMeeting[];
+  /** For a Kaizen: the root cause analysis. Null for every other kind. */
+  kaizen: KaizenAnalysis | null;
   proposals: UpdateProposal[];
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
@@ -197,6 +213,23 @@ export interface DigestMeeting {
   files: { source: string; file: string; sha256: string }[];
 }
 
+/**
+ * Why a Kaizen was opened: the task whose rework showed the problem, what went wrong there, and the root cause in
+ * the instructions. Copied by the dashboard from the agent's note in kaizen/, which stays as material.
+ */
+export interface KaizenAnalysis {
+  /** The kaizen/ file it came from. */
+  note: string;
+  /** The task whose feedback triggered it; empty when the note did not name a valid one. */
+  task_ref: string;
+  /** What went wrong in the task, as the executive saw it. */
+  symptom: string;
+  /** What instruction or signal was missing: the cause, not the symptom. */
+  root_cause: string;
+  /** Optional grouping, e.g. instructions, templates. */
+  area: string;
+}
+
 export interface ProposalDetail extends UpdateProposal {
   /** Current content of the target, or null when it does not exist. */
   current: string | null;
@@ -207,6 +240,11 @@ export interface ProposalDetail extends UpdateProposal {
   stale: boolean;
   /** Why this proposal cannot be shown or applied (bad target path, missing draft). */
   problem: string | null;
+  /**
+   * The target is a file the app installed. Once changed it is the user's: `gtd upgrade` then writes later app
+   * versions of it next to it as <file>.new instead of replacing it.
+   */
+  app_provided: boolean;
 }
 
 export interface ContextUpdateDetail extends ContextUpdate {
@@ -244,17 +282,34 @@ export function updateId(value: unknown): string {
 
 /**
  * A proposal target from the agent's frontmatter, as a workspace-relative POSIX path. Only Markdown files
- * under context/<category>/ and stakeholders/{people,groups,org-charts}/ can be proposed.
+ * under context/<category>/ and stakeholders/{people,groups,org-charts}/ can be proposed. A Kaizen may also
+ * change the agent instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) and the output
+ * templates under outputs/templates/.
  * Returns null when the path is outside those folders or is not a plain relative path.
  */
-export function proposalTarget(value: unknown): string | null {
+export function proposalTarget(value: unknown, kind: string | null = null): string | null {
   if (typeof value !== 'string' || !value || value.length > 300) return null;
+  if (kind === KAIZEN_KIND && KAIZEN_INSTRUCTION_FILES.includes(value)) return value;
   if (value.includes('\\') || value.includes('\0') || value.startsWith('/') || !value.endsWith('.md')) return null;
   const parts = value.split('/');
   if (parts.some((p) => !p || p === '.' || p === '..' || p.startsWith('.') || p.includes(':'))) return null;
   if (parts[0] === 'context') return parts.length >= 3 && CONTEXT_CATEGORIES.includes(parts[1]!) ? value : null;
   if (parts[0] === 'stakeholders') return parts.length >= 3 && STAKEHOLDER_FOLDERS.includes(parts[1]!) ? value : null;
-  return null;
+  if (kind !== KAIZEN_KIND) return null;
+  return parts[0] === 'outputs' && parts[1] === 'templates' && parts.length >= 4 ? value : null;
+}
+
+/** The root cause fields of a Kaizen update, or null for any other kind. */
+function normalizeKaizen(data: Record<string, unknown>): KaizenAnalysis | null {
+  if (data['kind'] !== KAIZEN_KIND) return null;
+  const task = str(data['task_ref']);
+  return {
+    note: str(data['kaizen_note']),
+    task_ref: TASK_ID_PATTERN.test(task) ? task : '',
+    symptom: str(data['symptom']),
+    root_cause: str(data['root_cause']),
+    area: str(data['area']),
+  };
 }
 
 function normalizeProposal(raw: unknown, index: number): UpdateProposal {
@@ -446,6 +501,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
     digest_meetings: normalizeDigestMeetings(data['digest_meetings']),
+    kaizen: normalizeKaizen(data),
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
     meeting_records: normalizeRecords(data['meeting_records']),
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
@@ -653,7 +709,9 @@ export class ContextUpdateService {
         await this.finishRemovals(id);
       }
       const { update: current } = await this.read(id);
-      const proposals = await Promise.all(current.proposals.map((p) => this.proposalDetail(dir, current, p)));
+      // The manifest is written with the system's separator; targets use "/".
+      const appFiles = new Set((readManifest(workspaceService.getWorkspacePath())?.files ?? []).map((f) => f.path.replace(/\\/g, '/')));
+      const proposals = await Promise.all(current.proposals.map((p) => this.proposalDetail(dir, current, p, appFiles)));
       await this.markLinkedPeople(current.meeting_records);
       const material_files = await listFolderFiles(path.join(dir, 'materials'));
       const hashOf = async (name: string) => {
@@ -780,10 +838,16 @@ export class ContextUpdateService {
     });
   }
 
-  private async proposalDetail(dir: string, update: ContextUpdate, p: UpdateProposal): Promise<ProposalDetail> {
-    const detail: ProposalDetail = { ...p, current: null, proposed: null, target_exists: false, stale: false, problem: null };
-    const target = proposalTarget(p.target);
-    if (!target) return { ...detail, problem: 'The target is not a context note or stakeholder file, so it cannot be applied.' };
+  private async proposalDetail(dir: string, update: ContextUpdate, p: UpdateProposal, appFiles: Set<string>): Promise<ProposalDetail> {
+    const kaizen = update.kind === KAIZEN_KIND;
+    const target = proposalTarget(p.target, update.kind);
+    const detail: ProposalDetail = { ...p, current: null, proposed: null, target_exists: false, stale: false, problem: null, app_provided: !!target && appFiles.has(target) };
+    if (!target) {
+      return { ...detail, problem: kaizen
+        ? 'A Kaizen can change context notes, stakeholder files, the agent instruction files and output templates only, so this cannot be applied.'
+        : 'The target is not a context note or stakeholder file, so it cannot be applied.' };
+    }
+    if (kaizen && p.action === 'remove') return { ...detail, problem: 'A Kaizen improves files; it never removes one. Remove the file yourself if it should go.' };
     if (!PROPOSAL_ID_PATTERN.test(p.id)) return { ...detail, problem: 'The proposal id is not valid (expected P-01, P-02...).' };
 
     const ws = workspaceService.getWorkspacePath();
@@ -844,7 +908,7 @@ export class ContextUpdateService {
    */
   async create(
     input: { title?: unknown; source_date?: unknown; notes?: unknown; text?: unknown },
-    system?: { origin: string; kind: string; textName: string },
+    system?: { origin: string; kind: string; textName: string; fields?: Record<string, string> },
   ): Promise<ContextUpdate> {
     const title = typeof input.title === 'string' ? input.title.trim().slice(0, 200) : '';
     const sourceDate = typeof input.source_date === 'string' && input.source_date ? input.source_date : new Date().toISOString().slice(0, 10);
@@ -887,7 +951,7 @@ export class ContextUpdateService {
       id,
       type: 'context-update',
       title: title || `Update ${sourceDate}`,
-      ...(system ? { origin: system.origin, kind: system.kind } : {}),
+      ...(system ? { origin: system.origin, kind: system.kind, ...system.fields } : {}),
       status: 'ready',
       source_date: sourceDate,
       created_at: now,

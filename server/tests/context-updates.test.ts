@@ -44,6 +44,47 @@ test('ids and proposal targets from requests or agent files are validated before
   ]) assert.equal(proposalTarget(bad), null, bad);
 });
 
+test('a Kaizen may also target the agent instruction files and output templates; nothing else gains them', () => {
+  const kaizenOnly = ['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md', 'outputs/templates/plain-text/output.md'];
+  for (const target of kaizenOnly) {
+    assert.equal(proposalTarget(target, 'kaizen'), target, target);
+    assert.equal(proposalTarget(target), null, `${target} outside a Kaizen`);
+    assert.equal(proposalTarget(target, 'memory-review'), null, `${target} in a memory review`);
+  }
+  assert.equal(proposalTarget('context/strategy/growth-plan/note.md', 'kaizen'), 'context/strategy/growth-plan/note.md');
+  for (const bad of [
+    '.claude/commands/gtd-task.md', '.claude/settings.json', '.schemas/task.schema.json', 'profile/executive-profile.md',
+    'tasks/active/TASK-2026-0001/task.md', 'outputs/templates/output.md', 'outputs/templates/../x/output.md',
+    'outputs/other/x/output.md', 'sub/CLAUDE.md', 'CLAUDE.md.bak', '.github/other.md', 'outputs/templates/x/output.html',
+  ]) assert.equal(proposalTarget(bad, 'kaizen'), null, bad);
+});
+
+test('a Kaizen review shows the root cause, refuses removals and flags files the app installed', async (t) => {
+  const ws = await workspace(t);
+  await fsp.writeFile(path.join(ws, 'CLAUDE.md'), '# Instructions\n');
+  await fsp.mkdir(path.join(ws, '.situation-board'), { recursive: true });
+  await fsp.writeFile(path.join(ws, '.situation-board', 'app-manifest.json'), JSON.stringify({ appVersion: '0.0.0', generatedAt: '', files: [{ path: 'CLAUDE.md', sha256: 'x' }] }));
+  const service = new ContextUpdateService();
+  const update = await service.create({ title: 'Kaizen from TASK-2026-0007', text: 'note' }, {
+    origin: 'kaizen', kind: 'kaizen', textName: 'kaizen-note.md',
+    fields: { kaizen_note: 'KAIZEN-2026-001.md', task_ref: 'TASK-2026-0007', symptom: 'Wrong totals', root_cause: 'No rule to check sums', area: 'instructions' },
+  });
+  assert.deepEqual(update.kaizen, { note: 'KAIZEN-2026-001.md', task_ref: 'TASK-2026-0007', symptom: 'Wrong totals', root_cause: 'No rule to check sums', area: 'instructions' });
+  assert.equal((await service.create({ text: 'x' })).kaizen, null, 'only a Kaizen carries the analysis');
+
+  await analyze(ws, update.id, [
+    { id: 'P-01', action: 'update', target: 'CLAUDE.md', title: 'Check sums', rationale: 'Prevents it' },
+    { id: 'P-02', action: 'remove', target: 'context/strategy/growth-plan/note.md', title: 'Drop', rationale: 'x' },
+  ], { 'P-01.md': '# Instructions\nCheck every total.\n' });
+  const detail = await service.get(update.id);
+  const [edit, removal] = detail.proposals;
+  assert.equal(edit!.problem, null);
+  assert.equal(edit!.current, '# Instructions\n');
+  assert.equal(edit!.app_provided, true, 'CLAUDE.md came with the app');
+  assert.match(removal!.problem ?? '', /never removes/);
+  assert.equal(removal!.app_provided, false);
+});
+
 test('create stores pasted text as material and a second file with the same name never replaces the first', async (t) => {
   await workspace(t);
   const service = new ContextUpdateService();
