@@ -718,3 +718,35 @@ export interface RoutinePreview {
   summary: string;
   next_runs: { at: string; due_date: string | null }[];
 }
+
+export type TranscriptionLanguage = 'auto' | 'en' | 'ja';
+
+export interface TranscriptionModel {
+  id: string;
+  name: string;
+  summary: string;
+  languages: string;
+  pros: string[];
+  cons: string[];
+  memory_gb: number;
+  size: number;
+  installed: boolean;
+  /** Bytes on disk from an interrupted download; the next download continues from there. */
+  partial: number;
+  download: { model: string; status: 'downloading' | 'verifying' | 'failed' | 'cancelled'; received: number; total: number; file: string; message?: string } | null;
+}
+
+export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; updated_at: string | null }
+
+export interface Transcription {
+  models: TranscriptionModel[];
+  settings: TranscriptionSettings;
+  defaults: TranscriptionSettings;
+  vad_installed: boolean;
+  vad_size: number;
+  /** Another dashboard on this computer is downloading; its progress shows there. */
+  downloading_elsewhere: boolean;
+  models_dir: string;
+  total_memory_gb: number;
+  memory_hint: string | null;
+}

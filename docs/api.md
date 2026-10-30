@@ -310,6 +310,11 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 | `POST` | `/api/meeting-queue/:id/files` | Add one file to a draft meeting (multipart, field `file`, up to 50 MB; at most 10 files and 100 MB per meeting). `409` for the same file twice. Returns `201` |
 | `POST` | `/api/meeting-queue/:id/queue` | The draft is complete, or a meeting on hold is queued again: the next digest can take it. `409` without a file |
 | `DELETE` | `/api/meeting-queue/:id` | Remove a meeting and its files from the queue. `409` while a digest is being made from it. Returns `204` |
+| `GET` | `/api/transcription` | The offline transcription models on offer (pluses, minuses, size, memory), which are downloaded, download progress, the settings (`model`, `language`), the models folder, and a hint when this computer has little memory for the chosen model |
+| `PUT` | `/api/transcription/settings` | Body: `model` (a catalog id) and/or `language` (`auto`, `en` or `ja`) |
+| `POST` | `/api/transcription/models/:id/download` | Start downloading a model, with the voice-activity model when missing. Returns `202`; progress arrives as `transcription` events on `/api/events` and in `GET /api/transcription`. `409` while another download runs, in this or another dashboard |
+| `POST` | `/api/transcription/models/:id/cancel` | Stop the download; what was downloaded is kept and the next download continues from there |
+| `DELETE` | `/api/transcription/models/:id` | Remove a model's files. `409` while it downloads |
 | `PUT` | `/api/context-updates/:id/keep-materials` | Keep the material after the update is done, or release it. Body: `{ "keep": true }` |
 | `PUT` | `/api/context-updates/:id/decisions` | Save review decisions on proposals: `accepted`, `rejected` or `null`, with an optional `reviewer_note` |
 | `PUT` | `/api/context-updates/:id/meeting-records` | From `in_review`: confirm or reject meeting records, apart from the proposals. Body: `{ "records": { "M-01": { "confirmation": "confirmed", "revision": "<the record's revision>" } } }`, each `confirmed`, `rejected` or `null`. Returns `409` when the record changed since it was loaded, and `400` for a record with `problems` (it can only be rejected) or a duplicate id |

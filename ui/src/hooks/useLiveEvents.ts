@@ -46,10 +46,15 @@ export function useLiveEvents(): void {
       }
     };
 
+    // Model downloads live outside the workspace, so the server announces them itself.
+    const handleTranscription = () => dispatch({ type: 'DATA_CHANGED', payload: 'transcription' });
+
     source.addEventListener('file_change', handleFileChange as EventListener);
+    source.addEventListener('transcription', handleTranscription);
 
     return () => {
       source?.removeEventListener('file_change', handleFileChange as EventListener);
+      source?.removeEventListener('transcription', handleTranscription);
       source?.close();
     };
   }, [dispatch]);

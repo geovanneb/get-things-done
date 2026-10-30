@@ -14,6 +14,7 @@ import { useApi } from '@/hooks/useApi';
 import { cleanupSummary } from '@/components/routines/SystemCleanup';
 import WorkspaceAvatar from '@/components/layout/WorkspaceAvatar';
 import WorkspaceIconCrop from '@/components/layout/WorkspaceIconCrop';
+import TranscriptionSettings from '@/components/settings/TranscriptionSettings';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
 import type { ThemeMode, TextSize } from '@/utils/theme';
 import type { WorkspaceConfig, GitStatus, ValidationResult, SystemCleanup } from '@/types';
@@ -996,6 +997,10 @@ export default function SettingsView() {
       {/* Section 3: Appearance */}
       <SectionCard title="Cleanup and retention">
         <CleanupPointer />
+      </SectionCard>
+
+      <SectionCard title="Transcription">
+        <TranscriptionSettings />
       </SectionCard>
 
       <SectionCard title="Appearance">
