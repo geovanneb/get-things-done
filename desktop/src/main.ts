@@ -163,7 +163,10 @@ function showWindow(): void {
 /** While recording: the computer stays awake, the hidden window keeps working, and the tray says so. */
 function setRecording(active: boolean): void {
   recording = active;
-  mainWindow?.webContents.setBackgroundThrottling(!active);
+  // Also called from the window's 'closed' event, when its page is already destroyed and cannot be changed.
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.setBackgroundThrottling(!active);
+  }
   if (active && keepAwake === null) keepAwake = powerSaveBlocker.start('prevent-app-suspension');
   if (!active && keepAwake !== null) {
     powerSaveBlocker.stop(keepAwake);
@@ -182,7 +185,8 @@ function setRecording(active: boolean): void {
 function sendRecordingCommand(command: RecordingCommand): void {
   recordingCommands.leave(command);
   if (command === 'open') showWindow();
-  mainWindow?.webContents.send('gtd:recording-command');
+  // A page that is not there yet takes the command once it loads (onRecordingCommand takes it on start).
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('gtd:recording-command');
 }
 
 /** The microphone only, for the app's own main window. Preview windows and any other page never get it. */
