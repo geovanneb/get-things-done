@@ -92,6 +92,15 @@ function IconPerson() {
   );
 }
 
+function IconMic() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <rect x="6.25" y="2" width="5.5" height="9" rx="2.75" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3.5 8.5a5.5 5.5 0 0 0 11 0M9 14v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function IconRepeat() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -189,6 +198,7 @@ export default function NavRail() {
   const navItems: NavItem[] = [
     { path: '/situation', label: 'Situation', icon: <IconSituation /> },
     { path: '/board', label: 'Board', icon: <IconBoard /> },
+    { path: '/meetings', label: 'Meetings', icon: <IconMic /> },
     { path: '/routines', label: 'Routines', icon: <IconRepeat /> },
     { path: '/stakeholders', label: 'Stakeholders', icon: <IconPeople /> },
     { path: '/outputs', label: 'Outputs', icon: <IconFile /> },

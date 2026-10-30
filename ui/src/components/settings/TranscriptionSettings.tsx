@@ -209,6 +209,22 @@ export default function TranscriptionSettings() {
         </span>
       </label>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
+        <span style={{ fontWeight: 600 }}>Live transcript while recording</span>
+        <select aria-label="Live transcript model" value={data.settings.live_model ?? ''} disabled={saving}
+          onChange={(e) => void save({ live_model: e.target.value || null })}
+          style={{ maxWidth: 420, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' }}>
+          <option value="">Off: transcribe after the meeting</option>
+          {data.models.filter((m) => m.installed).map((m) => (
+            <option key={m.id} value={m.id}>{m.name}{m.speed ? ` (about ${m.speed.realtime_x}× real time here)` : ''}</option>
+          ))}
+        </select>
+        <span style={hintStyle}>
+          The text appears on the Meetings page as people speak. Choose a model much faster than real time (see Test speed),
+          and try it next to a video call: how much room is left depends on the computer. If it is not the model chosen above,
+          the chosen model transcribes the recording again after the meeting, and its text replaces the live one.
+        </span>
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
           <input type="checkbox" checked={data.settings.keep_recordings} disabled={saving}
             onChange={(e) => void save({ keep_recordings: e.target.checked })} />
