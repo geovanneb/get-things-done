@@ -36,6 +36,10 @@ export interface UpgradeResult {
   added: string[];
   conflicted: string[];
   unchanged: string[];
+  /** Files the app no longer ships, removed because they were still exactly as installed. */
+  removed: string[];
+  /** Files the app no longer ships, kept because the user changed them. */
+  retired_kept: string[];
   fromVersion: string | null;
   toVersion: string;
 }
@@ -71,6 +75,16 @@ export const WORKSPACE_DIRS = [
 ];
 
 export const MANIFEST_RELATIVE_PATH = path.join('.situation-board', 'app-manifest.json');
+
+/**
+ * App files a newer version no longer ships. An upgrade removes one only while it is exactly what the app
+ * installed (its hash in the previous manifest); a changed copy is the user's and stays. Listed by name, so
+ * choosing fewer AI tools never removes the files of the others.
+ */
+const RETIRED_APP_FILES = [
+  // Kaizen notes open as context updates now: /gtd-context-analyze and /gtd-context-apply handle them.
+  path.join('.claude', 'commands', 'gtd-kaizen.md'),
+];
 
 /** Files whose contents are interpolated and hashed as text. Everything else is copied byte-for-byte. */
 const TEXT_EXTENSIONS = new Set(['.md', '.json', '.yaml', '.yml', '.txt', '.html', '.css', '.js']);
@@ -407,6 +421,8 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
     added: [],
     conflicted: [],
     unchanged: [],
+    removed: [],
+    retired_kept: [],
     fromVersion: previous?.appVersion ?? null,
     toVersion: getAppVersion(),
   };
@@ -443,6 +459,24 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
       // Either user-edited, or predates the manifest. Never clobber it.
       fs.writeFileSync(`${destPath}.new`, nextContent);
       result.conflicted.push(relPath);
+    }
+  }
+
+  for (const relPath of RETIRED_APP_FILES) {
+    const destPath = path.join(workspacePath, relPath);
+    let current: Buffer;
+    try {
+      if (!fs.lstatSync(destPath).isFile()) continue;
+      current = fs.readFileSync(destPath);
+    } catch {
+      continue;
+    }
+    const recordedHash = previousByPath.get(relPath);
+    if (recordedHash && recordedHash === sha256(current)) {
+      fs.rmSync(destPath);
+      result.removed.push(relPath);
+    } else {
+      result.retired_kept.push(relPath);
     }
   }
 

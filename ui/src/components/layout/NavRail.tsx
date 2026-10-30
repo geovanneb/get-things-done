@@ -92,16 +92,6 @@ function IconPerson() {
   );
 }
 
-function IconKaizen() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M8 2.5C5 2.5 2.5 5 2.5 8S5 13.5 8 13.5 13.5 11 13.5 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-      <path d="M11 2l2 2-5 5-2-2 5-5Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-      <path d="M13 4l1-2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function IconRepeat() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -205,7 +195,6 @@ export default function NavRail() {
     { path: '/context', label: 'Context', icon: <IconBook /> },
     { path: '/agents', label: 'Agents & Skills', icon: <IconAgent /> },
     { path: '/insights', label: 'Insights', icon: <IconChart /> },
-    { path: '/kaizen', label: 'Kaizen', icon: <IconKaizen /> },
   ];
 
   // Experimental view, shown only while the Settings switch is on.

@@ -1,4 +1,5 @@
 import { RoutineService } from './routineService';
+import { scheduleKaizenIntake } from './kaizenIntake';
 
 /**
  * Checks routines while the server runs: shortly after start (which is also how routines catch up
@@ -26,6 +27,8 @@ export class RoutineScheduler {
   }
 
   private async tick(trigger: 'startup' | 'timer'): Promise<void> {
+    // The file watcher can miss an event (macOS, network drives): a Kaizen note then still opens within a minute.
+    void scheduleKaizenIntake();
     try {
       for (const run of await this.service.runDue(trigger)) {
         console.log(`[routines] ${run.routine_id} ${run.status}: ${run.message}`);

@@ -1092,7 +1092,7 @@ export default function SettingsView() {
               }}
             >
               Adds an <strong style={{ fontWeight: 600 }}>Agent Floor</strong> item to the sidebar,
-              below Kaizen. It draws your workspace as a pixel-art office: the backlog is a stack of
+              below Insights. It draws your workspace as a pixel-art office: the backlog is a stack of
               paper on a desk, agents walk over to pick up a task, read it, research it at the
               bookshelf and the terminal, then carry the finished sheet to the Done desk. Everything
               on screen is driven by real task files and live file-change events.

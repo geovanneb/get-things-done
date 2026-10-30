@@ -34,6 +34,8 @@ export interface UpgradeResult {
   added: string[];
   conflicted: string[];
   unchanged: string[];
+  removed?: string[];
+  retired_kept?: string[];
   fromVersion: string | null;
   toVersion: string;
 }

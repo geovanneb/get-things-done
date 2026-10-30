@@ -18,7 +18,6 @@ const AgentsView = lazy(() => import('./views/AgentsView'));
 const InsightsView = lazy(() => import('./views/InsightsView'));
 const ProfileView = lazy(() => import('./views/ProfileView'));
 const SettingsView = lazy(() => import('./views/SettingsView'));
-const KaizenView = lazy(() => import('./views/KaizenView'));
 const RoutinesView = lazy(() => import('./views/RoutinesView'));
 const AgentFloorView = lazy(() => import('./views/AgentFloorView'));
 const SetupView = lazy(() => import('./views/SetupView'));
@@ -89,7 +88,8 @@ function AppRoutes() {
           <Route path="context/updates/:id" element={<ContextView />} />
           <Route path="agents" element={<AgentsView />} />
           <Route path="insights" element={<InsightsView />} />
-          <Route path="kaizen" element={<KaizenView />} />
+          {/* Kaizen lives in Context updates now; an old link or bookmark lands there. */}
+          <Route path="kaizen" element={<Navigate to="/context/updates" replace />} />
           <Route path="routines" element={<RoutinesView />} />
           <Route path="agent-floor" element={<AgentFloorView />} />
           <Route path="profile" element={<ProfileView />} />

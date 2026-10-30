@@ -319,21 +319,6 @@ export interface InsightsCalendarDayDetail {
   stakeholders: Array<{ ref: string; name: string; count: number }>;
 }
 
-export interface KaizenProposal {
-  id: string;
-  title: string;
-  /** moved: the dashboard opened a Kaizen context update from it (context_update). */
-  status: 'proposed' | 'applied' | 'rejected' | 'moved';
-  area: string;
-  root_cause: string;
-  proposed_fix: string;
-  files_affected: string[];
-  created_at: string;
-  applied_at: string | null;
-  context_update: string | null;
-  body: string;
-}
-
 export interface SearchResult {
   id: string;
   type: 'task' | 'stakeholder' | 'context' | 'output' | 'agent';

@@ -15,7 +15,6 @@ export function scopeForPath(filePath: string): DataScope {
   if (p.includes('/outputs/')) return 'outputs';
   if (p.includes('/context-updates/')) return 'context-updates';
   if (p.includes('/context/')) return 'context';
-  if (p.includes('/kaizen/')) return 'kaizen';
   if (p.includes('/routines/')) return 'routines';
   if (p.includes('/profile/')) return 'profile';
   return 'other';

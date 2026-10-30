@@ -685,7 +685,7 @@ my-workspace/
 │
 ├── .claude/                   Claude Code integration
 │   ├── agents/                4 specialist agents
-│   ├── commands/              /gtd-task, /gtd-kaizen, /gtd-context-analyze, /gtd-context-apply
+│   ├── commands/              /gtd-task, /gtd-context-analyze, /gtd-context-apply
 │   ├── skills/                5 curated skills
 │   └── settings.json          Tool permissions (read-wide, write-narrow)
 │
