@@ -134,8 +134,8 @@ const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', langu
 /** Below this much memory the default model leaves little room, and the lighter one is suggested. */
 const LOW_MEMORY_BYTES = 8.5 * 1024 ** 3;
 const STALL_MS = 60_000;
-/** At most this much downloaded data waits in memory for the disk. */
-const MAX_QUEUED_BYTES = 64 * 1024 * 1024;
+/** At most this much downloaded data waits in memory for the disk (a setting only tests change). */
+export const downloadLimits = { maxQueuedBytes: 64 * 1024 * 1024 };
 const ATTEMPTS = 3;
 
 function httpError(status: number, message: string): Error {
@@ -180,6 +180,10 @@ interface Job { progress: DownloadProgress; abort: AbortController; bytes: Map<s
 interface Lock { file: string; token: string }
 /** The download this dashboard runs (claimed before anything is awaited), and how the last one of each model ended. */
 let active: Job | null = null;
+/** True while this dashboard removes a model: claimed before anything is awaited, like a download. */
+let removing = false;
+/** The tokens of the download locks this process holds, for downloads and removals alike. */
+const ownedTokens = new Set<string>();
 const lastOutcome = new Map<string, DownloadProgress>();
 
 /** A lock file whose holder never finished writing it (a crash, a full disk) is taken over after this long. */
@@ -268,7 +272,7 @@ export class TranscriptionModelService {
   /** Who holds the download lock, when it is another live dashboard. */
   private async otherHolder(): Promise<boolean> {
     const holder = await this.readLock();
-    return Boolean(holder && holder.token !== active?.lock?.token && holder.pid !== undefined && processAlive(holder.pid) && holder.pid !== process.pid);
+    return Boolean(holder && !holder.incomplete && !ownedTokens.has(holder.token!) && processAlive(holder.pid) && holder.pid !== process.pid);
   }
 
   async view(): Promise<TranscriptionView> {
@@ -312,6 +316,7 @@ export class TranscriptionModelService {
     const model = this.find(id);
     if (model.id === this.vad.id) throw httpError(400, 'The voice-activity model is downloaded with a transcription model');
     if (active) throw httpError(409, active.progress.model === id ? 'This model is already downloading' : `Another model is downloading (${active.progress.model}); wait for it or cancel it first`);
+    if (removing) throw httpError(409, 'A model is being removed; try again in a moment');
     // Claimed before the first await, so two requests can never both start.
     const job: Job = { progress: { model: id, status: 'downloading', received: 0, total: 0, file: '' }, abort: new AbortController(), bytes: new Map(), lock: null };
     active = job;
@@ -358,15 +363,22 @@ export class TranscriptionModelService {
     const model = this.find(id);
     if (model.id === this.vad.id) throw httpError(400, 'The voice-activity model is kept for every transcription model');
     if (active) throw httpError(409, active.progress.model === id ? 'Cancel the download first' : 'Wait for the download to finish first');
-    await fsp.mkdir(this.dir(), { recursive: true });
-    const lock = await this.lock('Another dashboard is downloading a model; wait for it to finish first');
+    if (removing) throw httpError(409, 'A model is being removed; try again in a moment');
+    // Claimed before the first await, like a download.
+    removing = true;
     try {
-      const st = await fsp.lstat(this.modelDir(id)).catch(() => null);
-      // A link is removed as a link: its target is never touched.
-      if (st?.isSymbolicLink()) await fsp.unlink(this.modelDir(id));
-      else if (st) await fsp.rm(this.modelDir(id), { recursive: true, force: true });
+      await fsp.mkdir(this.dir(), { recursive: true });
+      const lock = await this.lock('Another dashboard is downloading a model; wait for it to finish first');
+      try {
+        const st = await fsp.lstat(this.modelDir(id)).catch(() => null);
+        // A link is removed as a link: its target is never touched.
+        if (st?.isSymbolicLink()) await fsp.unlink(this.modelDir(id));
+        else if (st) await fsp.rm(this.modelDir(id), { recursive: true, force: true });
+      } finally {
+        await this.unlock(lock);
+      }
     } finally {
-      await this.unlock(lock);
+      removing = false;
     }
     lastOutcome.delete(id);
     notify(true);
@@ -479,13 +491,17 @@ export class TranscriptionModelService {
       let queued = 0;
       let readError: unknown = null;
       let ended = false;
+      // Set when the writer stops (done, failed or cancelled): the reader then stops waiting for room.
+      let stopped = false;
       let wake: (() => void) | null = null;
       const signalWriter = () => { const w = wake; wake = null; w?.(); };
+      job.abort.signal.addEventListener('abort', signalWriter, { once: true });
       const reader = (res.body as ReadableStream<Uint8Array>).getReader();
       const reading = (async () => {
         try {
           for (;;) {
-            while (queued > MAX_QUEUED_BYTES) await new Promise((r) => setTimeout(r, 10));
+            while (queued > downloadLimits.maxQueuedBytes && !stopped) await new Promise((r) => setTimeout(r, 10));
+            if (stopped) break;
             const { value, done } = await reader.read();
             if (done) break;
             clearTimeout(timer);
@@ -502,6 +518,7 @@ export class TranscriptionModelService {
         }
       })();
       const handle = await fsp.open(part, O_WRONLY | O_CREAT | O_NOFOLLOW | (append ? O_APPEND : O_TRUNC), 0o600).catch(async (err: unknown) => {
+        stopped = true;
         await reader.cancel().catch(() => {});
         await reading;
         throw err;
@@ -519,6 +536,7 @@ export class TranscriptionModelService {
         out.on('error', (err) => { writeError = err; });
         try {
           for (;;) {
+            if (job.abort.signal.aborted) throw new Error('Cancelled.');
             const chunk = queue.shift();
             if (!chunk) {
               if (ended) break;
@@ -533,12 +551,14 @@ export class TranscriptionModelService {
             this.setBytes(job, file.name, written);
           }
         } finally {
+          stopped = true;
           if (!ended) await reader.cancel().catch(() => {});
           await reading;
         }
         if (readError) throw readError;
         if (writeError) throw writeError;
       } finally {
+        stopped = true;
         if (!ended) await reader.cancel().catch(() => {});
         await reading;
         if (!stream) await handle.close().catch(() => {});
@@ -569,32 +589,38 @@ export class TranscriptionModelService {
 
   private lockFile(): string { return path.join(this.dir(), 'download.lock'); }
 
-  private async readLock(): Promise<{ pid?: number; token?: string; incomplete: boolean; mtime: number } | null> {
+  /** The lock as it is now, with what identifies this very file: its inode and its exact content. */
+  private async readLock(file = this.lockFile()): Promise<{ pid?: number; token?: string; incomplete: boolean; mtime: number; ino: number; raw: string } | null> {
     let raw: string;
-    let mtime: number;
+    let st: fs.Stats;
     try {
-      [raw, mtime] = await Promise.all([fsp.readFile(this.lockFile(), 'utf-8'), fsp.lstat(this.lockFile()).then((s) => s.mtimeMs)]);
+      st = await fsp.lstat(file);
+      raw = await fsp.readFile(file, 'utf-8');
     } catch {
       return null;
     }
     try {
       const o = JSON.parse(raw) as { pid?: unknown; token?: unknown };
-      if (typeof o.pid === 'number' && typeof o.token === 'string') return { pid: o.pid, token: o.token, incomplete: false, mtime };
+      if (typeof o.pid === 'number' && Number.isInteger(o.pid) && o.pid > 0 && typeof o.token === 'string' && o.token) {
+        return { pid: o.pid, token: o.token, incomplete: false, mtime: st.mtimeMs, ino: st.ino, raw };
+      }
     } catch { /* an unfinished or damaged lock */ }
-    return { incomplete: true, mtime };
+    return { incomplete: true, mtime: st.mtimeMs, ino: st.ino, raw };
   }
 
   /**
    * Takes the download lock: one download or removal at a time across every dashboard using this folder. The lock
    * names its holder and a token, so only the holder releases it. A lock whose holder is gone, or that was never
-   * finished, is taken over by moving it aside first: of two dashboards taking over at once, only one move succeeds.
+   * finished or is damaged and old, is taken over under a short second lock: there it is read again and removed
+   * only if it is still the very file judged stale (same inode, same content), so a live lock is never removed.
    */
   private async lock(busy = 'Another dashboard is downloading a model; wait for it to finish'): Promise<Lock> {
     const file = this.lockFile();
     const token = `${process.pid}-${randomUUID()}`;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         const handle = await fsp.open(file, 'wx', 0o600);
+        ownedTokens.add(token);
         try { await handle.writeFile(JSON.stringify({ pid: process.pid, token, at: new Date().toISOString() })); } finally { await handle.close(); }
         return { file, token };
       } catch (err) {
@@ -603,27 +629,45 @@ export class TranscriptionModelService {
       const holder = await this.readLock();
       if (!holder) continue;
       const stale = holder.incomplete ? Date.now() - holder.mtime > INCOMPLETE_LOCK_MS
-        : !processAlive(holder.pid) || (holder.pid === process.pid && holder.token !== active?.lock?.token);
+        : !processAlive(holder.pid) || (holder.pid === process.pid && !ownedTokens.has(holder.token!));
       if (!stale) throw httpError(409, holder.incomplete ? 'Another dashboard is starting a download; try again in a moment' : busy);
-      const aside = `${file}.stale-${token}`;
-      try { await fsp.rename(file, aside); } catch { continue; }
-      // Moved aside: if it was not the stale lock seen above (another dashboard took over in between), put it back.
-      const moved = await fsp.readFile(aside, 'utf-8').catch(() => '');
-      const same = holder.incomplete ? !/"token"/.test(moved) : moved.includes(`"${holder.token}"`);
-      if (!same) {
-        await fsp.link(aside, file).catch(() => {});
-        await fsp.rm(aside, { force: true });
-        throw httpError(409, busy);
-      }
-      await fsp.rm(aside, { force: true });
+      await this.takeOver(holder.ino, holder.raw);
     }
     throw httpError(409, 'The download lock could not be taken; try again');
   }
 
+  /** Removes the stale lock seen, under the takeover lock, if it is still that very file. */
+  private async takeOver(ino: number, raw: string): Promise<void> {
+    const guard = `${this.lockFile()}.takeover`;
+    let handle: fsp.FileHandle;
+    try {
+      handle = await fsp.open(guard, 'wx', 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      // Held only for a moment; one left by a dashboard that stopped right then is cleared after a while.
+      const st = await fsp.lstat(guard).catch(() => null);
+      if (st && Date.now() - st.mtimeMs > INCOMPLETE_LOCK_MS) await fsp.rm(guard, { force: true });
+      await new Promise((r) => setTimeout(r, 50));
+      return;
+    }
+    try {
+      const now = await this.readLock();
+      if (now && now.ino === ino && now.raw === raw) await fsp.rm(this.lockFile(), { force: true });
+    } finally {
+      await handle.close().catch(() => {});
+      await fsp.rm(guard, { force: true });
+    }
+  }
+
   /** Releases the lock only when it is still ours. */
   private async unlock(lock: Lock): Promise<void> {
-    const holder = await this.readLock();
-    if (holder?.token === lock.token) await fsp.rm(lock.file, { force: true });
+    try {
+      const holder = await this.readLock();
+      if (holder?.token === lock.token) await fsp.rm(lock.file, { force: true });
+    } finally {
+      // Forgotten only once the file is gone, so this process never takes its own live lock for a stale one.
+      ownedTokens.delete(lock.token);
+    }
   }
 
   /** For tests: waits until no download runs in this process. */

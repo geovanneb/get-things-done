@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { AddressInfo } from 'node:net';
-import { CATALOG, TranscriptionModelService, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
+import { CATALOG, TranscriptionModelService, downloadLimits, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
@@ -298,4 +298,39 @@ test('a range answer for a different part of the file is refused', async (t) => 
   const d = (await service.view()).models[0]!.download;
   assert.equal(d?.status, 'failed');
   assert.match(d!.message!, /different part of the file/);
+});
+
+test('a writer that stops while the queue is full ends the download; a malformed old lock is taken over; a removal holds its turn', async (t) => {
+  const dir = await modelsFolder(t);
+  // A server that never stops sending: the file grows past its size, the writer stops with the queue full.
+  const endless = (async () => new Response(new ReadableStream<Uint8Array>({ pull: (c) => { c.enqueue(new Uint8Array(65_536)); } }), { status: 200 })) as unknown as typeof fetch;
+  const previous = downloadLimits.maxQueuedBytes;
+  downloadLimits.maxQueuedBytes = 128 * 1024;
+  t.after(() => { downloadLimits.maxQueuedBytes = previous; });
+  const { models, vad } = catalog('http://fictional.invalid');
+  const flooded = new TranscriptionModelService(models, vad, endless);
+  await flooded.download('fictional-model');
+  await TranscriptionModelService.settled();
+  const d = (await flooded.view()).models[0]!.download;
+  assert.equal(d?.status, 'failed');
+  assert.match(d!.message!, /larger than expected/);
+  await assert.rejects(fsp.access(path.join(dir, 'download.lock')), 'the lock is released');
+  downloadLimits.maxQueuedBytes = previous;
+
+  // An old lock with a damaged holder is taken over.
+  const { base } = await fileServer(t, files);
+  const service = new TranscriptionModelService(catalog(base).models, catalog(base).vad);
+  const lock = path.join(dir, 'download.lock');
+  await fsp.writeFile(lock, JSON.stringify({ pid: 'bad', token: 'bad' }));
+  const old = new Date(Date.now() - 60_000);
+  await fsp.utimes(lock, old, old);
+  await service.download('fictional-model');
+  await TranscriptionModelService.settled();
+  assert.equal(await service.installed('fictional-model'), true);
+
+  // While this dashboard removes a model, a download in the same dashboard waits its turn.
+  const removal = service.remove('fictional-model');
+  await assert.rejects(service.download('fictional-model'), /being removed/);
+  await removal;
+  assert.equal(await service.installed('fictional-model'), false);
 });
