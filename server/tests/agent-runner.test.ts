@@ -45,6 +45,11 @@ function fakeAdapter(options: { problems?: { code: 'not_logged_in'; message: str
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 30));
+/** Waits until a condition holds, for steps the runner finishes after a run ends (on a slow machine, more than one tick). */
+async function eventually(check: () => Promise<boolean>, ms = 2000): Promise<boolean> {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 20))) if (await check()) return true;
+  return check();
+}
 const success = { exit_code: 0, result: { subtype: 'success', num_turns: 12, total_cost_usd: 0.5, permission_denials: [] }, stderr: '' };
 
 test('outcomes are explained in plain words; success needs both the update and the tool to say so', () => {
@@ -446,7 +451,8 @@ test('apply runs the workspace\'s own command with the gate, for the accepted fi
   const done = await service.get('CU-2026-0001');
   assert.equal(done?.status, 'succeeded');
   assert.match(done!.message, /accepted changes are written/);
-  await assert.rejects(fsp.access(path.dirname(gates.at(-1)!)), 'the gate\'s private folder is gone after the run');
+  // Removed as the runner's last step after saving the record: waited for, not assumed within a fixed tick.
+  assert.ok(await eventually(() => fsp.access(path.dirname(gates.at(-1)!)).then(() => false, () => true)), 'the gate\'s private folder is gone after the run');
 });
 
 test('success is checked against what was accepted at the start, and a half-done apply can continue', async (t) => {
