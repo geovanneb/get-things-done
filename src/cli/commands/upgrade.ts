@@ -105,6 +105,16 @@ export const upgradeCommand = new Command('upgrade')
 
     report('Added', result.added, chalk.green);
     report('Updated', result.updated, chalk.cyan);
+    report('Removed, no longer used', result.removed ?? [], chalk.cyan);
+
+    const retiredKept = result.retired_kept ?? [];
+    if (retiredKept.length > 0) {
+      console.log(chalk.yellow(`  No longer used, kept because you changed it (${retiredKept.length})`));
+      for (const file of retiredKept) console.log(`    ${file}`);
+      console.log('');
+      console.log(chalk.dim('  The app does not use these files anymore. Delete them when you no longer need them.'));
+      console.log('');
+    }
 
     if (result.conflicted.length > 0) {
       console.log(chalk.yellow(`  Kept your version (${result.conflicted.length})`));
@@ -117,7 +127,8 @@ export const upgradeCommand = new Command('upgrade')
       console.log('');
     }
 
-    if (result.added.length === 0 && result.updated.length === 0 && result.conflicted.length === 0) {
+    if (result.added.length === 0 && result.updated.length === 0 && result.conflicted.length === 0
+      && (result.removed ?? []).length === 0 && retiredKept.length === 0) {
       console.log(chalk.dim('  Nothing to change.'));
       console.log('');
     }

@@ -371,35 +371,20 @@ test('corrupt ID reservations stop cleanup and new IDs instead of reusing old li
   await assert.rejects(new TaskService().createTask({ title: 'Fictional new task' } as never), /reservations/);
 });
 
-test('a newly rejected old kaizen proposal starts retention when rejected', async (t) => {
+test('a moved Kaizen note ages from when it moved; a note still waiting is never removed', async (t) => {
   const ws = await workspace(t);
-  const { KaizenService } = await import('../src/services/kaizenService');
-  await write(ws, 'kaizen/KAIZEN-2026-001.md', { id: 'KAIZEN-2026-001', title: 'Fictional proposal', status: 'proposed', created_at: '2020-01-01' });
-  await new KaizenService().updateKaizen('KAIZEN-2026-001', { status: 'rejected' });
+  const old = '2020-01-01T00:00:00.000Z';
+  await write(ws, 'kaizen/KAIZEN-2026-001.md', { id: 'KAIZEN-2026-001', title: 'Fictional: moved long ago', status: 'moved', context_update: 'CU-2020-0001', moved_at: old, created_at: old });
+  await write(ws, 'kaizen/KAIZEN-2026-002.md', { id: 'KAIZEN-2026-002', title: 'Fictional: moved today', status: 'moved', context_update: 'CU-2026-0002', moved_at: new Date().toISOString(), created_at: old });
+  await write(ws, 'kaizen/KAIZEN-2026-003.md', { id: 'KAIZEN-2026-003', title: 'Fictional: waiting', status: 'proposed', created_at: old });
+  await fsp.writeFile(path.join(ws, 'kaizen/KAIZEN-2026-004.md'), '---\ntitle: [broken\n---\n');
   const service = new RoutineService();
   await service.updateSystemCleanup({ memory_review: { enabled: false }, rules: { kaizen: { enabled: true, action: 'delete' } } });
   await service.runSystemCleanupNow();
-  assert.ok(await exists(path.join(ws, 'kaizen/KAIZEN-2026-001.md')));
-  const raw = parseMarkdown(await fsp.readFile(path.join(ws, 'kaizen/KAIZEN-2026-001.md'), 'utf8'));
-  assert.equal(raw.data['title'], 'Fictional proposal');
-  assert.ok(raw.data['rejected_at']);
-});
-
-
-test('kaizen updates preserve YAML-sensitive titles and extra frontmatter', async (t) => {
-  const ws = await workspace(t);
-  const { KaizenService } = await import('../src/services/kaizenService');
-  const file = path.join(ws, 'kaizen/KAIZEN-2026-001.md');
-  await write(ws, 'kaizen/KAIZEN-2026-001.md', { id: 'KAIZEN-2026-001', title: 'Fictional: proposal', status: 'proposed', created_at: '2020-01-01', custom: 'preserved' }, 'Fictional body.');
-  const service = new KaizenService();
-  const before = await fsp.readFile(file, 'utf8');
-  await assert.rejects(service.updateKaizen('KAIZEN-2026-001', { status: 'invalid' } as never), /Invalid/);
-  assert.equal(await fsp.readFile(file, 'utf8'), before);
-  await service.updateKaizen('KAIZEN-2026-001', { status: 'rejected' });
-  const parsed = parseMarkdown(await fsp.readFile(file, 'utf8'));
-  assert.equal(parsed.data['title'], 'Fictional: proposal');
-  assert.equal(parsed.data['custom'], 'preserved');
-  assert.match(parsed.content, /Fictional body/);
+  assert.equal(await exists(path.join(ws, 'kaizen/KAIZEN-2026-001.md')), false);
+  assert.ok(await exists(path.join(ws, 'kaizen/KAIZEN-2026-002.md')), 'moved too recently');
+  assert.ok(await exists(path.join(ws, 'kaizen/KAIZEN-2026-003.md')), 'a note still waiting stays');
+  assert.ok(await exists(path.join(ws, 'kaizen/KAIZEN-2026-004.md')), 'an unreadable note stays');
 });
 
 /** A record as the dashboard saves it after the user confirmed it: bound to the record's content. */

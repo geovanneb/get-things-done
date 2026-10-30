@@ -331,8 +331,8 @@ try {
       fs.readFileSync(path.join(ws, '.gitignore'), 'utf8').includes('.situation-board/trash/'));
     const badRule = await send('PUT', '/api/routines/system-cleanup', { rules: { kaizen: { enabled: true, action: 'archive' } } });
     check('system cleanup settings are validated', badRule.status === 400, String(badRule.status));
-    const invalidKaizen = await send('PATCH', '/api/kaizen/KZN-001', { status: 'invalid' });
-    check('kaizen rejects invalid statuses', invalidKaizen.status === 400, String(invalidKaizen.status));
+    check('the old Kaizen API and /gtd-kaizen are gone: Kaizen lives in context updates',
+      (await fetch(`${base}/api/kaizen`)).status === 404 && !fs.existsSync(path.join(ws, '.claude', 'commands', 'gtd-kaizen.md')));
 
 
     const note = path.join(ws, 'context', 'glossary', 'smoke-term');

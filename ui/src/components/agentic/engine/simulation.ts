@@ -451,7 +451,7 @@ export function classifyEvent(path: string): { activity: Activity | null; label:
   if (p.includes('/context/')) return { activity: 'browsing', label: 'context note read' };
   if (p.includes('/stakeholders/')) return { activity: 'browsing', label: 'stakeholder file read' };
   if (p.includes('/outputs/')) return { activity: 'writing', label: 'output template touched' };
-  if (p.includes('/kaizen/')) return { activity: 'thinking', label: 'kaizen proposal written' };
+  if (p.includes('/kaizen/')) return { activity: 'thinking', label: 'kaizen note written' };
   if (/\/tasks\/.*task\.md$/.test(p)) return { activity: null, label: 'task file updated' };
   return { activity: null, label: 'workspace file changed' };
 }

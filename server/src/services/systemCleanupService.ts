@@ -3,7 +3,6 @@ import * as fsp from 'fs/promises';
 import { WorkspaceService } from './workspace';
 import { TaskService } from './taskService';
 import { ContextUpdateService, hasConfirmedRecord } from './contextUpdateService';
-import { KaizenService } from './kaizenService';
 import { parseMarkdown } from '../utils/markdown';
 import { workspaceEntry } from '../utils/files';
 import { atomicWrite } from '../utils/atomicWrite';
@@ -15,7 +14,6 @@ import { reserveIds } from './idReservations';
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
 const contextUpdateService = new ContextUpdateService();
-const kaizenService = new KaizenService();
 
 /**
  * The built-in "System cleanup" job. It runs on the routine engine's triggers and lock (see
@@ -215,6 +213,24 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
  */
 function kaizenDoneAt(status: unknown, note: { applied_at?: unknown; rejected_at?: unknown; moved_at?: unknown }): unknown {
   return status === 'rejected' ? note.rejected_at : status === 'moved' ? note.moved_at : note.applied_at;
+}
+
+/** The finished Kaizen notes in kaizen/: applied or rejected before Kaizen moved to context updates, or moved. */
+async function closedKaizenNotes(ws: string): Promise<{ filename: string; data: Record<string, unknown> }[]> {
+  const dir = path.join(ws, 'kaizen');
+  const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const notes: { filename: string; data: Record<string, unknown> }[] = [];
+  for (const entry of entries) {
+    // Dirent.isFile() is false for a symbolic link: a link is never cleaned up through here.
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    try {
+      const data = obj(parseMarkdown(await fsp.readFile(path.join(dir, entry.name), 'utf-8')).data);
+      if (['applied', 'rejected', 'moved'].includes(String(data['status']))) notes.push({ filename: entry.name, data });
+    } catch {
+      // An unreadable note is left alone.
+    }
+  }
+  return notes;
 }
 
 function when(value: unknown): Date | null {
@@ -462,9 +478,9 @@ export class SystemCleanupService {
       }
     }
     if (settings.rules.kaizen.enabled) {
-      for (const { filename, proposal } of await kaizenService.listKaizenFiles().catch(() => [])) {
-        if (proposal.status !== 'applied' && proposal.status !== 'rejected' && proposal.status !== 'moved') continue;
-        add('kaizen', proposal.id || filename, proposal.title, path.join(ws, 'kaizen', filename), ageDays(when(kaizenDoneAt(proposal.status, proposal)), now));
+      for (const { filename, data } of await closedKaizenNotes(ws)) {
+        add('kaizen', typeof data['id'] === 'string' && data['id'] ? data['id'] : filename, typeof data['title'] === 'string' ? data['title'] : '',
+          path.join(ws, 'kaizen', filename), ageDays(when(kaizenDoneAt(data['status'], data)), now));
       }
     }
     if (settings.rules.trash.enabled) {

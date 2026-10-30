@@ -28,7 +28,6 @@ export type DataScope =
   | 'outputs'
   | 'context'
   | 'context-updates'
-  | 'kaizen'
   | 'routines'
   | 'profile'
   | 'transcription'
@@ -42,7 +41,6 @@ const initialVersions: DataVersions = {
   outputs: 0,
   context: 0,
   'context-updates': 0,
-  kaizen: 0,
   routines: 0,
   transcription: 0,
   profile: 0,

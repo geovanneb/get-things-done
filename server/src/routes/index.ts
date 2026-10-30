@@ -12,7 +12,6 @@ import workspaceRouter from './workspace';
 import searchRouter from './search';
 import situationRouter from './situation';
 import insightsRouter from './insights';
-import kaizenRouter from './kaizen';
 import agentActivityRouter from './agentActivity';
 import mentionsRouter from './mentions';
 import orgChartsRouter from './orgCharts';
@@ -42,7 +41,6 @@ export function registerRoutes(app: Express): void {
   app.use('/api/search', searchRouter);
   app.use('/api/situation', situationRouter);
   app.use('/api/insights', insightsRouter);
-  app.use('/api/kaizen', kaizenRouter);
   app.use('/api/agent-activity', agentActivityRouter);
   app.use('/api/mentions', mentionsRouter);
   app.use('/api/org-charts', orgChartsRouter);

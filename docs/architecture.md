@@ -74,7 +74,7 @@ The October 2026 review of main at `f8587ef` found and addressed:
 | Finding | Correction |
 | --- | --- |
 | Executable frontmatter in workspace/marketplace parsing | Shared data-only parser; no global document-content cache |
-| Request-controlled paths in tasks, skills, context, templates and kaizen | Path component validation before filesystem access |
+| Request-controlled paths in tasks, skills, context and templates | Path component validation before filesystem access |
 | Lexical-only file confinement and unsandboxed attachment previews | Real-path checks and shared sandboxed responses |
 | Uploads could replace entity metadata or follow a file symlink | Protected attachment writer using atomic replacement |
 | Fixed temporary filename caused concurrent writes to collide | Unique exclusive temporary files and failure cleanup |

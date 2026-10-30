@@ -28,7 +28,6 @@ import { errorHandler } from '../src/middleware/errorHandler';
 import { AgentService } from '../src/services/agentService';
 import { ContextService } from '../src/services/contextService';
 import { OutputService } from '../src/services/outputService';
-import { KaizenService } from '../src/services/kaizenService';
 import { TaskService } from '../src/services/taskService';
 
 async function temporary(t: { after: (fn: () => Promise<void>) => void }) {
@@ -100,7 +99,6 @@ test('task file operations reject traversal before accessing the filesystem', as
     await assert.rejects(new AgentService().deleteSkill(id), /Invalid/);
     await assert.rejects(new AgentService().installSkill(id), /Invalid/);
     await assert.rejects(new AgentService().getAgent(id), /Invalid/);
-    await assert.rejects(new KaizenService().getKaizen(id), /Invalid/);
     await assert.rejects(new ContextService().createContextNote({ title: 'Fixture', slug: id }), /Invalid/);
     await assert.rejects(new OutputService().createTemplate({ name: 'Fixture', slug: id }), /Invalid/);
     await assert.rejects(tasks.getTask(id), /Invalid/);

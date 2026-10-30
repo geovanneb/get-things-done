@@ -4,6 +4,7 @@ import { param } from '../utils/params';
 import { sendFile } from '../utils/files';
 import { ContextUpdateService } from '../services/contextUpdateService';
 import { AgentRunnerService } from '../services/agentRunner';
+import { scheduleKaizenIntake } from '../services/kaizenIntake';
 
 const router = Router();
 const service = new ContextUpdateService();
@@ -15,6 +16,9 @@ const body = (req: Request): Record<string, unknown> =>
 
 // GET /api/context-updates
 router.get('/', async (_req: Request, res: Response) => {
+  // A Kaizen note the watcher missed is opened before the list is read, so the user never waits for the next tick.
+  // Without notes this is one folder read.
+  await scheduleKaizenIntake();
   res.json(await service.list());
 });
 

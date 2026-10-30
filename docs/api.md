@@ -580,26 +580,9 @@ dashboard as a context update with `origin: kaizen` and `kind: kaizen`, right aw
 carries the root cause in its `kaizen` field (`note`, `task_ref`, `symptom`, `root_cause`, `area`) and is reviewed
 and applied like any other update; its proposals may also change `CLAUDE.md`, `AGENTS.md`,
 `.github/copilot-instructions.md` and `outputs/templates/<slug>/output.md`. The note is marked `status: moved` with
-`context_update` and `moved_at`. The endpoints below still serve the notes, including those from before.
-
-| Method | Path | What it does |
-|---|---|---|
-| `GET` | `/api/kaizen` | List improvement proposals |
-| `GET` | `/api/kaizen/:id` | Get one proposal. Returns `404` with `{ "error": "Not found" }` if it does not exist |
-| `PATCH` | `/api/kaizen/:id` | Set `status` (`proposed`, `applied` or `rejected`) and `applied_at`; invalid values return 400. A transition to `rejected` stamps `rejected_at` for retention |
-
-```text
-GET /api/kaizen
-→ 200 [{"id":"KZN-001","title":"Always add a one-line answer before the board deck","status":"proposed",
-        "area":"profile","files_affected":["profile/executive-profile.md"], …}]
-
-GET /api/kaizen/KZN-001
-→ 200 {"id":"KZN-001","root_cause":"Two board decks came back asking for the bottom line first.", …}
-
-PATCH /api/kaizen/KZN-001
-{"status":"applied","applied_at":"2026-10-28"}
-→ 200 {"id":"KZN-001","status":"applied","applied_at":"2026-10-28", …}
-```
+`context_update` and `moved_at`. There is no separate Kaizen endpoint: use the context update endpoints. Notes
+applied or rejected before this change stay in `kaizen/` as history; Insights counts them, and System cleanup can
+remove them by age.
 
 ---
 

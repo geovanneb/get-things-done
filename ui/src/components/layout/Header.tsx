@@ -13,7 +13,6 @@ const VIEW_LABELS: Record<string, string> = {
   '/context': 'Context',
   '/agents': 'Agents & Skills',
   '/insights': 'Insights',
-  '/kaizen': 'Kaizen',
   '/routines': 'Routines',
   '/agent-floor': 'Agent Floor',
   '/profile': 'Profile',
