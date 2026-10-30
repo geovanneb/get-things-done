@@ -12,6 +12,8 @@ export interface DesktopBridge {
   openWorkspaceFolder(): Promise<{ opened: boolean; error?: string }>;
   /** Asks the system for the microphone: `granted`, or what the user should do. */
   microphoneAccess?(): Promise<string>;
+  /** `yes` when the computer's own sound can be recorded; otherwise why not. */
+  systemAudioSupport?(): Promise<string>;
   /** Tells the app a recording runs, so it stays awake and asks before quitting. */
   recordingState?(active: boolean): void;
 }
@@ -28,6 +30,13 @@ export function isDesktopApp(): boolean {
 /** `granted`, or a message for the user. In a browser, the browser itself asks when recording starts. */
 export async function microphoneAccess(): Promise<string> {
   return (await desktopBridge()?.microphoneAccess?.()) ?? 'granted';
+}
+
+/** In a browser only the microphone is recorded; the desktop app says whether this computer can do more. */
+export async function systemAudioSupport(): Promise<string> {
+  const bridge = desktopBridge();
+  if (!bridge?.systemAudioSupport) return 'Only the microphone is recorded here, so people heard through headphones are not. The desktop app can also record the computer\'s sound.';
+  return bridge.systemAudioSupport();
 }
 
 export function reportRecording(active: boolean): void {
