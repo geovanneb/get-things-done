@@ -609,3 +609,34 @@ test('after a crash between writing the task and the link, a retry finds the tas
   assert.equal(retry.update.meeting_records[0]!.action_items[0]!.task_ref, first.task.id, 'the link is restored');
   assert.equal((await taskIds(ws)).length, 1);
 });
+
+test('a Word document gets a readable text copy in the same record; an encrypted one is saved alone with the reason', async (t) => {
+  const ws = await workspace(t);
+  const zlib = await import('node:zlib');
+  const { crc32 } = await import('../src/utils/docx');
+  // The smallest fictional .docx the reader accepts: one deflated word/document.xml.
+  const docx = (paragraphs: string[]) => {
+    const xml = Buffer.from(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphs.map((p) => `<w:p><w:r><w:t>${p}</w:t></w:r></w:p>`).join('')}</w:body></w:document>`);
+    const packed = zlib.deflateRawSync(xml);
+    const name = Buffer.from('word/document.xml');
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(8, 8); local.writeUInt32LE(crc32(xml), 14); local.writeUInt32LE(packed.length, 18); local.writeUInt32LE(xml.length, 22); local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(8, 10); central.writeUInt32LE(crc32(xml), 16); central.writeUInt32LE(packed.length, 20); central.writeUInt32LE(xml.length, 24); central.writeUInt16LE(name.length, 28);
+    const dirStart = 30 + name.length + packed.length;
+    const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10); end.writeUInt32LE(46 + name.length, 12); end.writeUInt32LE(dirStart, 16);
+    return Buffer.concat([local, name, packed, central, name, end]);
+  };
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'x' });
+  const saved = await service.addMaterial(id, 'Weekly sync.docx', docx(['Jane Doe 0:03', 'Fictional words.']));
+  assert.deepEqual([saved.transcript, saved.transcript_complete], ['Weekly_sync.text.md', true]);
+  const copy = await fsp.readFile(path.join(ws, 'context-updates', id, 'materials', 'Weekly_sync.text.md'), 'utf-8');
+  assert.match(copy, /\n {2}Jane Doe 0:03\n {2}Fictional words\./);
+  const record = (await service.get(id)).transcripts[0]!;
+  assert.deepEqual([record.kind, record.source, record.complete, record.current], ['docx', 'Weekly_sync.docx', true, true]);
+
+  const labelled = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(512)]);
+  const enc = await service.addMaterial(id, 'labelled.docx', labelled);
+  assert.equal(enc.transcript, undefined);
+  assert.match(enc.transcript_problem!, /encrypted .* sensitivity label/);
+  assert.equal((await service.addMaterial(id, 'deck.pptx', Buffer.from('PK fictional'))).transcript_problem, undefined, 'other Office files are just files');
+});

@@ -46,12 +46,12 @@ directly. For spreadsheets, read for the facts that matter (totals, dates, owner
 status), not row by row.
 
 `transcripts` in `update.md` lists the readable copies the dashboard made from WebVTT
-transcripts (`file`, its `source`, and `complete`). Only a file listed there is such a
+transcripts and Word documents (`file`, its `source`, `kind` and `complete`). Only a file listed there is such a
 copy, whatever its name or first line says. Before you rely on a copy, check that the
 files still match the record (`shasum -a 256`: the copy against `sha256`, the source
 against `source_sha256`); if either was edited or is missing, read the source instead.
-When the copy matches and `complete` is true, read it instead of its source and cite its
-times as evidence; when `complete` is false, it lists what it could not read, so read
+When the copy matches and `complete` is true, read it instead of its source (cite a
+transcript's times as evidence); when `complete` is false, it lists what it could not read, so read
 the source as well. Speaker labels are what the file says, not
 identities: link a speaker to a stakeholder only when the material makes it clear.
 

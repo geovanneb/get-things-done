@@ -8,6 +8,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
 import { moveToTrash } from './trash';
 import { isAnalysisRunning } from './runState';
+import { docxMarkdown, docxText } from '../utils/docx';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 import { TaskService } from './taskService';
 import type { Task } from '../types';
@@ -71,8 +72,8 @@ const MAX_DIFF_BYTES = 512 * 1024;
 export interface UpdateMaterial { name: string; size: number; type: string }
 
 /**
- * A readable copy the dashboard made from a transcript, recorded by the dashboard only. This list, not a
- * file's name or first line, says which file is a copy: an uploaded file can claim anything.
+ * A readable copy the dashboard made from a WebVTT transcript or a Word document, recorded by the dashboard only.
+ * This list, not a file's name or first line, says which file is a copy: an uploaded file can claim anything.
  */
 export interface UpdateTranscript {
   /** The copy and the original it was made from, both in materials/. */
@@ -81,8 +82,13 @@ export interface UpdateTranscript {
   source_sha256: string;
   /** The copy as written; a copy changed since is kept when its original is removed. */
   sha256: string;
-  /** Every cue was read. When false, the copy lists what is missing and the original must be read too. */
+  /**
+   * The copy holds everything: every cue of a transcript, or a Word document that is plain paragraphs. When false,
+   * the copy says what is missing and the original must be read too.
+   */
   complete: boolean;
+  /** What it was made from: `webvtt` or `docx`. */
+  kind: 'webvtt' | 'docx';
   /**
    * Detail only: both files still have the recorded SHA-256. When false, the source or the copy was edited
    * (or is gone) after the copy was made, so the copy no longer stands for the source.
@@ -91,7 +97,7 @@ export interface UpdateTranscript {
 }
 
 /** A transcript copy prepared in memory, before anything is written. */
-interface PreparedTranscript { content: string; complete: boolean }
+interface PreparedTranscript { content: string; complete: boolean; kind: 'webvtt' | 'docx' }
 
 export interface UpdateProposal {
   id: string;
@@ -420,7 +426,8 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     transcripts: Array.isArray(data['transcripts']) ? (data['transcripts'] as unknown[]).flatMap((entry) => {
       const t = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
       const ok = typeof t['file'] === 'string' && typeof t['source'] === 'string' && typeof t['sha256'] === 'string';
-      return ok ? [{ file: t['file'] as string, source: t['source'] as string, source_sha256: str(t['source_sha256']), sha256: t['sha256'] as string, complete: t['complete'] === true }] : [];
+      const kind = t['kind'] === 'docx' ? 'docx' as const : 'webvtt' as const;
+      return ok ? [{ file: t['file'] as string, source: t['source'] as string, source_sha256: str(t['source_sha256']), sha256: t['sha256'] as string, complete: t['complete'] === true, kind }] : [];
     }) : [],
     transcript_problems: normalizePairs(data['transcript_problems'], 'source', 'reason'),
     keep_materials: data['keep_materials'] === true,
@@ -439,6 +446,13 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
  */
 function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | { problem: string } | null {
   const ext = path.extname(name).toLowerCase();
+  if (ext === '.docx') {
+    if (buffer.length > MAX_CONVERT_BYTES) return { problem: `The Word file is over ${MAX_CONVERT_BYTES / 1024 / 1024} MB, so no readable copy was made.` };
+    const read = docxText(buffer);
+    if (!read.ok) return { problem: read.problem };
+    if (!read.text.paragraphs.some((p) => p.trim())) return { problem: 'The Word document has no text in its body, so no readable copy was made.' };
+    return { content: docxMarkdown(name, sha256(buffer), read.text), complete: read.text.missing.length === 0, kind: 'docx' };
+  }
   if (!['.vtt', '.txt', '.md'].includes(ext)) return null;
   const text = decodeText(buffer.length > MAX_CONVERT_BYTES ? buffer.subarray(0, 64) : buffer);
   if (text === null) return ext === '.vtt' ? { problem: 'The file is not valid UTF-8 or UTF-16 text, so no readable copy was made.' } : null;
@@ -448,7 +462,7 @@ function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | {
   const parsed = parseWebVtt(text);
   if (!parsed) return ext === '.vtt' ? { problem: 'The file does not start with WEBVTT, so no readable copy was made.' } : null;
   if (parsed.cues.length === 0) return { problem: 'No cue could be read, so no readable copy was made.' };
-  return { content: transcriptMarkdown(name, sha256(buffer), parsed), complete: parsed.problems.length === 0 };
+  return { content: transcriptMarkdown(name, sha256(buffer), parsed), complete: parsed.problems.length === 0, kind: 'webvtt' };
 }
 
 /** The name of a file in `dir` with exactly these bytes, if any. Only files of the same size are read. */
@@ -880,17 +894,21 @@ export class ContextUpdateService {
     });
   }
 
-  /** Writes a prepared copy under a free name that keeps the `.transcript.md` ending, and returns its record. */
+  /**
+   * Writes a prepared copy under a free name that keeps its ending (`.transcript.md` for a WebVTT transcript,
+   * `.text.md` for a Word document), and returns its record.
+   */
   private async saveTranscript(dir: string, sourceName: string, buffer: Buffer, prepared: PreparedTranscript): Promise<UpdateTranscript> {
     const stem = sourceName.replace(/\.[^.]+$/, '') || 'transcript';
-    let name = `${stem}.transcript.md`;
+    const ending = prepared.kind === 'docx' ? 'text.md' : 'transcript.md';
+    let name = `${stem}.${ending}`;
     for (let n = 2; await fsp.lstat(path.join(dir, name)).then(() => true, () => false); n++) {
       if (n > 999) throw httpError(409, 'Too many files with the same name');
-      name = `${stem}-${n}.transcript.md`;
+      name = `${stem}-${n}.${ending}`;
     }
     const content = Buffer.from(prepared.content, 'utf-8');
     await saveAttachment(dir, name, content, 'update.md');
-    return { file: name, source: sourceName, source_sha256: sha256(buffer), sha256: sha256(content), complete: prepared.complete };
+    return { file: name, source: sourceName, source_sha256: sha256(buffer), sha256: sha256(content), complete: prepared.complete, kind: prepared.kind };
   }
 
   /**
