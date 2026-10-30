@@ -182,19 +182,25 @@ test('real model: the worker transcribes English and Japanese samples with Sense
 
 test('a worker that ignores the stop signal is killed before the next job may start; the real worker exits when the dashboard goes away', async (t) => {
   const dir = await tmp(t);
-  // A real child that ignores SIGTERM and never answers.
+  // A real child that ignores SIGTERM and never answers the job. It says when it ignores SIGTERM, and only then is
+  // the job stopped: however slowly the child starts on a busy machine, the stop finds it ignoring the signal.
   const stubborn = path.join(dir, 'stubborn.cjs');
-  await fsp.writeFile(stubborn, "process.on('SIGTERM', () => {}); process.on('disconnect', () => {}); setInterval(() => {}, 1000);");
+  await fsp.writeFile(stubborn, "process.on('SIGTERM', () => {}); process.on('disconnect', () => {}); process.send({ type: 'ready' }); setInterval(() => {}, 1000);");
   let child: ChildProcess | null = null;
-  const launcher: WorkerLauncher = () => (child = fork(stubborn, [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] }));
+  let readyAt = 0;
+  const stop = new AbortController();
+  const launcher: WorkerLauncher = () => {
+    child = fork(stubborn, [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    child.on('message', (m: { type?: string }) => { if (m.type === 'ready') { readyAt = Date.now(); stop.abort(); } });
+    return child;
+  };
   const engine = new TranscriptionEngine(new TranscriptionModelService(), launcher);
-  const run = (engine as unknown as { run: (r: WorkerRequest, ms: number, on: () => void) => Promise<void> }).run.bind(engine);
-  const started = Date.now();
-  // Long enough for the child to be running and ignoring SIGTERM when the stop comes, also on a busy machine.
-  await assert.rejects(run({ type: 'version' }, 2000, () => {}), /took too long/);
+  const run = (engine as unknown as { run: (r: WorkerRequest, ms: number, on: () => void, s?: AbortSignal) => Promise<void> }).run.bind(engine);
+  await assert.rejects(run({ type: 'version' }, 120_000, () => {}, stop.signal), /Cancelled/);
+  assert.ok(readyAt > 0, 'stopped once the worker ignored SIGTERM');
   assert.ok(child!.exitCode !== null || child!.signalCode !== null, 'the worker has really exited before the job is over');
   assert.equal(child!.signalCode, 'SIGKILL', 'killed outright after ignoring the polite signal');
-  assert.ok(Date.now() - started >= 5000, 'it was given its grace period first');
+  assert.ok(Date.now() - readyAt >= 3000, 'it was given its grace period first');
 
   // The real worker, with nothing to do: when the dashboard disconnects, it exits.
   const worker = launchWorker();

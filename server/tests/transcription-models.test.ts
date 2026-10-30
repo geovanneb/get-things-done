@@ -173,7 +173,8 @@ test('cancel keeps what was downloaded; one download at a time, also across dash
   await service.download('fictional-model');
   await assert.rejects(service.download('fictional-model'), /already downloading/);
   await assert.rejects(service.remove('fictional-model'), /Cancel the download first/);
-  await new Promise((r) => setTimeout(r, 250));
+  // Cancelled once part of it has arrived and is on disk, however slow the machine is.
+  for (const end = Date.now() + 10_000; Date.now() < end && !((await service.view()).models[0]!.partial > 0);) await new Promise((r) => setTimeout(r, 20));
   await service.cancel('fictional-model');
   await TranscriptionModelService.settled();
   const view = (await service.view()).models[0]!;

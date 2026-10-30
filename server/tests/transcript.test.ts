@@ -117,7 +117,9 @@ test('anything that is not WebVTT is left alone, and many speakers are read quic
   const parsed = parseWebVtt(many)!;
   transcriptMarkdown('x.vtt', 'h', parsed);
   assert.equal(parsed.speakers.length, 20000);
-  assert.ok(Date.now() - started < 2000, `took ${Date.now() - started} ms`);
+  // Linear work takes well under a second; quadratic work on 20,000 speakers would take minutes. The margin keeps
+  // a busy CI machine from failing it.
+  assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
 });
 
 test('overlapping cues keep their own times, a cue in the header is reported, and many backticks are fine', () => {
