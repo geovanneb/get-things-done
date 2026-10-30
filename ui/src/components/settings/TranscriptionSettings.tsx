@@ -7,12 +7,6 @@ import { useApi } from '@/hooks/useApi';
 import { useAppState } from '@/store';
 import type { Transcription, TranscriptionLanguage, TranscriptionModel } from '@/types';
 
-const LANGUAGES: { id: TranscriptionLanguage; label: string }[] = [
-  { id: 'auto', label: 'Auto (each part of the meeting in its own language)' },
-  { id: 'en', label: 'English' },
-  { id: 'ja', label: 'Japanese' },
-];
-
 const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' };
 
 /** Decimal units, as file managers show them and as the pluses and minuses say. */
@@ -83,7 +77,6 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
           {model.cons.map((c) => <li key={c}><span aria-hidden style={{ color: 'var(--color-warning)', fontWeight: 700 }}>− </span>{c}</li>)}
         </ul>
       </div>
-      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{model.languages}.</div>
       {running && d && (
         <div aria-live="polite">
           <div role="progressbar" aria-label={`Downloading ${model.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
@@ -163,6 +156,8 @@ export default function TranscriptionSettings() {
     }
   };
   const chosen = data.models.find((m) => m.id === data.settings.model);
+  const liveModel = data.models.find((m) => m.id === data.settings.live_model);
+  const liveLanguageMissing = liveModel && data.settings.language !== 'auto' && !liveModel.language_options?.some((l) => l.id === data.settings.language);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -201,11 +196,18 @@ export default function TranscriptionSettings() {
         <select aria-label="Transcription language" value={data.settings.language} disabled={saving}
           onChange={(e) => void save({ language: e.target.value as TranscriptionLanguage })}
           style={{ maxWidth: 420, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}>
-          {LANGUAGES.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+          <option value="auto">Auto (each part of the meeting in its own language)</option>
+          {chosen?.language_options?.filter((l) => l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+          {chosen?.language_options?.some((l) => !l.common) && (
+            <optgroup label="Other languages">
+              {chosen.language_options.filter((l) => !l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+            </optgroup>
+          )}
         </select>
         <span style={hintStyle}>
           Auto detects the language of each part of a meeting, so a meeting that switches between English and Japanese comes
           out right. For the most accurate transcript of a meeting in one language, choose that language.
+          {liveLanguageMissing && ` ${liveModel.name} does not have this language, so the live transcript detects it by itself.`}
         </span>
       </label>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
