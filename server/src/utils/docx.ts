@@ -174,6 +174,8 @@ const WRAPPERS = new Set(['document', 'body', 'r', 'hyperlink', 'smartTag', 'sdt
 /** What a text copy cannot hold, by element, in plain words. */
 /** What a copy lacks when the document has pictures: no text is missing, only images. */
 export const PICTURES = 'pictures or charts';
+/** Text found inside content the copy skips, such as a text box in a picture or shape. */
+export const SKIPPED_TEXT = 'text inside pictures, shapes or other content the copy does not read';
 
 const NOT_TEXT = new Map([
   ['tbl', 'tables'], ['drawing', PICTURES], ['pict', PICTURES], ['object', 'embedded objects'],
@@ -186,7 +188,7 @@ const NAME = /^[A-Za-z_][\w.-]*(:[A-Za-z_][\w.-]*)?$/;
 const SPACE = /^[ \t\n]$/;
 const XML_DECLARATION = /^<\?xml[ \t\n]+version[ \t\n]*=[ \t\n]*(["'])1\.[0-9]+\1(?:[ \t\n]+encoding[ \t\n]*=[ \t\n]*(["'])([A-Za-z][\w.-]*)\2)?(?:[ \t\n]+standalone[ \t\n]*=[ \t\n]*(["'])(?:yes|no)\4)?[ \t\n]*\?>$/;
 
-interface Open { qname: string; name: string; ns: Map<string, string>; suppress: boolean; paragraph: boolean }
+interface Open { qname: string; name: string; ns: Map<string, string>; suppress: boolean; skip: boolean; paragraph: boolean }
 
 /** The body text of a Word document. */
 export function docxText(buffer: Buffer): DocxResult {
@@ -227,6 +229,9 @@ function readBody(xml: string, encoding: string): DocxText {
   let instructions = 0;
   // Open elements whose content is skipped or hidden.
   let suppressed = 0;
+  // Of those, the ones skipped because the copy does not read them (not hidden, like deleted text): text inside
+  // them is text the copy lacks.
+  let skipped = 0;
   let declarations = 0;
   let sawRoot = false;
   let sawBody = false;
@@ -327,6 +332,7 @@ function readBody(xml: string, encoding: string): DocxText {
       const open = stack.pop();
       if (!open || open.qname !== qname) throw new Error(`</${qname}> does not close the open element`);
       if (open.suppress) suppressed--;
+      if (open.skip) skipped--;
       if (open.paragraph) paragraphs.push(texts.pop()!);
       continue;
     }
@@ -369,18 +375,20 @@ function readBody(xml: string, encoding: string): DocxText {
     }
 
     const [uri, local] = name.split('|') as [string, string];
-    const open: Open = { qname, name, ns, suppress: false, paragraph: false };
+    const open: Open = { qname, name, ns, suppress: false, skip: false, paragraph: false };
     if (uri !== NS_W) {
       // Another vocabulary, for example mc:AlternateContent or a drawing: its content is not read as text.
       note(local, qname);
       open.suppress = true;
+      open.skip = true;
     } else if (HIDDEN.has(local) || IGNORED.has(local)) {
       open.suppress = true;
     } else if (local === 'p') {
       open.paragraph = true;
       texts.push('');
     } else if (local === 't') {
-      // Read where it stands.
+      // Read where it stands. Inside skipped content, such as a text box in a picture, it is text the copy lacks.
+      if (skipped) missing.add(SKIPPED_TEXT);
     } else if (local === 'tab') {
       append('\t');
     } else if (local === 'br' || local === 'cr') {
@@ -406,13 +414,17 @@ function readBody(xml: string, encoding: string): DocxText {
     } else if (!WRAPPERS.has(local)) {
       note(local, qname);
       // Tables still have their cell text read; everything else unknown is skipped.
-      if (local !== 'tbl') open.suppress = true;
+      if (local !== 'tbl') {
+        open.suppress = true;
+        open.skip = true;
+      }
     }
     if (selfClosing) {
       if (open.paragraph) paragraphs.push(texts.pop()!);
       continue;
     }
     if (open.suppress) suppressed++;
+    if (open.skip) skipped++;
     stack.push(open);
   }
   if (stack.length) throw new Error(`<${stack[stack.length - 1]!.qname}> is never closed`);
