@@ -15,12 +15,14 @@ const updates = [
   { id: 'CU-2026-0003', title: 'Memory review', origin: 'system-cleanup' },
   { id: 'CU-2026-0004', title: 'Board prep', origin: '' },
   { id: 'CU-2026-0005', title: 'Something new', origin: 'future-job' },
+  { id: 'CU-2026-0006', title: 'Kaizen from TASK-2026-0001', origin: 'kaizen' },
 ];
 
 check('no origin is an import', updateType({ origin: null }) === 'imported' && updateType({ origin: '' }) === 'imported');
 check('the meeting digest and memory review are told apart by origin',
   updateType({ origin: 'meetings' }) === 'meeting-digest' && updateType({ origin: 'system-cleanup' }) === 'memory-review');
 check('an unknown origin is "other", never an import', updateType({ origin: 'future-job' }) === 'other');
+check('a Kaizen is its own type', updateType({ origin: 'kaizen' }) === 'kaizen');
 
 check('all with no query keeps everything', filterUpdates(updates, 'all', '').length === updates.length);
 const imported = filterUpdates(updates, 'imported', '');
@@ -30,7 +32,7 @@ check('the query matches the id', filterUpdates(updates, 'all', '0003').map((u) 
 check('type and query combine', filterUpdates(updates, 'meeting-digest', 'logistics').length === 0);
 
 const counts = typeCounts(updates);
-check('counts per type', counts.imported === 2 && counts['meeting-digest'] === 1 && counts['memory-review'] === 1 && counts.other === 1);
+check('counts per type', counts.imported === 2 && counts['meeting-digest'] === 1 && counts['memory-review'] === 1 && counts.kaizen === 1 && counts.other === 1);
 check('types with no update are left out', !('imported' in typeCounts([{ origin: 'meetings' }])));
 
 if (failures > 0) {

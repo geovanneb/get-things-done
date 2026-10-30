@@ -520,11 +520,14 @@ export class AgentRunnerService {
   /** The accepted creates and updates of an approved update: what an apply may write. Removals are the dashboard's. */
   private async acceptedTargets(workspace: string, id: string): Promise<AcceptedChange[]> {
     const raw = await fsp.readFile(path.join(workspace, 'context-updates', updateId(id), 'update.md'), 'utf-8');
-    const proposals = (parseMarkdown(raw).data as Record<string, unknown>)['proposals'];
+    const data = parseMarkdown(raw).data as Record<string, unknown>;
+    const proposals = data['proposals'];
+    // A Kaizen may also change the instruction files and output templates; the user accepted each one by path.
+    const kind = typeof data['kind'] === 'string' ? data['kind'] : null;
     if (!Array.isArray(proposals)) return [];
     return proposals.flatMap((entry) => {
       const p = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
-      const target = proposalTarget(p['target']);
+      const target = proposalTarget(p['target'], kind);
       const writes = p['action'] === 'create' || p['action'] === 'update';
       return p['decision'] === 'accepted' && writes && target ? [{ id: String(p['id']), action: String(p['action']), target }] : [];
     });
@@ -537,9 +540,12 @@ export class AgentRunnerService {
    */
   private async notApplied(workspace: string, id: string, started: AcceptedChange[]): Promise<string[]> {
     let proposals: unknown;
+    let kind: string | null = null;
     try {
       const raw = await fsp.readFile(path.join(workspace, 'context-updates', updateId(id), 'update.md'), 'utf-8');
-      proposals = (parseMarkdown(raw).data as Record<string, unknown>)['proposals'];
+      const data = parseMarkdown(raw).data as Record<string, unknown>;
+      proposals = data['proposals'];
+      kind = typeof data['kind'] === 'string' ? data['kind'] : null;
     } catch {
       return started.map((c) => `${c.id} (the update could not be read to check)`);
     }
@@ -549,7 +555,7 @@ export class AgentRunnerService {
     }
     return started.flatMap((c) => {
       const p = now.get(c.id);
-      const same = p && p['decision'] === 'accepted' && p['action'] === c.action && proposalTarget(p['target']) === c.target;
+      const same = p && p['decision'] === 'accepted' && p['action'] === c.action && proposalTarget(p['target'], kind) === c.target;
       const done = same && (p['outcome'] === 'applied' || p['outcome'] === 'merged');
       return done ? [] : [p && !same ? `${c.id} (changed during the run)` : c.id];
     });

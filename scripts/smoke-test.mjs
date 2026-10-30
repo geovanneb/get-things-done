@@ -498,6 +498,23 @@ try {
     check('closing without changes keeps the record, deletes the materials and leaves the context alone',
       closed.status === 'done' && closed.materials.length === 4 && !fs.existsSync(path.join(dir, 'materials'))
       && fs.readFileSync(path.join(ws, target), 'utf-8') === before);
+
+    // A Kaizen note the agent leaves after a rework opens a Kaizen context update by itself.
+    fs.writeFileSync(path.join(ws, 'kaizen', 'KAIZEN-2026-901.md'), [
+      '---', 'id: KAIZEN-2026-901', 'title: Fictional lesson', 'status: proposed', 'task_ref: TASK-2026-0001',
+      'symptom: A fictional mistake', 'root_cause: A fictional missing rule', 'proposed_fix: Add the rule',
+      'files_affected:', '  - CLAUDE.md', `created_at: '${new Date().toISOString()}'`, '---', '', 'Fictional note.', '',
+    ].join('\n'));
+    let kaizen = null;
+    for (let i = 0; i < 50 && !kaizen; i++) {
+      kaizen = (await (await fetch(`${base}/api/context-updates`)).json()).find((u) => u.kaizen?.note === 'KAIZEN-2026-901.md') ?? null;
+      if (!kaizen) await new Promise((r) => setTimeout(r, 200));
+    }
+    check('a Kaizen note opens a Kaizen context update with its root cause, waiting for the user',
+      kaizen?.kind === 'kaizen' && kaizen.status === 'ready' && kaizen.kaizen.root_cause === 'A fictional missing rule'
+      && /status: moved/.test(fs.readFileSync(path.join(ws, 'kaizen', 'KAIZEN-2026-901.md'), 'utf-8')),
+      JSON.stringify(kaizen).slice(0, 200));
+    if (kaizen) await fetch(`${base}/api/context-updates/${kaizen.id}`, { method: 'DELETE' });
     const kept = await (await json('POST', '/api/context-updates', { title: 'Fictional board recording', text: 'Fictional recording transcript' })).json();
     const badKeep = await json('PUT', `/api/context-updates/${kept.id}/keep-materials`, { keep: 'yes' });
     await json('PUT', `/api/context-updates/${kept.id}/keep-materials`, { keep: true });

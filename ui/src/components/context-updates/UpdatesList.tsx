@@ -78,7 +78,7 @@ function UpdateRow({ u, onOpen }: { u: ContextUpdate; onOpen: (id: string) => vo
           <TypeBadge origin={u.origin} />
         </span>
         <span style={{ display: 'block', marginTop: 2, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span>{u.kind === 'memory-review' ? '' : ` · material from ${u.source_date || 'unknown date'}`} · {summaryLine(u)} · updated {formatRelativeDate(u.updated_at || u.created_at)}
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span>{u.kaizen ? (u.kaizen.task_ref ? ` · from ${u.kaizen.task_ref}` : '') : u.kind === 'memory-review' ? '' : ` · material from ${u.source_date || 'unknown date'}`} · {summaryLine(u)} · updated {formatRelativeDate(u.updated_at || u.created_at)}
         </span>
       </span>
       <StatusPill status={u.status} />

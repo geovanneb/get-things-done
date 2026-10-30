@@ -30,7 +30,10 @@ done, and only when no other accepted change failed.
 
 1. Check the `target` is a workspace-relative path under `context/<category>/` or
    `stakeholders/people/`, `stakeholders/groups/` or `stakeholders/org-charts/`, ending
-   in `.md`. If not, do not write it: set `outcome: failed` with the reason.
+   in `.md`. For a Kaizen (`kind: kaizen`), `CLAUDE.md`, `AGENTS.md`,
+   `.github/copilot-instructions.md` and `outputs/templates/<slug>/output.md` are
+   allowed too. If not, do not write it: set
+   `outcome: failed` with the reason.
 2. Read the proposed content in `context-updates/$ARGUMENTS/proposals/<id>.md`.
 3. Decide how to write it:
    - **Unchanged target** (an `update` whose file was not modified after `analyzed_at`,
@@ -46,7 +49,10 @@ done, and only when no other accepted change failed.
    free. If another file took the number, use the next free one and update any reference
    to it in the other accepted proposals.
 5. Keep frontmatter valid against `.schemas/`. Set `updated_at` on every file you
-   write. Never change a note's `id` or `created_at`.
+   write, when the file has that field. Never change a note's `id` or `created_at`.
+   `CLAUDE.md` and `AGENTS.md` steer every later run: write exactly the reviewed
+   change there, nothing around it. An app update may have changed one of them since
+   the analysis; then merge as above.
 6. Set `outcome: applied` (or `merged`, `failed`) on the proposal in `update.md`, and
    `outcome_note` when there is something to say. Do this after each proposal, so a
    rerun can pick up where this one stopped.

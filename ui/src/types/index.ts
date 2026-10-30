@@ -322,13 +322,15 @@ export interface InsightsCalendarDayDetail {
 export interface KaizenProposal {
   id: string;
   title: string;
-  status: 'proposed' | 'applied' | 'rejected';
+  /** moved: the dashboard opened a Kaizen context update from it (context_update). */
+  status: 'proposed' | 'applied' | 'rejected' | 'moved';
   area: string;
   root_cause: string;
   proposed_fix: string;
   files_affected: string[];
   created_at: string;
   applied_at: string | null;
+  context_update: string | null;
   body: string;
 }
 
@@ -467,6 +469,17 @@ export interface ContextUpdateProposal {
   target_exists?: boolean;
   stale?: boolean;
   problem?: string | null;
+  /** The target is a file the app installed: once changed, later app versions of it arrive as <file>.new. */
+  app_provided?: boolean;
+}
+
+/** Why a Kaizen was opened. Copied by the dashboard from the agent's note in kaizen/. */
+export interface KaizenAnalysis {
+  note: string;
+  task_ref: string;
+  symptom: string;
+  root_cause: string;
+  area: string;
 }
 
 /** `ref` is the agent's link to a stakeholder; `ref_found` (detail only) says whether that stakeholder exists. */
@@ -542,6 +555,8 @@ export interface ContextUpdate {
   kind: string | null;
   /** Meeting digest only: which queued meeting each file came from. */
   digest_meetings?: DigestMeeting[];
+  /** For a Kaizen: the root cause analysis. Null for every other kind. */
+  kaizen?: KaizenAnalysis | null;
   proposals: ContextUpdateProposal[];
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];

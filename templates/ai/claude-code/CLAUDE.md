@@ -111,6 +111,10 @@ Do not skip this because the change looks small. A one line edit is still rework
 When the rework is finished and saved, set the status back to `in_review`, exactly as
 you would for a first pass.
 
+Then write a Kaizen note on why the instructions did not prevent the mistake, as in
+`/gtd-task` Step 10: `kaizen/KAIZEN-YYYY-NNN.md`, one root cause per note. The dashboard
+opens a Kaizen context update from it; you never apply it yourself.
+
 ### Timestamps: set start_date on the first run
 
 The first time you move a task to `in_progress`, also set `start_date` to the current
@@ -200,6 +204,11 @@ dashboard's Meeting digest job collected meetings from the queue
 `materials/meetings.md` lists the meetings; `/gtd-context-analyze` drafts one meeting
 record per meeting.
 
+An update with `origin: kaizen` and `kind: kaizen` was opened by the dashboard from a
+Kaizen note in `kaizen/`. `/gtd-context-analyze` checks the root cause against the task
+and drafts the smallest change that prevents it; such an update may also change
+`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md` and the output templates.
+
 ## Schema references
 
 All frontmatter structures are documented in `.schemas/`. Refer to these when creating new files:
@@ -209,6 +218,7 @@ All frontmatter structures are documented in `.schemas/`. Refer to these when cr
 - Org charts: `.schemas/org-chart.schema.json`
 - Context notes: `.schemas/context.schema.json`
 - Context updates: `.schemas/context-update.schema.json`
+- Kaizen notes: `.schemas/kaizen.schema.json`
 - Output templates: `.schemas/output-template.schema.json`
 - Executive profile: `.schemas/profile.schema.json`
 - Execution manifests: `.schemas/execution-manifest.schema.json`

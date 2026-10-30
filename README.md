@@ -709,7 +709,7 @@ my-workspace/
 ├── context-updates/           Imported material and what it changed
 │
 ├── outputs/templates/         What "finished" looks like
-├── kaizen/                    Improvement proposals
+├── kaizen/                    Kaizen notes (each opens a context update)
 └── workflows/                 Reserved for multi-step workflows
 ```
 

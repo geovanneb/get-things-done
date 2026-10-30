@@ -18,6 +18,7 @@ import { AgentRunnerService } from './services/agentRunner';
 import { transcriptionEvents } from './services/transcriptionModels';
 import { meetingTranscriptionEvents } from './services/meetingTranscription';
 import { TranscriptionEngine } from './services/transcription/engine';
+import { isKaizenNote, scheduleKaizenIntake } from './services/kaizenIntake';
 
 export const HOST = '127.0.0.1';
 
@@ -69,6 +70,11 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     }
   };
 
+  // A note an agent leaves in kaizen/ opens a Kaizen context update right away.
+  const onKaizenNote = (event: FileWatchEvent): void => {
+    if (isKaizenNote(event.path)) void scheduleKaizenIntake();
+  };
+
   // Model downloads happen outside the workspace, so the watcher cannot see them: they send their own notice.
   const broadcastTranscription = (): void => {
     for (const client of sseClients) client.write('event: transcription\ndata: {}\n\n');
@@ -86,6 +92,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     watcherService.off('change', broadcastEvent);
     watcherService.off('add', broadcastEvent);
     watcherService.off('unlink', broadcastEvent);
+    watcherService.off('add', onKaizenNote);
+    watcherService.off('change', onKaizenNote);
     watcherService.stop();
     routineScheduler.stop();
     // A running analysis is stopped first, with everything it started, and its record saved.
@@ -113,6 +121,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       watcherService.on('change', broadcastEvent);
       watcherService.on('add', broadcastEvent);
       watcherService.on('unlink', broadcastEvent);
+      watcherService.on('add', onKaizenNote);
+      watcherService.on('change', onKaizenNote);
       transcriptionEvents.on('change', broadcastTranscription);
       meetingTranscriptionEvents.on('change', broadcastTranscription);
 
@@ -121,6 +131,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
         const workspacePath = workspaceService.getWorkspacePath();
         console.log(`Watching workspace: ${workspacePath}`);
         watcherService.start(workspacePath);
+        // Notes left while the dashboard was closed: the watcher only reports what changes from now on.
+        void scheduleKaizenIntake();
         // A workspace chosen with `gtd init` or `gtd use` shows up in the dashboard's switcher too.
         try { workspaceService.rememberWorkspace(workspacePath); } catch { /* the config folder is not writable: not fatal */ }
       } catch {

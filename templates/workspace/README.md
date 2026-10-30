@@ -33,7 +33,7 @@ context/                Background knowledge, by category
 outputs/templates/      Output templates: required sections + style guides
 context-updates/        Imported material (transcripts, slides...) and the
                         record of what it changed in the context
-kaizen/                 Improvement proposals for this workspace
+kaizen/                 Kaizen notes: why a task needed rework (each opens a context update)
 routines/               Schedules that create recurring tasks (RT-NNNN.md)
 workflows/              Reserved for multi-step workflow definitions
 ```

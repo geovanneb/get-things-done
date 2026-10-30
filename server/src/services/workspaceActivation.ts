@@ -2,6 +2,7 @@ import { ScaffoldOptions } from './scaffold';
 import { WorkspaceService } from './workspace';
 import { searchService } from './searchService';
 import { watcherService } from './watcherService';
+import { scheduleKaizenIntake } from './kaizenIntake';
 
 const workspaceService = new WorkspaceService();
 
@@ -21,5 +22,6 @@ export async function activateWorkspace(
   }
   searchService.reset();
   watcherService.start(workspacePath);
+  void scheduleKaizenIntake();
   return { initialized };
 }

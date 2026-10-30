@@ -16,7 +16,7 @@ export const RULES: { type: CleanupRuleType; label: string; hint: string; action
   { type: 'completed_tasks', label: 'Finished tasks', hint: 'Done tasks still on the board.', actions: ['archive', 'trash', 'delete'], clock: 'since finished' },
   { type: 'archived_tasks', label: 'Archived tasks', hint: 'Insights stop counting removed tasks.', actions: ['trash', 'delete'], clock: 'since archived' },
   { type: 'context_updates', label: 'Finished context updates', hint: 'Records of done updates. Updates whose materials you kept, or with a confirmed meeting record, are skipped.', actions: ['trash', 'delete'], clock: 'since finished' },
-  { type: 'kaizen', label: 'Closed kaizen proposals', hint: 'Applied or rejected. Open proposals are never touched.', actions: ['trash', 'delete'], clock: 'since closed' },
+  { type: 'kaizen', label: 'Closed kaizen proposals', hint: 'Applied, rejected, or moved into a context update. Open proposals are never touched.', actions: ['trash', 'delete'], clock: 'since closed' },
   { type: 'trash', label: 'Empty the trash', hint: 'Removed and replaced files the app keeps in .situation-board/trash/.', actions: ['delete'], clock: 'in the trash' },
 ];
 
