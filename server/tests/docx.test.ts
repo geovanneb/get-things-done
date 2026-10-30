@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as zlib from 'node:zlib';
 import { crc32, docxMarkdown, docxText, SKIPPED_TEXT } from '../src/utils/docx';
-import { readableSize } from '../src/services/contextUpdateService';
+import { IMAGE_CHARACTERS, readableSize } from '../src/services/contextUpdateService';
 
 /** A minimal fictional .docx: a ZIP with the given entries. `size`, `crc` and `flags` override what the headers state. */
 function zip(entries: { name: string; data: Buffer; store?: boolean; size?: number; flags?: number; crc?: number; descriptor?: 'plain' | 'signed'; descriptorCrc?: number }[]): Buffer {
@@ -100,19 +100,19 @@ test('encrypted, damaged or oversized packages are refused with a reason, never 
 const reason = (b: Buffer) => { const r = docxText(b); return r.ok ? 'ok' : r.problem; };
 
 /**
- * Reading stays linear: four times the input takes well under 16 times (quadratic) as long. Each size is timed
- * as the best of three runs, and only the ratio counts, so a busy machine slows both sizes alike instead of
- * failing a fixed time limit.
+ * Reading stays linear: four times the input takes well under 16 times (quadratic) as long; linear is about 4,
+ * and 10 leaves room for a garbage collection landing on the larger run. Each size is timed as the best of five
+ * runs, and only the ratio counts, so a busy machine slows both sizes alike instead of failing a fixed time limit.
  */
 function assertLinear(input: (size: number) => Buffer, check: (b: Buffer) => void, size: number, label: string): void {
-  const best = (b: Buffer) => Math.min(...[0, 1, 2].map(() => {
+  const best = (b: Buffer) => Math.min(...[0, 1, 2, 3, 4].map(() => {
     const started = performance.now();
     check(b);
     return performance.now() - started;
   }));
   const small = best(input(size));
   const large = best(input(size * 4));
-  assert.ok(large < Math.max(small, 2) * 8, `${label}: ${small.toFixed(0)} ms for ${size}, ${large.toFixed(0)} ms for ${size * 4}`);
+  assert.ok(large < Math.max(small, 2) * 10, `${label}: ${small.toFixed(0)} ms for ${size}, ${large.toFixed(0)} ms for ${size * 4}`);
 }
 const read = (body: string) => { const r = docxText(docx(body)); assert.ok(r.ok, r.ok ? '' : r.problem); return r.ok ? r.text : { paragraphs: [], missing: [] }; };
 
@@ -276,4 +276,6 @@ test('readable size: a copy alone when it holds all the text, the original too w
   assert.ok(readableSize('talk.vtt', broken) > broken.length, `${readableSize('talk.vtt', broken)}`);
   assert.equal(readableSize('notes.md', Buffer.from('Short notes.')), 'Short notes.'.length);
   assert.equal(readableSize('deck.pdf', Buffer.alloc(1000)), 1000, 'anything else by its size');
+  // A photo of a whiteboard or a slide counts as about one look at a picture, not as its megabytes.
+  for (const name of ['board.jpg', 'Board.JPEG', 'slide.png', 'photo.heic', 'shot.webp']) assert.equal(readableSize(name, Buffer.alloc(3_000_000)), IMAGE_CHARACTERS, name);
 });

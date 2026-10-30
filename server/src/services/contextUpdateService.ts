@@ -490,12 +490,20 @@ function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | {
 }
 
 /**
+ * What one image counts as, in characters. An agent looks at a scaled-down picture, so a photo of a whiteboard or
+ * a slide costs about the same whatever its file size: at most about 1,600 tokens, roughly this much text.
+ */
+export const IMAGE_CHARACTERS = 6_000;
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic', '.heif']);
+
+/**
  * Roughly how much an agent reads for one file, in characters: a transcript by its readable copy, other text by
- * its length, anything else by its size, so a deck or a PDF is counted high rather than low. An incomplete copy
- * sends the agent to the original as well, so both count, unless a Word copy lacks only pictures: it still holds
- * all the text.
+ * its length, an image as IMAGE_CHARACTERS, anything else by its size, so a deck or a PDF is counted high rather
+ * than low. An incomplete copy sends the agent to the original as well, so both count, unless a Word copy lacks
+ * only pictures: it still holds all the text.
  */
 export function readableSize(name: string, buffer: Buffer): number {
+  if (IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase())) return IMAGE_CHARACTERS;
   const prepared = prepareTranscript(name, buffer);
   if (prepared && 'content' in prepared) {
     const onlyPictures = prepared.kind === 'docx' && (prepared.missing ?? []).every((m) => m === PICTURES);
