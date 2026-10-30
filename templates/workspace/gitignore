@@ -2,6 +2,7 @@
 .situation-board/logs/
 .situation-board/trash/
 .situation-board/runs/
+context-updates/meeting-queue/
 node_modules/
 *.log
 .situation-board/routines/run.lock
