@@ -36,8 +36,8 @@ Meeting digest job collected meetings from the meeting queue into this update. F
 the steps as usual, and:
 
 - Read `materials/meetings.md` first: it lists each meeting with its date, title, files
-  and roughly how much text they hold (`text_characters`; an hour of transcript is about
-  90,000). Add one meeting record per listed meeting, with that meeting's date, even when
+  and roughly how much text they hold (`text_characters`; a full-day meeting is about
+  250,000). Add one meeting record per listed meeting, with that meeting's date, even when
   it changes nothing in the context.
 - Work one meeting at a time, in the order listed: read its files (Step 3), write down
   its candidate facts and its meeting record, then go to the next meeting. Decide the

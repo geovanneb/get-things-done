@@ -322,7 +322,7 @@ test('long meetings: a digest holds at most max_characters of readable text, and
   assert.deepEqual((await updates.get(third.context_update!)).digest_meetings.map((m) => m.id), [c]);
 
   assert.throws(() => parseSettings({ max_characters: 1000 }), /50000 to 4000000/);
-  assert.equal(parseSettings({}).max_characters, 800_000);
+  assert.equal(parseSettings({}).max_characters, 400_000);
 });
 
 test('the schedule: first check counts from now, missed runs collapse into one, switched off makes nothing', async (t) => {

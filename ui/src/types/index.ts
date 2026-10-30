@@ -670,7 +670,7 @@ export interface MeetingDigestSettings {
   enabled: boolean;
   schedule: RoutineSchedule;
   max_meetings: number;
-  /** Readable text per digest, in characters; an hour of transcript is about 90,000. */
+  /** Readable text per digest, in characters; a meeting averages about 30,000 an hour. */
   max_characters: number;
   updated_at: string | null;
 }
