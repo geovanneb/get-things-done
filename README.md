@@ -807,8 +807,11 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
   `HTTPS_PROXY` (Node 22.21 or later, or 24), and `NODE_EXTRA_CA_CERTS` for a company
   certificate, before starting the dashboard. Never turn certificate checks off.
 
-Speeds were measured on an Apple Silicon Mac. Transcribing recordings arrives in a
-next version.
+Speeds were measured on an Apple Silicon Mac. **Check** on a downloaded model loads it
+in the transcription engine, so you know it works on this computer. The engine
+([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), Apache-2.0) runs in its own
+process for each job, so the model's memory and any crash stay out of the dashboard.
+Transcribing recordings arrives in a next version.
 
 ---
 

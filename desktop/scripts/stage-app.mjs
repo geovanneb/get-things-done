@@ -29,13 +29,19 @@ const packed = JSON.parse(npm(['pack', '--json', '--ignore-scripts', '--pack-des
 const tarball = path.join(stage, packed[0].filename);
 
 fs.writeFileSync(path.join(gtd, 'package.json'), JSON.stringify({ name: 'gtd-desktop-stage', private: true }, null, 2));
-// No optional dependencies: nothing optional is needed (search uses node:sqlite, built into Electron's Node).
+// Optional dependencies are kept: the transcription engine (sherpa-onnx) ships its native binary for each platform
+// as one, and npm installs the one for the computer building the app (each CI runner builds its own architecture).
 // No install scripts: none of the production dependencies needs one.
-npm(['install', tarball, '--omit=dev', '--omit=optional', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock'], gtd);
+npm(['install', tarball, '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock'], gtd);
 
 const app = path.join(gtd, 'node_modules', '@bertonha', 'getthingsdone');
-for (const required of ['dist/server/server.js', 'dist/ui/index.html', 'templates/workspace', 'package.json']) {
+for (const required of ['dist/server/server.js', 'dist/server/services/transcription/worker.js', 'dist/ui/index.html', 'templates/workspace', 'package.json']) {
   if (!fs.existsSync(path.join(app, required))) throw new Error(`Staged app is missing ${required}`);
+}
+// The engine's binary for this platform: without it transcription cannot run in the app.
+const platform = `${process.platform === 'win32' ? 'win' : process.platform}-${process.arch}`;
+if (!fs.existsSync(path.join(gtd, 'node_modules', `sherpa-onnx-${platform}`, 'sherpa-onnx.node'))) {
+  throw new Error(`Staged app is missing the transcription engine for ${platform} (sherpa-onnx-${platform})`);
 }
 fs.rmSync(tarball);
 console.log(`Staged ${JSON.parse(fs.readFileSync(path.join(app, 'package.json'), 'utf-8')).version} into ${path.relative(desktop, gtd)}`);
