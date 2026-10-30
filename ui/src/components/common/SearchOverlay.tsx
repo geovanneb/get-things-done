@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import Badge from './Badge';
 import { SearchResult } from '../../types';
+import { useRecorder } from '../recording/RecordingProvider';
+import { useRecordLauncher } from '../recording/RecordLauncher';
 
 interface SearchOverlayProps {
   isOpen: boolean;
@@ -36,6 +38,21 @@ const typeBadgeVariant = (type: string): 'accent' | 'info' | 'success' | 'warnin
   return map[type] ?? 'default';
 };
 
+/** Something to do rather than a file to open. Shown above the results, when the query fits its words. */
+interface QuickAction {
+  id: string;
+  label: string;
+  hint: string;
+  words: string;
+  run: () => void;
+}
+
+/** Every word typed starts one of the action's words, so "rec", "mic" or "stop rec" all find it. */
+function actionMatches(action: QuickAction, query: string): boolean {
+  const words = action.words.split(' ');
+  return query.trim().toLowerCase().split(/\s+/).filter(Boolean).every((q) => words.some((w) => w.startsWith(q)));
+}
+
 function groupResults(results: SearchResult[]) {
   const groups: Record<string, SearchResult[]> = {};
   for (const r of results) {
@@ -53,6 +70,8 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const debounceRef = useRef<number | null>(null);
+  const recorder = useRecorder();
+  const { openRecordDialog } = useRecordLauncher();
 
   useEffect(() => {
     if (isOpen) {
@@ -92,17 +111,34 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
 
   const allResults = results;
 
+  const recordAction: QuickAction | null = recorder.status === 'recording'
+    ? { id: 'stop-recording', label: 'Stop recording', hint: `Stop and save ${recorder.title}`, words: 'stop recording record meeting microphone mic audio save', run: () => void recorder.stop() }
+    : recorder.active ? null
+    : { id: 'record-meeting', label: 'Record a meeting', hint: 'Start recording from the microphone', words: 'record recording a meeting microphone mic audio start', run: openRecordDialog };
+  const actions = recordAction && actionMatches(recordAction, query) ? [recordAction] : [];
+  const itemCount = actions.length + allResults.length;
+
+  const runAction = (action: QuickAction) => {
+    onClose();
+    action.run();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, allResults.length - 1));
+      setActiveIndex((i) => Math.min(i + 1, itemCount - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter' && allResults[activeIndex]) {
-      const r = allResults[activeIndex];
+    } else if (e.key === 'Enter') {
+      if (activeIndex < actions.length) {
+        runAction(actions[activeIndex]);
+        return;
+      }
+      const r = allResults[activeIndex - actions.length];
+      if (!r) return;
       navigate(typePaths[r.type]?.(r.id) ?? r.path);
       onClose();
     }
@@ -204,7 +240,25 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
 
         {/* Results */}
         <div id="search-results" role="listbox" style={{ overflowY: 'auto', flex: 1 }}>
-          {query && results.length === 0 && !loading && (
+          {actions.length > 0 && (
+            <div>
+              <div style={{ padding: '8px 16px 4px', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Actions
+              </div>
+              {actions.map((action, idx) => (
+                <button key={action.id} role="option" aria-selected={idx === activeIndex}
+                  onClick={() => runAction(action)} onMouseEnter={() => setActiveIndex(idx)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 16px', textAlign: 'left', background: idx === activeIndex ? 'var(--color-surface-hover)' : 'transparent', border: 'none', cursor: 'pointer', transition: 'background 0.1s' }}>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', width: 18, justifyContent: 'center', color: action.id === 'stop-recording' ? 'var(--color-critical)' : 'var(--color-text-secondary)' }}>●</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)' }}>{action.label}</span>
+                    <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }} className="truncate">{action.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {query && results.length === 0 && actions.length === 0 && !loading && (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
               No results for "{query}"
             </div>
@@ -215,7 +269,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
             </div>
           )}
           {Object.entries(groups).map(([type, items]) => {
-            const startIndex = allResults.indexOf(items[0]);
+            const startIndex = actions.length + allResults.indexOf(items[0]);
             return (
               <div key={type}>
                 <div style={{
@@ -290,7 +344,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
           color: 'var(--color-text-muted)',
         }}>
           <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>↑↓</kbd> navigate</span>
-          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>↵</kbd> open</span>
+          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>↵</kbd> open or run</span>
           <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>Esc</kbd> close</span>
         </div>
       </div>

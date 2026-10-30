@@ -2,6 +2,7 @@
 // and no call takes a path from the page: the workspace path comes from the server.
 import { BrowserWindow, IpcMainInvokeEvent, dialog, ipcMain, shell, systemPreferences } from 'electron';
 import { classifyLink } from './links';
+import type { RecordingCommand } from './recording-commands';
 
 /** Asks the system for the microphone. `granted`, or what the user should do: the system only ever asks once. */
 async function microphoneAccess(): Promise<string> {
@@ -19,7 +20,12 @@ async function microphoneAccess(): Promise<string> {
   return 'granted';
 }
 
-export function registerBridge(getWindow: () => BrowserWindow | null, getAppUrl: () => string, onRecording: (active: boolean) => void): void {
+export function registerBridge(
+  getWindow: () => BrowserWindow | null,
+  getAppUrl: () => string,
+  onRecording: (active: boolean) => void,
+  takeRecordingCommand: () => RecordingCommand | null,
+): void {
   const trusted = (event: IpcMainInvokeEvent): BrowserWindow => {
     const window = getWindow();
     const url = event.senderFrame?.url ?? '';
@@ -46,6 +52,11 @@ export function registerBridge(getWindow: () => BrowserWindow | null, getAppUrl:
   ipcMain.handle('gtd:recording-state', async (event, active: unknown) => {
     if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
     onRecording(active === true);
+  });
+
+  ipcMain.handle('gtd:take-recording-command', async (event) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    return takeRecordingCommand();
   });
 
   ipcMain.handle('gtd:open-workspace-folder', async (event) => {

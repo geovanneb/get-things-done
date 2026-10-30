@@ -7,6 +7,7 @@ import { registerBridge } from './bridge';
 import { stopServer } from './server-lifecycle';
 import { holdUpdatesWhile, installNow, startUpdateChecks } from './updates';
 import { classifyLink } from './links';
+import { RecordingCommands, type RecordingCommand } from './recording-commands';
 import { DEFAULT_PORT, findFreePort } from './port';
 
 const APP_NAME = 'Get Things Done';
@@ -23,6 +24,10 @@ let appUrl = '';
 let quitting = false;
 /** A recording runs in the window; set by the dashboard through the bridge. */
 let recording = false;
+/** What the menu-bar menu asked the page to do about recording, until the page takes it. */
+const recordingCommands = new RecordingCommands();
+/** A downloaded update waiting for a restart, so the menu can be rebuilt when recording starts or stops. */
+let pendingUpdate: string | null = null;
 let keepAwake: number | null = null;
 
 // ---- Settings kept by the desktop app (not the workspace) ----
@@ -165,6 +170,19 @@ function setRecording(active: boolean): void {
     keepAwake = null;
   }
   tray?.setToolTip(active ? `${APP_NAME}: recording` : APP_NAME);
+  // macOS shows text next to the menu-bar icon: a recording is visible even with the window closed.
+  if (process.platform === 'darwin') tray?.setTitle(active ? 'REC' : '');
+  setTrayMenu(pendingUpdate);
+}
+
+/**
+ * Asks the page to open the record dialog or to stop the recording. Opening needs the window; stopping does not,
+ * since the recorder keeps running while the window is hidden.
+ */
+function sendRecordingCommand(command: RecordingCommand): void {
+  recordingCommands.leave(command);
+  if (command === 'open') showWindow();
+  mainWindow?.webContents.send('gtd:recording-command');
 }
 
 /** The microphone only, for the app's own main window. Preview windows and any other page never get it. */
@@ -189,8 +207,13 @@ function createTray(): void {
 
 /** `update` is a downloaded version waiting for a restart. */
 function setTrayMenu(update: string | null): void {
+  pendingUpdate = update;
   tray?.setContextMenu(
     Menu.buildFromTemplate([
+      recording
+        ? { label: 'Stop recording and save', click: () => sendRecordingCommand('stop') }
+        : { label: 'Record a meeting…', click: () => sendRecordingCommand('open') },
+      { type: 'separator' },
       { label: `Open ${APP_NAME}`, click: showWindow },
       { label: 'Open in browser', click: () => void shell.openExternal(appUrl) },
       ...(update ? [{ type: 'separator' as const }, { label: `Restart to update to ${update}`, click: installNow }] : []),
@@ -234,7 +257,7 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.on('will-download', (_event, item) => {
       item.setSaveDialogOptions({ defaultPath: path.join(app.getPath('downloads'), item.getFilename()) });
     });
-    registerBridge(() => mainWindow, () => appUrl, setRecording);
+    registerBridge(() => mainWindow, () => appUrl, setRecording, () => recordingCommands.take());
     holdUpdatesWhile(() => recording);
 
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {

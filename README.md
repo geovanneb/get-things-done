@@ -783,8 +783,10 @@ settings.
   AAC, FLAC or AIFF. Uploads stream to disk. A meeting with a recording waits in the
   queue for its transcript, made on this computer with the model chosen in **Settings >
   Transcription** (see below); the transcript then goes into the digest with the meeting.
-- **Record a meeting** on the Routines page records the microphone, in the desktop app
-  and in the browser (Chrome or Edge, with the dashboard opened at localhost). Tell
+- **Record** in the top bar (or **Record a meeting** on the Routines page, in ⌘K search,
+  or in the desktop app's menu-bar menu) records the microphone, in the desktop app
+  and in the browser (Chrome or Edge, with the dashboard opened at localhost). While it
+  runs, the top bar shows the time and **Stop** on every page. Tell
   everyone first: the dialog asks each time. A banner shows on every page with what was
   captured and what is saved. Only the microphone is recorded, so people heard through
   headphones are not. Audio is saved as it arrives, about 115 MB an hour; what the page

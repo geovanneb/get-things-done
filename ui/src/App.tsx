@@ -1,5 +1,6 @@
 import { RecordingProvider } from '@/components/recording/RecordingProvider';
 import { RecordingBanner } from '@/components/recording/RecordingBanner';
+import { RecordLauncherProvider } from '@/components/recording/RecordLauncher';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useAppDispatch } from './store';
@@ -72,7 +73,7 @@ function AppRoutes() {
   }
 
   return (
-    <>
+    <RecordLauncherProvider>
       <AppInitializer />
       <Suspense fallback={loading}>
       <Routes>
@@ -100,7 +101,7 @@ function AppRoutes() {
         </Route>
       </Routes>
       </Suspense>
-    </>
+    </RecordLauncherProvider>
   );
 }
 
