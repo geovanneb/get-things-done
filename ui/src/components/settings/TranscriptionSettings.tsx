@@ -1,3 +1,4 @@
+import { describeSpeed, recommendModel } from '@/utils/transcriptionSpeed';
 import React from 'react';
 import Button from '@/components/common/Button';
 import Badge from '@/components/common/Badge';
@@ -19,7 +20,7 @@ function size(bytes: number): string {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
 }
 
-function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onAction }: {
+function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onAction, onTested }: {
   model: TranscriptionModel;
   chosen: boolean;
   busy: boolean;
@@ -28,7 +29,23 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
   vadSize: number;
   onChoose: () => void;
   onAction: (action: 'download' | 'cancel' | 'delete') => void;
+  onTested: () => void;
 }) {
+  const [speedTest, setSpeedTest] = React.useState<{ running: boolean; error?: string }>({ running: false });
+  const runSpeedTest = async () => {
+    setSpeedTest({ running: true });
+    try {
+      const res = await fetch(`/api/transcription/models/${model.id}/speed-test`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { message?: string };
+        throw new Error(body.message || `The speed test failed (${res.status})`);
+      }
+      setSpeedTest({ running: false });
+      onTested();
+    } catch (err) {
+      setSpeedTest({ running: false, error: (err as Error).message });
+    }
+  };
   const [check, setCheck] = React.useState<{ running: boolean; ok?: boolean; message?: string }>({ running: false });
   const runCheck = async () => {
     setCheck({ running: true });
@@ -81,6 +98,11 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
       {!running && d?.message && (
         <p role="alert" style={{ ...hintStyle, color: d.status === 'failed' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{d.message}</p>
       )}
+      {model.speed && !speedTest.running && (
+        <p role="status" style={hintStyle}>{describeSpeed(model.speed.realtime_x).line}</p>
+      )}
+      {speedTest.running && <p role="status" style={hintStyle}>Testing on a minute of speech… {model.memory_gb > 2 ? 'This one can take a minute or two.' : ''}</p>}
+      {speedTest.error && <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{speedTest.error}</p>}
       {check.message && (
         <p role={check.ok ? 'status' : 'alert'} style={{ ...hintStyle, color: check.ok ? 'var(--color-success)' : 'var(--color-critical)' }}>{check.message}</p>
       )}
@@ -90,8 +112,9 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
           : model.installed
             ? <>
               {vadMissing && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
-              {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running} loading={check.running} onClick={() => void runCheck()}>Check</Button>}
-              <Button size="sm" variant="ghost" disabled={busy || check.running} onClick={() => onAction('delete')}>Delete</Button>
+              {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={check.running} onClick={() => void runCheck()}>Check</Button>}
+              {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={speedTest.running} onClick={() => void runSpeedTest()}>{model.speed ? 'Test speed again' : 'Test speed'}</Button>}
+              <Button size="sm" variant="ghost" disabled={busy || check.running || speedTest.running} onClick={() => onAction('delete')}>Delete</Button>
             </>
             : <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>
               {model.partial > 0 ? `Continue download (${size(model.partial)} of ${size(model.size)})` : `Download (${size(model.size)})`}
@@ -156,11 +179,21 @@ export default function TranscriptionSettings() {
       {data.memory_hint && (
         <p role="note" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-warning)' }}>{data.memory_hint}</p>
       )}
+      {(() => {
+        const pick = recommendModel(data.models);
+        if (!pick) return <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Not sure which to use? Download a model and press <strong>Test speed</strong>: it tells you how it runs on this computer.</p>;
+        return (
+          <p role="note" style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+            Recommended for this computer: <strong>{pick.name}</strong>, {pick.reason}.
+            {pick.id !== data.settings.model && <> <Button size="sm" variant="ghost" disabled={saving} onClick={() => void save({ model: pick.id })}>Use it</Button></>}
+          </p>
+        );
+      })()}
       <div role="radiogroup" aria-label="Transcription model" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {data.models.map((m) => (
           <ModelCard key={m.id} model={m} chosen={m.id === data.settings.model} busy={saving || (downloading && m.download === null)}
             vadMissing={!data.vad_installed} vadSize={data.vad_size}
-            onChoose={() => void save({ model: m.id })} onAction={(a) => void act(m, a)} />
+            onChoose={() => void save({ model: m.id })} onAction={(a) => void act(m, a)} onTested={refetch} />
         ))}
       </div>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>

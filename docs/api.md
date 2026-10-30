@@ -322,6 +322,7 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 | `POST` | `/api/transcription/models/:id/cancel` | Stop the download; what was downloaded is kept and the next download continues from there |
 | `GET` | `/api/transcription/engine` | Whether the transcription engine loads on this computer, and its version (no model needed): `{ available, version, error }` |
 | `POST` | `/api/transcription/models/:id/check` | Load a downloaded model in the transcription worker: `{ ok, load_ms, message }`. `409` when it is not downloaded |
+| `POST` | `/api/transcription/models/:id/speed-test` | Measures how fast a downloaded model transcribes on this computer: about a minute of sample speech (two short recordings from the SenseVoice model's repository, downloaded once from a pinned address and checked by SHA-256). Returns `realtime_x` (seconds of speech per second of work, without loading the model), `load_ms`, `measured_at`. Kept per model in the models folder; `GET /api/transcription` shows it as each model's `speed`, only on the computer that measured it. `409` before the model is downloaded or while a transcription runs |
 | `DELETE` | `/api/transcription/models/:id` | Remove a model's files. `409` while it downloads |
 | `PUT` | `/api/context-updates/:id/keep-materials` | Keep the material after the update is done, or release it. Body: `{ "keep": true }` |
 | `PUT` | `/api/context-updates/:id/decisions` | Save review decisions on proposals: `accepted`, `rejected` or `null`, with an optional `reviewer_note` |

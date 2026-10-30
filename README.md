@@ -829,6 +829,12 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
   `HTTPS_PROXY` (Node 22.21 or later, or 24), and `NODE_EXTRA_CA_CERTS` for a company
   certificate, before starting the dashboard. Never turn certificate checks off.
 
+**Test speed** on a downloaded model measures it on this computer, on about a minute of
+sample speech (two short recordings from the SenseVoice model's repository, downloaded
+once and checked): it estimates how long an hour of meeting takes, and, by rule of
+thumb, whether there is room to transcribe while recording next to a video call. Once a model is tested, Settings recommends one
+for this computer: the most accurate one that gets an hour done in 15 minutes.
+
 Speeds were measured on an Apple Silicon Mac. **Check** on a downloaded model loads it
 in the transcription engine, so you know it works on this computer. The engine
 ([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), Apache-2.0) runs in its own
