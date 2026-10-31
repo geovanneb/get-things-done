@@ -59,7 +59,8 @@ router.post('/:id/files', upload.single('file'), async (req: Request, res: Respo
 
 // POST /api/meeting-queue/:id/recording  { token }  starts recording into a draft meeting
 router.post('/:id/recording', async (req: Request, res: Response) => {
-  res.status(201).json(await recording.start(queueId(param(req, 'id')), (req.body as { token?: string }).token as string));
+  const { token, language } = req.body as { token?: string; language?: unknown };
+  res.status(201).json(await recording.start(queueId(param(req, 'id')), token as string, new Date(), language));
 });
 
 // PUT /api/meeting-queue/:id/recording?offset=N  a block of audio, with the writer token in X-Recording-Token

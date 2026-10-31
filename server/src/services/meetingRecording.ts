@@ -111,9 +111,11 @@ export class MeetingRecordingService {
   ) {}
 
   /** Starts recording into a draft meeting. Starting again with the same token returns the same session. */
-  async start(id: string, token: string, now = new Date()): Promise<{ generation: string; offset: number; language: string; language_changes: LanguageChange[] }> {
+  /** `language`: the spoken language chosen for this meeting; without it, the one in Settings. */
+  async start(id: string, token: string, now = new Date(), chosen?: unknown): Promise<{ generation: string; offset: number; language: string; language_changes: LanguageChange[] }> {
+    if (chosen !== undefined && !knownLanguage(chosen)) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
     if (typeof token !== 'string' || token.length < 16 || token.length > 200) throw httpError(400, 'A writer token is required');
-    const language = (await this.models.readSettings().catch(() => null))?.language ?? 'auto';
+    const language = (chosen as string | undefined) ?? (await this.models.readSettings().catch(() => null))?.language ?? 'auto';
     const opened = await this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);
       if (meeting.status !== 'draft') throw httpError(409, 'A recording can only go into a meeting before it is queued');

@@ -491,3 +491,14 @@ test('a meeting that starts in the other language switches from its start; a mod
   const switched = await s.recording.setLanguage(rec.id, TOKEN, undefined, offer.id);
   assert.deepEqual(switched.language_changes, [{ at: 0, language: 'ja' }], 'from the very start');
 });
+
+test('a recording takes the language chosen for the meeting; an unknown one is refused', async (t) => {
+  const ws = await workspace(t);
+  const s = services(ws, fakeModels(), fakeEngine().engine);
+  const a = await s.queue.createMeeting({ title: 'Fictional Japanese call', meeting_date: '2026-10-31' });
+  await assert.rejects(s.recording.start(a.id, TOKEN, new Date(), 'xx'), /Invalid language/);
+  const opened = await s.recording.start(a.id, TOKEN, new Date(), 'ja');
+  assert.equal(opened.language, 'ja');
+  assert.equal((await s.queue.loadMeeting(a.id)).live?.language, 'ja');
+  // Without a choice, Settings decide: every other test here starts that way and gets Auto.
+});

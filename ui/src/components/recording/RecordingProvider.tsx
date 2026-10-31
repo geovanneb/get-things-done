@@ -12,7 +12,8 @@ import type { MeetingParticipant, QueuedMeeting, SpokenLanguage, Transcription }
  * saved, because only saved audio survives a crash of the page; a gap in the capture is shown, never hidden.
  */
 
-export interface RecordingOptions { title: string; date: string; participants: MeetingParticipant[]; deviceId: string; voiceCleanup: boolean; systemAudio: boolean }
+/** `language`: the spoken language of this meeting (`auto` or a code); without it, the one in Settings. */
+export interface RecordingOptions { title: string; date: string; participants: MeetingParticipant[]; deviceId: string; voiceCleanup: boolean; systemAudio: boolean; language?: string }
 
 export type RecorderStatus = 'idle' | 'starting' | 'recording' | 'saving' | 'failed';
 
@@ -166,7 +167,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     reportRecording(false);
   }, []);
 
-  const start = useCallback(async ({ title, date, participants, deviceId, voiceCleanup, systemAudio }: RecordingOptions) => {
+  const start = useCallback(async ({ title, date, participants, deviceId, voiceCleanup, systemAudio, language: spoken }: RecordingOptions) => {
     if (phase.current !== 'idle') return;
     phase.current = 'starting';
     reportRecording(true);
@@ -205,7 +206,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       const meeting = await apiPost<QueuedMeeting>('/api/meeting-queue', { title, meeting_date: date, participants });
       created = meeting.id;
       const token = crypto.randomUUID();
-      const opened = await apiPost<{ generation: string; offset: number; language: string }>(`/api/meeting-queue/${meeting.id}/recording`, { token });
+      const opened = await apiPost<{ generation: string; offset: number; language: string }>(`/api/meeting-queue/${meeting.id}/recording`, { token, ...(spoken ? { language: spoken } : {}) });
       // Optional: without the list the recording goes on, with its language as it started.
       const overview = await apiGet<Transcription>('/api/transcription').catch(() => null);
       const languages = overview?.models.find((m) => m.id === overview.settings.model)?.language_options ?? [];
