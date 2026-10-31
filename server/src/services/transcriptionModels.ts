@@ -183,7 +183,7 @@ export const CATALOG: CatalogModel[] = [
     languages: '100 languages, including English and Japanese',
     language_options: WHISPER_LANGUAGES,
     pros: ['About 3 times quicker than Whisper Turbo on the CPU: an hour of meeting takes about 5 minutes', 'As accurate, measured on English and Japanese', 'About 1 GB of memory'],
-    cons: ['Apple Silicon Macs only', 'Chosen once Test speed shows it runs on the graphics chip', 'Not for the live transcript', 'A 574 MB download'],
+    cons: ['Apple Silicon Macs only', 'Chosen once Test speed shows it runs on the graphics chip', 'As the live model it uses the graphics chip during your call', 'A 574 MB download'],
     memory_gb: 1,
     engine: { kind: 'whisper-cpp', files: { model: 'ggml-large-v3-turbo-q5_0.bin' } },
     gpu: { cpu: 'whisper-large-v3-turbo' },
@@ -277,7 +277,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   if (o['language'] !== undefined && o['language'] !== 'auto' && !WHISPER_LANGUAGES.some((l) => l.id === o['language'])) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
   if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
   if (o['speakers'] !== undefined && typeof o['speakers'] !== 'boolean') throw httpError(400, 'Invalid speakers: use true or false');
-  if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'] && !m.gpu)) throw httpError(400, 'Invalid live_model: a catalog model (not a GPU one), or null for no live transcript');
+  if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'])) throw httpError(400, 'Invalid live_model: a catalog model, or null for no live transcript');
   const model = (o['model'] as string | undefined) ?? base.model;
   return {
     model,
@@ -383,6 +383,12 @@ export class TranscriptionModelService {
     const choosing = typeof input === 'object' && input !== null && (input as { model?: unknown }).model !== undefined && (input as { model?: unknown }).model !== (await this.readSettings()).model;
     if (choosing && chosen?.gpu && (!offered(chosen) || !ranOnGpu((await readSpeeds())[chosen.id]))) {
       throw httpError(409, `${chosen.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
+    }
+    // The same for the live model: chosen anew, a GPU model must be verified here.
+    const liveInput = typeof input === 'object' && input !== null ? (input as { live_model?: unknown }).live_model : undefined;
+    const live = this.catalog.find((m) => m.id === next.live_model);
+    if (liveInput !== undefined && liveInput !== (await this.readSettings()).live_model && live?.gpu && (!offered(live) || !ranOnGpu((await readSpeeds())[live.id]))) {
+      throw httpError(409, `${live.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
     }
     next.updated_at = now.toISOString();
     await fsp.mkdir(this.dir(), { recursive: true });

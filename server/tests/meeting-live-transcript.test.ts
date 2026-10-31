@@ -506,3 +506,38 @@ test('a recording takes the language chosen for the meeting; an unknown one is r
   s.live.forget(a.id);
   await settle();
 });
+
+test('a GPU live model runs live only while verified here; otherwise SenseVoice stands in and the page says why', async (t) => {
+  const ws = await workspace(t);
+  const GPU = 'whisper-large-v3-turbo-gpu';
+  const models = path.join(ws, '.gpu-models');
+  await fsp.mkdir(path.join(models, 'speed-test'), { recursive: true });
+  await fsp.writeFile(path.join(models, 'gtd-whisper'), '');
+  const saved = { models: process.env.ESB_MODELS_PATH, helper: process.env.GTD_WHISPER_HELPER };
+  process.env.ESB_MODELS_PATH = models;
+  process.env.GTD_WHISPER_HELPER = path.join(models, 'gtd-whisper');
+  t.after(() => {
+    for (const [key, value] of [['ESB_MODELS_PATH', saved.models], ['GTD_WHISPER_HELPER', saved.helper]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  const settings = {
+    readSettings: async () => ({ model: GPU, language: 'auto', keep_recordings: false, live_model: GPU, speakers: false, updated_at: null }),
+    installedPath: async () => '/fictional/model',
+  } as unknown as TranscriptionModelService;
+  const started: string[] = [];
+  const { engine } = fakeEngine();
+  const follow = (engine as unknown as { follow: (wav: string, o: { model: string }) => Promise<unknown> }).follow;
+  (engine as unknown as { follow: unknown }).follow = (wav: string, o: { model: string }) => { started.push(o.model); return follow(wav, o); };
+  const s = services(ws, settings, engine);
+
+  const first = await record(s, 1);
+  assert.deepEqual(started, ['sensevoice-2024-07-17'], 'not verified: SenseVoice stands in');
+  assert.match((await s.live.read(first.id, 0)).note ?? '', /not verified on this computer/);
+  await s.recording.finish(first.id, { token: TOKEN, offset: first.offset, generation: first.generation, queue: false });
+
+  await fsp.writeFile(path.join(models, 'speed-test', `${GPU}.json`), JSON.stringify({ realtime_x: 15, load_ms: 1, measured_at: new Date().toISOString(), cpu: `${os.cpus()[0]?.model ?? 'unknown'} × ${os.cpus().length}`, backend: 'MTL0' }));
+  const second = await record(s, 1);
+  assert.equal(started.at(-1), GPU, 'verified: on the GPU');
+  assert.equal((await s.live.read(second.id, 0)).note, undefined);
+});

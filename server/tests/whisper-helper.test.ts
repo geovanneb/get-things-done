@@ -4,7 +4,7 @@ import * as fsp from 'node:fs/promises';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { HelperError, startHelper, whisperHelperPath } from '../src/services/transcription/whisperHelper';
 import { launchWorker } from '../src/services/transcription/engine';
 import type { WorkerReply, WorkerRequest } from '../src/services/transcription/protocol';
@@ -204,7 +204,8 @@ test('GPU helper through the engine: a job that ends, is stopped or whose worker
   const dir = await tmp(t);
   const { TranscriptionEngine } = await import('../src/services/transcription/engine');
   const { TranscriptionModelService } = await import('../src/services/transcriptionModels');
-  const program = realHelper ?? await fakeHelper(dir, 'slow');
+  // The real helper needs a real model; without one, the stand-in.
+  const program = realHelper && ggml ? realHelper : await fakeHelper(dir, 'slow');
   let worker: import('node:child_process').ChildProcess | null = null;
   const engine = new TranscriptionEngine(new TranscriptionModelService(), () => (worker = launchWorker()));
   const run = (engine as unknown as { run: (r: WorkerRequest, ms: number, on: (reply: WorkerReply) => void, s?: AbortSignal) => Promise<void> }).run.bind(engine);
@@ -295,4 +296,30 @@ test('GPU helper: until its owner confirms it, the helper loads nothing, and a w
   for (let i = 0; i < 50 && alive(helper); i++) await new Promise((r) => setTimeout(r, 100));
   assert.equal(alive(helper), false, 'the helper ended without loading');
   assert.equal(fs.existsSync(path.join(dir, 'loading')), false);
+});
+
+// A GPU model installed in STT_TEST_MODELS (whisper-large-v3-turbo-gpu), the real helper, and the sample audio.
+const gpuModel = realModels && fs.existsSync(path.join(realModels, 'whisper-large-v3-turbo-gpu', 'installed.json'));
+const realLive = !realHelper || !gpuModel || !realAudio ? 'set GTD_WHISPER_HELPER, STT_TEST_MODELS with the GPU model, and STT_TEST_AUDIO to run' : false;
+
+test('real GPU helper live: a follow job transcribes on Metal, and ending or stopping it, also while it loads, leaves no helper', { skip: realLive }, async (t) => {
+  const previous = process.env.ESB_MODELS_PATH;
+  process.env.ESB_MODELS_PATH = realModels;
+  t.after(() => { if (previous === undefined) delete process.env.ESB_MODELS_PATH; else process.env.ESB_MODELS_PATH = previous; });
+  const { TranscriptionEngine } = await import('../src/services/transcription/engine');
+  const wav = path.join(realAudio!, 'en.wav');
+  const bytes = (fs.statSync(wav).size - 44) & ~1;
+  const helpers = () => { try { return execFileSync('pgrep', ['-f', realHelper!]).toString().trim().split('\n').filter(Boolean).length; } catch { return 0; } };
+  const texts: string[] = [];
+  const session = await new TranscriptionEngine().follow(wav, { model: 'whisper-large-v3-turbo-gpu', language: 'auto', onSegment: (s) => texts.push(s.text) });
+  session.committed(bytes);
+  const result = await session.end(bytes, 120_000);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.match(texts.join(' '), /tribal chieftain/i);
+  assert.equal(helpers(), 0, 'no helper left after the end');
+  // Stopped while the model loads.
+  const early = await new TranscriptionEngine().follow(wav, { model: 'whisper-large-v3-turbo-gpu', language: 'auto', onSegment: () => {} });
+  await new Promise((r) => setTimeout(r, 300));
+  await early.cancel();
+  assert.equal(helpers(), 0, 'no helper left after a stop');
 });

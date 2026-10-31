@@ -3,7 +3,9 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { constants as fsConstants } from 'fs';
 import { MeetingDigestService, liveRecordingFile } from './meetingDigestService';
-import { CATALOG, languageFor, languagesFor, TranscriptionModelService } from './transcriptionModels';
+import { CATALOG, languageFor, languagesFor, runnableModel, TranscriptionModelService } from './transcriptionModels';
+import { forgetSpeed } from './transcription/speedTest';
+import { GPU_FAILURES } from './transcription/whisperHelper';
 import { languageAt, withLanguageChange, type LanguageChange } from './transcription/languages';
 import { LanguageEvidence, type HeardPart, type Suggestion } from './transcription/languageSuggestion';
 import { randomUUID } from 'crypto';
@@ -89,6 +91,8 @@ export interface Job {
    * records, and the menu bar, are its users.
    */
   evidence: LanguageEvidence | null;
+  /** Why the live transcript runs with another model than the one in Settings, or not at all. */
+  note?: string;
   /** Parts from before the last change of language, or at it, say nothing about it. */
   heardFrom: number;
 }
@@ -166,12 +170,25 @@ export class MeetingLiveTranscriptService {
   private async open(job: Job): Promise<void> {
     const { meetingId, generation, workspace } = job;
     const settings = await this.models.readSettings().catch(() => null);
-    if (!settings?.live_model || !await this.models.installedPath(settings.live_model).catch(() => null)) {
+    // The live model in Settings, or what can stand in for it: a GPU model runs live only while installed and verified
+    // here (never its CPU counterpart, too slow to follow a meeting); otherwise SenseVoice, when downloaded, or none.
+    let live = settings?.live_model ?? null;
+    if (live && CATALOG.find((m) => m.id === live)?.gpu) {
+      const ready = await this.models.installedPath(live).catch(() => null) && await runnableModel(live) === live;
+      if (!ready) {
+        const stand = await this.models.installedPath(SENSEVOICE_ID).catch(() => null) ? SENSEVOICE_ID : null;
+        job.note = stand
+          ? 'The GPU model is not verified on this computer (run its speed test in Settings > Transcription), so SenseVoice makes the live transcript.'
+          : 'The GPU model is not verified on this computer (run its speed test in Settings > Transcription), so there is no live transcript.';
+        live = stand;
+      }
+    }
+    if (!settings || !live || !await this.models.installedPath(live).catch(() => null)) {
       jobs.delete(generation);
       return;
     }
-    job.model = settings.live_model;
-    job.language = languageFor(settings.live_model, job.asked);
+    job.model = live;
+    job.language = languageFor(live, job.asked);
     job.mainModel = settings.model;
     // Offered only in a language of the model that transcribes after the meeting: the one in Settings now (see `watch`).
     job.evidence = new LanguageEvidence((language) => modelHas(job.mainModel, language), () => randomUUID());
@@ -188,8 +205,8 @@ export class MeetingLiveTranscriptService {
         // A recording comes first: a transcription of an earlier meeting running here gives way (it goes back in line).
         releaseRoom = await TranscriptionEngine.roomForLive();
         // Whisper cannot tell the language of a part while one is set: SenseVoice, when downloaded, tells it instead.
-        const live = CATALOG.find((m) => m.id === job.model);
-        const detector = live?.engine?.kind === 'whisper' && await this.models.installedPath(SENSEVOICE_ID).catch(() => null) ? SENSEVOICE_ID : undefined;
+        const entry = CATALOG.find((m) => m.id === job.model);
+        const detector = (entry?.engine?.kind === 'whisper' || entry?.engine?.kind === 'whisper-cpp') && await this.models.installedPath(SENSEVOICE_ID).catch(() => null) ? SENSEVOICE_ID : undefined;
         const session = await this.engine.follow(path.join(folder, liveRecordingFile(generation)), {
           model: job.model, language: job.language, ...(detector ? { detector } : {}),
           onSegment: (s) => this.add(job, s),
@@ -279,11 +296,21 @@ export class MeetingLiveTranscriptService {
 
   private checkLag(job: Job): void {
     if (job.status !== 'live') return;
-    if (job.session?.failed) { stopJob(job, `The live transcript stopped: ${job.session.failed}`); return; }
+    if (job.session?.failed) {
+      void this.revokeOnGpuFailure(job, job.session.failure);
+      stopJob(job, `The live transcript stopped: ${job.session.failed}`);
+      return;
+    }
     const behind = job.committed / BYTES_PER_SECOND - job.processed;
     if (behind <= LAG_SECONDS) { job.behindSince = null; return; }
     job.behindSince ??= Date.now();
     if (Date.now() - job.behindSince > LAG_MS) stopJob(job, 'This computer could not keep up with the live transcript, so the recording is transcribed after the meeting.');
+  }
+
+  /** A GPU live model failed on the GPU itself: it must pass a new speed test, as after a failed transcription. */
+  private async revokeOnGpuFailure(job: Job, failure: string | null): Promise<void> {
+    if (!failure || !GPU_FAILURES.includes(failure) || !CATALOG.find((m) => m.id === job.model)?.gpu) return;
+    await forgetSpeed(job.model);
   }
 
   /** A decoded part: evidence for the language suggestion. */
@@ -350,7 +377,12 @@ export class MeetingLiveTranscriptService {
       job.session.committed(sealedBytes);
       const result = await job.session.end(sealedBytes, job.deadline - Date.now());
       await job.writes;
-      if (!result.ok) { stopJob(job, `The live transcript did not finish: ${result.message}`); return null; }
+      if (!result.ok) {
+        // Before the recording goes to the queue: the after-meeting job must not pick the failed GPU model again.
+        await this.revokeOnGpuFailure(job, result.failure ?? null);
+        stopJob(job, `The live transcript did not finish: ${result.message}`);
+        return null;
+      }
       // It can have stopped while this waited (a failed write), so its status is read again.
       if (result.bytes !== sealedBytes || job.writeFailed || (job.status as LiveStatus) === 'stopped') {
         stopJob(job, 'The live transcript did not cover the whole recording.');
@@ -384,7 +416,7 @@ export class MeetingLiveTranscriptService {
    * What the page shows: the live transcript from segment `from` on, and its status. A recording whose live transcript
    * runs in another dashboard, or not at all, says so.
    */
-  async read(meetingId: string, from: number): Promise<{ generation: string | null; status: LiveStatus | 'unavailable'; reason: string | null; next: number; segments: LiveSegment[]; suggestion?: Suggestion | null }> {
+  async read(meetingId: string, from: number): Promise<{ generation: string | null; status: LiveStatus | 'unavailable'; reason: string | null; next: number; segments: LiveSegment[]; suggestion?: Suggestion | null; note?: string }> {
     const meeting = await this.queue.loadMeeting(meetingId);
     const generation = meeting.live?.generation ?? null;
     const job = generation ? jobs.get(generation) : undefined;
@@ -398,7 +430,7 @@ export class MeetingLiveTranscriptService {
     // Only what is saved to the file: the page never sees a stretch that a reload could not show again.
     const start = Math.max(0, Math.min(Number.isSafeInteger(from) ? from : 0, job.saved));
     const segments = job.segments.slice(start, Math.min(job.saved, start + PAGE));
-    return { generation, status: job.status, reason: job.reason, next: start + segments.length, segments, suggestion: this.suggestion(generation) };
+    return { generation, status: job.status, reason: job.reason, next: start + segments.length, segments, suggestion: this.suggestion(generation), ...(job.note ? { note: job.note } : {}) };
   }
 
   /** For tests: forgets every job without touching files. */

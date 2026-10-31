@@ -101,15 +101,14 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
       {model.speed && !speedTest.running && (
         <p role="status" style={hintStyle}>
           {model.gpu
-            // After the meeting only: no advice about the live transcript.
-            ? `About ${model.speed.realtime_x}× real time here: an hour of meeting takes about ${Math.max(1, Math.round(60 / model.speed.realtime_x))} minutes after it.`
+            ? `About ${model.speed.realtime_x}× real time here: an hour of meeting takes about ${Math.max(1, Math.round(60 / model.speed.realtime_x))} minutes after it. Next to a video call it shares the graphics chip with the call.`
             : describeSpeed(model.speed.realtime_x).line}
         </p>
       )}
       {model.gpu && !speedTest.running && (
         <p role="status" style={{ ...hintStyle, color: model.gpu_ready ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
           {model.gpu_ready
-            ? 'Runs on this Mac\'s graphics chip. If it ever fails there, the recording is transcribed with Whisper Turbo on the CPU instead.'
+            ? 'Runs on this Mac\'s graphics chip. It can also make the live transcript (choose it below): Whisper quality as people speak, and with speaker detection off, the transcript is ready when you stop. If it ever fails on the graphics chip, the recording is transcribed with Whisper Turbo on the CPU instead.'
             : model.installed
               ? (model.speed ? 'The test ran, but not on the graphics chip: it cannot be chosen.' : 'Press Test speed: it can be chosen once the test shows it runs on the graphics chip.')
               : 'Download it, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'}
@@ -290,7 +289,7 @@ export default function TranscriptionSettings() {
           onChange={(e) => void save({ live_model: e.target.value || null })}
           style={{ maxWidth: 420, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' }}>
           <option value="">Off: transcribe after the meeting</option>
-          {data.models.filter((m) => m.installed && !m.gpu).map((m) => (
+          {data.models.filter((m) => m.installed && (!m.gpu || m.gpu_ready || m.id === data.settings.live_model)).map((m) => (
             <option key={m.id} value={m.id}>{m.name}{m.speed ? ` (about ${m.speed.realtime_x}× real time here)` : ''}</option>
           ))}
         </select>

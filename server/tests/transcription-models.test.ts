@@ -509,7 +509,7 @@ test('a GPU model is offered only with the GPU engine, chosen only once it ran o
   process.env.GTD_WHISPER_HELPER = helper;
   assert.equal((await service.view()).models.find((m) => m.id === GPU)?.gpu_ready, false);
   await assert.rejects(service.updateSettings({ model: GPU }), /Test speed shows it runs/);
-  await assert.rejects(service.updateSettings({ live_model: GPU }), /not a GPU one/);
+  await assert.rejects(service.updateSettings({ live_model: GPU }), /Test speed shows it runs/, 'live too, only once verified');
 
   // Tested here, but it ran on the CPU: still not chosen. On Metal: chosen.
   const computer = `${os.cpus()[0]?.model ?? 'unknown'} × ${os.cpus().length}`;
@@ -519,6 +519,7 @@ test('a GPU model is offered only with the GPU engine, chosen only once it ran o
   await assert.rejects(service.updateSettings({ model: GPU }), /Test speed shows it runs/);
   await result('MTL0');
   assert.equal((await service.updateSettings({ model: GPU })).settings.model, GPU);
+  assert.equal((await service.updateSettings({ live_model: GPU })).settings.live_model, GPU, 'and as the live model');
   // Its verification lost later (a failure, another computer): the other settings can still be saved, and what runs
   // is the CPU counterpart.
   await fsp.rm(path.join(dir, 'speed-test', `${GPU}.json`));
