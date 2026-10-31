@@ -30,6 +30,23 @@ export function splitLong(part: Part, longest = LONGEST_PART, search = SEARCH): 
   return parts;
 }
 
+/** A piece this short around a change of language is not worth a part of its own. */
+const SHORTEST_PIECE = SAMPLE_RATE / 4;
+
+/** Ends a part where the language changes, so the speech after the change is not read in the language before it. */
+export function splitAtChanges(part: Part, seconds: number[]): Part[] {
+  const parts: Part[] = [];
+  let offset = 0;
+  for (const at of seconds) {
+    const cut = Math.round(at * SAMPLE_RATE) - part.start;
+    if (cut - offset < SHORTEST_PIECE || part.samples.length - cut < SHORTEST_PIECE) continue;
+    parts.push({ start: part.start + offset, samples: part.samples.subarray(offset, cut) });
+    offset = cut;
+  }
+  parts.push({ start: part.start + offset, samples: part.samples.subarray(offset) });
+  return parts;
+}
+
 export interface Around {
   /** Where the part before this one ended. */
   previousEnd: number;

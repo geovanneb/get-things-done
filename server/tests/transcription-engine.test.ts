@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as fs from 'node:fs';
-import { contextRange, RecentAudio, splitLong } from '../src/services/transcription/parts';
+import { contextRange, RecentAudio, splitAtChanges, splitLong } from '../src/services/transcription/parts';
 import { markRepeats } from '../src/services/transcription/repeats';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -390,4 +390,13 @@ test('recent audio keeps the last stretch, also across the end of its buffer', (
   assert.equal(audio.slice(6, 5), null);
   audio.add(new Float32Array(25).map((_, i) => i));
   assert.deepEqual([...audio.slice(34, 37)!], [22, 23, 24], 'more than it holds at once');
+});
+
+test('a part ends where the language changes, unless that leaves almost nothing', () => {
+  const part = { start: 16_000, samples: new Float32Array(160_000) };
+  const pieces = (at: number[]) => splitAtChanges(part, at).map((p) => [p.start, p.samples.length]);
+  assert.deepEqual(pieces([]), [[16_000, 160_000]]);
+  assert.deepEqual(pieces([5]), [[16_000, 64_000], [80_000, 96_000]]);
+  assert.deepEqual(pieces([3, 7]), [[16_000, 32_000], [48_000, 64_000], [112_000, 64_000]]);
+  assert.deepEqual(pieces([0.5, 1.1, 11.9, 20]), [[16_000, 160_000]], 'outside it, or within a moment of its ends');
 });

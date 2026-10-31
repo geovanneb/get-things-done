@@ -826,7 +826,7 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
 - **Spoken language during a recording**: the recording banner, and in the desktop app
   the menu-bar menu, change the language from that moment on: the live transcript and
   the transcript made after the meeting both follow it. It applies from the audio saved
-  so far, so to the speech part that starts next. Whisper then writes that language;
+  so far, up to a few seconds before the click. Whisper then writes that language;
   SenseVoice takes it as a hint and still follows clear speech in another language.
 - **Parts of a meeting**: a transcript made after a meeting cuts it at 2 seconds of
   silence, and a live transcript at half a second, so text keeps coming. Each part is

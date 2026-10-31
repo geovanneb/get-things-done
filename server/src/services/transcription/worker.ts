@@ -11,7 +11,7 @@
 import * as fsp from 'fs/promises';
 import type { EngineModel, WorkerControl, WorkerRequest, WorkerReply } from './protocol';
 import { languageAt, type LanguageChange } from './languages';
-import { contextRange, RecentAudio, splitLong, type Part } from './parts';
+import { contextRange, RecentAudio, splitAtChanges, splitLong, type Part } from './parts';
 import { markRepeats } from './repeats';
 import { readWavFormat, wavChunks, WavError } from './wav';
 
@@ -92,7 +92,7 @@ function withContext(part: Part, next: number | null, job: Job): { samples: Floa
   return { samples, from: part.start - before.length, to: end + after.length };
 }
 
-/** Recognizes each finished speech segment and sends it; returns how many had text. A part's own start decides its language. */
+/** Recognizes each finished speech segment and sends it; returns how many had text. A part ends at a change of language. */
 async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Job): Promise<number> {
   let found = 0;
   while (!vad.isEmpty()) {
@@ -100,12 +100,11 @@ async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Job)
     const segment = vad.front(false);
     vad.pop();
     const nextSegment = vad.isEmpty() ? null : vad.front(false).start;
-    const parts = splitLong(segment);
+    const parts = splitAtChanges(segment, job.changes.map((c) => c.at)).flatMap((part) => splitLong(part));
     for (const [i, part] of parts.entries()) {
       // Here, between two decodes: a change arriving during a decode only joins the list.
-      const seconds = part.start / SAMPLE_RATE;
-      job.lastPart = seconds;
-      const language = languageAt(job.start, job.changes, seconds);
+      job.lastPart = (part.start + part.samples.length) / SAMPLE_RATE;
+      const language = languageAt(job.start, job.changes, part.start / SAMPLE_RATE);
       if (language !== job.current) {
         recognizer.setConfig(recognizerConfig(job.model, language));
         job.current = language;
@@ -145,7 +144,7 @@ async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'f
   const recognizer = await load(sherpa, request.model, request.language);
   const vad = newVad(sherpa, request.model, SILENCE_SECONDS.live);
   const job = newJob(request.model, request.language, control.changes);
-  control.lateLanguage = (at) => job.lastPart >= at;
+  control.lateLanguage = (at) => job.lastPart > at;
   const file = await fsp.open(request.wav, 'r');
   const HEADER = 44;
   const STEP = 2 * SAMPLE_RATE * 2; // two seconds of audio per read
