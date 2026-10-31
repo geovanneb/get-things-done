@@ -30,6 +30,8 @@ const VAD_LONGEST_SECONDS = 20;
  * Meetily makes the same choice.
  */
 const SILENCE_SECONDS = { after: 2, live: 0.5 };
+/** Parts shorter than this are not given to the language detector: they say little (see languageSuggestion.ts). */
+const DETECT_MIN_SAMPLES = 2 * SAMPLE_RATE;
 
 interface SherpaStream { acceptWaveform(input: { samples: Float32Array; sampleRate: number }): void }
 interface SherpaRecognizer { createStream(): SherpaStream; decodeAsync(stream: SherpaStream): Promise<{ text: string; lang?: string }>; setConfig(config: unknown): void }
@@ -155,7 +157,7 @@ function newVad(sherpa: Sherpa, model: EngineModel, silence: number): SherpaVad 
 }
 
 /** The language of a job, and what is known of the audio around its parts. */
-interface Job { model: EngineModel; start: string; /** A live job: every part says what it sounded like. */ live?: boolean; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; shown: Map<number, number>; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
+interface Job { model: EngineModel; start: string; /** A live job: every part says what it sounded like. */ live?: boolean; /** Tells the language where the live model cannot. */ detector?: SherpaRecognizer; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; shown: Map<number, number>; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
 const newJob = (model: EngineModel, start: string, changes: LanguageChange[], turns: SpeakerTurn[] = []): Job => ({ model, start, changes, turns, voiceCuts: speakerCuts(turns), shown: new Map(), lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
 
 /** The part with what can be had of its context, and where that starts and ends. */
@@ -198,6 +200,12 @@ async function decodeAll(recognizer: Recognizer, vad: SherpaVad, job: Job): Prom
       job.previousEnd = part.start + part.samples.length;
       const decoded = await recognizer.decode(input.samples, language);
       const text = markRepeats(decoded.text.trim());
+      // A live model that cannot tell the language with one set (Whisper): the detector listens to parts long enough.
+      if (job.live && job.detector && decoded.detected === null && part.samples.length >= DETECT_MIN_SAMPLES) {
+        const stream = job.detector.createStream();
+        stream.acceptWaveform({ samples: input.samples, sampleRate: SAMPLE_RATE });
+        decoded.detected = detectedLanguage((await job.detector.decodeAsync(stream)).lang);
+      }
       // For the language suggestion: the part's own speech, without its context, also when it found no words.
       if (job.live) send({ type: 'part', start: part.start / SAMPLE_RATE, end: (part.start + part.samples.length) / SAMPLE_RATE, detected: decoded.detected });
       if (text) {
@@ -233,7 +241,9 @@ function onControl(message: WorkerControl): void {
 async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'follow' }>): Promise<void> {
   const recognizer = await load(sherpa, request.model, request.language);
   const vad = newVad(sherpa, request.model, SILENCE_SECONDS.live);
-  const job = { ...newJob(request.model, request.language, control.changes), live: true };
+  // In Auto the detector hears nothing the live model does not, but a language can be set during the recording.
+  const detector = request.detector ? await sherpa.OfflineRecognizer.createAsync(recognizerConfig({ ...request.detector, threads: 1 }, 'auto')) : undefined;
+  const job = { ...newJob(request.model, request.language, control.changes), live: true, ...(detector ? { detector } : {}) };
   control.lateLanguage = (at) => job.lastPart > at;
   const file = await fsp.open(request.wav, 'r');
   const HEADER = 44;

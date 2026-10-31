@@ -25,7 +25,14 @@ export type WorkerRequest =
    * Follows a recording as it is made: a 16 kHz mono 16-bit WAV that grows. The worker reads only audio the dashboard
    * says is saved (`committed`), then everything up to `end` once the recording is sealed.
    */
-  | { type: 'follow'; model: EngineModel; wav: string; language: string };
+  | {
+    type: 'follow'; model: EngineModel; wav: string; language: string;
+    /**
+     * A model that only tells the language of each part, for a live model that cannot while a language is set
+     * (Whisper repeats the set one): SenseVoice, which reports what it hears.
+     */
+    detector?: EngineModel;
+  };
 
 /**
  * Sent to a job after its request. `helper-known`: its GPU engine was recorded (see `helper` below). The others go to a

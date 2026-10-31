@@ -257,12 +257,28 @@ export class TranscriptionEngine {
     model: string; language: string; onSegment: (s: Segment) => void; onProgress?: (done: number, total: number) => void;
     /** Each decoded part, with or without words, and the language it sounded like (see languageSuggestion.ts). */
     onPart?: (part: { start: number; end: number; detected: string | null }) => void;
+    /** A model that tells the language of parts the live model cannot (see `detector` in protocol.ts); left out if missing. */
+    detector?: string;
   }): Promise<FollowSession> {
     if (closing) throw httpError(503, 'The dashboard is shutting down');
     if (busy) throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true });
-    const release = await this.models.lease(options.model);
+    const releaseModel = await this.models.lease(options.model);
     let model: EngineModel;
-    try { model = await this.engineModel(options.model); } catch (err) { await release(); throw err; }
+    try { model = await this.engineModel(options.model); } catch (err) { await releaseModel(); throw err; }
+    // Optional: without it the live transcript is the same, only without a suggested language.
+    let detector: EngineModel | undefined;
+    let releaseDetector: (() => Promise<void>) | null = null;
+    if (options.detector && options.detector !== options.model) {
+      try {
+        releaseDetector = await this.models.lease(options.detector);
+        detector = await this.engineModel(options.detector);
+      } catch {
+        await releaseDetector?.().catch(() => {});
+        releaseDetector = null;
+        detector = undefined;
+      }
+    }
+    const release = async () => { await releaseModel(); await releaseDetector?.(); };
     if (busy || closing) { await release(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
     busy = true;
     let child: ChildProcess;
@@ -306,7 +322,7 @@ export class TranscriptionEngine {
       settle({ ok: false, message: `The transcription engine stopped (${sig ?? `exit code ${code}`}).${stderr.trim() ? ` ${stderr.trim().split('\n').slice(-1)[0]}` : ''}` });
     });
     const sendControl = (control: WorkerControl) => { if (child.connected && !outcome) child.send(control, () => {}); };
-    if (child.connected) child.send({ type: 'follow', model, wav, language: options.language } satisfies WorkerRequest, () => {});
+    if (child.connected) child.send({ type: 'follow', model, wav, language: options.language, ...(detector ? { detector } : {}) } satisfies WorkerRequest, () => {});
     else settle({ ok: false, message: 'The transcription engine could not start.' });
 
     return {

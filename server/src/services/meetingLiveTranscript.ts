@@ -109,6 +109,9 @@ export interface LiveResult {
   mainModel: string;
 }
 
+/** The model that tells the spoken language for a live Whisper. */
+const SENSEVOICE_ID = 'sensevoice-2024-07-17';
+
 /** Whether a catalog model has a language. */
 function modelHas(model: string, language: string): boolean {
   return Boolean(CATALOG.find((m) => m.id === model)?.language_options?.some((o) => o.id === language));
@@ -181,8 +184,11 @@ export class MeetingLiveTranscriptService {
         if (before) { stopJob(job, 'The dashboard restarted during the recording; it is transcribed after the meeting.'); return; }
         const handle = await fsp.open(job.file, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600);
         await handle.close();
+        // Whisper cannot tell the language of a part while one is set: SenseVoice, when downloaded, tells it instead.
+        const live = CATALOG.find((m) => m.id === job.model);
+        const detector = live?.engine?.kind === 'whisper' && await this.models.installedPath(SENSEVOICE_ID).catch(() => null) ? SENSEVOICE_ID : undefined;
         const session = await this.engine.follow(path.join(folder, liveRecordingFile(generation)), {
-          model: job.model, language: job.language,
+          model: job.model, language: job.language, ...(detector ? { detector } : {}),
           onSegment: (s) => this.add(job, s),
           onPart: (part) => this.heard(job, part),
           onProgress: (done) => { job.processed = done; this.checkLag(job); },
