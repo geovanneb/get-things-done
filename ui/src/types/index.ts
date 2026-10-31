@@ -699,7 +699,8 @@ export interface QueuedMeeting {
   updated_at: string;
   queued_at: string | null;
   /** `recording` is set for a recording: the meeting waits for its transcript before a digest can take it. */
-  files: { name: string; size: number; sha256: string; recording?: RecordingState }[];
+  /** `capture`: set on a recording made in the dashboard, not on an upload. */
+  files: { name: string; size: number; sha256: string; recording?: RecordingState; capture?: string }[];
   /** Why it waits instead of going into the next digest; queue it again to clear. */
   held: string | null;
   in_digest: boolean;
