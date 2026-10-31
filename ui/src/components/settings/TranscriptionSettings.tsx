@@ -170,7 +170,7 @@ export default function TranscriptionSettings() {
       <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
         Meeting recordings will be transcribed on this computer, offline: nothing is sent anywhere. Choose a model and download
         it once. <strong>{data.defaults.model === data.settings.model ? 'The default, ' : ''}{chosen?.name ?? 'The chosen model'}</strong>
-        {chosen && chosen.memory_gb > 2 ? ' is the most accurate but takes longer; ' : ' '}you can change it here at any time.
+        {chosen && chosen.memory_gb > 2 ? ' is accurate but takes longer; ' : ' '}you can change it here at any time.
       </p>
       {data.downloading_elsewhere && (
         <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
@@ -210,9 +210,12 @@ export default function TranscriptionSettings() {
             </optgroup>
           )}
         </select>
+        <span role="note" style={{ maxWidth: 560, padding: '6px 10px', borderLeft: '3px solid var(--color-accent)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontWeight: 600, color: 'var(--color-text)' }}>
+          For the most accurate transcript of a meeting in one language, choose that language.
+        </span>
         <span style={hintStyle}>
-          Auto detects the language of each part of a meeting, so a meeting that switches between English and Japanese comes
-          out right. For the most accurate transcript of a meeting in one language, choose that language.
+          Auto detects the language of each part of a meeting, so it suits a meeting that switches languages. It can pick
+          the wrong language for a very short remark.
           {liveLanguageMissing && ` ${liveModel.name} does not have this language, so the live transcript detects it by itself.`}
         </span>
       </label>

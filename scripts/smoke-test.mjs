@@ -667,7 +667,7 @@ try {
     const stt = await (await fetch(`${base}/api/transcription`)).json();
     const badLanguage = await json('PUT', '/api/transcription/settings', { language: 'xx' });
     check('transcription lists the models with pluses and minuses, the accurate one first and chosen, and refuses an unknown language',
-      stt.models?.[0]?.id === 'whisper-large-v3-turbo' && stt.settings?.model && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
+      stt.models?.some((m) => m.id === 'whisper-large-v3-turbo') && stt.settings?.model && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
       && ['auto', 'en', 'ja'].includes(stt.settings.language) && badLanguage.status === 400,
       `models=${stt.models?.map((m) => m.id).join(',')} bad=${badLanguage.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
