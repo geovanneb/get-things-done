@@ -63,7 +63,7 @@ export default function MeetingsView() {
         <section style={cardStyle} aria-label="Transcript of the meeting">
           {transcript
             ? <TranscriptReader key={`${shown.id}/${transcript.file}/${transcript.name}/${transcript.sha256}`} meetingId={shown.id} title={shown.title} transcript={transcript}
-              canName={transcript.final && !shown.in_digest} onNamed={refetch}
+              canName={transcript.final && !shown.in_digest} onNamed={refetch} participants={shown.participants ?? []}
               onClose={() => { if (pickedMeeting) setPicked(null); else setClosed(shown.id); }} />
             : <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{shown.title}: the transcript appears here when it is ready.</p>}
         </section>
