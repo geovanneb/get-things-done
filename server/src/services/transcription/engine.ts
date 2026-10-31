@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ChildProcess, fork } from 'child_process';
-import { CATALOG, SPEAKER_MODEL, TranscriptionModelService, VAD } from '../transcriptionModels';
+import { CATALOG, languageFor, SPEAKER_MODEL, TranscriptionModelService, VAD } from '../transcriptionModels';
 import { readWavFormat } from './wav';
 import { whisperHelperPath } from './whisperHelper';
 import type { LanguageChange } from './languages';
@@ -174,7 +174,7 @@ export class TranscriptionEngine {
       await release();
       throw err;
     }
-    return this.recognize(wav, prepared, options.language ?? settings.language, options, release, false);
+    return this.recognize(wav, prepared, languageFor(id, options.language ?? settings.language), options, release, false);
   }
 
   /**
@@ -211,7 +211,7 @@ export class TranscriptionEngine {
           note = 'speaker detection failed';
         }
       }
-      const result = await this.recognize(wav, prepared, options.language ?? settings.language, { ...options, turns }, undefined, true);
+      const result = await this.recognize(wav, prepared, languageFor(id, options.language ?? settings.language), { ...options, turns }, undefined, true);
       return { ...result, speaker_note: note };
     } finally {
       busy = false;

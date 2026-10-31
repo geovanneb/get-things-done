@@ -46,3 +46,11 @@ export function markRepeats(text: string): string {
   }
   return out;
 }
+
+/**
+ * Whether any part holds a word: a letter or a digit, in any script. A model that does not know the meeting's
+ * language can return parts of only "," or "."; that is no speech found, whatever the number of parts.
+ */
+export function hasWords(texts: readonly string[]): boolean {
+  return texts.some((t) => /[\p{L}\p{N}]/u.test(t.replace(/\[repeated \d+ times\]/g, '')));
+}

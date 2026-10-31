@@ -240,8 +240,9 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   const model = (o['model'] as string | undefined) ?? base.model;
   return {
     model,
-    // Moving to a model without the language chosen goes back to Auto.
-    language: languageFor(model, (o['language'] as TranscriptionLanguage | undefined) ?? base.language, catalog),
+    // Kept as chosen, also when the model does not have it: Settings then says so, and each transcription gives the
+    // model Auto instead (`languageFor`), so the choice is back when a model that has it is chosen again.
+    language: (o['language'] as TranscriptionLanguage | undefined) ?? base.language,
     keep_recordings: (o['keep_recordings'] as boolean | undefined) ?? base.keep_recordings,
     speakers: (o['speakers'] as boolean | undefined) ?? base.speakers,
     live_model: o['live_model'] === undefined ? base.live_model : (o['live_model'] as string | null),

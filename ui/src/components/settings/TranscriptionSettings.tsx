@@ -202,6 +202,10 @@ export default function TranscriptionSettings() {
   const chosen = data.models.find((m) => m.id === data.settings.model);
   const liveModel = data.models.find((m) => m.id === data.settings.live_model);
   const liveLanguageMissing = liveModel && data.settings.language !== 'auto' && !liveModel.language_options?.some((l) => l.id === data.settings.language);
+  // A language the chosen model does not know is read as Auto, and speech in it can come out empty: say so, and keep
+  // it in the list rather than showing Auto as if it had been chosen.
+  const languageMissing = chosen && data.settings.language !== 'auto' && !chosen.language_options?.some((l) => l.id === data.settings.language);
+  const languageLabel = data.models.flatMap((m) => m.language_options ?? []).find((l) => l.id === data.settings.language)?.label ?? data.settings.language;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -241,6 +245,7 @@ export default function TranscriptionSettings() {
           onChange={(e) => void save({ language: e.target.value as TranscriptionLanguage })}
           style={{ maxWidth: 420, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}>
           <option value="auto">Auto (each part of the meeting in its own language)</option>
+          {languageMissing && <option value={data.settings.language}>{languageLabel} (not in {chosen.name})</option>}
           {chosen?.language_options?.filter((l) => l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
           {chosen?.language_options?.some((l) => !l.common) && (
             <optgroup label="Other languages">
@@ -248,6 +253,12 @@ export default function TranscriptionSettings() {
             </optgroup>
           )}
         </select>
+        {languageMissing && (
+          <span role="alert" style={{ maxWidth: 560, color: 'var(--color-warning)' }}>
+            {chosen.name} does not know {languageLabel}: it reads it as Auto, and speech in {languageLabel} can come out
+            empty. Choose a Whisper model for {languageLabel}.
+          </span>
+        )}
         <span role="note" style={{ maxWidth: 560, padding: '6px 10px', borderLeft: '3px solid var(--color-accent)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontWeight: 600, color: 'var(--color-text)' }}>
           For the most accurate transcript of a meeting in one language, choose that language.
         </span>
