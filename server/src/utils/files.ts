@@ -184,9 +184,27 @@ export async function zipFolder(dir: string, ownMarkdown: string): Promise<{ nam
   return { name: `${folderName}.zip`, data: buildZip(entries) };
 }
 
+/**
+ * An uploaded file's name as it is saved: letters and digits of any script (会議.wav, ação.pdf) with `_`, `.`
+ * and `-`; anything else becomes `_`. NFC, so the same name from a Mac and from Windows is the same name.
+ * Cut to `maxBytes` of UTF-8 before the extension, since file systems count bytes and CJK takes three each.
+ */
+export function safeFileName(name: string, maxBytes = 200): string {
+  const safe = path.basename(name).normalize('NFC').replace(/[^\p{L}\p{M}\p{N}_.-]/gu, '_');
+  if (Buffer.byteLength(safe) <= maxBytes) return safe;
+  const ext = path.extname(safe);
+  const keepExt = Buffer.byteLength(ext) < maxBytes / 2 ? ext : '';
+  let stem = '';
+  for (const ch of safe.slice(0, safe.length - keepExt.length)) {
+    if (Buffer.byteLength(stem + ch + keepExt) > maxBytes) break;
+    stem += ch;
+  }
+  return stem + keepExt;
+}
+
 /** Save attachments without following an existing file symlink or replacing entity metadata. */
 export async function saveAttachment(dir: string, originalName: string, buffer: Buffer, reserved: string): Promise<FolderFile> {
-  const name = topLevelName(path.basename(originalName).replace(/[^\w.-]/g, '_'));
+  const name = topLevelName(safeFileName(originalName));
   if (name.startsWith('.') || name.toLowerCase() === reserved.toLowerCase()) {
     throw new Error('Invalid attachment name: reserved file');
   }

@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import { createHash } from 'crypto';
 import { WorkspaceService } from './workspace';
-import { reservedSequence } from './idReservations';
+import { reserveIds, reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
-import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, topLevelName, FolderFile } from '../utils/files';
+import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
 import { moveToTrash } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
@@ -651,7 +651,7 @@ async function sameFileIn(dir: string, buffer: Buffer): Promise<string | null> {
 
 /** Sanitizes a name the way saveAttachment does, then adds -2, -3... so a second "notes.txt" never replaces the first. */
 async function uniqueName(dir: string, originalName: string): Promise<string> {
-  const safe = path.basename(originalName).replace(/[^\w.-]/g, '_') || 'file';
+  const safe = safeFileName(originalName) || 'file';
   const ext = path.extname(safe);
   const stem = safe.slice(0, safe.length - ext.length) || 'file';
   for (let n = 1; n < 1000; n++) {
@@ -1528,13 +1528,20 @@ export class ContextUpdateService {
     await fsp.rm(path.join(dir, 'proposals'), { recursive: true, force: true });
   }
 
+  /**
+   * Moves the update's folder to the trash. Its materials can be the only copy of what was uploaded: a
+   * digest's meetings leave the queue once it holds them, recordings and transcripts included. The id
+   * stays taken, so digest receipts and run history that name it never point at a newer update.
+   */
   async remove(id: string): Promise<void> {
     return this.serialized(id, async () => {
       const { update } = await this.read(id);
       // Applying may have written some files already; deleting the record would hide what happened.
       this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
       await this.requireNoRun(id, 'delete the update');
-      await fsp.rm(this.updateDir(id), { recursive: true, force: true });
+      const ws = workspaceService.getWorkspacePath();
+      await reserveIds([id]);
+      await moveToTrash(ws, await workspaceEntry(ws, this.updateDir(id)));
     });
   }
 }

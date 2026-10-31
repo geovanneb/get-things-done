@@ -5,11 +5,12 @@ import { sendFile } from '../utils/files';
 import { ContextUpdateService } from '../services/contextUpdateService';
 import { AgentRunnerService } from '../services/agentRunner';
 import { scheduleKaizenIntake } from '../services/kaizenIntake';
+import { utf8FileNames } from '../utils/uploadNames';
 
 const router = Router();
 const service = new ContextUpdateService();
 const runner = new AgentRunnerService();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limits: { fileSize: 50 * 1024 * 1024 } });
 
 const body = (req: Request): Record<string, unknown> =>
   (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;

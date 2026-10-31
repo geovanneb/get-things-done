@@ -370,8 +370,10 @@ test('each model offers the languages it has, and a language it lacks goes back 
   assert.equal(languageFor('whisper-large-v3-turbo', 'vi'), 'vi');
   const whisper = parseTranscriptionSettings({ model: 'whisper-large-v3-turbo', language: 'vi' });
   assert.equal(whisper.language, 'vi');
-  assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17' }, whisper).language, 'auto', 'a saved language the model lacks would stop its engine');
-  assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17', language: 'vi' }).language, 'auto');
+  // Kept as chosen when the model lacks it, so Settings can say so; each transcription gives that model Auto.
+  assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17' }, whisper).language, 'vi');
+  assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17', language: 'vi' }).language, 'vi');
+  assert.equal(languageFor('sensevoice-2024-07-17', parseTranscriptionSettings({ model: 'sensevoice-2024-07-17', language: 'vi' }).language), 'auto');
 });
 
 test('a second download waits its turn, can be taken out of the queue, and goes on after one that failed', async (t) => {
@@ -468,4 +470,20 @@ test('telling speakers apart is on by default, and can be turned off', () => {
   assert.equal(parseTranscriptionSettings({ speakers: false }).speakers, false);
   assert.equal(parseTranscriptionSettings({}, parseTranscriptionSettings({ speakers: false })).speakers, false);
   assert.throws(() => parseTranscriptionSettings({ speakers: 'yes' }), /Invalid speakers/);
+});
+
+test('Settings keep Portuguese when SenseVoice is chosen after it, so the page can say SenseVoice lacks it', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-lang-'));
+  const previous = process.env.ESB_MODELS_PATH;
+  process.env.ESB_MODELS_PATH = dir;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.ESB_MODELS_PATH; else process.env.ESB_MODELS_PATH = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+  const service = new TranscriptionModelService();
+  await service.updateSettings({ model: 'whisper-large-v3-turbo', language: 'pt' });
+  const view = await service.updateSettings({ model: 'sensevoice-2024-07-17' });
+  assert.equal(view.settings.language, 'pt');
+  assert.equal((await service.readSettings()).language, 'pt');
+  assert.equal(view.models.find((m) => m.id === 'sensevoice-2024-07-17')!.language_options!.some((l) => l.id === 'pt'), false, 'and the page sees SenseVoice has no Portuguese');
 });

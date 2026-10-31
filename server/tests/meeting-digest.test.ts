@@ -268,6 +268,29 @@ test('a published digest removed by hand before the handoff keeps its meetings o
   assert.match(made.message, /Made digest/);
 });
 
+test('deleting a digest moves its folder to the trash: it is the only copy of meetings that left the queue', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const a = await queueMeeting(service, 'Weekly sync', '2026-10-28', [['transcript.vtt', vtt('Jane Doe', 'Budget next week.')]]);
+  const made = (await service.runNow(new Date('2026-10-28T18:00:00'))).context_update!;
+  assert.deepEqual((await service.readQueue()).meetings, [], 'the meeting left the queue');
+
+  await updates.remove(made);
+  await assert.rejects(fsp.access(path.join(ws, 'context-updates', made)));
+  const trash = path.join(ws, '.situation-board', 'trash');
+  const [entry, ...others] = await fsp.readdir(trash);
+  assert.ok(entry?.endsWith(`-${made}`) && others.length === 0, 'one trash entry, named after the update');
+  const kept = await fsp.readFile(path.join(trash, entry!, 'materials', `${a}-transcript.vtt`), 'utf-8');
+  assert.match(kept, /Budget next week/, 'the transcript can still be got back');
+
+  // The next digest gets a new id, so the receipts and run history of the deleted one still name only it.
+  await queueMeeting(service, 'Review', '2026-10-29', [['notes.md', Buffer.from('Notes B')]]);
+  const next = (await service.runNow(new Date('2026-10-29T18:00:00'))).context_update!;
+  assert.ok(next > made, `${next} after ${made}`);
+  const receipts = await fsp.readFile(path.join(ws, '.situation-board', 'routines', 'meeting-digest-receipts.jsonl'), 'utf-8');
+  assert.equal(receipts.split(made).length - 1, 1, 'one receipt names the deleted digest');
+});
+
 test('a readable copy never replaces another original, whatever the upload order', async (t) => {
   await workspace(t);
   const service = new MeetingDigestService();

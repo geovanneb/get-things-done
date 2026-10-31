@@ -635,6 +635,20 @@ test('speakers are marked in the transcript, and when finding them fails the tra
   assert.match(await read(failed), /Fictional words\./);
 });
 
+test('parts with no words in more than a minute (a language the model does not know) are partial, not complete', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  // A fictional Portuguese meeting read by a model without Portuguese: parts of only punctuation.
+  const { engine } = fakeEngine(speaks([',', '.', '。', ', .'], 134));
+  const id = await queueRecording(queue, 'Fictional Orion meeting');
+  await new MeetingTranscriptionService(queue, fakeModels(), engine).tick();
+  await MeetingTranscriptionService.settled();
+  const r = await recording(queue, id);
+  assert.equal(r.status, 'partial');
+  assert.match(r.error ?? '', /No words were found .* may not know the meeting's language/);
+  assert.match((await queue.runNow(new Date('2026-10-30T18:00:00'))).message, /1 meeting waits for transcription/, 'the digest does not take it');
+});
+
 test('a recording fixed to a model that is not downloaded can switch to the model the page offered', async (t) => {
   await workspace(t);
   const queue = new MeetingDigestService();

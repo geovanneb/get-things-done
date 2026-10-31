@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as fs from 'node:fs';
 import { contextRange, cutsAround, RecentAudio, SHORTEST_TURN, speakerCuts, speakerOf, speakerTurns, splitAtChanges, splitLong } from '../src/services/transcription/parts';
-import { markRepeats } from '../src/services/transcription/repeats';
+import { hasWords, markRepeats } from '../src/services/transcription/repeats';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
@@ -415,7 +415,12 @@ test('speaker turns: numbered by who speaks first, a short sound is no speaker, 
   assert.equal(speakerOf(0, 10, turns), 1, 'pauses in a part do not count against its voice');
   assert.equal(speakerOf(7, 10, turns), undefined, 'half one voice, half another');
   assert.equal(speakerOf(30, 31, turns), undefined, 'nobody known there');
-  assert.equal(speakerOf(0, 10, [{ start: 4, end: 4.1, speaker: 1 }]), undefined, 'one known moment says nothing about ten seconds');
+  assert.equal(speakerOf(0, 10, [{ start: 4, end: 4.1, speaker: 1 }, { start: 20, end: 25, speaker: 2 }]), undefined, 'one known moment says nothing about ten seconds');
+  // One voice in the whole recording: every part with speech is it, even where the voice was hardly heard, or a short
+  // sound (no voice) overlaps.
+  const alone = [{ start: 6, end: 9, speaker: 1 }, { start: 12, end: 18, speaker: 1 }, { start: 4.2, end: 5, speaker: 0 }];
+  assert.equal(speakerOf(4, 10, alone), 1, 'the first sentence of someone who speaks alone');
+  assert.equal(speakerOf(0, 3, alone), 1);
   assert.equal(speakerOf(0, 10, [{ start: 0, end: 9, speaker: 1 }, { start: 3, end: 7, speaker: 2 }]), undefined, 'two voices at once');
   assert.deepEqual(cutsAround([2, 5, 9], 5, 8), { before: 5, after: 9 });
   assert.deepEqual(cutsAround([2, 5, 9], 0.5, 1), { before: 0, after: 2 });
@@ -485,4 +490,9 @@ test('finding speakers failing leaves the transcript, the slot is kept between t
   stop.abort();
   await assert.rejects(engine.transcribeWithSpeakers(wav, { signal: stop.signal }), /Cancelled/);
   assert.equal(TranscriptionEngine.isBusy(), false);
+});
+
+test('words in any script count; punctuation and repeat marks alone do not', () => {
+  assert.equal(hasWords([',', '.', ' 。', '、', '[repeated 7 times]']), false);
+  for (const text of ['Olá', '中学', 'ありがとう', '42', 'Привет']) assert.equal(hasWords([',', text]), true, text);
 });

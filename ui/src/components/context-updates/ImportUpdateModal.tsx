@@ -12,6 +12,8 @@ const MAX_FILE = 50 * 1024 * 1024;
 const MAX_RECORDING = 4_000_000_000;
 const RECORDING = /\.(wav|m4a|mp3|aac|flac|aiff?|caf|ogg|opus|webm|wma|mp4|mov)$/i;
 const isRecording = (name: string) => RECORDING.test(name);
+/** Recordings a meeting for the digest gets transcribed from (the server says when this computer cannot). */
+const TRANSCRIBED = /\.(wav|m4a|mp3|aac|flac|aiff?|caf)$/i;
 /** The limit for a file: in a meeting for the digest a recording may be 4 GB; everything else 50 MB. */
 const limitFor = (file: File, meeting: boolean) => (meeting && isRecording(file.name) ? MAX_RECORDING : MAX_FILE);
 const limitLabel = (file: File, meeting: boolean) => (limitFor(file, meeting) === MAX_RECORDING ? '4 GB' : '50 MB');
@@ -110,7 +112,8 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
 
   const hasContent = files.length > 0 || text.trim().length > 0;
   const tooBig = files.filter((f) => f.size > limitFor(f, mode === 'meeting'));
-  const risky = files.filter((f) => hardToRead(f.name));
+  // A recording in a meeting for the digest is transcribed first, so the agent reads its transcript.
+  const risky = files.filter((f) => hardToRead(f.name) && !(mode === 'meeting' && TRANSCRIBED.test(f.name)));
 
   const queueMeeting = async () => {
     setSaving('Saving...');
@@ -216,7 +219,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
             <p style={{ ...hintStyle, margin: '6px 0 0' }}>
               A recording of the meeting can go in too, up to 4 GB: WAV, and on a Mac also M4A, MP3, AAC, FLAC or AIFF. It is
               transcribed on this computer before a digest takes the meeting (choose the model in Settings &gt; Transcription);
-              transcribing arrives in a next version, and until then the meeting waits in the queue.
+              until its transcript is ready, the meeting waits in the queue.
             </p>
           )}
           {files.length > 0 && (

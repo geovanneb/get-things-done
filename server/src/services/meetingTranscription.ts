@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft, namesFor, parseSpeakerNames, SPEAKER_LABEL, transcriptSpeakers, MAX_SPEAKER_NAMES } from './meetingDigestService';
 import { TranscriptionModelService, CATALOG, languagesFor, SPEAKER_MODEL } from './transcriptionModels';
 import type { LanguageChange } from './transcription/languages';
+import { hasWords } from './transcription/repeats';
 import { TranscriptionEngine, Segment, engineEvents, type TranscribeOptions } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
 import { HeldLock, tryLock, unlock } from '../utils/fileLock';
@@ -35,8 +36,15 @@ import { fileInside } from '../utils/files';
  * `running` by a dashboard that is gone goes back to `pending`. The recording itself is always kept.
  */
 
-/** No speech in more than this much audio makes a transcript suspicious: it is kept as partial, not used. */
+/** No words in more than this much audio makes a transcript suspicious: it is kept as partial, not used. */
 const EMPTY_AUDIO_SECONDS = 60;
+
+/** Why a transcript without words is only partial. Parts without words mean speech the model could not read. */
+function noWords(model: string, parts: number): string {
+  if (parts === 0) return 'No speech was found in more than a minute of audio.';
+  const name = CATALOG.find((m) => m.id === model)?.name ?? model;
+  return `No words were found in more than a minute of speech. ${name} may not know the meeting's language: choose another model or the language in Settings > Transcription, then try again.`;
+}
 const MAC_CONVERTER = '/usr/bin/afconvert';
 /** Progress reaches the dashboard at most this often. */
 const NOTIFY_MS = 1000;
@@ -478,7 +486,7 @@ export class MeetingTranscriptionService {
         await this.queue.saveMeeting(meeting);
         return;
       }
-      const complete = !error && !(segments.length === 0 && seconds > EMPTY_AUDIO_SECONDS);
+      const complete = !error && !(!hasWords(segments.map((x) => x.text)) && seconds > EMPTY_AUDIO_SECONDS);
       const stem = entry.name.replace(/\.[^.]+$/, '') || 'recording';
       let name = `${stem}.transcript.md`;
       for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
@@ -492,7 +500,7 @@ export class MeetingTranscriptionService {
         meeting.files.push({ name, size: content.length, sha256 });
         const result = nextRecording(r, {
           status: complete ? 'done' : 'partial', model, language, transcript: name, transcript_sha256: sha256, seconds,
-          ...(error ? { error: error.message } : !complete ? { error: 'No speech was found in more than a minute of audio.' } : {}),
+          ...(error ? { error: error.message } : !complete ? { error: noWords(model, segments.length) } : {}),
         });
         // A complete transcript is chosen over the live draft, in this same step. A partial one leaves both, for the
         // user to choose between.

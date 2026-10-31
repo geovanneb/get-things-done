@@ -3,10 +3,11 @@ import { param } from '../utils/params';
 import multer from 'multer';
 import { OutputService } from '../services/outputService';
 import { sendFile, sendZip } from '../utils/files';
+import { utf8FileNames } from '../utils/uploadNames';
 
 const router = Router();
 const outputService = new OutputService();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // GET /api/outputs/templates
 router.get('/templates', async (req: Request, res: Response) => {

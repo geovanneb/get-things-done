@@ -7,6 +7,7 @@ import { MeetingTranscriptionService } from '../services/meetingTranscription';
 import { MeetingRecordingService } from '../services/meetingRecording';
 import { MeetingLiveTranscriptService } from '../services/meetingLiveTranscript';
 import { fileInside, sendFile, topLevelName } from '../utils/files';
+import { utf8FileNames } from '../utils/uploadNames';
 
 const router = Router();
 const service = new MeetingDigestService();
@@ -29,7 +30,7 @@ const streamToMeeting: multer.StorageEngine = {
     fsp.rm(file.path, { force: true }).then(() => callback(null), (err: Error) => callback(err));
   },
 };
-const upload = multer({ storage: streamToMeeting, limits: { fileSize: MAX_RECORDING_BYTES, files: 1 } });
+const upload = multer({ storage: streamToMeeting, ...utf8FileNames, limits: { fileSize: MAX_RECORDING_BYTES, files: 1 } });
 
 const body = (req: Request): Record<string, unknown> =>
   (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
