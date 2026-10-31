@@ -28,6 +28,13 @@ minor versions may include breaking changes.
   the bottom. In the collapsed sidebar the group headings become thin dividers. "Outputs" is
   now called "Output templates", like its page. (#191)
 
+### Fixed
+
+- **The Context dot no longer stays after you delete an update.** Deleting, closing, approving or
+  reopening a context update now refreshes the sidebar dot and "Waiting on you" at once, instead of
+  waiting for the file watcher. When the live connection to the server drops and comes back, the
+  dashboard reads everything again, so nothing that changed meanwhile stays out of date. (#201)
+
 ## [0.7.0] - 2026-10-29
 
 Get Things Done now comes as a **desktop app for Mac and Windows**: download it, open it, and a

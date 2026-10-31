@@ -396,6 +396,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   }, [data?.status]);
 
   const notify = (type: 'success' | 'error' | 'info', message: string) => dispatch({ type: 'ADD_NOTIFICATION', payload: { type, message } });
+  // The sidebar dot and "Waiting on you" count the same updates: tell them too, not only this page (#201).
+  const changed = () => dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
 
   useEffect(() => {
     if (!data) return;
@@ -440,7 +442,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     try {
       await action();
       if (success) notify('success', success);
-      refetch();
+      changed();
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
@@ -558,7 +560,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       : `Delete this update and its materials${confirmedCount > 0 ? ', including the meeting records you confirmed' : ''}? Nothing in your context has changed yet.`;
     if (!window.confirm(msg)) return;
     void (async () => {
-      try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update deleted.'); onBack(); } catch (err) {
+      try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update deleted.'); onBack(); changed(); } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Could not delete.');
       }
     })();
@@ -611,13 +613,13 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             onCopied={() => setCopiedFor(u.status)} />
         )}
 
-        {['ready', 'analyzing', 'in_review'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={refetch} onRunning={setRunning} />}
+        {['ready', 'analyzing', 'in_review'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
         {(u.status === 'approved' || u.status === 'applying') && !running && (
           <CommandBox ref={u.status === 'approved' ? copyRef : undefined} command={`/gtd-context-apply ${u.id}`} emphasis={u.status === 'approved'}
             label={u.status === 'approved' ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Run in Claude Code to apply your accepted changes'}
             onCopied={() => setCopiedFor(u.status)} />
         )}
-        {['approved', 'applying', 'done'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={refetch} onRunning={setRunning} />}
+        {['approved', 'applying', 'done'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
         {(u.status === 'analyzing' || u.status === 'applying') && !running && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             Taking too long, or the agent stopped? Run the same command again: it picks up where it left off.

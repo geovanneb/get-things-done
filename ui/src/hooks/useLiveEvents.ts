@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAppDispatch, DataScope } from '../store';
+import { RECONNECT_DELAY_MS, streamTracker } from '../utils/liveEvents';
 
 interface FileChangeEvent {
   type: 'change' | 'add' | 'unlink';
@@ -30,11 +31,9 @@ export function useLiveEvents(): void {
 
   useEffect(() => {
     let source: EventSource | null = null;
-    try {
-      source = new EventSource('/api/events');
-    } catch {
-      return;
-    }
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+    const stream = streamTracker();
 
     const handleFileChange = (e: MessageEvent) => {
       try {
@@ -45,19 +44,46 @@ export function useLiveEvents(): void {
       }
     };
 
+    // Back after a drop, or through at last: changes made meanwhile were never announced, so read everything once (#201).
+    const handleConnected = () => {
+      if (stream.connected()) dispatch({ type: 'ALL_DATA_CHANGED' });
+    };
+
     // Model downloads live outside the workspace, so the server announces them itself.
     const handleTranscription = () => dispatch({ type: 'DATA_CHANGED', payload: 'transcription' });
-
-    source.addEventListener('file_change', handleFileChange as EventListener);
-    source.addEventListener('transcription', handleTranscription);
     // More live transcript, or its status changed: the page reads on from its own number, so a missed notice costs nothing.
     const handleLive = () => dispatch({ type: 'DATA_CHANGED', payload: 'live-transcript' });
-    source.addEventListener('live-transcript', handleLive);
+
+    // The browser retries a dropped stream by itself, but gives up for good on some errors (a failed restart,
+    // for example). Then open a new one after a short wait.
+    const handleError = () => {
+      stream.failed();
+      if (stopped || source?.readyState !== EventSource.CLOSED || retry) return;
+      retry = setTimeout(() => {
+        retry = null;
+        open();
+      }, RECONNECT_DELAY_MS);
+    };
+
+    const open = () => {
+      source?.close();
+      try {
+        source = new EventSource('/api/events');
+      } catch {
+        return;
+      }
+      source.addEventListener('connected', handleConnected);
+      source.addEventListener('file_change', handleFileChange as EventListener);
+      source.addEventListener('transcription', handleTranscription);
+      source.addEventListener('live-transcript', handleLive);
+      source.addEventListener('error', handleError);
+    };
+
+    open();
 
     return () => {
-      source?.removeEventListener('file_change', handleFileChange as EventListener);
-      source?.removeEventListener('transcription', handleTranscription);
-      source?.removeEventListener('live-transcript', handleLive);
+      stopped = true;
+      if (retry) clearTimeout(retry);
       source?.close();
     };
   }, [dispatch]);

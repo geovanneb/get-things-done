@@ -343,7 +343,7 @@ export default function ContextView() {
   const { id: updateId } = useParams<{ id?: string }>();
   const showUpdates = location.pathname.startsWith('/context/updates');
   const updatesVersion = useDataVersion('context-updates');
-  const { data: updates, refetch: refetchUpdates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
+  const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
   const updatesWaiting = (updates ?? []).filter((u) => ['ready', 'in_review', 'approved'].includes(u.status)).length;
   const [importOpen, setImportOpen] = useState(false);
   // Kept here, not in the list, so opening an update and coming back keeps the filter and the page.
@@ -425,7 +425,8 @@ export default function ContextView() {
 
   const handleImported = (update: ContextUpdate, uploadErrors: string[]) => {
     setImportOpen(false);
-    refetchUpdates();
+    // Also refreshes the sidebar dot, which counts the same updates.
+    dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
     if (uploadErrors.length) {
       dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: `Saved, but some files did not upload: ${uploadErrors.join('; ')}` } });
     }
