@@ -823,6 +823,11 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
 - **Language**: Auto detects the language of each part of a meeting, so a meeting
   that switches between English and Japanese comes out right; for the most accurate
   transcript of a meeting in one language, choose that language.
+- **Spoken language during a recording**: the recording banner, and in the desktop app
+  the menu-bar menu, change the language from that moment on: the live transcript and
+  the transcript made after the meeting both follow it. It applies from the audio saved
+  so far, so to the speech part that starts next. Whisper then writes that language;
+  SenseVoice takes it as a hint and still follows clear speech in another language.
 - Downloads show their progress, can be cancelled and continue where they stopped. Press
   Download on a second model while one runs and it waits its turn;
   every file is checked against its pinned checksum before it is used. On a computer

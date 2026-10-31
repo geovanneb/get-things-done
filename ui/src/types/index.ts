@@ -758,12 +758,14 @@ export interface RoutinePreview {
 
 export type TranscriptionLanguage = string;
 
+export interface SpokenLanguage { id: string; label: string; common?: boolean }
+
 export interface TranscriptionModel {
   id: string;
   name: string;
   summary: string;
   languages: string;
-  language_options?: { id: string; label: string; common?: boolean }[];
+  language_options?: SpokenLanguage[];
   pros: string[];
   cons: string[];
   memory_gb: number;

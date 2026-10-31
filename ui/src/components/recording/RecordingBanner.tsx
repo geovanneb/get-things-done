@@ -49,6 +49,22 @@ export function RecordingBanner() {
           {r.systemLevel !== null && <Meter label="Computer" level={r.systemLevel} />}
           <p style={line}>Saved {clock(r.saved)} of {clock(r.captured)} captured.{r.systemLevel === null ? ' Microphone only: people heard through headphones are not recorded.' : ''}</p>
           {r.gap > 0 && <p role="status" style={{ ...line, color: 'var(--color-warning)' }}>{clock(r.gap)} of this meeting was not captured, for example while the computer slept.</p>}
+          {r.status === 'recording' && r.languages.length > 0 && (
+            <label style={{ ...line, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ flexShrink: 0 }}>Spoken language</span>
+              <select aria-label="Spoken language" value={r.language} onChange={(e) => void r.setLanguage(e.target.value)}
+                style={{ flex: 1, minWidth: 0, padding: '2px 4px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}>
+                <option value="auto">Auto</option>
+                {r.languages.filter((l) => l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                {r.languages.some((l) => !l.common) && (
+                  <optgroup label="Other languages">
+                    {r.languages.filter((l) => !l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+          )}
+          {r.languageError && <p role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{r.languageError}</p>}
           <Link to="/meetings" style={{ ...line, color: 'var(--color-accent)' }}>Open Meetings for the transcript</Link>
           {r.lost.map((text) => <p key={text} role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{text}</p>)}
           {r.warning && <p role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{r.warning}</p>}

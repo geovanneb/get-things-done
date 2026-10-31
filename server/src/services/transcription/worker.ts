@@ -4,17 +4,19 @@
  *
  * Messages in (one request per process): { type: 'version' } | { type: 'check', model } | { type: 'transcribe', model, wav, language }
  *               | { type: 'follow', model, wav, language }, then for a follow job { type: 'committed' | 'end', bytes }
+ *                 and { type: 'language', at, language }
  * Messages out: { type: 'version', version } | { type: 'loaded', ms } | { type: 'progress', done, total }
  *               | { type: 'segment', start, end, text } | { type: 'done', seconds, segments } | { type: 'error', message }
  */
 import * as fsp from 'fs/promises';
 import type { EngineModel, WorkerControl, WorkerRequest, WorkerReply } from './protocol';
+import { languageAt, type LanguageChange } from './languages';
 import { readWavFormat, wavChunks, WavError } from './wav';
 
 const SAMPLE_RATE = 16000;
 
 interface SherpaStream { acceptWaveform(input: { samples: Float32Array; sampleRate: number }): void }
-interface SherpaRecognizer { createStream(): SherpaStream; decodeAsync(stream: SherpaStream): Promise<{ text: string }> }
+interface SherpaRecognizer { createStream(): SherpaStream; decodeAsync(stream: SherpaStream): Promise<{ text: string }>; setConfig(config: unknown): void }
 interface SherpaVad { acceptWaveform(samples: Float32Array): void; isEmpty(): boolean; front(enableExternalBuffer: boolean): { samples: Float32Array; start: number }; pop(): void; flush(): void }
 interface SherpaResampler { resample(samples: Float32Array): Float32Array; flush(samples: Float32Array): Float32Array }
 interface Sherpa {
@@ -60,13 +62,25 @@ function newVad(sherpa: Sherpa, model: EngineModel): SherpaVad {
   }, 60);
 }
 
-/** Recognizes each finished speech segment and sends it; returns how many had text. */
-async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad): Promise<number> {
+/** The languages of a job: the one the recognizer holds now, and when it should change. */
+interface Languages { model: EngineModel; start: string; changes: LanguageChange[]; current: string; lastPart: number }
+const languages = (model: EngineModel, start: string, changes: LanguageChange[]): Languages => ({ model, start, changes, current: start, lastPart: -1 });
+
+/** Recognizes each finished speech segment and sends it; returns how many had text. A segment's start decides its language. */
+async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Languages): Promise<number> {
   let found = 0;
   while (!vad.isEmpty()) {
     // A copy: Electron, where this worker runs in the desktop app, refuses buffers that live in native memory.
     const segment = vad.front(false);
     vad.pop();
+    // Here, between two decodes: a change arriving during a decode only joins the list.
+    const seconds = segment.start / SAMPLE_RATE;
+    job.lastPart = seconds;
+    const language = languageAt(job.start, job.changes, seconds);
+    if (language !== job.current) {
+      recognizer.setConfig(recognizerConfig(job.model, language));
+      job.current = language;
+    }
     const stream = recognizer.createStream();
     stream.acceptWaveform({ samples: segment.samples, sampleRate: SAMPLE_RATE });
     const result = await recognizer.decodeAsync(stream);
@@ -80,8 +94,12 @@ async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad): Promise<
 }
 
 /** What the dashboard said about a recording being followed: saved so far, and sealed at. */
-const control = { committed: 0, end: null as number | null, wake: null as (() => void) | null };
+const control = { committed: 0, end: null as number | null, wake: null as (() => void) | null, changes: [] as LanguageChange[], lateLanguage: null as ((at: number) => boolean) | null, late: false };
 function onControl(message: WorkerControl): void {
+  if (message?.type === 'language') {
+    control.changes.push({ at: message.at, language: message.language });
+    if (control.lateLanguage?.(message.at)) control.late = true;
+  }
   if (message?.type === 'committed' && Number.isSafeInteger(message.bytes)) control.committed = Math.max(control.committed, message.bytes);
   if (message?.type === 'end' && Number.isSafeInteger(message.bytes)) control.end = message.bytes;
   control.wake?.();
@@ -94,6 +112,8 @@ function onControl(message: WorkerControl): void {
 async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'follow' }>): Promise<void> {
   const recognizer = await load(sherpa, request.model, request.language);
   const vad = newVad(sherpa, request.model);
+  const job = languages(request.model, request.language, control.changes);
+  control.lateLanguage = (at) => job.lastPart >= at;
   const file = await fsp.open(request.wav, 'r');
   const HEADER = 44;
   const STEP = 2 * SAMPLE_RATE * 2; // two seconds of audio per read
@@ -122,7 +142,7 @@ async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'f
         for (; i + 512 <= all.length; i += 512) vad.acceptWaveform(all.subarray(i, i + 512));
         pending = all.slice(i);
         read += size;
-        segments += await decodeAll(recognizer, vad);
+        segments += await decodeAll(recognizer, vad, job);
         const done = read / (SAMPLE_RATE * 2);
         if (done - lastProgress >= 5) {
           lastProgress = done;
@@ -139,8 +159,8 @@ async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'f
   }
   if (pending.length) vad.acceptWaveform(pending);
   vad.flush();
-  segments += await decodeAll(recognizer, vad);
-  send({ type: 'done', seconds: read / (SAMPLE_RATE * 2), segments, bytes: read });
+  segments += await decodeAll(recognizer, vad, job);
+  send({ type: 'done', seconds: read / (SAMPLE_RATE * 2), segments, bytes: read, ...(control.late ? { late_language: true } : {}) });
 }
 
 async function transcribe(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'transcribe' }>): Promise<void> {
@@ -151,7 +171,8 @@ async function transcribe(sherpa: Sherpa, request: Extract<WorkerRequest, { type
   let segments = 0;
   let fed = 0;
   let pending = new Float32Array(0);
-  const decode = async () => { segments += await decodeAll(recognizer, vad); };
+  const job = languages(request.model, request.language, request.changes ?? []);
+  const decode = async () => { segments += await decodeAll(recognizer, vad, job); };
   // The VAD takes 512 samples at a time; what is left over waits for the next chunk.
   const feed = async (samples: Float32Array) => {
     const all = new Float32Array(pending.length + samples.length);

@@ -67,6 +67,12 @@ router.put('/:id/recording', express.raw({ type: 'application/octet-stream', lim
   res.json(await recording.append(queueId(param(req, 'id')), req.get('x-recording-token') ?? '', offset, req.body as Buffer));
 });
 
+// PUT /api/meeting-queue/:id/recording/language  { token, language }  the language being spoken from now on
+router.put('/:id/recording/language', async (req: Request, res: Response) => {
+  const { token, language } = req.body as { token?: string; language?: unknown };
+  res.json(await recording.setLanguage(queueId(param(req, 'id')), token as string, language));
+});
+
 // GET /api/meeting-queue/:id/recording/transcript?from=N  the live transcript of the recording being made, from segment N
 router.get('/:id/recording/transcript', async (req: Request, res: Response) => {
   const from = typeof req.query['from'] === 'string' && /^\d{1,9}$/.test(req.query['from']) ? Number(req.query['from']) : 0;

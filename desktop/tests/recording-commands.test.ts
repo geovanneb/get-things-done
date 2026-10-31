@@ -17,6 +17,27 @@ test('a newer command replaces one the page has not taken', () => {
   assert.equal(commands.take(), 'stop');
 });
 
+test('a language never replaces a Stop, and goes with its recording', () => {
+  let now = 1000;
+  const commands = new RecordingCommands(() => now);
+  commands.leave('stop');
+  commands.leave('language:ja');
+  assert.equal(commands.take(), 'stop');
+  commands.leave('language:ja');
+  commands.leave('language:en');
+  assert.equal(commands.take(), 'language:en');
+  commands.leave('language:ja');
+  commands.dropLanguage();
+  assert.equal(commands.take(), null);
+  commands.leave('stop');
+  commands.dropLanguage();
+  assert.equal(commands.take(), 'stop');
+  commands.leave('stop');
+  now += COMMAND_TTL_MS + 1;
+  commands.leave('language:ko');
+  assert.equal(commands.take(), 'language:ko', 'a Stop too old to count');
+});
+
 test('a command left long ago does not open the dialog out of nowhere', () => {
   let now = 1000;
   const commands = new RecordingCommands(() => now);

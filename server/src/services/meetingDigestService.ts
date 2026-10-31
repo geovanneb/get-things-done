@@ -17,6 +17,7 @@ import { reserveIds, reservedSequence } from './idReservations';
 import { processAlive } from './runState';
 import { AgentRunnerService } from './agentRunner';
 import { readWavFormat, WavError } from './transcription/wav';
+import { knownLanguage, parseLanguageChanges, type LanguageChange } from './transcription/languages';
 
 const workspaceService = new WorkspaceService();
 const contextUpdateService = new ContextUpdateService();
@@ -163,9 +164,16 @@ export interface LiveRecording {
   name: string;
   /** How much audio was sealed, once finalizing. */
   sealed_bytes?: number;
+  /** The language it started with, fixed at the start: Settings may change during the meeting. */
+  language?: string;
+  /** Changes of the spoken language during the recording. */
+  language_changes?: LanguageChange[];
   /** The model and language to transcribe it with, fixed when it was sealed; every later Finish uses the same. */
-  target?: { model: string; language: string };
+  target?: RecordingTarget;
 }
+
+/** What to transcribe a recording with. `changes`: when the spoken language changed during the recording. */
+export interface RecordingTarget { model: string; language: string; changes?: LanguageChange[] }
 
 /** The manifest's record of a recording in progress. One that cannot be read is kept as damaged, never dropped: it protects audio. */
 function parseLive(value: unknown): LiveRecording | undefined {
@@ -178,8 +186,17 @@ function parseLive(value: unknown): LiveRecording | undefined {
   return {
     generation: o['generation'] as string, token_sha256: o['token_sha256'] as string, state: o['state'] as LiveRecording['state'], started_at: text('started_at'), name: o['name'] as string,
     ...(o['state'] === 'finalizing' ? { sealed_bytes: o['sealed_bytes'] as number } : {}),
+    ...parseLiveLanguage(o),
     ...(parseTarget(o['target']) ? { target: parseTarget(o['target'])! } : {}),
   };
+}
+
+/** Language changes that cannot be read must not leave a forced language in place: the recording goes to Auto. */
+function parseLiveLanguage(o: Record<string, unknown>): Pick<LiveRecording, 'language' | 'language_changes'> {
+  if (o['language'] === undefined && o['language_changes'] === undefined) return {};
+  const changes = o['language_changes'] === undefined ? [] : parseLanguageChanges(o['language_changes']);
+  if (!knownLanguage(o['language']) || !changes) return { language: 'auto' };
+  return { language: o['language'], ...(changes.length ? { language_changes: changes } : {}) };
 }
 
 /** A file name the queue may use: at the top of the meeting's folder, not hidden, not the manifest. */
@@ -216,7 +233,7 @@ export interface RecordingState {
    */
   draft?: TranscriptDraft;
   /** The model and language to transcribe with, fixed when the recording was finished, whatever Settings say later. */
-  target?: { model: string; language: string };
+  target?: RecordingTarget;
 }
 
 export interface TranscriptDraft { transcript: string; transcript_sha256: string; model: string; language: string; seconds: number }
@@ -274,9 +291,14 @@ function parseDraft(value: unknown): TranscriptDraft | undefined {
   return ok ? { transcript: d['transcript'] as string, transcript_sha256: d['transcript_sha256'] as string, model: d['model'] as string, language: d['language'] as string, seconds: d['seconds'] as number } : undefined;
 }
 
-function parseTarget(value: unknown): { model: string; language: string } | undefined {
+function parseTarget(value: unknown): RecordingTarget | undefined {
   const t = obj(value);
-  return typeof t['model'] === 'string' && t['model'] && typeof t['language'] === 'string' && t['language'] ? { model: t['model'] as string, language: t['language'] as string } : undefined;
+  if (typeof t['model'] !== 'string' || !t['model'] || typeof t['language'] !== 'string' || !t['language']) return undefined;
+  const target = { model: t['model'], language: t['language'] };
+  if (t['changes'] === undefined) return target;
+  // As for a recording in progress: changes that cannot be read are never replaced by one forced language.
+  const changes = parseLanguageChanges(t['changes']);
+  return changes ? { ...target, changes } : { ...target, language: 'auto' };
 }
 
 /** A file streamed to disk, not yet part of its meeting. */
