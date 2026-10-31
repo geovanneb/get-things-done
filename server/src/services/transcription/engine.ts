@@ -262,6 +262,7 @@ export class TranscriptionEngine {
       vad: path.join(vad, VAD.files[0]!.name),
       // Leave a core for the dashboard and the rest of the computer.
       threads: Math.max(1, Math.min(8, os.availableParallelism() - 1)),
+      ...(entry.engine.noArena ? { noArena: true } : {}),
     };
   }
 

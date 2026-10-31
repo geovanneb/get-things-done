@@ -8,6 +8,7 @@
  *               | { type: 'segment', start, end, text } | { type: 'done', seconds, segments } | { type: 'error', message }
  */
 import * as fsp from 'fs/promises';
+import * as path from 'path';
 import type { EngineModel, WorkerControl, WorkerRequest, WorkerReply } from './protocol';
 import { readWavFormat, wavChunks, WavError } from './wav';
 
@@ -36,16 +37,26 @@ function loadSherpa(): Sherpa {
   return require('sherpa-onnx-node') as Sherpa;
 }
 
+/** The engine reads this option from a file. By name, from the model's folder: the engine cannot open every path on Windows. */
+const NO_ARENA_FILE = 'no-arena.config';
+async function prepareNoArena(model: EngineModel): Promise<void> {
+  const folder = path.dirname(model.files['encoder']!);
+  await fsp.writeFile(path.join(folder, NO_ARENA_FILE), 'EnableCpuMemArena=0\n');
+  process.chdir(folder);
+}
+
 /** The engine's settings for a model. Auto language is an empty string: each segment is detected on its own. */
 function recognizerConfig(model: EngineModel, language: string): unknown {
   const lang = language === 'auto' ? '' : language;
   const modelConfig = model.kind === 'whisper'
     ? { whisper: { encoder: model.files.encoder, decoder: model.files.decoder, language: lang, task: 'transcribe', tailPaddings: -1 }, tokens: model.files.tokens }
     : { senseVoice: { model: model.files.model, language: lang, useInverseTextNormalization: 1 }, tokens: model.files.tokens };
-  return { featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 }, modelConfig: { ...modelConfig, numThreads: model.threads, provider: 'cpu', debug: 0 } };
+  const provider = model.noArena ? `cpu:${NO_ARENA_FILE}` : 'cpu';
+  return { featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 }, modelConfig: { ...modelConfig, numThreads: model.threads, provider, debug: 0 } };
 }
 
 async function load(sherpa: Sherpa, model: EngineModel, language: string): Promise<SherpaRecognizer> {
+  if (model.noArena) await prepareNoArena(model);
   const started = performance.now();
   const recognizer = await sherpa.OfflineRecognizer.createAsync(recognizerConfig(model, language));
   send({ type: 'loaded', ms: Math.round(performance.now() - started) });

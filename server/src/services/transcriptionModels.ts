@@ -42,7 +42,11 @@ export interface CatalogModel {
   memory_gb: number;
   files: ModelFile[];
   /** How the transcription engine uses the files: which kind of model, and which file plays which part. */
-  engine?: { kind: 'whisper' | 'sensevoice'; files: Record<string, string> };
+  /**
+   * `noArena`: the engine takes its memory in small pieces instead of one growing block. Large-v3 needs it in the desktop
+   * app, whose allocator ends the process on that block; it costs other models speed.
+   */
+  engine?: { kind: 'whisper' | 'sensevoice'; files: Record<string, string>; noArena?: boolean };
 }
 
 /** `auto`, or a language code of the model; see `languageFor`. */
@@ -115,7 +119,7 @@ export const CATALOG: CatalogModel[] = [
     pros: ['The most accurate transcripts, also of short remarks', 'Full punctuation', '100 languages'],
     cons: ['Slow: about 1.4 times faster than real time, so an 8-hour meeting takes nearly 6 hours', 'Needs about 6 GB of memory while transcribing', 'A 1.8 GB download'],
     memory_gb: 6,
-    engine: { kind: 'whisper', files: { encoder: 'large-v3-encoder.int8.onnx', decoder: 'large-v3-decoder.int8.onnx', tokens: 'large-v3-tokens.txt' } },
+    engine: { kind: 'whisper', files: { encoder: 'large-v3-encoder.int8.onnx', decoder: 'large-v3-decoder.int8.onnx', tokens: 'large-v3-tokens.txt' }, noArena: true },
     files: [
       { name: 'large-v3-encoder.int8.onnx', url: `${HF}/${WHISPER_V3_REPO}/resolve/${WHISPER_V3_COMMIT}/large-v3-encoder.int8.onnx`, size: 766671985, sha256: 'd531cf17248acc43e8c09b472a0877055e770877857a5332fc1304b36534ec85' },
       { name: 'large-v3-decoder.int8.onnx', url: `${HF}/${WHISPER_V3_REPO}/resolve/${WHISPER_V3_COMMIT}/large-v3-decoder.int8.onnx`, size: 1008265203, sha256: 'ebc6bfd88e162a46cb3edee8a7e727e1dcbc65cabecb19e2573695e4d495e1af' },
