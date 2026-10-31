@@ -399,3 +399,25 @@ test('with speakers wanted, a live transcript of the chosen model stays a draft:
   assert.ok(r.draft);
   assert.deepEqual(r.target, { model: 'fast', language: 'auto', speakers: true });
 });
+
+test('no audio for a minute (the recording page is gone): the live job lets go of the engine, and the recording stays', async (t) => {
+  const ws = await workspace(t);
+  const { engine, state } = fakeEngine();
+  const s = services(ws, fakeModels(), engine);
+  const { id, generation } = await record(s, 2);
+  const job = MeetingLiveTranscriptService.job(generation)!;
+  const realNow = Date.now;
+  let now = realNow();
+  Date.now = () => now;
+  t.after(() => { Date.now = realNow; });
+  now += 45_000;
+  await s.live.watch(job);
+  assert.equal(state.cancelled, false, 'a pause is not a page that is gone');
+  now += 20_000;
+  await s.live.watch(job);
+  await settle();
+  assert.equal(state.cancelled, true, 'the engine is free for the other meetings');
+  assert.equal(job.status, 'stopped');
+  assert.match(job.reason ?? '', /No audio arrived for a minute/);
+  assert.equal((await s.queue.loadMeeting(id)).live?.generation, generation, 'the recording is still there, to finish');
+});

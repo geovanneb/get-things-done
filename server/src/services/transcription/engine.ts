@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ChildProcess, fork } from 'child_process';
+import { EventEmitter } from 'events';
 import { CATALOG, SPEAKER_MODEL, TranscriptionModelService, VAD } from '../transcriptionModels';
 import { readWavFormat } from './wav';
 import { whisperHelperPath } from './whisperHelper';
@@ -78,6 +79,12 @@ const speakerTimeout = (seconds: number) => Math.max(10 * 60 * 1000, seconds * 1
 const MAX_SPEAKER_SECONDS = 4 * 3600;
 
 let busy = false;
+/** `free`: the one-job slot was given back, so whatever waited for it can start. */
+export const engineEvents = new EventEmitter();
+function free(): void {
+  busy = false;
+  engineEvents.emit('free');
+}
 /** Workers still running, so the dashboard can end them when it shuts down. */
 const running = new Set<ChildProcess>();
 /** After asking a worker to stop, how long it gets before it is killed outright. */
@@ -214,7 +221,7 @@ export class TranscriptionEngine {
       const result = await this.recognize(wav, prepared, options.language ?? settings.language, { ...options, turns }, undefined, true);
       return { ...result, speaker_note: note };
     } finally {
-      busy = false;
+      free();
       await giveBack();
     }
   }
@@ -258,7 +265,7 @@ export class TranscriptionEngine {
     try {
       child = this.launcher();
     } catch (err) {
-      busy = false;
+      free();
       await release();
       throw new Error(`The transcription engine could not start: ${(err as Error).message}`, { cause: err });
     }
@@ -272,7 +279,7 @@ export class TranscriptionEngine {
       child.once('exit', () => resolve());
       child.once('close', () => { if (neverStarted.has(child)) resolve(); });
     });
-    void exited.then(async () => { running.delete(child); busy = false; await release().catch(() => {}); });
+    void exited.then(async () => { running.delete(child); free(); await release().catch(() => {}); });
 
     let outcome: { ok: true; bytes: number; seconds: number; segments: number; lateLanguage: boolean } | { ok: false; message: string } | null = null;
     const settle = (value: NonNullable<typeof outcome>) => { if (!outcome) { outcome = value; for (const w of waiting) w(); } };
@@ -352,7 +359,7 @@ export class TranscriptionEngine {
     try {
       child = this.launcher();
     } catch (err) {
-      if (!held) busy = false;
+      if (!held) free();
       await giveBack();
       throw new Error(`The transcription engine could not start: ${(err as Error).message}`, { cause: err });
     }
@@ -396,7 +403,7 @@ export class TranscriptionEngine {
       });
     } finally {
       // The next job starts only once this worker has really exited, so two never hold a model's memory at once.
-      const done = async () => { await helperGone(helper); running.delete(child); if (!held) busy = false; await giveBack(); };
+      const done = async () => { await helperGone(helper); running.delete(child); if (!held) free(); await giveBack(); };
       if (await stop(child)) await done();
       else if (held) await new Promise<void>((resolve) => { child.once('exit', () => { void done().finally(resolve); }); });
       else child.once('exit', () => { void done(); });

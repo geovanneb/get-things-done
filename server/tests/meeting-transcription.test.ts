@@ -243,15 +243,14 @@ test('a result is dropped when the recording is no longer this job\'s, and remov
     m.files[0]!.recording = { status: 'pending' };
     await queue.saveMeeting(m);
   });
-  release();
-  await MeetingTranscriptionService.settled();
-  assert.equal((await recording(queue, id)).status, 'pending', 'the late result is not published');
-  assert.deepEqual((await queue.loadMeeting(id)).files.map((f) => f.name), ['workshop.wav']);
-
-  // It is picked up again; removing the meeting ends that job.
+  // The late result is dropped, and the recording, back in line, is picked up again at once.
   const again = new Promise<void>((r) => { started = r; });
-  await job.tick();
+  release();
   await again;
+  assert.deepEqual((await queue.loadMeeting(id)).files.map((f) => f.name), ['workshop.wav'], 'the late result is not published');
+  assert.equal((await recording(queue, id)).status, 'running');
+
+  // Removing the meeting ends that job.
   await queue.removeMeeting(id);
   job.forget(id);
   await MeetingTranscriptionService.settled();
@@ -634,4 +633,103 @@ test('speakers are marked in the transcript, and when finding them fails the tra
   assert.equal((await recording(queue, failed)).status, 'done', 'the transcript does not depend on it');
   assert.match(await read(failed), /Speakers are not told apart \(speaker detection failed\)/);
   assert.match(await read(failed), /Fictional words\./);
+});
+
+test('a recording fixed to a model that is not downloaded can switch to the model the page offered', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engine, calls } = fakeEngine(speaks(['Fictional switch test']));
+  // Only SenseVoice is downloaded, and chosen; the recording was finished for Turbo.
+  const models = {
+    readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'auto' }),
+    installedPath: async (id: string) => (id === 'sensevoice-2024-07-17' ? '/fictional/model' : null),
+  } as unknown as TranscriptionModelService;
+  const id = await queueRecording(queue, 'Switch');
+  await queue.withQueue(async () => {
+    const m = await queue.loadMeeting(id);
+    m.files[0]!.recording = { ...m.files[0]!.recording!, target: { model: 'whisper-large-v3-turbo', language: 'auto' } };
+    await queue.saveMeeting(m);
+  });
+  const job = new MeetingTranscriptionService(queue, models, engine);
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  assert.equal(calls.length, 0, 'it waits for its model');
+  await assert.rejects(job.retry(id, 'workshop.wav'), /chosen in Settings .* is not downloaded/, 'switching to a model that is not there either is refused');
+  await assert.rejects(job.retry(id, 'workshop.wav', 'not-a-model'), /Not a transcription model/);
+  // "Use SenseVoice" names the model the page showed, even if Settings changed meanwhile in another dashboard.
+  await job.retry(id, 'workshop.wav', 'sensevoice-2024-07-17');
+  await MeetingTranscriptionService.settled();
+  const r = await recording(queue, id);
+  assert.equal(r.status, 'done');
+  assert.equal(r.model, 'sensevoice-2024-07-17');
+  assert.equal(r.target?.model, 'sensevoice-2024-07-17');
+  assert.equal(r.target?.language, 'auto', 'the spoken language stays');
+  // A recording that is only waiting its turn is not touched by "Try again".
+  const other = await queueRecording(queue, 'Waiting');
+  await queue.withQueue(async () => {
+    const m = await queue.loadMeeting(other);
+    m.held = true;
+    await queue.saveMeeting(m);
+  });
+  await assert.rejects(job.retry(other, 'workshop.wav', 'sensevoice-2024-07-17'), /Only a stopped/);
+});
+
+test('the next recording starts as soon as one is done, not at the next check', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engine, calls } = fakeEngine(speaks(['Fictional queue test']));
+  const first = await queueRecording(queue, 'First');
+  const second = await queueRecording(queue, 'Second');
+  await new MeetingTranscriptionService(queue, fakeModels(), engine).tick();
+  for (let i = 0; i < 50 && calls.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await MeetingTranscriptionService.settled();
+  assert.equal(calls.length, 2, 'one tick did both');
+  assert.equal((await recording(queue, first)).status, 'done');
+  assert.equal((await recording(queue, second)).status, 'done');
+});
+
+test('a job that found the engine busy starts again by itself when the engine came free while it was ending', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engineEvents } = await import('../src/services/transcription/engine');
+  let first = true;
+  const { engine, calls } = fakeEngine(async (wav, o) => {
+    if (first) {
+      first = false;
+      // The other job (a speed test, a live transcript) lets go just as this one gives up.
+      engineEvents.emit('free');
+      throw Object.assign(new Error('A transcription is already running; wait for it to finish'), { statusCode: 409, engineBusy: true });
+    }
+    return speaks(['Fictional retry after free'])(wav, o);
+  });
+  const id = await queueRecording(queue, 'Busy then free');
+  await new MeetingTranscriptionService(queue, fakeModels(), engine).tick();
+  for (let i = 0; i < 50 && calls.length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+  await MeetingTranscriptionService.settled();
+  assert.equal(calls.length, 2);
+  assert.equal((await recording(queue, id)).status, 'done', 'no routine check was needed');
+});
+
+test('a result that cannot be saved is not transcribed again and again, and the meetings after it get their turn', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const transcribed: string[] = [];
+  const { engine } = fakeEngine(async (wav, o) => { transcribed.push(path.basename(path.dirname(wav))); return speaks(['Fictional result'])(wav, o); });
+  const first = await queueRecording(queue, 'Unsaved');
+  const second = await queueRecording(queue, 'Healthy');
+  // Saving the first meeting's transcript fails every time; everything else can be written.
+  const original = queue.saveMeeting.bind(queue);
+  queue.saveMeeting = async (m) => {
+    if (m.id === first && m.files.some((f) => f.recording?.status === 'done' || f.recording?.status === 'partial')) throw new Error('Fictional disk refusal');
+    return original(m);
+  };
+  t.after(() => { queue.saveMeeting = original; });
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  // Routine checks, one after another.
+  for (let i = 0; i < 3; i++) {
+    await job.tick();
+    await MeetingTranscriptionService.settled();
+  }
+  assert.equal((await recording(queue, second)).status, 'done', 'the next meeting was not held up');
+  assert.equal(transcribed.filter((d) => d === first).length, 1, 'the unsaved one waits before it is tried again');
 });

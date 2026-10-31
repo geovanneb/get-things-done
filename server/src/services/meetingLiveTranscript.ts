@@ -28,6 +28,11 @@ const FINISH_MS = 2 * 60 * 1000;
 /** Behind by more than this for longer than LAG_MS, the live transcript gives up; the recording goes on. */
 const LAG_SECONDS = 60;
 const LAG_MS = 30_000;
+/**
+ * No audio for this long: the page that records has gone (closed, crashed, offline), so the live transcript lets go
+ * of the engine and the other meetings are transcribed. The page calls such a recording interrupted after 30 seconds.
+ */
+const NO_AUDIO_MS = 60_000;
 /** The live transcript of 8 hours is about 2 MB; this much means something is wrong. */
 const MAX_JSONL_BYTES = 20 * 1024 * 1024;
 /** Segments per catch-up page. */
@@ -71,6 +76,8 @@ export interface Job {
   writes: Promise<void>;
   writeFailed: boolean;
   committed: number;
+  /** When audio last arrived, or the job started. */
+  audioAt: number;
   processed: number;
   behindSince: number | null;
   finishing: Promise<LiveResult | null> | null;
@@ -132,7 +139,7 @@ export class MeetingLiveTranscriptService {
     const job: Job = {
       meetingId, generation, workspace, model: '', asked: language, language, changes, missedLanguage: false, mainModel: '',
       file: '', session: null, status: 'loading', reason: null, segments: [], saved: 0, starting: null, watch: null, sealedSince: null, bytes: 0,
-      writes: Promise.resolve(), writeFailed: false, committed: saved, processed: 0, behindSince: null, finishing: null, deadline: null,
+      writes: Promise.resolve(), writeFailed: false, committed: saved, audioAt: Date.now(), processed: 0, behindSince: null, finishing: null, deadline: null,
     };
     jobs.set(generation, job);
     job.starting = this.open(job).catch(() => {});
@@ -184,6 +191,7 @@ export class MeetingLiveTranscriptService {
   committed(generation: string, bytes: number): void {
     const job = jobs.get(generation);
     if (!job || job.status === 'stopped' || job.status === 'done') return;
+    if (bytes > job.committed) job.audioAt = Date.now();
     job.committed = Math.max(job.committed, bytes);
     job.session?.committed(job.committed);
     this.checkLag(job);
@@ -215,6 +223,11 @@ export class MeetingLiveTranscriptService {
     if (mine && live?.state === 'finalizing' && !job.finishing) job.sealedSince ??= Date.now();
     else job.sealedSince = null;
     const abandoned = job.sealedSince !== null && Date.now() - job.sealedSince > FINISH_MS + 30_000;
+    // Still recording, but no audio comes: a sealed recording has its own wait above, for the Finish under way.
+    if (mine && live?.state === 'recording' && job.status === 'live' && Date.now() - job.audioAt > NO_AUDIO_MS) {
+      stopJob(job, 'No audio arrived for a minute, so the live transcript stopped and other meetings can be transcribed. The recording is kept: finish it to have it transcribed.');
+      return;
+    }
     if ((!mine || abandoned) && job.status === 'live') {
       stopJob(job, 'The recording was finished or removed elsewhere.');
       void this.close(job.generation);

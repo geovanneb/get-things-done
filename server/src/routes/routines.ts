@@ -56,10 +56,14 @@ router.post('/system-cleanup/run', async (_req: Request, res: Response) => {
 router.get('/meeting-digest', async (_req: Request, res: Response) => {
   // With the transcription running in this dashboard, if any, and its progress.
   // Which models are downloaded: a recording fixed to one that is not waits, and the card says which to download.
-  const models = (await new TranscriptionModelService().view().catch(() => null))?.models.filter((m) => m.installed) ?? null;
+  const view = await new TranscriptionModelService().view().catch(() => null);
+  const models = view?.models.filter((m) => m.installed) ?? null;
   res.json({
     ...await service.meetingDigest(), transcription: transcription.progress(),
     installed_models: models ? models.map((m) => m.id) : null,
+    // Names to show instead of ids, and the model chosen now: a waiting recording can switch to it.
+    model_names: Object.fromEntries((view?.models ?? []).map((m) => [m.id, m.name])),
+    chosen_model: view?.settings.model ?? null,
     // How fast each is on this computer, when tested: for how long a recording will take.
     model_speeds: Object.fromEntries((models ?? []).flatMap((m) => (m.speed ? [[m.id, m.speed.realtime_x]] : []))),
   });

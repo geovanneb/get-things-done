@@ -740,6 +740,10 @@ export interface MeetingDigest {
   installed_models: string[] | null;
   /** Seconds of speech per second of work on this computer, for the tested models. */
   model_speeds: Record<string, number>;
+  /** Every transcription model's name, by id. */
+  model_names: Record<string, string>;
+  /** The model chosen in Settings now; null when unknown. */
+  chosen_model: string | null;
   queue_problems: { id: string; reason: string }[];
   max_meetings_limit: number;
 }
