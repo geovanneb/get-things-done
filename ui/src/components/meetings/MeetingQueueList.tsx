@@ -4,6 +4,7 @@ import { useRecorder } from '@/components/recording/RecordingProvider';
 import { apiDelete, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
 import { joinNames } from '@/utils/meetingParticipants';
+import { matching, meetingPeriod, SHOWN_MEETINGS, visibleMeetings } from '@/utils/meetingQueue';
 import type { MeetingDigest, QueuedMeeting, RecordingState, TranscriptionProgress } from '@/types';
 
 /** A recording whose transcript can go into a digest: done, or partial and used as it is. */
@@ -94,6 +95,11 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
   const recorder = useRecorder();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
+  const [query, setQuery] = React.useState('');
+  const [all, setAll] = React.useState(false);
+  // What needs you is always there; a search shows every match; otherwise the newest few, and the rest on request.
+  const { shown, hidden } = visibleMeetings(job.queue, query, all, job.installed_models ?? null);
+  const found = matching(job.queue, query);
   const act = async (kind: string, fn: () => Promise<string | void>) => {
     setBusy(kind);
     setNotice(null);
@@ -117,11 +123,18 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
           {job.queue_problems.map((p) => `${p.id}: ${p.reason}`).join(' ')}
         </div>
       )}
-      {job.queue.length > 0 ? (
+      {(job.queue.length > SHOWN_MEETINGS || query) && (
+        <input type="search" aria-label="Search meetings" placeholder="Search by title, date or person" value={query} onChange={(e) => setQuery(e.target.value)}
+          style={{ width: '100%', maxWidth: 360, marginTop: 4, padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: 'var(--text-sm)' }} />
+      )}
+      {job.queue.length > 0 && found.length === 0 && (
+        <p style={{ margin: '8px 0 0', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No meeting matches “{query}”.</p>
+      )}
+      {found.length > 0 ? (
         <ul aria-label="Meeting queue" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {job.queue.map((m) => (
+          {shown.map((m) => (
             <li key={m.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}{meetingPeriod(m) ? ` ${meetingPeriod(m)}` : ''}</span>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
               {m.participants?.length ? <span style={{ flexBasis: '100%', order: 1, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Expected: {joinNames(m.participants)}</span> : null}
               <span title={m.held ?? undefined} style={{ fontSize: 'var(--text-xs)', color: m.held ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
@@ -180,8 +193,14 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
             </li>
           ))}
         </ul>
-      ) : (
+      ) : job.queue.length === 0 && (
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No meetings in the queue. Record one, or add one under Context &gt; Updates.</p>
+      )}
+      {hidden > 0 && (
+        <Button size="sm" variant="ghost" onClick={() => setAll(true)}>Show {hidden} older</Button>
+      )}
+      {all && !query.trim() && found.length > SHOWN_MEETINGS && (
+        <Button size="sm" variant="ghost" onClick={() => setAll(false)}>Show fewer</Button>
       )}
       {notice && <p role={notice.error ? 'alert' : 'status'} style={{ margin: '8px 0 0', fontSize: 'var(--text-sm)', color: notice.error ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{notice.text}</p>}
     </>
