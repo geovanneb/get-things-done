@@ -1,5 +1,7 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '@/hooks/useApi';
+import { apiPost } from '@/utils/api';
 import { useDataVersion } from '@/store';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
@@ -15,6 +17,45 @@ const cardStyle = { border: '1px solid var(--color-border)', borderRadius: 'var(
 const headingStyle = { margin: '0 0 10px', fontSize: 'var(--text-base)', fontWeight: 600 } as const;
 
 const REFRESH_MS = 10_000;
+
+/**
+ * When the queue goes into a digest, and a way to make one now: the meetings are here, so the button is too. A digest
+ * still open for review holds the next one back; it says so, and where to find it.
+ */
+function DigestNow({ job, onDone }: { job: MeetingDigest; onDone: () => void }) {
+  const [busy, setBusy] = React.useState(false);
+  const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
+  const waiting = job.queue.filter((m) => m.status === 'queued' && !m.in_digest).length;
+  const when = job.next_run_at ? new Date(job.next_run_at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : null;
+  const run = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      // A run that failed still answers 201, with what went wrong.
+      const result = await apiPost<{ status: 'ok' | 'error'; message: string }>('/api/routines/meeting-digest/run');
+      setNotice({ text: result.message, error: result.status === 'error' });
+      onDone();
+    } catch (err) {
+      setNotice({ text: (err as Error).message, error: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const line = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' } as const;
+  return (
+    <>
+      {job.open_digest
+        ? <span style={line}>Digest <Link to={`/context/updates/${job.open_digest}`} style={{ color: 'var(--color-accent)' }}>{job.open_digest}</Link> is open for review: the next one waits for it.</span>
+        : when && waiting > 0 && <span style={line}>Next digest {when}</span>}
+      <Button size="sm" variant="secondary" loading={busy} disabled={busy || waiting === 0 || Boolean(job.open_digest)}
+        title={waiting === 0 ? 'No meeting waits for a digest' : 'Make a digest from the queue now, without waiting for the schedule'}
+        onClick={() => void run()}>
+        Make digest now
+      </Button>
+      {notice && <span role={notice.error ? 'alert' : 'status'} style={{ ...line, flexBasis: '100%', color: notice.error ? 'var(--color-critical)' : line.color }}>{notice.text}</span>}
+    </>
+  );
+}
 
 /** Recording, the live transcript, and the meetings on their way into a digest. The digest's schedule stays in Routines. */
 export default function MeetingsView() {
@@ -69,7 +110,10 @@ export default function MeetingsView() {
         </section>
       )}
       <section style={cardStyle} aria-label="Meetings in the queue">
-        <h3 style={headingStyle}>Queue</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ ...headingStyle, margin: 0, flex: 1 }}>Queue</h3>
+          {data && <DigestNow job={data} onDone={refetch} />}
+        </div>
         {error && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</p>}
         {!data && !error && <LoadingSpinner text="Loading meetings..." />}
         {data && <MeetingQueueList job={data} onChanged={refetch} onRead={(meeting, file) => setPicked({ meeting, file })} />}
