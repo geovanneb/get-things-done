@@ -9,7 +9,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { readSpeeds, type SpeedResult } from './transcription/speedTest';
 import { processAlive } from './runState';
 import { HeldLock, ownsToken, readLock, tryLock, unlock } from '../utils/fileLock';
-import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, type LanguageOption } from './transcription/languages';
+import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, type LanguageOption, withLanguageChange, type LanguageChange } from './transcription/languages';
 
 /**
  * Speech-to-text models for offline transcription: a fixed catalog, downloaded on request from Settings.
@@ -193,6 +193,12 @@ export function modelsDir(): string {
 export function languageFor(model: string, language: string, catalog: CatalogModel[] = CATALOG): string {
   const options = catalog.find((m) => m.id === model)?.language_options;
   return !options || language === 'auto' || options.some((o) => o.id === language) ? language : 'auto';
+}
+
+/** A language and its changes as `model` can follow them: what it lacks becomes Auto, and what then changes nothing goes. */
+export function languagesFor(model: string, language: string, changes: readonly LanguageChange[] = [], catalog: CatalogModel[] = CATALOG): { language: string; changes: LanguageChange[] } {
+  const start = languageFor(model, language, catalog);
+  return { language: start, changes: changes.reduce<LanguageChange[]>((list, c) => withLanguageChange(start, list, { at: c.at, language: languageFor(model, c.language, catalog) }), []) };
 }
 
 /** Validates settings from a request or the file, filling anything missing from `base`. */

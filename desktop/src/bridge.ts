@@ -21,11 +21,23 @@ async function microphoneAccess(): Promise<string> {
   return 'granted';
 }
 
+/** The language menu a page may show in the menu bar: short lists of plain language codes and names, nothing else. */
+export interface SpokenLanguageMenu { current: string; options: { id: string; label: string }[] }
+
+export function parseLanguageMenu(value: unknown): SpokenLanguageMenu | null {
+  const { current, options } = (value ?? {}) as Partial<SpokenLanguageMenu>;
+  const code = (id: unknown): id is string => typeof id === 'string' && /^[a-z]{2,4}$/.test(id);
+  if (!code(current) || !Array.isArray(options) || options.length > 12) return null;
+  if (!options.every((o) => code(o?.id) && typeof o.label === 'string' && o.label.length > 0 && o.label.length <= 40)) return null;
+  return { current, options: options.map(({ id, label }) => ({ id, label })) };
+}
+
 export function registerBridge(
   getWindow: () => BrowserWindow | null,
   getAppUrl: () => string,
   onRecording: (active: boolean) => void,
   takeRecordingCommand: () => RecordingCommand | null,
+  onLanguageMenu: (menu: SpokenLanguageMenu | null) => void,
 ): void {
   const trusted = (event: IpcMainInvokeEvent): BrowserWindow => {
     const window = getWindow();
@@ -58,6 +70,11 @@ export function registerBridge(
   ipcMain.handle('gtd:recording-state', async (event, active: unknown) => {
     if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
     onRecording(active === true);
+  });
+
+  ipcMain.handle('gtd:recording-language', async (event, menu: unknown) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    onLanguageMenu(parseLanguageMenu(menu));
   });
 
   ipcMain.handle('gtd:take-recording-command', async (event) => {

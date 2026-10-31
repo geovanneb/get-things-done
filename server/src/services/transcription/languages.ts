@@ -40,3 +40,39 @@ function options(common: string[], others: string[]): LanguageOption[] {
 const WHISPER_COMMON = ['en', 'ja', 'ko', 'vi'];
 export const WHISPER_LANGUAGES = options(WHISPER_COMMON, Object.keys(NAMES).filter((id) => !WHISPER_COMMON.includes(id)));
 export const SENSEVOICE_LANGUAGES = options(['en', 'ja', 'ko'], ['zh', 'yue']);
+
+/** From `at` seconds of audio on, this language (`auto` too). A recording's list goes up in time. */
+export interface LanguageChange { at: number; language: string }
+
+/** Far more than anyone switches in a meeting: a list this long is something else going wrong. */
+export const MAX_LANGUAGE_CHANGES = 200;
+
+/** A language any model has, or `auto`. */
+export const knownLanguage = (id: unknown): id is string => id === 'auto' || WHISPER_LANGUAGES.some((l) => l.id === id);
+
+/** The language in force at `seconds` of audio. */
+export function languageAt(start: string, changes: readonly LanguageChange[], seconds: number): string {
+  let language = start;
+  for (const change of changes) if (change.at <= seconds) language = change.language;
+  return language;
+}
+
+/** The list after one more change: two at the same moment are one, the latest, and a change to the same language is none. */
+export function withLanguageChange(start: string, changes: readonly LanguageChange[], change: LanguageChange): LanguageChange[] {
+  const before = changes.filter((c) => c.at < change.at);
+  return languageAt(start, before, change.at) === change.language ? before : [...before, change];
+}
+
+/** A list as saved in a manifest, only when all of it is sound. */
+export function parseLanguageChanges(value: unknown): LanguageChange[] | null {
+  if (!Array.isArray(value) || value.length > MAX_LANGUAGE_CHANGES) return null;
+  let last = -1;
+  const changes: LanguageChange[] = [];
+  for (const item of value as unknown[]) {
+    const { at, language } = (item ?? {}) as Partial<LanguageChange>;
+    if (typeof at !== 'number' || !Number.isFinite(at) || at < 0 || at <= last || !knownLanguage(language)) return null;
+    last = at;
+    changes.push({ at, language });
+  }
+  return changes;
+}

@@ -8,6 +8,7 @@ import { stopServer } from './server-lifecycle';
 import { holdUpdatesWhile, installNow, startUpdateChecks } from './updates';
 import { classifyLink } from './links';
 import { RecordingCommands, type RecordingCommand } from './recording-commands';
+import type { SpokenLanguageMenu } from './bridge';
 import { DEFAULT_PORT, findFreePort } from './port';
 
 const APP_NAME = 'Get Things Done';
@@ -24,6 +25,8 @@ let appUrl = '';
 let quitting = false;
 /** A recording runs in the window; set by the dashboard through the bridge. */
 let recording = false;
+/** The spoken languages the page offers for the running recording, for the menu-bar menu. */
+let languageMenu: SpokenLanguageMenu | null = null;
 /** What the menu-bar menu asked the page to do about recording, until the page takes it. */
 const recordingCommands = new RecordingCommands();
 /** A downloaded update waiting for a restart, so the menu can be rebuilt when recording starts or stops. */
@@ -163,6 +166,10 @@ function showWindow(): void {
 /** While recording: the computer stays awake, the hidden window keeps working, and the tray says so. */
 function setRecording(active: boolean): void {
   recording = active;
+  if (!active) {
+    languageMenu = null;
+    recordingCommands.dropLanguage();
+  }
   // Also called from the window's 'closed' event, when its page is already destroyed and cannot be changed.
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.setBackgroundThrottling(!active);
@@ -217,6 +224,12 @@ function setTrayMenu(update: string | null): void {
       recording
         ? { label: 'Stop recording and save', click: () => sendRecordingCommand('stop') }
         : { label: 'Record a meeting…', click: () => sendRecordingCommand('open') },
+      ...(recording && languageMenu ? [{
+        label: 'Spoken language',
+        submenu: languageMenu.options.map(({ id, label }) => ({
+          label, type: 'radio' as const, checked: id === languageMenu?.current, click: () => sendRecordingCommand(`language:${id}`),
+        })),
+      }] : []),
       { type: 'separator' },
       { label: `Open ${APP_NAME}`, click: showWindow },
       { label: 'Open in browser', click: () => void shell.openExternal(appUrl) },
@@ -261,7 +274,10 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.on('will-download', (_event, item) => {
       item.setSaveDialogOptions({ defaultPath: path.join(app.getPath('downloads'), item.getFilename()) });
     });
-    registerBridge(() => mainWindow, () => appUrl, setRecording, () => recordingCommands.take());
+    registerBridge(() => mainWindow, () => appUrl, setRecording, () => recordingCommands.take(), (menu) => {
+      languageMenu = menu;
+      setTrayMenu(pendingUpdate);
+    });
     holdUpdatesWhile(() => recording);
 
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {

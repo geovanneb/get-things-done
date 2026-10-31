@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'crypto';
 import { withWorkspacePath, WorkspaceService } from './workspace';
 import { MeetingLiveTranscriptService } from './meetingLiveTranscript';
 import { TranscriptionModelService } from './transcriptionModels';
+import { knownLanguage, MAX_LANGUAGE_CHANGES, withLanguageChange, type LanguageChange } from './transcription/languages';
 import { audioTranscriptMarkdown } from './meetingTranscription';
 import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
 
@@ -29,6 +30,7 @@ import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestSer
 
 const HEADER_BYTES = 44;
 const SAMPLE_RATE = 16_000;
+const BYTES_PER_SECOND = SAMPLE_RATE * 2;
 const MAX_FILES = 10;
 /** Audio newer than this means a page is recording: blocks arrive every few seconds. An interrupted recording does not count. */
 const RUNNING_MS = 30_000;
@@ -108,8 +110,9 @@ export class MeetingRecordingService {
   ) {}
 
   /** Starts recording into a draft meeting. Starting again with the same token returns the same session. */
-  async start(id: string, token: string, now = new Date()): Promise<{ generation: string; offset: number }> {
+  async start(id: string, token: string, now = new Date()): Promise<{ generation: string; offset: number; language: string; language_changes: LanguageChange[] }> {
     if (typeof token !== 'string' || token.length < 16 || token.length > 200) throw httpError(400, 'A writer token is required');
+    const language = (await this.models.readSettings().catch(() => null))?.language ?? 'auto';
     const opened = await this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);
       if (meeting.status !== 'draft') throw httpError(409, 'A recording can only go into a meeting before it is queued');
@@ -123,7 +126,7 @@ export class MeetingRecordingService {
       if (running) throw httpError(409, `Another recording is open ("${running.title}"): finish or discard it first`);
       const two = (n: number) => String(n).padStart(2, '0');
       const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`;
-      meeting.live = { generation: randomUUID(), token_sha256: hashToken(token), state: 'recording', started_at: now.toISOString(), name: `recording-${stamp}.wav` };
+      meeting.live = { generation: randomUUID(), token_sha256: hashToken(token), state: 'recording', started_at: now.toISOString(), name: `recording-${stamp}.wav`, language };
       // The session first: a file exists only with a session that protects it.
       await this.queue.saveMeeting(meeting);
       return this.opened(meeting);
@@ -131,8 +134,32 @@ export class MeetingRecordingService {
     const workspace = new WorkspaceService().getWorkspacePath();
     pinned.set(hashToken(token), workspace);
     // Never waited for, and never fails the recording.
-    void this.live.start(id, opened.generation, workspace, opened.offset).catch(() => {});
+    void this.live.start(id, opened.generation, workspace, opened.offset, opened.language, opened.language_changes).catch(() => {});
     return opened;
+  }
+
+  /**
+   * The spoken language from now on, for this recording's transcripts: from what is saved so far, which is what
+   * `at` in the reply says. Under the lock, so Finish and every block of audio are either before or after it.
+   */
+  async setLanguage(id: string, token: string, language: unknown): Promise<{ language: string; language_changes: LanguageChange[]; at: number }> {
+    if (!knownLanguage(language)) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
+    return inWorkspaceOf(token, () => this.queue.withQueue(async () => {
+      const meeting = await this.queue.loadMeeting(id);
+      const live = meeting.live;
+      if (live?.state !== 'recording' || live.token_sha256 !== hashToken(token ?? '')) throw httpError(409, 'This page no longer holds the recording');
+      const { handle, saved } = await liveFile(path.join(await this.queue.meetingFolder(id), liveRecordingFile(live.generation)));
+      await handle.close();
+      const at = saved / BYTES_PER_SECOND;
+      const start = live.language ?? 'auto';
+      const changes = withLanguageChange(start, live.language_changes ?? [], { at, language });
+      if (changes.length > MAX_LANGUAGE_CHANGES) throw httpError(409, 'The language was changed too many times in this recording');
+      const { language_changes: _old, ...rest } = live;
+      meeting.live = { ...rest, language: start, ...(changes.length ? { language_changes: changes } : {}) };
+      await this.queue.saveMeeting(meeting);
+      this.live.language(live.generation, changes, { at, language });
+      return { language, language_changes: changes, at };
+    }));
   }
 
   /** The title of a recording audio arrived for just now. A workspace does not change under it, from any page. */
@@ -145,10 +172,10 @@ export class MeetingRecordingService {
     return null;
   }
 
-  private async opened(meeting: QueuedMeeting): Promise<{ generation: string; offset: number }> {
+  private async opened(meeting: QueuedMeeting): Promise<{ generation: string; offset: number; language: string; language_changes: LanguageChange[] }> {
     const { handle, saved } = await liveFile(path.join(await this.queue.meetingFolder(meeting.id), liveRecordingFile(meeting.live!.generation)));
     await handle.close();
-    return { generation: meeting.live!.generation, offset: saved };
+    return { generation: meeting.live!.generation, offset: saved, language: meeting.live!.language ?? 'auto', language_changes: meeting.live!.language_changes ?? [] };
   }
 
   /** Stores a block of audio at `offset` (bytes of audio, without the header) and says how much is safely stored. */
@@ -233,7 +260,7 @@ export class MeetingRecordingService {
         if (saved === 0) throw httpError(409, 'Nothing was recorded; discard this meeting instead');
         // What to transcribe it with is fixed here, once: Settings may change before the queue gets to it.
         const settings = await this.models.readSettings().catch(() => null);
-        meeting.live = { ...live, state: 'finalizing', sealed_bytes: saved, ...(settings ? { target: { model: settings.model, language: settings.language } } : {}) };
+        meeting.live = { ...live, state: 'finalizing', sealed_bytes: saved, ...(settings ? { target: { model: settings.model, language: live.language ?? settings.language, ...(live.language_changes ? { changes: live.language_changes } : {}) } } : {}) };
         await this.queue.saveMeeting(meeting);
         return meeting.live;
       });
@@ -249,12 +276,13 @@ export class MeetingRecordingService {
         // language, else as a draft while the target model transcribes again.
         const usable = live && !(live.segments.length === 0 && live.seconds > EMPTY_AUDIO_SECONDS) ? live : null;
         const target = sealed.target;
-        const final = Boolean(usable && target && usable.model === target.model && usable.language === target.language);
+        const final = Boolean(usable && target && usable.model === target.model && usable.asked === target.language && !usable.lateLanguage
+          && JSON.stringify(usable.askedChanges) === JSON.stringify(target.changes ?? []));
         const published = await this.queue.withQueue(async () => {
           const meeting = await this.queue.loadMeeting(id);
           if (meeting.live?.generation !== sealed.generation || meeting.live.state !== 'finalizing') return meeting;
           await this.queue.publishRecording(meeting, checked, usable ? {
-            content: (recordingName) => Buffer.from(audioTranscriptMarkdown(recordingName, checked.sha256, usable.model, usable.language, usable.seconds, usable.segments, true), 'utf-8'),
+            content: (recordingName) => Buffer.from(audioTranscriptMarkdown(recordingName, checked.sha256, usable.model, usable.language, usable.seconds, usable.segments, true, usable.changes, usable.lateLanguage), 'utf-8'),
             model: usable.model, language: usable.language, seconds: usable.seconds, as: final ? 'transcript' : 'draft',
           } : undefined);
           return this.queue.loadMeeting(id);

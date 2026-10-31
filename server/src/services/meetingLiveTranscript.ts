@@ -3,7 +3,8 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { constants as fsConstants } from 'fs';
 import { MeetingDigestService, liveRecordingFile } from './meetingDigestService';
-import { languageFor, TranscriptionModelService } from './transcriptionModels';
+import { languageFor, languagesFor, TranscriptionModelService } from './transcriptionModels';
+import { withLanguageChange, type LanguageChange } from './transcription/languages';
 import { FollowSession, Segment, TranscriptionEngine } from './transcription/engine';
 import { withWorkspacePath } from './workspace';
 
@@ -43,7 +44,13 @@ export interface Job {
   generation: string;
   workspace: string;
   model: string;
+  /** What this recording's language was asked to be; `language` is what the live model can do of it. */
+  asked: string;
   language: string;
+  /** The changes of language told to the worker, as asked. Never the recording's list: that is what they are checked against. */
+  changes: LanguageChange[];
+  /** The recording holds a change this job was never told of. */
+  missedLanguage: boolean;
   /** The model chosen for transcripts, when the recording started: the live text is used as the transcript only with it. */
   mainModel: string;
   file: string;
@@ -71,7 +78,20 @@ export interface Job {
 }
 
 /** A live transcript that covered all of a sealed recording. */
-export interface LiveResult { model: string; language: string; seconds: number; segments: Segment[]; mainModel: string }
+export interface LiveResult {
+  model: string;
+  /** What it was made with. */
+  language: string;
+  changes: LanguageChange[];
+  /** What was asked for, to compare with the recording's target. */
+  asked: string;
+  askedChanges: LanguageChange[];
+  /** A change came after a part it applies to was transcribed, or never came. */
+  lateLanguage: boolean;
+  seconds: number;
+  segments: Segment[];
+  mainModel: string;
+}
 
 /** Notices for the page: a recording's live transcript has more, or changed status. */
 export const liveTranscriptEvents = new EventEmitter();
@@ -106,11 +126,11 @@ export class MeetingLiveTranscriptService {
    * Starts the live transcript of a recording that just started (or restarted in this dashboard), when Settings has
    * a live model. Returns at once; it never fails the recording.
    */
-  async start(meetingId: string, generation: string, workspace: string, saved: number): Promise<void> {
+  async start(meetingId: string, generation: string, workspace: string, saved: number, language = 'auto', changes: LanguageChange[] = []): Promise<void> {
     if (jobs.has(generation)) return;
     // Taken at once, before anything is awaited: a second start, a Finish or a discard always find this job.
     const job: Job = {
-      meetingId, generation, workspace, model: '', language: 'auto', mainModel: '',
+      meetingId, generation, workspace, model: '', asked: language, language, changes, missedLanguage: false, mainModel: '',
       file: '', session: null, status: 'loading', reason: null, segments: [], saved: 0, starting: null, watch: null, sealedSince: null, bytes: 0,
       writes: Promise.resolve(), writeFailed: false, committed: saved, processed: 0, behindSince: null, finishing: null, deadline: null,
     };
@@ -127,7 +147,7 @@ export class MeetingLiveTranscriptService {
       return;
     }
     job.model = settings.live_model;
-    job.language = languageFor(settings.live_model, settings.language);
+    job.language = languageFor(settings.live_model, job.asked);
     job.mainModel = settings.model;
     await withWorkspacePath(workspace, async () => {
       try {
@@ -146,6 +166,8 @@ export class MeetingLiveTranscriptService {
         // Finished, discarded or stopped while the model loaded: this worker has no recording to follow.
         if (job.status !== 'loading' || jobs.get(generation) !== job) { await session.cancel(); return; }
         job.session = session;
+        // Changes made while the model loaded, before any audio they apply to.
+        for (const change of job.changes) session.language(change.at, languageFor(job.model, change.language));
         session.committed(job.committed);
         job.status = 'live';
         job.watch = setInterval(() => { void this.watch(job); }, WATCH_MS);
@@ -165,6 +187,15 @@ export class MeetingLiveTranscriptService {
     job.committed = Math.max(job.committed, bytes);
     job.session?.committed(job.committed);
     this.checkLag(job);
+  }
+
+  /** The spoken language changed: `changes` is the recording's whole list now, and `change` the one to tell the worker. */
+  language(generation: string, changes: LanguageChange[], change: LanguageChange): void {
+    const job = jobs.get(generation);
+    if (!job || job.status === 'stopped' || job.status === 'done') return;
+    job.changes = withLanguageChange(job.asked, job.changes, change);
+    if (JSON.stringify(job.changes) !== JSON.stringify(changes)) job.missedLanguage = true;
+    job.session?.language(change.at, languageFor(job.model, change.language));
   }
 
   /**
@@ -246,7 +277,7 @@ export class MeetingLiveTranscriptService {
       }
       job.status = 'done';
       emit(job);
-      return { model: job.model, language: job.language, seconds: sealedBytes / BYTES_PER_SECOND, segments: job.segments.map(({ start, end, text }) => ({ start, end, text })), mainModel: job.mainModel };
+      return { model: job.model, language: job.language, changes: languagesFor(job.model, job.asked, job.changes).changes, asked: job.asked, askedChanges: job.changes, lateLanguage: result.lateLanguage || job.missedLanguage, seconds: sealedBytes / BYTES_PER_SECOND, segments: job.segments.map(({ start, end, text }) => ({ start, end, text })), mainModel: job.mainModel };
     })();
     return job.finishing;
   }

@@ -653,6 +653,10 @@ try {
     });
     const firstBlock = await putBlock();
     const sameBlock = await (await putBlock()).json();
+    const spoken = await (await json('PUT', `/api/meeting-queue/${liveMeeting.id}/recording/language`, { token: recordToken, language: 'ja' })).json();
+    const spokenRefused = await json('PUT', `/api/meeting-queue/${liveMeeting.id}/recording/language`, { token: 'fictional-wrong-token-language', language: 'en' });
+    check('the spoken language changes during a recording, only from the page that records it',
+      spoken.language === 'ja' && spoken.at === 1 && spoken.language_changes?.length === 1 && spokenRefused.status === 409);
     const sealedResponse = await json('POST', `/api/meeting-queue/${liveMeeting.id}/recording/finish`, { token: recordToken, offset: 32000 });
     const sealedMeeting = await sealedResponse.json();
     await fetch(`${base}/api/meeting-queue/${liveMeeting.id}`, { method: 'DELETE' });
