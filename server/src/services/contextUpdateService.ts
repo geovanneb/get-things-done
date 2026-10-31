@@ -145,6 +145,12 @@ export interface MeetingPerson { ref: string | null; name: string; ref_found?: b
 export interface MeetingActionItem { description: string; owner: MeetingPerson | null; due_date: string; task_ref: string | null; task_found?: boolean }
 
 /**
+ * Who a voice in a transcript may be: the agent's proposal, with why. `label` belongs to the recording `source`, not to
+ * a person, and `person` stays the agent's claim until the user confirms the record. Null: unknown, and it stays unknown.
+ */
+export interface MeetingSpeaker { label: string; person: MeetingPerson | null; reason: string; source: string }
+
+/**
  * What one meeting was: drafted by the analysis, confirmed or rejected by the user on its own, apart from
  * the context proposals. A confirmed record is the reviewed account of the meeting; the transcript stays
  * unreviewed material. Confirming means the user checked the record, not that every attendee agreed to it.
@@ -155,6 +161,7 @@ export interface MeetingRecord {
   /** YYYY-MM-DD, or empty when the material does not say. */
   meeting_date: string;
   attendees: MeetingPerson[];
+  speakers: MeetingSpeaker[];
   decisions: string[];
   open_questions: string[];
   action_items: MeetingActionItem[];
@@ -227,6 +234,8 @@ export interface DigestRecording {
   complete: boolean;
   /** The recording's name in the materials; null when it was not kept. */
   file: string | null;
+  /** Who its speakers are, as the user named them after the meeting. */
+  speaker_names?: { label: string; name: string; ref?: string }[];
 }
 
 /**
@@ -414,8 +423,26 @@ function shownActionItems(list: unknown[], problems: string[]): { item: MeetingA
 /** The content a confirmation is bound to, in a fixed order. */
 function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' | 'revision' | 'problems' | 'changed_since_confirmed'>): string {
   const content = [r.id, r.title, r.meeting_date, r.attendees.map((p) => [p.ref, p.name]), r.decisions, r.open_questions,
-    r.action_items.map((a) => [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date]), r.source];
+    r.action_items.map((a) => [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date]), r.source,
+    // Only when there are any: a record confirmed before speakers existed stays confirmed.
+    ...(r.speakers.length ? [r.speakers.map((s) => [s.label, s.source, s.person ? [s.person.ref, s.person.name] : null, s.reason])] : [])];
   return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 16);
+}
+
+/** The speakers of a record. A label is `Speaker 2` and is there once per recording; anything else cannot be confirmed. */
+function recordSpeakers(raw: unknown[], problems: string[]): MeetingSpeaker[] {
+  const seen = new Set<string>();
+  return raw.map((entry, i) => {
+    const what = `speaker ${i + 1}`;
+    const o = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>;
+    const label = recordText(o['label'], `${what} label`, problems);
+    const source = recordText(o['source'], `${what} source`, problems);
+    if (!/^Speaker \d{1,3}$/.test(label)) problems.push(`${what} has no label like Speaker 2`);
+    if (!source) problems.push(`${what} does not say which transcript it is from`);
+    if (seen.has(`${source}/${label}`)) problems.push(`${label} is listed twice for ${source || 'one recording'}`);
+    seen.add(`${source}/${label}`);
+    return { label, source, person: o['person'] == null ? null : recordPerson(o['person'], `${what} person`, problems), reason: recordText(o['reason'], `${what} reason`, problems) };
+  });
 }
 
 /**
@@ -437,6 +464,7 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
       title: recordText(r['title'], 'title', problems),
       meeting_date: recordDate(r['meeting_date'], 'meeting_date', problems),
       attendees: people(recordList(r['attendees'], 'attendees', problems), 'attendee'),
+      speakers: recordSpeakers(recordList(r['speakers'], 'speakers', problems), problems),
       decisions: texts(recordList(r['decisions'], 'decisions', problems), 'decision'),
       open_questions: texts(recordList(r['open_questions'], 'open_questions', problems), 'open question'),
       action_items: shownActionItems(recordList(r['action_items'], 'action_items', problems), problems).map((x) => x.item),
@@ -810,6 +838,7 @@ export class ContextUpdateService {
     const tasks = path.join(workspaceService.getWorkspacePath(), 'tasks');
     for (const r of records) {
       for (const p of r.attendees) await check(p);
+      for (const s of r.speakers) await check(s.person);
       for (const a of r.action_items) {
         await check(a.owner);
         if (a.task_ref) a.task_found = await taskExists(tasks, a.task_ref);
@@ -862,6 +891,59 @@ export class ContextUpdateService {
       raws[index] = { ...raw, action_items: rawItems };
       await this.write(file, data, update.notes, { meeting_records: raws });
       return { update: (await this.read(id)).update, task, created: !found };
+    });
+  }
+
+  /** The hash of each transcript a record's speakers come from. A transcript that is not among the materials is refused. */
+  private async speakerEvidence(id: string, record: MeetingRecord): Promise<Record<string, string>> {
+    const evidence: Record<string, string> = {};
+    for (const source of new Set(record.speakers.map((s) => s.source))) {
+      const file = await fileInside(path.join(this.updateDir(id), 'materials'), source).catch(() => null);
+      if (!file) throw httpError(409, `Meeting record ${record.id} names speakers from ${source}, which is not among the materials`);
+      evidence[source] = (await hashFile(file)).sha256;
+    }
+    return evidence;
+  }
+
+  /** A confirmed record's speakers still rest on the transcripts that were confirmed. */
+  private async checkSpeakerEvidence(id: string, update: ContextUpdate, data: Record<string, unknown>): Promise<void> {
+    const raws = this.rawRecords(data);
+    for (const [i, record] of update.meeting_records.entries()) {
+      if (record.confirmation !== 'confirmed' || !record.speakers.length) continue;
+      const saved = JSON.stringify((raws[i] as Record<string, unknown>)['speakers_evidence'] ?? null);
+      if (saved !== JSON.stringify(await this.speakerEvidence(id, record))) {
+        throw httpError(409, `The transcript behind the speakers of meeting record ${record.id} changed after you confirmed it; review it again`);
+      }
+    }
+  }
+
+  /**
+   * The user's word on one speaker: who it is, or null for unknown. Only while the update is in review, and only on
+   * the record the user is looking at. It changes the record, so a confirmation given before it no longer counts.
+   */
+  async setSpeaker(id: string, recordId: string, input: unknown): Promise<ContextUpdate> {
+    return this.serialized(id, async () => {
+      await this.requireNoRun(id, 'change a speaker');
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['in_review'], 'change a speaker');
+      const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+      const matches = update.meeting_records.flatMap((r, i) => r.id === recordId ? [i] : []);
+      if (matches.length !== 1) throw httpError(400, `Invalid meeting record id: ${recordId}`);
+      const index = matches[0]!;
+      if (body['revision'] !== update.meeting_records[index]!.revision) throw httpError(409, `Meeting record ${recordId} changed since you loaded it; review it again`);
+      const problems: string[] = [];
+      const person = body['person'] == null ? null : recordPerson(body['person'], 'The person', problems);
+      if (problems.length) throw httpError(400, problems[0]!);
+      const raws = this.rawRecords(data);
+      const raw = raws[index] as Record<string, unknown>;
+      const speakers = Array.isArray(raw['speakers']) ? [...raw['speakers'] as Record<string, unknown>[]] : [];
+      const shown = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+      const at = speakers.findIndex((s) => s && shown(s['label']) === body['label'] && shown(s['source']) === body['source']);
+      if (at < 0) throw httpError(400, 'Invalid speaker');
+      speakers[at] = { ...speakers[at], person: person ? { ...(person.ref ? { ref: person.ref } : {}), name: person.name } : null, reason: 'Set by you' };
+      raws[index] = { ...raw, speakers, confirmation: undefined, confirmed_at: undefined, confirmed_hash: undefined, speakers_evidence: undefined };
+      await this.write(file, data, update.notes, { meeting_records: this.clean(raws) });
+      return (await this.read(id)).update;
     });
   }
 
@@ -1268,6 +1350,7 @@ export class ContextUpdateService {
    */
   async saveMeetingRecords(id: string, input: unknown): Promise<ContextUpdate> {
     return this.serialized(id, async () => {
+      await this.requireNoRun(id, 'confirm meeting records');
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review'], 'confirm meeting records');
       const choices = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
@@ -1288,6 +1371,9 @@ export class ContextUpdateService {
       }
       const now = new Date().toISOString();
       const normalized = update.meeting_records;
+      // Who a speaker is holds for one transcript: its hash stays with the confirmation, also after the materials go.
+      const evidence = new Map<string, Record<string, string>>();
+      for (const r of normalized) if (changes.get(r.id) === 'confirmed' && r.speakers.length) evidence.set(r.id, await this.speakerEvidence(id, r));
       const records = this.rawRecords(data).map((raw, i) => {
         const r = normalized[i]!;
         if (!changes.has(r.id)) return raw;
@@ -1297,6 +1383,7 @@ export class ContextUpdateService {
           confirmation: value ?? undefined,
           confirmed_at: value === 'confirmed' ? now : undefined,
           confirmed_hash: value === 'confirmed' ? r.revision : undefined,
+          speakers_evidence: evidence.get(r.id),
         };
       });
       await this.write(file, data, update.notes, { meeting_records: this.clean(records) });
@@ -1344,6 +1431,7 @@ export class ContextUpdateService {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review'], 'approve');
       await this.requireNoRun(id, 'approve');
+      await this.checkSpeakerEvidence(id, update, data);
       const records = this.frozenRecords(update, data);
       const confirmed = update.meeting_records.some((r) => r.confirmation === 'confirmed');
       if (!update.proposals.some((p) => p.decision === 'accepted') && !confirmed) {

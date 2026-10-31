@@ -444,6 +444,8 @@ try {
       method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
     });
     const created = await (await json('POST', '/api/context-updates', { title: 'Fictional steering committee', source_date: '2026-10-20', text: 'Transcript of a fictional meeting' })).json();
+    const speakerRefused = await json('PUT', `/api/context-updates/${created.id}/meeting-records/M-01/speaker`, { label: 'Speaker 1', source: 'a.transcript.md', person: null, revision: 'x' });
+    check('a speaker can only be changed while an update is in review', speakerRefused.status === 409, `status=${speakerRefused.status}`);
     check('a context update is created as ready, with pasted text saved as material',
       /^CU-\d{4}-\d{4}$/.test(created.id) && created.status === 'ready' && created.materials.some((m) => m.name === 'pasted-text.md'), JSON.stringify(created).slice(0, 200));
     const invalidDate = await json('POST', '/api/context-updates', { source_date: '2026-02-30' });
@@ -664,6 +666,8 @@ try {
       recordStart.status === 201 && firstBlock.status === 200 && sameBlock.offset === 32000
       && sealedResponse.status === 200 && sealedMeeting.files?.[0]?.recording?.status === 'pending',
       `start=${recordStart.status} block=${firstBlock.status} again=${sameBlock.offset} finish=${sealedResponse.status}`);
+    const unnamed = await json('PUT', `/api/meeting-queue/${liveMeeting.id}/recordings/missing.wav/speakers`, { transcript_sha256: 'x', names: { 'Speaker 1': { name: 'Kim Park' } } });
+    check('speakers can only be named on a recording that has a transcript', unnamed.status === 404, `status=${unnamed.status}`);
     // The engine loads in its worker on this machine (no model needed).
     const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
     check('the transcription engine loads in its worker', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));
@@ -671,7 +675,7 @@ try {
     const stt = await (await fetch(`${base}/api/transcription`)).json();
     const badLanguage = await json('PUT', '/api/transcription/settings', { language: 'xx' });
     check('transcription lists the models with pluses and minuses, the accurate one first and chosen, and refuses an unknown language',
-      stt.models?.some((m) => m.id === 'whisper-large-v3-turbo') && stt.settings?.model && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
+      stt.models?.some((m) => m.id === 'whisper-large-v3-turbo') && stt.settings?.model && stt.speakers?.id === 'speaker-detection' && stt.speakers.size > 0 && !stt.models.some((m) => m.id === 'speaker-detection') && stt.settings.speakers === true && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
       && ['auto', 'en', 'ja'].includes(stt.settings.language) && badLanguage.status === 400,
       `models=${stt.models?.map((m) => m.id).join(',')} bad=${badLanguage.status}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);

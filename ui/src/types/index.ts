@@ -471,11 +471,15 @@ export interface KaizenAnalysis {
 export interface MeetingPerson { ref: string | null; name: string; ref_found?: boolean }
 
 /** One meeting in the material, confirmed or rejected apart from the proposals. */
+/** Who a voice in a transcript may be: the agent's proposal until the user confirms the record. */
+export interface MeetingSpeaker { label: string; person: MeetingPerson | null; reason: string; source: string }
+
 export interface MeetingRecord {
   id: string;
   title: string;
   meeting_date: string;
   attendees: MeetingPerson[];
+  speakers: MeetingSpeaker[];
   decisions: string[];
   open_questions: string[];
   /** `task_ref`: the task created from the item in the dashboard; `task_found` (detail only): it still exists. */
@@ -671,9 +675,12 @@ export interface RecordingState {
   language?: string;
   /** The transcript made from it, a file of the same meeting. */
   transcript?: string;
+  transcript_sha256?: string;
   /** Seconds of audio. */
   seconds?: number;
   accepted?: boolean;
+  /** Who the speakers are, as the user named them: only for the transcript with this hash. */
+  speaker_names?: { transcript_sha256: string; names: SpeakerName[] };
   error?: string;
 }
 
@@ -758,6 +765,8 @@ export interface RoutinePreview {
 
 export type TranscriptionLanguage = string;
 
+export interface SpeakerName { label: string; name: string; ref?: string }
+
 export interface SpokenLanguage { id: string; label: string; common?: boolean }
 
 export interface TranscriptionModel {
@@ -778,10 +787,12 @@ export interface TranscriptionModel {
   speed: { realtime_x: number; load_ms: number | null; measured_at: string } | null;
 }
 
-export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; updated_at: string | null }
+export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; speakers: boolean; updated_at: string | null }
 
 export interface Transcription {
   models: TranscriptionModel[];
+  /** The optional speaker model, not one of the models to transcribe with. */
+  speakers: Pick<TranscriptionModel, 'id' | 'name' | 'summary' | 'size' | 'installed' | 'partial' | 'download'>;
   settings: TranscriptionSettings;
   defaults: TranscriptionSettings;
   vad_installed: boolean;

@@ -4,7 +4,7 @@ import { constants as fsConstants } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { withWorkspacePath, WorkspaceService } from './workspace';
 import { MeetingLiveTranscriptService } from './meetingLiveTranscript';
-import { TranscriptionModelService } from './transcriptionModels';
+import { SPEAKER_MODEL, TranscriptionModelService } from './transcriptionModels';
 import { knownLanguage, MAX_LANGUAGE_CHANGES, withLanguageChange, type LanguageChange } from './transcription/languages';
 import { audioTranscriptMarkdown } from './meetingTranscription';
 import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
@@ -260,7 +260,8 @@ export class MeetingRecordingService {
         if (saved === 0) throw httpError(409, 'Nothing was recorded; discard this meeting instead');
         // What to transcribe it with is fixed here, once: Settings may change before the queue gets to it.
         const settings = await this.models.readSettings().catch(() => null);
-        meeting.live = { ...live, state: 'finalizing', sealed_bytes: saved, ...(settings ? { target: { model: settings.model, language: live.language ?? settings.language, ...(live.language_changes ? { changes: live.language_changes } : {}) } } : {}) };
+        const speakers = settings?.speakers === true && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
+        meeting.live = { ...live, state: 'finalizing', sealed_bytes: saved, ...(settings ? { target: { model: settings.model, language: live.language ?? settings.language, ...(live.language_changes ? { changes: live.language_changes } : {}), ...(speakers ? { speakers } : {}) } } : {}) };
         await this.queue.saveMeeting(meeting);
         return meeting.live;
       });
@@ -276,7 +277,8 @@ export class MeetingRecordingService {
         // language, else as a draft while the target model transcribes again.
         const usable = live && !(live.segments.length === 0 && live.seconds > EMPTY_AUDIO_SECONDS) ? live : null;
         const target = sealed.target;
-        const final = Boolean(usable && target && usable.model === target.model && usable.asked === target.language && !usable.lateLanguage
+        // Speakers come from the transcript after the meeting, so a live text stays a draft when they are wanted.
+        const final = Boolean(usable && target && !target.speakers && usable.model === target.model && usable.asked === target.language && !usable.lateLanguage
           && JSON.stringify(usable.askedChanges) === JSON.stringify(target.changes ?? []));
         const published = await this.queue.withQueue(async () => {
           const meeting = await this.queue.loadMeeting(id);

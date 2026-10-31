@@ -122,6 +122,11 @@ router.post('/:id/recordings/:file/:action', async (req: Request, res: Response)
   } else res.status(404).json({ error: 'Not found', message: 'Use stop, retry, accept or use-live' });
 });
 
+// PUT /api/meeting-queue/:id/recordings/:file/speakers  { transcript_sha256, names: { "Speaker 2": { name, ref } | null } }
+router.put('/:id/recordings/:file/speakers', async (req: Request, res: Response) => {
+  res.json(await transcription.nameSpeakers(queueId(param(req, 'id')), topLevelName(param(req, 'file')), req.body));
+});
+
 // DELETE /api/meeting-queue/:id  remove a meeting and its files from the queue
 router.delete('/:id', async (req: Request, res: Response) => {
   const id = queueId(param(req, 'id'));

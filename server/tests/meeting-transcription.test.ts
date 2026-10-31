@@ -8,7 +8,7 @@ import { transcriptParts } from '../../ui/src/utils/transcriptReading';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { MeetingDigestService } from '../src/services/meetingDigestService';
+import { MeetingDigestService, parseSpeakerNames, transcriptSpeakers } from '../src/services/meetingDigestService';
 import { audioTranscriptMarkdown, MeetingTranscriptionService, transcriptionTimings } from '../src/services/meetingTranscription';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { TranscriptionModelService } from '../src/services/transcriptionModels';
@@ -576,4 +576,62 @@ test('the page can read the transcript the server writes', () => {
     { time: '08:00:00', text: '<b>Fictional</b> ``` words' }, { time: '08:00:03', text: 'line one line two' },
   ]);
   assert.deepEqual(transcriptParts(audioTranscriptMarkdown('a.wav', 'hash', 'fast', 'auto', 10, [], true)), []);
+  const voices = [{ start: 1, end: 2, text: 'Fictional words.', speaker: 2 }, { start: 3, end: 4, text: 'Not clear whose.' }];
+  assert.deepEqual(transcriptParts(audioTranscriptMarkdown('a.wav', 'hash', 'fast', 'auto', 4, voices, true)), [
+    { time: '00:00:01', speaker: 'Speaker 2', text: 'Fictional words.' }, { time: '00:00:03', text: 'Not clear whose.' },
+  ], 'speakers too');
+});
+
+test('speakers are marked in the transcript, and when finding them fails the transcript is still made', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const models = { readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'auto', speakers: true }), installedPath: async () => '/fictional/model' } as unknown as TranscriptionModelService;
+  const read = async (id: string) => fsp.readFile(path.join(ws, 'context-updates', 'meeting-queue', id, 'workshop.transcript.md'), 'utf-8');
+  const run = async (note: string | null, transcribe: Transcribe) => {
+    const engine = { transcribeWithSpeakers: async (wav: string, o: Parameters<Transcribe>[1]) => ({ ...await transcribe(wav, o), speaker_note: note }) } as unknown as TranscriptionEngine;
+    const id = await queueRecording(queue, 'Workshop');
+    await new MeetingTranscriptionService(queue, models, engine).tick();
+    await MeetingTranscriptionService.settled();
+    return id;
+  };
+
+  const told = await run(null, async (_wav, o) => {
+    o.onSegment?.({ start: 0, end: 1, text: 'Fictional words.', speaker: 1 } as Segment);
+    return { segments: [], seconds: 1, load_ms: 1 };
+  });
+  assert.equal((await recording(queue, told)).status, 'done');
+  assert.match(await read(told), /\[00:00:00 → 00:00:01\] Speaker 1\n {2}Fictional words\./);
+  assert.match(await read(told), /1 voice told apart\. Speaker 1 and so on are labels for this recording, not names/);
+
+  // Named on the Meetings page: for this transcript only, and only labels it has.
+  const job = new MeetingTranscriptionService(queue, models, { } as unknown as TranscriptionEngine);
+  const sha = (await recording(queue, told)).transcript_sha256!;
+  await assert.rejects(job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: 'old', names: { 'Speaker 1': { name: 'Kim Park' } } }), /changed meanwhile/);
+  await assert.rejects(job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: sha, names: { 'Speaker 7': { name: 'Kim Park' } } }), /no Speaker 7/);
+  await assert.rejects(job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: '  ' } } }), /Invalid name/);
+  assert.deepEqual([...transcriptSpeakers('[00:00:01 → 00:00:02] Speaker 1\n  Quoted text ] Speaker 7\n')], ['Speaker 1'], 'a label someone said is no speaker');
+  await job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Kim Park', ref: 'STK-0002' } } });
+  assert.deepEqual((await recording(queue, told)).speaker_names, { transcript_sha256: sha, names: [{ label: 'Speaker 1', name: 'Kim Park', ref: 'STK-0002' }] });
+  await job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Odd', ref: '../x' } } });
+  assert.deepEqual((await recording(queue, told)).speaker_names?.names, [{ label: 'Speaker 1', name: 'Odd' }], 'a ref that is not a stakeholder id is dropped');
+  await job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: sha, names: { 'Speaker 1': null } });
+  assert.equal((await recording(queue, told)).speaker_names, undefined);
+
+  // A transcript with 201 voices: all of them can be named but one, and nothing is dropped quietly.
+  const many = audioTranscriptMarkdown('a.wav', 'h', 'fast', 'auto', 300, Array.from({ length: 201 }, (_, i) => ({ start: i, end: i + 1, text: 'x', speaker: i + 1 })), true);
+  assert.equal(transcriptSpeakers(many).size, 201);
+  assert.equal(parseSpeakerNames(Array.from({ length: 201 }, (_, i) => ({ label: `Speaker ${i + 1}`, name: 'P' }))).length, 200);
+
+  // The digest tells the agent who they are, as the user named them.
+  await job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Kim Park', ref: 'STK-0002' } } });
+  const digest = await queue.runNow(new Date('2026-10-30T18:00:00'));
+  assert.equal(digest.status, 'ok', digest.message);
+  const list = await fsp.readFile(path.join(ws, 'context-updates', digest.context_update!, 'materials', 'meetings.md'), 'utf-8');
+  assert.match(list, /speakers_named_by_user: \[".*workshop\.transcript\.md: Speaker 1 = Kim Park \(STK-0002\)"\]/);
+  await assert.rejects(job.nameSpeakers(told, 'workshop.wav', { transcript_sha256: sha, names: { 'Speaker 1': null } }), /digest|No recording|not found/i, 'not once a digest has it');
+
+  const failed = await run('speaker detection failed', speaks(['Fictional words.']));
+  assert.equal((await recording(queue, failed)).status, 'done', 'the transcript does not depend on it');
+  assert.match(await read(failed), /Speakers are not told apart \(speaker detection failed\)/);
+  assert.match(await read(failed), /Fictional words\./);
 });

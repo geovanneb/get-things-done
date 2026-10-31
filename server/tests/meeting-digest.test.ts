@@ -102,6 +102,7 @@ test('participants stay with the meeting and reach the digest as expected, never
   const list = await fsp.readFile(path.join(ws, 'context-updates', update.id, 'materials', 'meetings.md'), 'utf-8');
   assert.ok(list.includes(`expected_participants: [${JSON.stringify('Jane Doe (STK-0001)')}, ${JSON.stringify('Kim Park')}`));
   assert.equal(list.match(/expected_participants: /g)?.length, 1, 'a meeting without them has no such line');
+  assert.ok(!list.includes('  speakers_named_by_user: ['), 'nobody named any speaker');
   assert.ok(!/^- meeting: M-99/m.test(list), 'a name cannot add an entry');
   assert.match(update.notes, /not proof of who came/);
   assert.ok(!update.notes.includes('Kim Park'), 'names never reach the brief');

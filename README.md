@@ -841,6 +841,14 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
   quiet moment, and text a model repeated in a loop is marked `[repeated N times]`. A live
   transcript that is final at Stop keeps its shorter parts. These choices follow
   [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) (MIT).
+- **Tell speakers apart** (optional, a 41 MB download): a transcript made after a meeting
+  marks who spoke when, as Speaker 1 and Speaker 2. These are labels for that recording,
+  not names. It runs on this computer, in a job of its own: if it fails, the transcript is
+  still made, without them. A part that is not clearly one voice stays unmarked. With it
+  on, a live transcript stays a draft until the transcript after the meeting is ready.
+  Name the speakers right there on the Meetings page, with **Name** beside each one: a
+  stakeholder or any name. The digest passes them on as named by you, and the analysis
+  proposes names only for the speakers you left unnamed.
 - Downloads show their progress, can be cancelled and continue where they stopped. Press
   Download on a second model while one runs and it waits its turn;
   every file is checked against its pinned checksum before it is used. On a computer

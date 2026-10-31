@@ -82,6 +82,11 @@ router.post('/:id/meeting-records/:recordId/tasks', async (req: Request, res: Re
   res.status(result.created ? 201 : 200).json(result);
 });
 
+// PUT /api/context-updates/:id/meeting-records/:recordId/speaker  { label, source, person, revision }  null: unknown
+router.put('/:id/meeting-records/:recordId/speaker', async (req: Request, res: Response) => {
+  res.json(await service.setSpeaker(param(req, 'id'), param(req, 'recordId'), body(req)));
+});
+
 // GET /api/context-updates/:id/run  the current or last run started from the dashboard (null if none)
 router.get('/:id/run', async (req: Request, res: Response) => {
   res.json(await runner.get(param(req, 'id')));

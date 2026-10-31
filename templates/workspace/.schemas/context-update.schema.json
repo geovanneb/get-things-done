@@ -39,6 +39,16 @@
         "title": {"type": "string", "maxLength": 1000},
         "meeting_date": {"type": "string", "format": "date", "description": "When the meeting happened, if the material says."},
         "attendees": {"type": "array", "maxItems": 30, "items": {"$ref": "#/definitions/person"}},
+        "speakers": {
+          "type": "array", "maxItems": 30,
+          "description": "Who each voice of a transcript may be: a proposal until the executive confirms the record.",
+          "items": {"type": "object", "required": ["label", "source"], "properties": {
+            "label": {"type": "string", "pattern": "^Speaker \\d{1,3}$"},
+            "source": {"type": "string", "maxLength": 1000, "description": "The transcript the label belongs to."},
+            "person": {"oneOf": [{"$ref": "#/definitions/person"}, {"type": "null"}], "description": "Left out or null: unknown."},
+            "reason": {"type": "string", "maxLength": 1000, "description": "What in the transcript points to this person."}
+          }}
+        },
         "decisions": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 1000}},
         "open_questions": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 1000}},
         "action_items": {

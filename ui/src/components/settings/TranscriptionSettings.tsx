@@ -123,6 +123,44 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
   );
 }
 
+/** The optional model that tells speakers apart: download it, turn it off, or remove it. */
+function SpeakerDetection({ speakers, enabled, saving, downloading, onToggle, onAction }: {
+  speakers: Transcription['speakers']; enabled: boolean; saving: boolean; downloading: boolean;
+  onToggle: (on: boolean) => void; onAction: (action: 'download' | 'cancel' | 'delete') => void;
+}) {
+  const d = speakers.download;
+  const running = d?.status === 'downloading' || d?.status === 'verifying' || d?.status === 'queued';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
+      {speakers.installed
+        ? (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
+            <input type="checkbox" checked={enabled} disabled={saving} onChange={(e) => onToggle(e.target.checked)} />
+            Tell speakers apart
+          </label>
+        )
+        : <span style={{ fontWeight: 600 }}>Tell speakers apart</span>}
+      <span style={hintStyle}>
+        Marks who spoke when, as Speaker 1 and Speaker 2, in a transcript made after a meeting. It runs on this computer, adds
+        about a tenth of the meeting&apos;s length, and keeps nothing of anyone&apos;s voice. A live transcript has no speakers.
+      </span>
+      {d?.message && !running && <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{d.message}</p>}
+      {running && (
+        <p role="status" style={hintStyle}>
+          {d.status === 'queued' ? 'Waiting for the download before it.' : d.status === 'verifying' ? 'Checking the files…' : `${d.total ? Math.floor((d.received / d.total) * 100) : 0}%: ${size(d.received)} of ${size(d.total)}`}
+        </p>
+      )}
+      <div>
+        {running
+          ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
+          : speakers.installed
+            ? <Button size="sm" variant="ghost" disabled={downloading} onClick={() => onAction('delete')}>Delete</Button>
+            : <Button size="sm" variant="secondary" disabled={saving} onClick={() => onAction('download')}>Download ({size(speakers.size)})</Button>}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Settings > Transcription: the offline speech-to-text models, their pluses and minuses, downloads, and the
  * language. Models stay on this computer, outside the workspace.
@@ -143,13 +181,13 @@ export default function TranscriptionSettings() {
   if (error) return <p role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</p>;
   if (!data) return null;
 
-  const downloading = data.downloading_elsewhere || data.models.some((m) => m.download?.status === 'downloading' || m.download?.status === 'verifying');
+  const downloading = data.downloading_elsewhere || [...data.models, data.speakers].some((m) => m.download?.status === 'downloading' || m.download?.status === 'verifying');
   const save = async (patch: Partial<Transcription['settings']>) => {
     setSaving(true);
     setNotice(null);
     try { await apiPut('/api/transcription/settings', patch); refetch(); } catch (err) { setNotice((err as Error).message); } finally { setSaving(false); }
   };
-  const act = async (model: TranscriptionModel, action: 'download' | 'cancel' | 'delete') => {
+  const act = async (model: Pick<TranscriptionModel, 'id' | 'name' | 'size'>, action: 'download' | 'cancel' | 'delete') => {
     setNotice(null);
     if (action === 'delete' && !window.confirm(`Delete ${model.name} (${size(model.size)}) from this computer? You can download it again later.`)) return;
     try {
@@ -235,6 +273,8 @@ export default function TranscriptionSettings() {
           the chosen model transcribes the recording again after the meeting, and its text replaces the live one.
         </span>
       </label>
+      <SpeakerDetection speakers={data.speakers} enabled={data.settings.speakers} saving={saving} downloading={downloading}
+        onToggle={(on) => void save({ speakers: on })} onAction={(action) => void act(data.speakers, action)} />
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
           <input type="checkbox" checked={data.settings.keep_recordings} disabled={saving}

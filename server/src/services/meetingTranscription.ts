@@ -3,10 +3,10 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
-import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft } from './meetingDigestService';
-import { TranscriptionModelService, CATALOG, languagesFor } from './transcriptionModels';
+import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft, namesFor, parseSpeakerNames, SPEAKER_LABEL, transcriptSpeakers, MAX_SPEAKER_NAMES } from './meetingDigestService';
+import { TranscriptionModelService, CATALOG, languagesFor, SPEAKER_MODEL } from './transcriptionModels';
 import type { LanguageChange } from './transcription/languages';
-import { TranscriptionEngine, Segment } from './transcription/engine';
+import { TranscriptionEngine, Segment, type TranscribeOptions } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
 import { HeldLock, tryLock, unlock } from '../utils/fileLock';
 import { processAlive } from './runState';
@@ -48,7 +48,7 @@ export interface TranscriptionProgress { meeting: string; file: string; done: nu
 /** Notices for the dashboard when a transcription starts, moves or ends. */
 export const meetingTranscriptionEvents = new EventEmitter();
 
-interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string; changes: LanguageChange[] }
+interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string; changes: LanguageChange[]; speakers: boolean; speakerNote?: string }
 /** The job this dashboard runs; null when none. */
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
@@ -66,8 +66,9 @@ const languageLine = (language: string, changes: LanguageChange[]) =>
   [languageWords(language), ...changes.map((c) => `${languageWords(c.language)} from ${clock(c.at)}`)].join(', ');
 
 /** A readable transcript of a recording, in the same shape as the copies of WebVTT transcripts. */
-export function audioTranscriptMarkdown(source: string, hash: string, model: string, language: string, seconds: number, segments: Segment[], complete: boolean, changes: LanguageChange[] = [], changesLate = false): string {
-  const body = segments.map((s) => `[${clock(s.start)} → ${clock(s.end)}]\n  ${s.text.replace(/\n+/g, ' ')}`).join('\n\n');
+export function audioTranscriptMarkdown(source: string, hash: string, model: string, language: string, seconds: number, segments: Segment[], complete: boolean, changes: LanguageChange[] = [], changesLate = false, speakerNote: string | null = null): string {
+  const body = segments.map((s) => `[${clock(s.start)} → ${clock(s.end)}]${s.speaker ? ` Speaker ${s.speaker}` : ''}\n  ${s.text.replace(/\n+/g, ' ')}`).join('\n\n');
+  const voices = new Set(segments.map((s) => s.speaker).filter(Boolean)).size;
   let longest = 2;
   for (const m of body.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
   const fence = '`'.repeat(longest + 1);
@@ -78,7 +79,8 @@ export function audioTranscriptMarkdown(source: string, hash: string, model: str
     `Made on this computer from the recording \`${source}\` with ${name} (language: ${languageLine(language, changes)}${changesLate ? ' as asked, but parts around a change may be in the language before it' : ''}). Source SHA-256: \`${hash}\`.`,
     '',
     `- Length: ${clock(seconds)}, ${segments.length} parts with speech`,
-    '- Speakers are not told apart: each part is what was said, in order.',
+    voices ? `- ${voices} ${voices === 1 ? 'voice' : 'voices'} told apart. Speaker 1 and so on are labels for this recording, not names; a part without one is not clear.`
+      : `- Speakers are not told apart${speakerNote ? ` (${speakerNote})` : ''}: each part is what was said, in order.`,
     '',
     complete
       ? '**Complete.** Every part of the recording with speech is below.'
@@ -124,7 +126,8 @@ export class MeetingTranscriptionService {
     if (typeof held === 'string') return;
     let job: Job | null = null;
     try {
-      job = await this.claim(settings.model, settings.language, held);
+      const speakers = settings.speakers === true && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
+      job = await this.claim(settings.model, settings.language, speakers, held);
     } finally {
       if (!job) await unlock(held);
     }
@@ -222,6 +225,31 @@ export class MeetingTranscriptionService {
     });
   }
 
+  /**
+   * Names the speakers of a recording's transcript: `{ "Speaker 2": { name, ref } }`, null to take a name back. Only for
+   * the transcript the page showed, and only labels that transcript has.
+   */
+  async nameSpeakers(meetingId: string, file: string, input: unknown): Promise<QueuedMeeting> {
+    const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const asked = (body['names'] && typeof body['names'] === 'object' && !Array.isArray(body['names']) ? body['names'] : {}) as Record<string, unknown>;
+    return this.change(meetingId, file, async (r) => {
+      if (!r.transcript || !r.transcript_sha256 || (r.status !== 'done' && r.status !== 'partial')) throw httpError(409, 'This recording has no transcript to name speakers in');
+      if (body['transcript_sha256'] !== r.transcript_sha256) throw httpError(409, 'The transcript changed meanwhile; look again');
+      const labels = transcriptSpeakers(await fsp.readFile(await fileInside(await this.queue.meetingFolder(meetingId), r.transcript), 'utf-8'));
+      const names = new Map(namesFor(r).map((n) => [n.label, n] as const));
+      for (const [label, value] of Object.entries(asked)) {
+        if (!SPEAKER_LABEL.test(label) || !labels.has(label)) throw httpError(400, `This transcript has no ${label}`);
+        if (value === null) { names.delete(label); continue; }
+        const [named] = parseSpeakerNames([{ ...(value && typeof value === 'object' ? value : {}), label }]);
+        if (!named) throw httpError(400, `Invalid name for ${label}`);
+        names.set(label, named);
+      }
+      if (names.size > MAX_SPEAKER_NAMES) throw httpError(400, `At most ${MAX_SPEAKER_NAMES} speakers can be named in one transcript`);
+      const { speaker_names: _old, ...rest } = r;
+      return names.size ? { ...rest, speaker_names: { transcript_sha256: r.transcript_sha256, names: [...names.values()] } } : rest;
+    });
+  }
+
   /** Changes one recording's state under the queue lock; never one held by a digest being made. */
   private async change(
     meetingId: string, file: string,
@@ -288,7 +316,7 @@ export class MeetingTranscriptionService {
   }
 
   /** Picks the oldest waiting recording and marks it running for this job, under the queue lock. */
-  private async claim(model: string, language: string, lock: HeldLock): Promise<Job | null> {
+  private async claim(model: string, language: string, speakers: boolean, lock: HeldLock): Promise<Job | null> {
     return this.queue.withQueue(async () => {
       const reserved = await this.queue.reserved();
       for (const meeting of (await this.queue.readQueue()).meetings) {
@@ -298,11 +326,13 @@ export class MeetingTranscriptionService {
         // A recording that cannot be read fails on its own; the queue goes on with the next one.
         let entry: QueuedMeeting['files'][number] | undefined;
         let use: { model: string; language: string; changes: LanguageChange[] } = { model, language, changes: [] };
+        let wantSpeakers = speakers;
         for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending')) {
           // Its own target, fixed when it was finished; a model that is not downloaded keeps it waiting, and the others go on.
           const wanted = candidate.recording?.target ?? { model, language };
           if (!await this.models.installedPath(wanted.model)) continue;
           use = { model: wanted.model, ...languagesFor(wanted.model, wanted.language, wanted.changes) };
+          wantSpeakers = candidate.recording?.target ? candidate.recording.target.speakers === true : speakers;
           const read = await fileInside(folder, candidate.name).then(hashFile).catch((err: Error) => err);
           const problem = read instanceof Error ? `The recording cannot be read (${read.message}); remove the meeting and add it again.`
             : read.sha256 !== candidate.sha256 ? 'The recording changed since it was added; remove the meeting and add it again.' : null;
@@ -316,7 +346,7 @@ export class MeetingTranscriptionService {
         entry.recording = nextRecording(entry.recording, { status: 'running', generation, owner: { pid: process.pid, token }, started_at: new Date().toISOString(), model: use.model, language: use.language });
         await this.queue.saveMeeting(meeting);
         return {
-          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes,
+          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes, speakers: wantSpeakers,
           progress: { meeting: meeting.id, file: entry.name, done: 0, total: 0, started_at: new Date().toISOString() },
         };
       }
@@ -346,7 +376,7 @@ export class MeetingTranscriptionService {
         wav = path.join((await workFolder(folder, true))!, `${job.generation}-${process.pid}.wav`);
         await convert(source, wav, job.abort.signal);
       }
-      const result = await this.engine.transcribe(wav, {
+      const options: TranscribeOptions = {
         model, language, changes: job.changes, signal: job.abort.signal,
         onSegment: (s) => { segments.push(s); },
         onProgress: (done, total) => {
@@ -354,7 +384,9 @@ export class MeetingTranscriptionService {
           const now = Date.now();
           if (now - notified >= NOTIFY_MS) { notified = now; meetingTranscriptionEvents.emit('change'); }
         },
-      });
+      };
+      const result = job.speakers ? await this.engine.transcribeWithSpeakers(wav, options) : { ...await this.engine.transcribe(wav, options), speaker_note: null };
+      job.speakerNote = result.speaker_note ?? undefined;
       seconds = result.seconds;
     } catch (err) {
       error = err as Error;
@@ -408,7 +440,7 @@ export class MeetingTranscriptionService {
       let name = `${stem}.transcript.md`;
       for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
         || await fsp.lstat(path.join(folder, name)).then(() => true, () => false); n++) name = `${stem}-${n}.transcript.md`;
-      const content = Buffer.from(audioTranscriptMarkdown(entry.name, entry.sha256, model, language, seconds, segments, complete, job.changes), 'utf-8');
+      const content = Buffer.from(audioTranscriptMarkdown(entry.name, entry.sha256, model, language, seconds, segments, complete, job.changes, false, job.speakerNote ?? null), 'utf-8');
       const target = path.join(folder, name);
       await atomicWrite(target, content);
       let replaced: string | null = null;

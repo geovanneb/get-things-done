@@ -1,17 +1,23 @@
-import type { QueuedMeeting } from '@/types';
+import type { QueuedMeeting, SpeakerName } from '@/types';
 
-export interface TranscriptPart { time: string; text: string }
+/** `speaker`: `Speaker 2`, a label for one recording, when the part is clearly one voice. */
+export interface TranscriptPart { time: string; speaker?: string; text: string }
 
-/** The transcript to read of a recording: the final one when there is one, else the live draft. */
-export interface Readable { name: string; final: boolean }
+/**
+ * The transcript to read of a recording: the final one when there is one, else the live draft. `file` and `sha256` say
+ * which recording and transcript; `names` are who its speakers are, as the user named them.
+ */
+export interface Readable { name: string; final: boolean; file: string; sha256: string; names: SpeakerName[] }
 
 /** What can be read of a meeting: of `file`, or of its first recording with something to read. */
 export function readableTranscript(meeting: QueuedMeeting, file?: string): Readable | null {
   for (const f of meeting.files) {
     if (!f.recording || (file && f.name !== file)) continue;
-    const { transcript, draft } = f.recording;
-    if (transcript) return { name: transcript, final: true };
-    if (draft) return { name: draft.transcript, final: false };
+    const { transcript, transcript_sha256, draft, speaker_names } = f.recording;
+    if (transcript && transcript_sha256) {
+      return { name: transcript, final: true, file: f.name, sha256: transcript_sha256, names: speaker_names && speaker_names.transcript_sha256 === transcript_sha256 ? speaker_names.names : [] };
+    }
+    if (draft) return { name: draft.transcript, final: false, file: f.name, sha256: draft.transcript_sha256, names: [] };
   }
   return null;
 }
@@ -37,9 +43,9 @@ export function transcriptParts(markdown: string): TranscriptPart[] | null {
   if (close < 0) return null;
   const parts: TranscriptPart[] = [];
   for (const line of lines.slice(open + 1, close)) {
-    const time = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\]$/.exec(line);
+    const time = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\]( Speaker \d{1,3})?$/.exec(line);
     const last = parts[parts.length - 1];
-    if (time) parts.push({ time: time[1]!, text: '' });
+    if (time) parts.push({ time: time[1]!, ...(time[2] ? { speaker: time[2].trim() } : {}), text: '' });
     else if (line.startsWith('  ') && last) last.text += (last.text ? ' ' : '') + line.trim();
     else if (line.trim()) return null;
   }

@@ -10,9 +10,10 @@
  */
 import * as fsp from 'fs/promises';
 import * as path from 'path';
+import { Worker } from 'worker_threads';
 import type { EngineModel, WorkerControl, WorkerRequest, WorkerReply } from './protocol';
 import { languageAt, type LanguageChange } from './languages';
-import { contextRange, RecentAudio, splitAtChanges, splitLong, type Part } from './parts';
+import { contextRange, cutsAround, RecentAudio, SHORTEST_TURN, speakerCuts, speakerOf, speakerTurns, splitAtChanges, splitLong, type Part, type SpeakerTurn } from './parts';
 import { markRepeats } from './repeats';
 import { readWavFormat, wavChunks, WavError } from './wav';
 
@@ -37,6 +38,7 @@ interface Sherpa {
   OfflineRecognizer: { createAsync(config: unknown): Promise<SherpaRecognizer> };
   Vad: new (config: unknown, bufferSeconds: number) => SherpaVad;
   LinearResampler: new (from: number, to: number) => SherpaResampler;
+  OfflineSpeakerDiarization: new (config: unknown) => { process(samples: Float32Array): { start: number; end: number; speaker: number }[] };
 }
 
 function send(reply: WorkerReply): void {
@@ -86,13 +88,20 @@ function newVad(sherpa: Sherpa, model: EngineModel, silence: number): SherpaVad 
 }
 
 /** The language of a job, and what is known of the audio around its parts. */
-interface Job { model: EngineModel; start: string; changes: LanguageChange[]; current: string; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
-const newJob = (model: EngineModel, start: string, changes: LanguageChange[]): Job => ({ model, start, changes, current: start, lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
+interface Job { model: EngineModel; start: string; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; current: string; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
+const newJob = (model: EngineModel, start: string, changes: LanguageChange[], turns: SpeakerTurn[] = []): Job => ({ model, start, changes, turns, voiceCuts: speakerCuts(turns), current: start, lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
 
 /** The part with what can be had of its context, and where that starts and ends. */
 function withContext(part: Part, next: number | null, job: Job): { samples: Float32Array; from: number; to: number } {
   const end = part.start + part.samples.length;
-  const range = contextRange(part.start, end, { previousEnd: job.previousEnd, next, heard: job.audio.seen, ending: job.ending });
+  // Context stays inside the voice of the part.
+  const voice = cutsAround(job.voiceCuts, part.start / SAMPLE_RATE, end / SAMPLE_RATE);
+  const nextCut = voice.after === null ? null : Math.round(voice.after * SAMPLE_RATE);
+  const range = contextRange(part.start, end, {
+    previousEnd: Math.max(job.previousEnd, Math.round(voice.before * SAMPLE_RATE)),
+    next: next === null ? nextCut : nextCut === null ? next : Math.min(next, nextCut),
+    heard: job.audio.seen, ending: job.ending,
+  });
   // The part itself is always whole: context that is gone is only missed.
   const before = job.audio.slice(range.from, part.start) ?? new Float32Array(0);
   const after = job.audio.slice(end, range.to) ?? new Float32Array(0);
@@ -111,7 +120,9 @@ async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Job)
     const segment = vad.front(false);
     vad.pop();
     const nextSegment = vad.isEmpty() ? null : vad.front(false).start;
-    const parts = splitAtChanges(segment, job.changes.map((c) => c.at)).flatMap((part) => splitLong(part));
+    const parts = splitAtChanges(segment, job.changes.map((c) => c.at))
+      .flatMap((part) => splitAtChanges(part, job.voiceCuts, SHORTEST_TURN))
+      .flatMap((part) => splitLong(part));
     for (const [i, part] of parts.entries()) {
       // Here, between two decodes: a change arriving during a decode only joins the list.
       job.lastPart = (part.start + part.samples.length) / SAMPLE_RATE;
@@ -128,7 +139,8 @@ async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Job)
       const text = markRepeats(result.text.trim());
       if (text) {
         found++;
-        send({ type: 'segment', start: input.from / SAMPLE_RATE, end: input.to / SAMPLE_RATE, text });
+        const speaker = speakerOf(part.start / SAMPLE_RATE, (part.start + part.samples.length) / SAMPLE_RATE, job.turns);
+        send({ type: 'segment', start: input.from / SAMPLE_RATE, end: input.to / SAMPLE_RATE, text, ...(speaker ? { speaker } : {}) });
       }
     }
   }
@@ -215,7 +227,7 @@ async function transcribe(sherpa: Sherpa, request: Extract<WorkerRequest, { type
   let segments = 0;
   let fed = 0;
   let pending = new Float32Array(0);
-  const job = newJob(request.model, request.language, request.changes ?? []);
+  const job = newJob(request.model, request.language, request.changes ?? [], request.turns ?? []);
   const decode = async () => { segments += await decodeAll(recognizer, vad, job); };
   // The VAD takes 512 samples at a time; what is left over waits for the next chunk.
   const feed = async (samples: Float32Array) => {
@@ -246,6 +258,34 @@ async function transcribe(sherpa: Sherpa, request: Extract<WorkerRequest, { type
   send({ type: 'done', seconds: format.duration, segments });
 }
 
+/** Above this similarity two stretches are one voice. Measured: lower finds people who are not there. */
+const SAME_SPEAKER = 0.85;
+
+/** Who spoke when. Everything about voices stays in this process, which ends with the job; only the times leave it. */
+async function findSpeakers(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'speakers' }>): Promise<void> {
+  // The work below blocks this thread, so a dashboard that went away would go unnoticed: a thread of its own watches.
+  new Worker("const { workerData } = require('worker_threads'); setInterval(() => { if (process.ppid !== workerData) process.kill(process.pid, 'SIGKILL'); }, 2000);", { eval: true, workerData: process.ppid }).unref();
+  const format = await readWavFormat(request.wav);
+  const resampler = format.sampleRate === SAMPLE_RATE ? null : new sherpa.LinearResampler(format.sampleRate, SAMPLE_RATE);
+  const samples = new Float32Array(Math.ceil(format.duration * SAMPLE_RATE) + SAMPLE_RATE);
+  let filled = 0;
+  const add = (block: Float32Array) => {
+    const fits = block.subarray(0, samples.length - filled);
+    samples.set(fits, filled);
+    filled += fits.length;
+  };
+  for await (const chunk of wavChunks(request.wav, format, 1)) add(resampler ? resampler.resample(chunk) : chunk);
+  if (resampler) add(resampler.flush(new Float32Array(0)));
+  const diarization = new sherpa.OfflineSpeakerDiarization({
+    segmentation: { pyannote: { model: request.segmentation }, numThreads: request.threads, debug: 0 },
+    embedding: { model: request.embedding, numThreads: request.threads, debug: 0 },
+    clustering: { numClusters: -1, threshold: SAME_SPEAKER },
+    minDurationOn: 0.3, minDurationOff: 0.5,
+  });
+  send({ type: 'turns', turns: speakerTurns(diarization.process(samples.subarray(0, filled)), format.duration) });
+  send({ type: 'done', seconds: format.duration, segments: 0 });
+}
+
 async function handle(request: WorkerRequest): Promise<void> {
   const sherpa = loadSherpa();
   if (request.type === 'version') {
@@ -259,6 +299,10 @@ async function handle(request: WorkerRequest): Promise<void> {
   }
   if (request.type === 'follow') {
     await follow(sherpa, request);
+    return;
+  }
+  if (request.type === 'speakers') {
+    await findSpeakers(sherpa, request);
     return;
   }
   await transcribe(sherpa, request);

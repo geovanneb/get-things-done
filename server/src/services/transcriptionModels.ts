@@ -59,6 +59,8 @@ export interface TranscriptionSettings {
   keep_recordings: boolean;
   /** The model for a live transcript while recording; null: no live transcript. */
   live_model: string | null;
+  /** Tell speakers apart in transcripts made after a meeting, once the speaker model is downloaded. */
+  speakers: boolean;
   updated_at: string | null;
 }
 
@@ -71,18 +73,24 @@ export interface DownloadProgress {
   message?: string;
 }
 
-export interface ModelView extends Omit<CatalogModel, 'files' | 'engine'> {
+/** Where a model stands on this computer. */
+export interface ModelState {
   size: number;
   installed: boolean;
   /** Bytes already on disk from an interrupted download; it resumes from there. */
   partial: number;
   download: DownloadProgress | null;
+}
+
+export interface ModelView extends Omit<CatalogModel, 'files' | 'engine'>, ModelState {
   /** How fast it transcribed on this computer, when tested. */
   speed: SpeedResult | null;
 }
 
 export interface TranscriptionView {
   models: ModelView[];
+  /** The optional speaker model. It is not one of the transcription models to choose from. */
+  speakers: Pick<CatalogModel, 'id' | 'name' | 'summary'> & ModelState;
   settings: TranscriptionSettings;
   defaults: TranscriptionSettings;
   /** The voice-activity model every transcription needs; downloaded with the first model. */
@@ -159,6 +167,26 @@ export const CATALOG: CatalogModel[] = [
   },
 ];
 
+const SEGMENTATION_REPO = 'csukuangfj/sherpa-onnx-pyannote-segmentation-3-0';
+const SEGMENTATION_COMMIT = '9403a6902bb58e3d5ae8c7e77c3422de279db2e0';
+const EMBEDDING_REPO = 'csukuangfj/speaker-embedding-models';
+const EMBEDDING_COMMIT = '0743f301363dec56491a490f6d6cbc9d67f9a3bf';
+
+/** Finds who spoke when, for transcripts made after a meeting. Optional, and never a model to transcribe with. */
+export const SPEAKER_MODEL: CatalogModel = {
+  id: 'speaker-detection',
+  name: 'Speaker detection',
+  summary: 'Tells speakers apart in a transcript made after a meeting.',
+  languages: 'Any',
+  pros: [],
+  cons: [],
+  memory_gb: 1,
+  files: [
+    { name: 'segmentation.int8.onnx', url: `${HF}/${SEGMENTATION_REPO}/resolve/${SEGMENTATION_COMMIT}/model.int8.onnx`, size: 1540506, sha256: 'd582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d' },
+    { name: 'embedding.onnx', url: `${HF}/${EMBEDDING_REPO}/resolve/${EMBEDDING_COMMIT}/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`, size: 39593761, sha256: '1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b' },
+  ],
+};
+
 /** Silero VAD splits a recording into speech segments; every model needs it. */
 export const VAD: CatalogModel = {
   id: 'silero-vad',
@@ -173,7 +201,7 @@ export const VAD: CatalogModel = {
   ],
 };
 
-const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, updated_at: null };
+const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, speakers: true, updated_at: null };
 /** Below this much memory the default model leaves little room, and the lighter one is suggested. */
 const LOW_MEMORY_BYTES = 8.5 * 1024 ** 3;
 const STALL_MS = 60_000;
@@ -207,6 +235,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   if (o['model'] !== undefined && !catalog.some((m) => m.id === o['model'])) throw httpError(400, 'Invalid model');
   if (o['language'] !== undefined && o['language'] !== 'auto' && !WHISPER_LANGUAGES.some((l) => l.id === o['language'])) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
   if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
+  if (o['speakers'] !== undefined && typeof o['speakers'] !== 'boolean') throw httpError(400, 'Invalid speakers: use true or false');
   if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'])) throw httpError(400, 'Invalid live_model: a catalog model, or null for no live transcript');
   const model = (o['model'] as string | undefined) ?? base.model;
   return {
@@ -214,6 +243,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
     // Moving to a model without the language chosen goes back to Auto.
     language: languageFor(model, (o['language'] as TranscriptionLanguage | undefined) ?? base.language, catalog),
     keep_recordings: (o['keep_recordings'] as boolean | undefined) ?? base.keep_recordings,
+    speakers: (o['speakers'] as boolean | undefined) ?? base.speakers,
     live_model: o['live_model'] === undefined ? base.live_model : (o['live_model'] as string | null),
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
@@ -251,13 +281,13 @@ const { O_WRONLY, O_CREAT, O_TRUNC, O_APPEND, O_RDONLY } = fs.constants;
 const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
 
 export class TranscriptionModelService {
-  constructor(private readonly catalog: CatalogModel[] = CATALOG, private readonly vad: CatalogModel = VAD, private readonly fetchImpl: typeof fetch = fetch) {}
+  constructor(private readonly catalog: CatalogModel[] = CATALOG, private readonly vad: CatalogModel = VAD, private readonly fetchImpl: typeof fetch = fetch, private readonly speakers: CatalogModel = SPEAKER_MODEL) {}
 
   private dir(): string { return modelsDir(); }
   private modelDir(id: string): string { return path.join(this.dir(), id); }
 
   private find(id: string): CatalogModel {
-    const model = id === this.vad.id ? this.vad : this.catalog.find((m) => m.id === id);
+    const model = id === this.vad.id ? this.vad : id === this.speakers.id ? this.speakers : this.catalog.find((m) => m.id === id);
     if (!model) throw httpError(404, `Unknown model: ${id}`);
     return model;
   }
@@ -351,30 +381,35 @@ export class TranscriptionModelService {
     return Boolean(holder && !holder.incomplete && !ownsToken(this.lockFile(), holder.token!) && processAlive(holder.pid) && holder.pid !== process.pid);
   }
 
+  private async state(m: CatalogModel): Promise<ModelState> {
+    const installed = await this.installed(m.id);
+    return {
+      size: m.files.reduce((sum, f) => sum + f.size, 0),
+      installed,
+      partial: installed ? 0 : await this.partialBytes(m),
+      download: active?.progress.model === m.id ? active.progress
+        : waiting.some((w) => w.id === m.id) ? { model: m.id, status: 'queued', received: 0, total: 0, file: '' }
+          : lastOutcome.get(m.id) ?? null,
+    };
+  }
+
   async view(): Promise<TranscriptionView> {
     const settings = await this.readSettings();
     const speeds = await readSpeeds();
     const vadInstalled = await this.installed(this.vad.id);
     const models: ModelView[] = [];
     for (const m of this.catalog) {
-      const { files, engine: _engine, ...rest } = m;
-      const installed = await this.installed(m.id);
-      models.push({
-        ...rest,
-        size: files.reduce((sum, f) => sum + f.size, 0),
-        installed,
-        partial: installed ? 0 : await this.partialBytes(m),
-        download: active?.progress.model === m.id ? active.progress
-          : waiting.some((w) => w.id === m.id) ? { model: m.id, status: 'queued', received: 0, total: 0, file: '' }
-            : lastOutcome.get(m.id) ?? null,
-        speed: installed ? speeds[m.id] ?? null : null,
-      });
+      const { files: _files, engine: _engine, ...rest } = m;
+      const state = await this.state(m);
+      models.push({ ...rest, ...state, speed: state.installed ? speeds[m.id] ?? null : null });
     }
     const total = os.totalmem();
     const light = this.catalog.find((m) => m.memory_gb <= 1);
     const heavy = this.catalog.find((m) => m.id === settings.model);
+    const { id, name, summary } = this.speakers;
     return {
       models,
+      speakers: { id, name, summary, ...await this.state(this.speakers) },
       settings,
       defaults: { ...DEFAULTS },
       vad_installed: vadInstalled,
@@ -414,7 +449,8 @@ export class TranscriptionModelService {
     active = job;
     try {
       const parts: CatalogModel[] = [];
-      for (const m of [this.vad, model]) if (!await this.installed(m.id)) parts.push(m);
+      // Transcribing needs the voice-activity model; finding speakers does not.
+      for (const m of model.id === this.speakers.id ? [model] : [this.vad, model]) if (!await this.installed(m.id)) parts.push(m);
       if (parts.length === 0) {
         active = null;
         await this.startWaiting();
