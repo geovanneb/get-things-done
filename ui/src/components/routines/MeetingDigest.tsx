@@ -71,7 +71,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             <span>Next: {settings.enabled ? (job.next_run_at ? formatWhen(job.next_run_at) : 'no more runs') : 'paused'}</span>
             {state.last_run_at && <span title={state.last_message}>Last: {formatRelativeTime(state.last_run_at)}</span>}
-            <span>{queued.length === 0 ? 'Queue empty' : `${queued.length} meeting${queued.length === 1 ? '' : 's'} queued`}{held > 0 ? `, ${held} on hold` : ''}{drafts > 0 ? `, ${drafts} still uploading` : ''}</span>
+            <span>{queued.length === 0 ? 'Queue empty' : `${queued.length} meeting${queued.length === 1 ? '' : 's'} queued`}{held > 0 ? `, ${held} on hold` : ''}{drafts > 0 ? `, ${drafts} not queued` : ''}</span>
           </div>
           {job.open_digest && (
             <div style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>

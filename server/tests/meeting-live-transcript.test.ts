@@ -421,3 +421,13 @@ test('no audio for a minute (the recording page is gone): the live job lets go o
   assert.match(job.reason ?? '', /No audio arrived for a minute/);
   assert.equal((await s.queue.loadMeeting(id)).live?.generation, generation, 'the recording is still there, to finish');
 });
+
+test('with the live transcript off, the recording page says it is off, not that it runs elsewhere', async (t) => {
+  const ws = await workspace(t);
+  const { engine } = fakeEngine();
+  const s = services(ws, fakeModels(null), engine);
+  const { id } = await record(s, 1);
+  const read = await s.live.read(id, 0);
+  assert.equal(read.status, 'unavailable');
+  assert.match(read.reason ?? '', /live transcript is off/);
+});
