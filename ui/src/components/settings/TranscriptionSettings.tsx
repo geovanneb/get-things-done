@@ -113,7 +113,8 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
               {vadMissing && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
               {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={check.running} onClick={() => void runCheck()}>Check</Button>}
               {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={speedTest.running} onClick={() => void runSpeedTest()}>{model.speed ? 'Test speed again' : 'Test speed'}</Button>}
-              <Button size="sm" variant="ghost" disabled={busy || check.running || speedTest.running} onClick={() => onAction('delete')}>Delete</Button>
+              <Button size="sm" variant="ghost" disabled={busy || check.running || speedTest.running} onClick={() => onAction('delete')}
+                title={busy || check.running || speedTest.running ? 'Not while a download, check or speed test is running' : undefined}>Delete</Button>
             </>
             : <Button size="sm" variant="secondary" disabled={saving || elsewhere} onClick={() => onAction('download')}>
               {model.partial > 0 ? `Continue download (${size(model.partial)} of ${size(model.size)})` : `Download (${size(model.size)})`}
@@ -154,7 +155,7 @@ function SpeakerDetection({ speakers, enabled, saving, downloading, onToggle, on
         {running
           ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
           : speakers.installed
-            ? <Button size="sm" variant="ghost" disabled={downloading} onClick={() => onAction('delete')}>Delete</Button>
+            ? <Button size="sm" variant="ghost" disabled={downloading} onClick={() => onAction('delete')} title={downloading ? 'Not while a download is running' : undefined}>Delete</Button>
             : <Button size="sm" variant="secondary" disabled={saving} onClick={() => onAction('download')}>Download ({size(speakers.size)})</Button>}
       </div>
     </div>
@@ -212,7 +213,7 @@ export default function TranscriptionSettings() {
       <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
         Meeting recordings will be transcribed on this computer, offline: nothing is sent anywhere. Choose a model and download
         it once. <strong>{data.defaults.model === data.settings.model ? 'The default, ' : ''}{chosen?.name ?? 'The chosen model'}</strong>
-        {chosen && chosen.memory_gb > 2 ? ' is accurate but takes longer; ' : ' '}you can change it here at any time.
+        {chosen && chosen.memory_gb > 2 ? ' is accurate but takes longer' : ' is fast and light'}; you can change it here at any time.
       </p>
       {data.downloading_elsewhere && (
         <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>

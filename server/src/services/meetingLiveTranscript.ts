@@ -321,7 +321,11 @@ export class MeetingLiveTranscriptService {
     const generation = meeting.live?.generation ?? null;
     const job = generation ? jobs.get(generation) : undefined;
     if (!generation || !job) {
-      return { generation, status: 'unavailable', reason: generation ? 'The live text of this recording is only in the dashboard that records it.' : null, next: 0, segments: [] };
+      // No live job here: the live transcript is off, or it runs in the dashboard that records.
+      const off = generation ? !(await this.models.readSettings().catch(() => null))?.live_model : false;
+      const reason = !generation ? null : off ? 'The live transcript is off (Settings > Transcription); the recording is transcribed after the meeting.'
+        : 'The live text of this recording is only in the dashboard that records it.';
+      return { generation, status: 'unavailable', reason, next: 0, segments: [] };
     }
     // Only what is saved to the file: the page never sees a stretch that a reload could not show again.
     const start = Math.max(0, Math.min(Number.isSafeInteger(from) ? from : 0, job.saved));

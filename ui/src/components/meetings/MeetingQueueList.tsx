@@ -13,6 +13,7 @@ function transcribed(r: RecordingState): boolean {
 }
 
 function minutes(seconds: number): string {
+  if (seconds < 60) return seconds < 1 ? 'a moment' : `${Math.max(1, Math.round(seconds))} s`;
   const m = Math.round(seconds / 60);
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
 }
@@ -104,7 +105,11 @@ export function recordingElsewhere(m: QueuedMeeting | MeetingDigest['queue'][num
 export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDigest; onChanged: () => void; onRead: (meeting: string, file: string) => void }) {
   const recorder = useRecorder();
   const [busy, setBusy] = React.useState<string | null>(null);
-  const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
+  const [notice, setNotice] = React.useState<{ text: string; error?: boolean; meeting?: string } | null>(null);
+  // A notice about a meeting that has left the queue (digested or removed) no longer holds.
+  React.useEffect(() => {
+    if (notice?.meeting && !job.queue.some((m) => m.id === notice.meeting)) setNotice(null);
+  }, [job.queue, notice]);
   const [query, setQuery] = React.useState('');
   const [all, setAll] = React.useState(false);
   // What needs you is always there; a search shows every match; otherwise the newest few, and the rest on request.
@@ -115,10 +120,10 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
     setNotice(null);
     try {
       const text = await fn();
-      if (text) setNotice({ text });
+      if (text) setNotice({ text, meeting: kind.match(/MQ-\d+-\d+/)?.[0] });
       onChanged();
     } catch (err) {
-      setNotice({ text: (err as Error).message, error: true });
+      setNotice({ text: (err as Error).message, error: true, meeting: kind.match(/MQ-\d+-\d+/)?.[0] });
       // Refused because things changed meanwhile: show them as they are now.
       onChanged();
     } finally {
@@ -148,7 +153,7 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
               {m.participants?.length ? <span style={{ flexBasis: '100%', order: 1, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Expected: {joinNames(m.participants)}</span> : null}
               <span title={m.held ?? undefined} style={{ fontSize: 'var(--text-xs)', color: m.held ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
-                {m.live ? (recorder.active && recorder.meetingId === m.id ? 'recording' : recordingElsewhere(m) ? 'recording in another page' : 'recording interrupted') : m.status === 'draft' ? 'uploading' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
+                {m.live ? (recorder.active && recorder.meetingId === m.id ? 'recording' : recordingElsewhere(m) ? 'recording in another page' : 'recording interrupted') : m.status === 'draft' ? 'not queued yet: its files are uploading, or the upload stopped' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
                   : m.files.some((f) => f.recording && !transcribed(f.recording)) ? 'waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
               </span>
               {m.held && !m.in_digest && (
@@ -168,7 +173,7 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
                   <span role="status" style={{ flex: 1, minWidth: 0, color: 'var(--color-warning)' }}>
                     {m.live.state === 'damaged' ? 'Its record cannot be read; the audio is kept. Removing the meeting discards it.'
                       : recordingElsewhere(m) ? 'Being recorded in another page or dashboard.'
-                      : `${Math.round(m.live.saved_bytes / 32_000 / 60)} min saved${m.live.last_block_at ? `, last audio ${formatRelativeTime(m.live.last_block_at)}` : ''}. It stays until you finish or discard it.`}
+                      : `${minutes(m.live.saved_bytes / 32_000)} saved${m.live.last_block_at ? `, last audio ${formatRelativeTime(m.live.last_block_at)}` : ''}. It stays until you finish or discard it.`}
                   </span>
                   {m.live.state !== 'damaged' && (
                     <Button size="sm" variant="ghost" disabled={busy !== null}
@@ -184,7 +189,7 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
               )}
               {m.files.filter((f) => f.recording?.status === 'done' && f.recording.transcript).map((f) => (
                 <div key={`read-${f.name}`} style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Transcript ready{f.recording!.accepted_live ? ' (the live one)' : ''}.
+                  Transcript of {f.name} ready{f.recording!.accepted_live ? ' (the live one)' : ''}.
                   <Button size="sm" variant="ghost" onClick={() => onRead(m.id, f.name)}>Read it</Button>
                 </div>
               ))}

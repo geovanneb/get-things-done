@@ -40,8 +40,10 @@ export function meetingActionDraft(
     `Action item from ${meeting} (context update ${update.id}, meeting record ${record.id}):`,
     '',
     action.description,
-    ...(who ? ['', `Owner: ${who}`] : []),
-    ...(action.due_date ? [`Due: ${action.due_date}`] : []),
+    // A list, so each stays on its own line in the task view.
+    ...(who || action.due_date ? [''] : []),
+    ...(who ? [`- Owner: ${who}`] : []),
+    ...(action.due_date ? [`- Due: ${action.due_date}`] : []),
     ...(mismatch ? ['', `Stakeholder not set: the record names "${action.owner!.name}" but links ${owner!.id}, which is ${owner!.name}. Choose the stakeholder yourself.`] : []),
   ];
   return {

@@ -53,7 +53,7 @@ export function TranscriptReader({ meetingId, title, transcript, onClose, canNam
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <p role="status" style={{ ...textStyle, flex: 1 }}>{title}: {transcript.final ? 'transcript' : 'live transcript, shown until the more accurate one is ready'}</p>
+        <p role="status" style={{ ...textStyle, flex: 1 }}>{title}, {transcript.file}: {transcript.final ? 'transcript' : 'live transcript, shown until the more accurate one is ready'}</p>
         <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-accent)' }}>Open as a file</a>
         <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
       </div>

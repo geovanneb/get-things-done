@@ -148,7 +148,7 @@ export class MeetingRecordingService {
     return inWorkspaceOf(token, () => this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);
       const live = meeting.live;
-      if (live?.state !== 'recording' || live.token_sha256 !== hashToken(token ?? '')) throw httpError(409, 'This page no longer holds the recording');
+      if (live?.state !== 'recording' || live.token_sha256 !== hashToken(token ?? '')) throw httpError(409, 'This page no longer holds the recording: it was finished, discarded or taken over elsewhere.');
       const { handle, saved } = await liveFile(path.join(await this.queue.meetingFolder(id), liveRecordingFile(live.generation)));
       await handle.close();
       const at = saved / BYTES_PER_SECOND;
@@ -186,7 +186,7 @@ export class MeetingRecordingService {
     return inWorkspaceOf(token, () => this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);
       if (meeting.live?.state !== 'recording' || meeting.live.token_sha256 !== hashToken(token ?? '')) {
-        throw httpError(409, 'This page no longer holds the recording');
+        throw httpError(409, 'This page no longer holds the recording: it was finished, discarded or taken over elsewhere.');
       }
       const folder = await this.queue.meetingFolder(id);
       const { handle, saved } = await liveFile(path.join(folder, liveRecordingFile(meeting.live.generation)));
@@ -255,7 +255,7 @@ export class MeetingRecordingService {
         const { handle, saved } = await liveFile(path.join(folder, liveRecordingFile(live.generation)));
         await handle.datasync().finally(() => handle.close());
         if (!input.recover) {
-          if (live.token_sha256 !== hashToken(input.token ?? '')) throw httpError(409, 'This page no longer holds the recording');
+          if (live.token_sha256 !== hashToken(input.token ?? '')) throw httpError(409, 'This page no longer holds the recording: it was finished, discarded or taken over elsewhere.');
           if (input.offset !== saved) throw httpError(409, 'Audio is still on its way', { offset: saved });
         }
         if (saved === 0) throw httpError(409, 'Nothing was recorded; discard this meeting instead');
