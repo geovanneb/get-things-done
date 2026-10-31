@@ -287,7 +287,7 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, updatesWaitin
       <div style={{ padding: '16px 16px 10px', fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
         Context
       </div>
-      <nav style={{ flex: 1 }}>
+      <nav>
         {items.map((cat) => {
           const isActive = activeCategory === cat;
           const count = cat === 'All' ? notes.length : (counts[cat.toLowerCase()] ?? 0);
@@ -307,7 +307,7 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, updatesWaitin
         })}
       </nav>
 
-      {/* Below the library: material that may change it. Its own group, so raw input never looks like context. */}
+      {/* Right under the library, not pinned to the bottom: material that may change it. Its own group, so raw input never looks like context. */}
       <div style={{ borderTop: '1px solid var(--color-border)', padding: '12px 0 16px' }}>
         <div style={{ padding: '0 16px 6px', fontSize: 'var(--text-xs)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
           Updates
@@ -463,6 +463,14 @@ export default function ContextView() {
             {updatesList && (updates?.length ?? 0) > 0 && (
               <Input value={updateQuery} onChange={(v) => { setUpdateQuery(v); setHistoryShown(HISTORY_PAGE); }} placeholder="Search title or ID..." aria-label="Search updates"
                 style={{ flex: '0 1 200px', minWidth: 140 }} />
+            )}
+            {updatesWaiting > 0 && !updatesList && (
+              <Button onClick={() => navigate('/context/updates')}
+                aria-label={`${updatesWaiting} ${updatesWaiting === 1 ? 'update waits' : 'updates wait'} for your review`}
+                title="Open the updates waiting for your review"
+                style={{ background: 'var(--color-warning-subtle)', color: 'var(--color-warning)', borderColor: 'color-mix(in oklch, var(--color-warning) 45%, transparent)', fontWeight: 600 }}>
+                {updatesWaiting > 99 ? '99+' : updatesWaiting} to review
+              </Button>
             )}
             <Button variant={showUpdates ? 'primary' : 'secondary'} onClick={() => setImportOpen(true)}
               title="Upload a transcript, deck, photo or any file that may change your context">
