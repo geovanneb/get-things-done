@@ -36,7 +36,7 @@ function fakeEngine(ms: number, loadMs = 0) {
     transcribe: async (wav: string) => {
       seen.push({ wav, size: (await fsp.stat(wav)).size });
       await new Promise((r) => setTimeout(r, ms + loadMs));
-      return { segments: [], seconds: 0, load_ms: loadMs };
+      return { segments: [{ start: 0, end: 1, text: 'Fictional speech.' }], seconds: 0, load_ms: loadMs };
     },
   } as unknown as TranscriptionEngine;
   return { engine, seen };
@@ -104,4 +104,16 @@ test('a sample download larger than expected is stopped as it arrives', async (t
   }))) as unknown as typeof fetch;
   await assert.rejects(runSpeedTest(fakeEngine(1).engine, 'm', endless, list), /did not match its checksum/);
   assert.ok(sent < 1024 * 1024, `stopped after ${sent} bytes`);
+});
+
+test('a speed test says why the engine failed, and a busy engine stays busy', async (t) => {
+  await modelsFolder(t);
+  const { fetchImpl } = fakeFetch();
+  const failing = (err: Error) => ({ transcribe: async () => { throw err; } }) as unknown as TranscriptionEngine;
+  await assert.rejects(runSpeedTest(failing(new Error('The transcription engine failed: fictional')), 'm', fetchImpl, list),
+    (err: Error & { statusCode?: number }) => err.statusCode === 424 && err.message === 'The speed test failed: The transcription engine failed: fictional');
+  const deaf = { transcribe: async () => ({ segments: [], seconds: 0, load_ms: 0 }) } as unknown as TranscriptionEngine;
+  await assert.rejects(runSpeedTest(deaf, 'm', fetchImpl, list), (err: Error & { statusCode?: number }) => err.statusCode === 424 && /found no speech/.test(err.message));
+  const busy = Object.assign(new Error('A transcription is already running'), { statusCode: 409 });
+  await assert.rejects(runSpeedTest(failing(busy), 'm', fetchImpl, list), (err: Error & { statusCode?: number }) => err.statusCode === 409);
 });

@@ -15,7 +15,7 @@ const SAMPLE_RATE = 16000;
 
 interface SherpaStream { acceptWaveform(input: { samples: Float32Array; sampleRate: number }): void }
 interface SherpaRecognizer { createStream(): SherpaStream; decodeAsync(stream: SherpaStream): Promise<{ text: string }> }
-interface SherpaVad { acceptWaveform(samples: Float32Array): void; isEmpty(): boolean; front(): { samples: Float32Array; start: number }; pop(): void; flush(): void }
+interface SherpaVad { acceptWaveform(samples: Float32Array): void; isEmpty(): boolean; front(enableExternalBuffer: boolean): { samples: Float32Array; start: number }; pop(): void; flush(): void }
 interface SherpaResampler { resample(samples: Float32Array): Float32Array; flush(samples: Float32Array): Float32Array }
 interface Sherpa {
   version?: string | (() => string);
@@ -64,7 +64,8 @@ function newVad(sherpa: Sherpa, model: EngineModel): SherpaVad {
 async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad): Promise<number> {
   let found = 0;
   while (!vad.isEmpty()) {
-    const segment = vad.front();
+    // A copy: Electron, where this worker runs in the desktop app, refuses buffers that live in native memory.
+    const segment = vad.front(false);
     vad.pop();
     const stream = recognizer.createStream();
     stream.acceptWaveform({ samples: segment.samples, sampleRate: SAMPLE_RATE });
