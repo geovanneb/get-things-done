@@ -7,7 +7,7 @@ import { MeetingDigestService } from '../src/services/meetingDigestService';
 import { MeetingRecordingService } from '../src/services/meetingRecording';
 import { MeetingLiveTranscriptService, liveTranscriptFile } from '../src/services/meetingLiveTranscript';
 import type { FollowSession, Segment, TranscriptionEngine } from '../src/services/transcription/engine';
-import type { TranscriptionModelService } from '../src/services/transcriptionModels';
+import { runnableModel, type TranscriptionModelService } from '../src/services/transcriptionModels';
 
 const TOKEN = 'fictional-writer-token-live';
 
@@ -540,4 +540,54 @@ test('a GPU live model runs live only while verified here; otherwise SenseVoice 
   const second = await record(s, 1);
   assert.equal(started.at(-1), GPU, 'verified: on the GPU');
   assert.equal((await s.live.read(second.id, 0)).note, undefined);
+});
+
+test('a GPU live model: without SenseVoice the page says why there is no live text; a GPU failure before it runs revokes it, a busy engine does not', async (t) => {
+  const ws = await workspace(t);
+  const GPU = 'whisper-large-v3-turbo-gpu';
+  const models = path.join(ws, '.gpu-models');
+  await fsp.mkdir(path.join(models, 'speed-test'), { recursive: true });
+  await fsp.writeFile(path.join(models, 'gtd-whisper'), '');
+  const saved = { models: process.env.ESB_MODELS_PATH, helper: process.env.GTD_WHISPER_HELPER };
+  process.env.ESB_MODELS_PATH = models;
+  process.env.GTD_WHISPER_HELPER = path.join(models, 'gtd-whisper');
+  t.after(() => {
+    for (const [key, value] of [['ESB_MODELS_PATH', saved.models], ['GTD_WHISPER_HELPER', saved.helper]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  const settings = {
+    readSettings: async () => ({ model: GPU, language: 'auto', keep_recordings: false, live_model: GPU, speakers: false, updated_at: null }),
+    // SenseVoice is not downloaded.
+    installedPath: async (id: string) => (id === 'sensevoice-2024-07-17' ? null : '/fictional/model'),
+  } as unknown as TranscriptionModelService;
+  // Later than the revocation each step makes, as a new speed test would be.
+  const verify = (later: number) => fsp.writeFile(path.join(models, 'speed-test', `${GPU}.json`), JSON.stringify({ realtime_x: 15, load_ms: 1, measured_at: new Date(Date.now() + later).toISOString(), cpu: `${os.cpus()[0]?.model ?? 'unknown'} × ${os.cpus().length}`, backend: 'MTL0' }));
+  let failWith: object | null = null;
+  let started = 0;
+  const engine = { follow: async () => { started++; throw Object.assign(new Error('Fictional failure'), failWith); } } as unknown as TranscriptionEngine;
+  const s = services(ws, settings, engine);
+
+  const unverified = await record(s, 1);
+  assert.equal(started, 0, 'no worker starts');
+  const view = await s.live.read(unverified.id, 0);
+  assert.equal(view.status, 'stopped');
+  assert.match(view.reason ?? '', /not verified on this computer.*no live transcript/);
+  await s.recording.finish(unverified.id, { token: TOKEN, offset: unverified.offset, generation: unverified.generation, queue: false });
+
+  await verify(1000);
+  failWith = { failure: 'missing' };
+  const missing = await record(s, 1);
+  await s.recording.finish(missing.id, { token: TOKEN, offset: missing.offset, generation: missing.generation, queue: false });
+  assert.notEqual(await runnableModel(GPU), GPU, 'revoked before the queue takes over');
+
+  await verify(2000);
+  failWith = { engineBusy: true };
+  const busy = await record(s, 1);
+  await s.recording.finish(busy.id, { token: TOKEN, offset: busy.offset, generation: busy.generation, queue: false });
+  assert.equal(await runnableModel(GPU), GPU, 'a busy engine says nothing about the GPU');
+  failWith = {};
+  const generic = await record(s, 1);
+  await s.recording.finish(generic.id, { token: TOKEN, offset: generic.offset, generation: generic.generation, queue: false });
+  assert.equal(await runnableModel(GPU), GPU, 'nor does an error without a GPU failure');
 });

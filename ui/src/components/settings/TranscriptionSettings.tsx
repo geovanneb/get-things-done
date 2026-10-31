@@ -108,7 +108,7 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
       {model.gpu && !speedTest.running && (
         <p role="status" style={{ ...hintStyle, color: model.gpu_ready ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
           {model.gpu_ready
-            ? 'Runs on this Mac\'s graphics chip. It can also make the live transcript (choose it below): Whisper quality as people speak, and with speaker detection off, the transcript is ready when you stop. If it ever fails on the graphics chip, the recording is transcribed with Whisper Turbo on the CPU instead.'
+            ? 'Runs on this Mac\'s graphics chip. It can also make the live transcript (choose it below): Whisper quality as people speak. With this model for both the live and the after-meeting transcript, and speaker detection off, a complete live transcript is used when you stop (catching up can take a moment); otherwise the recording is still transcribed after the meeting. If it ever fails on the graphics chip, the recording is transcribed with Whisper Turbo on the CPU instead.'
             : model.installed
               ? (model.speed ? 'The test ran, but not on the graphics chip: it cannot be chosen.' : 'Press Test speed: it can be chosen once the test shows it runs on the graphics chip.')
               : 'Download it, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'}

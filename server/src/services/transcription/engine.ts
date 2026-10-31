@@ -337,6 +337,8 @@ export class TranscriptionEngine {
     const waiting: (() => void)[] = [];
     const ended = () => new Promise<void>((resolve) => { if (outcome) resolve(); else waiting.push(resolve); });
     let loaded = false;
+    // Set once a GPU model's load report says Metal.
+    let onGpu = false;
     const loadTimer = setTimeout(() => { if (!loaded) { settle({ ok: false, message: 'The model took too long to load.' }); void stop(child); } }, CHECK_TIMEOUT_MS);
     child.on('message', (reply: WorkerReply) => {
       // Kept up after the job settled too: a GPU engine announced late must still be known, and confirmed so it loads
@@ -356,6 +358,13 @@ export class TranscriptionEngine {
           void stop(child);
           return;
         }
+        onGpu = gpu;
+      }
+      // No text, and no success, from a GPU model before it said it runs on Metal.
+      if (gpu && !onGpu && (reply.type === 'segment' || reply.type === 'part' || reply.type === 'done')) {
+        settle({ ok: false, message: 'The GPU engine did not say which device it runs on', failure: 'protocol' });
+        void stop(child);
+        return;
       }
       if (reply.type === 'segment') options.onSegment({ start: reply.start, end: reply.end, text: reply.text });
       if (reply.type === 'part') options.onPart?.({ start: reply.start, end: reply.end, detected: reply.detected });

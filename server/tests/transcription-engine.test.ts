@@ -535,3 +535,53 @@ test('real model: a language detector that does not load, or fails, leaves the l
   assert.equal(replies.find((r) => r.type === 'error'), undefined, JSON.stringify(replies.find((r) => r.type === 'error')));
   assert.match(replies.filter((r): r is Extract<WorkerReply, { type: 'segment' }> => r.type === 'segment').map((s) => s.text).join(' '), /tribal chieftain/i);
 });
+
+test('a GPU model live: no text and no success before its load report says Metal; on Metal it follows as usual', async (t) => {
+  const dir = await installedModels(t);
+  const GPU = 'whisper-large-v3-turbo-gpu';
+  const { VAD } = await import('../src/services/transcriptionModels');
+  await fakeInstall(dir, [GPU, VAD.id]);
+  await fsp.writeFile(path.join(dir, 'gtd-whisper'), '');
+  const previous = process.env.GTD_WHISPER_HELPER;
+  process.env.GTD_WHISPER_HELPER = path.join(dir, 'gtd-whisper');
+  t.after(() => { if (previous === undefined) delete process.env.GTD_WHISPER_HELPER; else process.env.GTD_WHISPER_HELPER = previous; });
+
+  const follow = async (backend: string | null | undefined, first?: 'done') => {
+    const worker = fakeWorker((request, reply) => {
+      if (request.type === 'follow' && first === 'done') { reply({ type: 'done', bytes: 32_000, seconds: 1, segments: 0 } as WorkerReply); return; }
+      if (request.type === 'follow') {
+        if (backend !== null) reply({ type: 'loaded', ms: 1, ...(backend ? { backend } : {}) } as WorkerReply);
+        reply({ type: 'segment', start: 0, end: 1, text: 'Fictional words' } as WorkerReply);
+        if (backend === null) reply({ type: 'done', bytes: 32_000, seconds: 1, segments: 1 } as WorkerReply);
+      }
+      if (request.type === 'end') reply({ type: 'done', bytes: request.bytes, seconds: 1, segments: 1 } as WorkerReply);
+    });
+    const engine = new TranscriptionEngine(new TranscriptionModelService(), worker.launcher);
+    const segments: unknown[] = [];
+    const session = await engine.follow('/fictional.wav', { model: GPU, language: 'en', onSegment: (s) => segments.push(s) });
+    await new Promise((r) => setTimeout(r, 30));
+    const result = await session.end(32_000, 1000);
+    return { result, segments, killed: worker.runs[0]!.killed };
+  };
+
+  const silent = await follow(null);
+  assert.deepEqual(silent.segments, [], 'no text without a load report');
+  assert.equal(silent.result.ok, false);
+  assert.equal(!silent.result.ok && silent.result.failure, 'protocol');
+  assert.ok(silent.killed, 'the worker is stopped');
+
+  const cpu = await follow('CPU');
+  assert.deepEqual(cpu.segments, []);
+  assert.equal(!cpu.result.ok && cpu.result.failure, 'gpu');
+
+  const doneFirst = await follow(null, 'done');
+  assert.equal(!doneFirst.result.ok && doneFirst.result.failure, 'protocol', 'no success before the load report');
+
+  const unknown = await follow(undefined);
+  assert.deepEqual(unknown.segments, []);
+  assert.equal(!unknown.result.ok && unknown.result.failure, 'gpu', 'a load report without a device is not Metal');
+
+  const metal = await follow('MTL0');
+  assert.equal(metal.segments.length, 1);
+  assert.ok(metal.result.ok, 'on Metal it follows as usual');
+});

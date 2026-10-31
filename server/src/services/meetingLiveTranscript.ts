@@ -93,6 +93,8 @@ export interface Job {
   evidence: LanguageEvidence | null;
   /** Why the live transcript runs with another model than the one in Settings, or not at all. */
   note?: string;
+  /** The GPU model's verification being withdrawn after it failed: Finish waits for it before the queue takes over. */
+  revoking?: Promise<void>;
   /** Parts from before the last change of language, or at it, say nothing about it. */
   heardFrom: number;
 }
@@ -184,6 +186,8 @@ export class MeetingLiveTranscriptService {
       }
     }
     if (!settings || !live || !await this.models.installedPath(live).catch(() => null)) {
+      // Kept, stopped, only to tell the page why there is no live transcript; Finish and discard close it as usual.
+      if (job.note && !live) { stopJob(job, job.note); delete job.note; return; }
       jobs.delete(generation);
       return;
     }
@@ -226,6 +230,8 @@ export class MeetingLiveTranscriptService {
         emit(job);
       } catch (err) {
         const busy = (err as { engineBusy?: boolean }).engineBusy;
+        // The GPU engine failed before it ran (gone from this install, say): the same as a failure while it runs.
+        await this.revokeOnGpuFailure(job, (err as { failure?: string }).failure ?? null);
         stopJob(job, busy ? 'Another transcription was running, so this recording is transcribed after the meeting.' : `The live transcript could not start: ${(err as Error).message}`);
       } finally {
         // However it went (started, failed, or the recording ended while the model loaded), the queue is not held.
@@ -308,9 +314,10 @@ export class MeetingLiveTranscriptService {
   }
 
   /** A GPU live model failed on the GPU itself: it must pass a new speed test, as after a failed transcription. */
-  private async revokeOnGpuFailure(job: Job, failure: string | null): Promise<void> {
-    if (!failure || !GPU_FAILURES.includes(failure) || !CATALOG.find((m) => m.id === job.model)?.gpu) return;
-    await forgetSpeed(job.model);
+  private revokeOnGpuFailure(job: Job, failure: string | null): Promise<void> {
+    if (!failure || !GPU_FAILURES.includes(failure) || !CATALOG.find((m) => m.id === job.model)?.gpu) return Promise.resolve();
+    job.revoking ??= forgetSpeed(job.model).catch(() => {});
+    return job.revoking;
   }
 
   /** A decoded part: evidence for the language suggestion. */
@@ -370,7 +377,7 @@ export class MeetingLiveTranscriptService {
     if (!job) return Promise.resolve(null);
     job.finishing ??= (async () => {
       await job.starting;
-      if (job.status === 'stopped' || !job.session) { await job.session?.cancel(); return null; }
+      if (job.status === 'stopped' || !job.session) { await job.session?.cancel(); await job.revoking; return null; }
       job.status = 'finishing';
       emit(job);
       job.deadline ??= Date.now() + FINISH_MS;
