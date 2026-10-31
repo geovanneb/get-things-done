@@ -7,7 +7,7 @@ import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, wit
 import { TranscriptionModelService, CATALOG, languagesFor, SPEAKER_MODEL } from './transcriptionModels';
 import type { LanguageChange } from './transcription/languages';
 import { hasWords } from './transcription/repeats';
-import { TranscriptionEngine, Segment, type TranscribeOptions } from './transcription/engine';
+import { TranscriptionEngine, Segment, engineEvents, type TranscribeOptions } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
 import { HeldLock, tryLock, unlock } from '../utils/fileLock';
 import { processAlive } from './runState';
@@ -56,11 +56,25 @@ export interface TranscriptionProgress { meeting: string; file: string; done: nu
 /** Notices for the dashboard when a transcription starts, moves or ends. */
 export const meetingTranscriptionEvents = new EventEmitter();
 
-interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string; changes: LanguageChange[]; speakers: boolean; speakerNote?: string }
+interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string; changes: LanguageChange[]; speakers: boolean; speakerNote?: string;
+  /** It found the engine busy and went back in line: it waits for the engine to come free, not for this job's end. */
+  engineBusy?: boolean;
+  /** How many times the engine had come free when this job started (see `frees`). */
+  frees: number;
+  /** Its result could not be saved. */
+  unsaved?: boolean }
 /** The job this dashboard runs; null when none. */
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
 let ticking = 0;
+/** Times the engine came free: a job that found it busy can tell whether that happened while it was ending. */
+let frees = 0;
+/**
+ * Recordings whose result could not be saved, until when they are left aside: recovery puts them back in line, and
+ * without this the oldest one would be taken first every time, so the meetings after it would never get a turn.
+ */
+const setAside = new Map<string, number>();
+const SET_ASIDE_MS = 10 * 60 * 1000;
 
 const digest = new MeetingDigestService();
 
@@ -145,14 +159,27 @@ export class MeetingTranscriptionService {
     const claimed = job;
     // The job runs on its own: whatever happens in it is caught here, and it always gives back its lock.
     void (async () => {
+      // A job that failed outside the transcription, or whose result could not be saved, is not followed at once:
+      // recovery would hand the same recording back straight away, again and again.
+      let ended = false;
       try {
         await this.run(claimed, claimed.model, claimed.language);
+        ended = true;
       } catch (err) {
         console.error(`[transcription] ${claimed.meeting}/${claimed.file}: ${(err as Error).message}`);
       } finally {
         if (active === claimed) active = null;
-        await unlock(claimed.lock).catch(() => {});
-        meetingTranscriptionEvents.emit('change');
+        // Counted as busy until the next start is under way, so the queue never looks idle in between.
+        ticking++;
+        try {
+          await unlock(claimed.lock).catch(() => {});
+          meetingTranscriptionEvents.emit('change');
+        } finally {
+          // The next recording starts now, not at the next routine check. One that found the engine busy waits for it
+          // to come free, unless that already happened while it was ending (the signal then found this job active).
+          if (ended && !claimed.unsaved && (!claimed.engineBusy || frees !== claimed.frees)) this.kick();
+          ticking--;
+        }
       }
     })();
   }
@@ -175,14 +202,26 @@ export class MeetingTranscriptionService {
     return meeting;
   }
 
-  /** Puts a stopped, failed or partial recording back in line for transcription. */
-  async retry(meetingId: string, file: string): Promise<QueuedMeeting> {
+  /**
+   * Puts a stopped, failed or partial recording back in line for transcription, with `model` or else the model
+   * chosen in Settings now; its spoken language stays. Also takes a recording that waits for a model that is not
+   * downloaded.
+   */
+  async retry(meetingId: string, file: string, model?: string): Promise<QueuedMeeting> {
     let dropped: string | undefined;
-    const meeting = await this.change(meetingId, file, (r, m) => {
-      if (!['stopped', 'failed', 'partial'].includes(r.status)) throw httpError(409, 'Only a stopped, failed or partial transcription can be tried again');
+    const settings = await this.models.readSettings();
+    // "Use <model>" names the model it showed; another dashboard may have changed Settings meanwhile.
+    if (model !== undefined && !CATALOG.some((m) => m.id === model)) throw httpError(400, 'Not a transcription model');
+    const use = model ?? settings.model;
+    if (!await this.models.installedPath(use)) throw httpError(409, model ? 'That model is not downloaded' : 'The model chosen in Settings > Transcription is not downloaded yet: download it there first');
+    const speakers = settings.speakers === true && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
+    const meeting = await this.change(meetingId, file, async (r, m) => {
+      const waitsForModel = r.status === 'pending' && Boolean(r.target) && !await this.models.installedPath(r.target!.model);
+      if (!['stopped', 'failed', 'partial'].includes(r.status) && !waitsForModel) throw httpError(409, 'Only a stopped, failed or partial transcription can be tried again');
       // A partial transcript gives way to the new one, so a digest never gets both.
       if (r.transcript) { dropped = r.transcript; m.files = m.files.filter((f) => f.name !== r.transcript); }
-      return nextRecording(r, { status: 'pending' });
+      const target = r.target ? { ...r.target, model: use, speakers } : undefined;
+      return nextRecording(r, { status: 'pending', ...(target ? { target } : {}) });
     });
     if (dropped) {
       const file = await fileInside(await this.queue.meetingFolder(meetingId), dropped).catch(() => null);
@@ -335,7 +374,7 @@ export class MeetingTranscriptionService {
         let entry: QueuedMeeting['files'][number] | undefined;
         let use: { model: string; language: string; changes: LanguageChange[] } = { model, language, changes: [] };
         let wantSpeakers = speakers;
-        for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending')) {
+        for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending' && (setAside.get(`${meeting.id}/${f.name}`) ?? 0) <= Date.now())) {
           // Its own target, fixed when it was finished; a model that is not downloaded keeps it waiting, and the others go on.
           const wanted = candidate.recording?.target ?? { model, language };
           if (!await this.models.installedPath(wanted.model)) continue;
@@ -354,7 +393,7 @@ export class MeetingTranscriptionService {
         entry.recording = nextRecording(entry.recording, { status: 'running', generation, owner: { pid: process.pid, token }, started_at: new Date().toISOString(), model: use.model, language: use.language });
         await this.queue.saveMeeting(meeting);
         return {
-          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes, speakers: wantSpeakers,
+          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes, speakers: wantSpeakers, frees,
           progress: { meeting: meeting.id, file: entry.name, done: 0, total: 0, started_at: new Date().toISOString() },
         };
       }
@@ -406,6 +445,9 @@ export class MeetingTranscriptionService {
     try {
       await this.publish(job, model, language, segments, seconds || job.progress.total, error);
     } catch (err) {
+      // Left running on disk: recovery puts it back in line, and it waits a while so the others go first.
+      job.unsaved = true;
+      setAside.set(`${job.meeting}/${job.file}`, Date.now() + SET_ASIDE_MS);
       console.error(`[transcription] ${job.meeting}/${job.file}: ${(err as Error).message}`);
     }
   }
@@ -434,6 +476,7 @@ export class MeetingTranscriptionService {
       }
       // The engine was busy with something else, such as a speed test: nothing went wrong with this recording.
       if (error && segments.length === 0 && (error as { engineBusy?: boolean }).engineBusy) {
+        job.engineBusy = true;
         entry.recording = nextRecording(r, { status: 'pending' });
         await this.queue.saveMeeting(meeting);
         return;
@@ -518,3 +561,9 @@ function convert(source: string, target: string, signal: AbortSignal): Promise<v
     });
   });
 }
+
+// The engine came free (a live transcript or a speed test ended): a waiting recording can start now.
+engineEvents.on('free', () => {
+  frees++;
+  new MeetingTranscriptionService().tick().catch((err: Error) => console.error(`[transcription] ${err.message}`));
+});

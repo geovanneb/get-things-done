@@ -113,9 +113,9 @@ router.post('/:id/recordings/:file/:action', async (req: Request, res: Response)
   const id = queueId(param(req, 'id'));
   const file = topLevelName(param(req, 'file'));
   const action = param(req, 'action');
-  const body = (req.body ?? {}) as { generation?: unknown; draft_sha256?: unknown };
+  const body = (req.body ?? {}) as { generation?: unknown; draft_sha256?: unknown; model?: unknown };
   if (action === 'stop') res.json(await transcription.stop(id, file, typeof body.generation === 'string' ? body.generation : undefined));
-  else if (action === 'retry') res.json(await transcription.retry(id, file));
+  else if (action === 'retry') res.json(await transcription.retry(id, file, typeof body.model === 'string' ? body.model : undefined));
   else if (action === 'accept') res.json(await transcription.accept(id, file));
   else if (action === 'use-live') {
     if (typeof body.draft_sha256 !== 'string') { res.status(400).json({ error: 'Bad Request', message: 'draft_sha256 is required' }); return; }

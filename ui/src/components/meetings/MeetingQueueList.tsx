@@ -18,19 +18,25 @@ function minutes(seconds: number): string {
 }
 
 /** One recording of a queued meeting: where its transcription stands, and what can be done about it. */
-function RecordingLine({ meeting, file, state, progress, disabled, installed, speeds, onAction, onRead }: {
+function RecordingLine({ meeting, file, state, progress, disabled, installed, speeds, names, chosen, onAction, onRead }: {
   meeting: QueuedMeeting; file: string; state: RecordingState; progress: TranscriptionProgress | null; disabled: boolean; installed: string[] | null; speeds: Record<string, number>;
+  /** Model names by id, and the model chosen in Settings now. */
+  names: Record<string, string>; chosen: string | null;
   onAction: (action: 'stop' | 'retry' | 'accept' | 'use-live', message: string, body?: Record<string, string>, stopFirst?: boolean) => void;
   onRead: () => void;
 }) {
   let text: string;
   let tone = 'var(--color-text-muted)';
+  const name = (id: string) => names[id] ?? id;
+  // Fixed to a model that is not downloaded: it can switch to the one chosen now, when that one is.
+  const missing = state.status === 'pending' && Boolean(state.target) && Boolean(installed) && !installed!.includes(state.target!.model);
+  const switchTo = missing && chosen && chosen !== state.target!.model && installed!.includes(chosen) ? chosen : null;
   if (state.status === 'running') {
     text = progress && progress.total > 0
       ? `Transcribing: ${Math.min(99, Math.floor((progress.done / progress.total) * 100))}% of ${minutes(progress.total)}`
       : progress ? 'Transcribing: loading the model' : 'Transcribing in another dashboard';
-  } else if (state.status === 'pending' && state.target && installed && !installed.includes(state.target.model)) {
-    text = `Waits for ${state.target.model}, which is not downloaded: download it again in Settings > Transcription`;
+  } else if (missing) {
+    text = `Waits for ${name(state.target!.model)}, which is not downloaded: download it in Settings > Transcription${switchTo ? `, or use ${name(switchTo)}` : ''}`;
     tone = 'var(--color-warning)';
   } else if (state.status === 'pending') text = 'Waits for transcription; one recording at a time';
   else if (state.status === 'stopped') { text = 'Stopped: the meeting waits until you try again or remove it'; tone = 'var(--color-warning)'; }
@@ -41,14 +47,14 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   const draft = state.draft;
   if (draft) {
     const accurate = state.status === 'running' ? text.replace(/^Transcribing/, 'being made')
-      : state.status === 'pending' ? (tone === 'var(--color-warning)' ? `waits for ${state.target?.model}, which is not downloaded (Settings > Transcription)` : 'waits its turn')
+      : state.status === 'pending' ? (missing ? `waits for ${name(state.target!.model)}, which is not downloaded (Settings > Transcription)` : 'waits its turn')
         : state.status === 'stopped' ? 'stopped'
           : state.status === 'failed' ? `failed (${state.error ?? 'unknown error'})`
             : 'partial: use one of them, or try again';
     // From Test speed, when the model was tested; a model that has not been gives no estimate.
     const speed = state.target ? speeds[state.target.model] : undefined;
     const estimate = speed && state.status === 'pending' && tone !== 'var(--color-warning)' ? `, about ${minutes(draft.seconds / speed)} of work` : '';
-    text = `Live transcript ready. The more accurate one${state.target ? ` (${state.target.model})` : ''}: ${accurate}${estimate}`;
+    text = `Live transcript ready. The more accurate one${state.target ? ` (${name(state.target.model)})` : ''}: ${accurate}${estimate}`;
   }
   return (
     <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
@@ -60,6 +66,10 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
             if (state.status === 'running' && !window.confirm(`Stop transcribing ${file}? What was transcribed so far is not kept.`)) return;
             onAction('stop', `${file} will not be transcribed until you try again.`, state.generation ? { generation: state.generation } : undefined);
           }}>Stop</Button>
+      )}
+      {switchTo && (
+        <Button size="sm" variant="ghost" disabled={disabled}
+          onClick={() => onAction('retry', `${file} will be transcribed with ${name(switchTo)}.`, { model: switchTo })}>Use {name(switchTo)}</Button>
       )}
       {draft && (
         <Button size="sm" variant="ghost" onClick={onRead}>Read it</Button>
@@ -181,7 +191,8 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
               {m.status === 'queued' && m.files.filter((f) => f.recording && !(f.recording.status === 'done')).map((f) => (
                 <RecordingLine key={f.name} meeting={m} file={f.name} state={f.recording!} onRead={() => onRead(m.id, f.name)}
                   progress={job.transcription?.meeting === m.id && job.transcription.file === f.name ? job.transcription : null}
-                  installed={job.installed_models} speeds={job.model_speeds} disabled={busy !== null || m.in_digest}
+                  installed={job.installed_models} speeds={job.model_speeds} names={job.model_names ?? {}} chosen={job.chosen_model ?? null}
+                  disabled={busy !== null || m.in_digest}
                   onAction={(action, message, body, stopFirst) => act(`${action}-${m.id}-${f.name}`, async () => {
                     const base = `/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(f.name)}`;
                     // Stop exactly the job the page showed, then use the draft it showed.
