@@ -40,3 +40,19 @@ export function recommendModel(models: { id: string; name: string; speed: { real
   const fastest = measured.reduce((a, b) => (b.speed!.realtime_x > a.speed!.realtime_x ? b : a));
   return { id: fastest.id, name: fastest.name, reason: 'the fastest one tested; none of them is quick on this computer' };
 }
+
+/**
+ * Below this, a GPU model is not offered with a button for the live transcript: it leaves too little headroom to follow
+ * a meeting, before a call even shares the graphics chip. Not a call-safe threshold; that comes from measurements next
+ * to a call.
+ */
+export const GPU_LIVE_X = 2;
+
+/**
+ * A GPU model that showed here it runs on the graphics chip, offered for the live transcript while another live model
+ * (or none) is chosen. Null when there is nothing to offer.
+ */
+export function gpuLiveOffer(models: { id: string; name: string; installed: boolean; gpu?: unknown; gpu_ready?: boolean; speed: { realtime_x: number } | null }[], liveModel: string | null): { id: string; name: string; realtime_x: number } | null {
+  const ready = models.find((m) => m.gpu && m.gpu_ready && m.installed && m.speed);
+  return ready && ready.id !== liveModel ? { id: ready.id, name: ready.name, realtime_x: ready.speed!.realtime_x } : null;
+}

@@ -800,7 +800,7 @@ export interface TranscriptionModel {
   gpu_ready?: boolean;
 }
 
-export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; speakers: boolean; updated_at: string | null }
+export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; live_model_source?: 'unset' | 'user' | 'automatic'; speakers: boolean; updated_at: string | null }
 
 export interface Transcription {
   models: TranscriptionModel[];

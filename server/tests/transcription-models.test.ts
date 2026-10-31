@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { AddressInfo } from 'node:net';
-import { CATALOG, TranscriptionModelService, downloadLimits, languageFor, languagesFor, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
+import { CATALOG, TranscriptionModelService, downloadLimits, settingsLimits, languageFor, languagesFor, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
 import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, languageAt, parseLanguageChanges, withLanguageChange } from '../src/services/transcription/languages';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
@@ -525,4 +525,70 @@ test('a GPU model is offered only with the GPU engine, chosen only once it ran o
   await fsp.rm(path.join(dir, 'speed-test', `${GPU}.json`));
   assert.equal((await service.updateSettings({ language: 'ja' })).settings.language, 'ja');
   assert.equal((await service.view()).effective_model, 'whisper-large-v3-turbo');
+});
+
+test('who chose the live model: unset only on a new install, the user for any live choice (Off too), never taken from a request', async (t) => {
+  const dir = await modelsFolder(t);
+  const service = new TranscriptionModelService();
+  assert.equal((await service.readSettings()).live_model_source, 'unset', 'no settings: a new install');
+
+  // Settings saved before the field: their live model, null included, is the user's.
+  await fsp.writeFile(path.join(dir, 'settings.json'), JSON.stringify({ model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, updated_at: null }));
+  assert.equal((await service.readSettings()).live_model_source, 'user');
+  await fsp.writeFile(path.join(dir, 'settings.json'), JSON.stringify({ model: 'whisper-large-v3-turbo', live_model: 'sensevoice-2024-07-17' }));
+  assert.equal((await service.readSettings()).live_model_source, 'user', 'an older live choice too');
+  await fsp.writeFile(path.join(dir, 'settings.json'), JSON.stringify({ live_model: null, live_model_source: 'nobody' }));
+  assert.equal((await service.readSettings()).live_model_source, 'user', 'an unknown value counts as a choice');
+  await fsp.writeFile(path.join(dir, 'settings.json'), JSON.stringify({ live_model: null, live_model_source: 'automatic' }));
+  assert.equal((await service.readSettings()).live_model_source, 'automatic', 'a saved value is kept');
+  // Unreadable settings may hold a choice.
+  await fsp.writeFile(path.join(dir, 'settings.json'), '{ not json');
+  assert.equal((await service.readSettings()).live_model_source, 'user');
+
+  await fsp.rm(path.join(dir, 'settings.json'));
+  // Another setting keeps it as it was; a request cannot set it.
+  assert.equal((await service.updateSettings({ language: 'ja', live_model_source: 'automatic' })).settings.live_model_source, 'unset');
+  assert.equal((await service.readSettings()).live_model_source, 'unset');
+  // Choosing Off is a choice.
+  assert.equal((await service.updateSettings({ live_model: null })).settings.live_model_source, 'user');
+  assert.equal((await service.updateSettings({ speakers: false, live_model_source: 'unset' })).settings.live_model_source, 'user');
+  assert.equal(JSON.parse(await fsp.readFile(path.join(dir, 'settings.json'), 'utf-8')).live_model_source, 'user');
+});
+
+test('settings saves are one at a time across dashboards: a save read before another write never puts back what it replaced', async (t) => {
+  const dir = await modelsFolder(t);
+  // Dashboard A reads the settings, then is slow to write them; dashboard B chooses Off meanwhile.
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let aRead!: () => void;
+  const aHasRead = new Promise<void>((r) => { aRead = r; });
+  const a = new TranscriptionModelService();
+  const readA = a.readSettings.bind(a);
+  let first = true;
+  a.readSettings = async () => { const settings = await readA(); if (first) { first = false; aRead(); await gate; } return settings; };
+  const b = new TranscriptionModelService();
+  const readB = b.readSettings.bind(b);
+  let bReads = 0;
+  b.readSettings = async () => { bReads++; return readB(); };
+  const saveA = a.updateSettings({ language: 'ja' });
+  await aHasRead;
+  const saveB = b.updateSettings({ live_model: null });
+  // Without the lock B would read (and later write) at once; with it, it waits while A holds the lock.
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(bReads, 0, 'B does not read the settings while A saves');
+  release();
+  await Promise.all([saveA, saveB]);
+  const saved = await b.readSettings();
+  assert.deepEqual([saved.language, saved.live_model, saved.live_model_source], ['ja', null, 'user'], 'both saves kept, and the explicit Off');
+
+  // Another dashboard (a live process) holds the lock: the save waits, then says so; nothing is written.
+  const previous = settingsLimits.lockWaitMs;
+  settingsLimits.lockWaitMs = 200;
+  t.after(() => { settingsLimits.lockWaitMs = previous; });
+  await fsp.writeFile(path.join(dir, 'settings.lock'), JSON.stringify({ pid: process.ppid, token: 'other' }));
+  const before = await fsp.readFile(path.join(dir, 'settings.json'), 'utf-8');
+  await assert.rejects(b.updateSettings({ language: 'en' }), (err: Error & { statusCode?: number }) => err.statusCode === 409 && /Another dashboard is saving/.test(err.message));
+  assert.equal(await fsp.readFile(path.join(dir, 'settings.json'), 'utf-8'), before, 'nothing written');
+  await fsp.rm(path.join(dir, 'settings.lock'));
+  assert.equal((await b.updateSettings({ language: 'en' })).settings.language, 'en');
 });

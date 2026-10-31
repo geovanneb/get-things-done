@@ -9,7 +9,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { ranOnGpu, readSpeeds, type SpeedResult } from './transcription/speedTest';
 import { whisperHelperPath } from './transcription/whisperHelper';
 import { processAlive } from './runState';
-import { HeldLock, ownsToken, readLock, tryLock, unlock } from '../utils/fileLock';
+import { HeldLock, lock, ownsToken, readLock, tryLock, unlock } from '../utils/fileLock';
 import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, type LanguageOption, withLanguageChange, type LanguageChange } from './transcription/languages';
 
 /**
@@ -23,6 +23,7 @@ import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, type LanguageOption, withLangu
  *
  *   ~/.gtd/models/settings.json              the model and language used for transcription
  *   ~/.gtd/models/download.lock              held while a download runs, by any dashboard
+ *   ~/.gtd/models/settings.lock              held while settings are saved, by any dashboard
  *   ~/.gtd/models/<model id>/<file>          the model's files
  *   ~/.gtd/models/<model id>/installed.json  written last, after every file was verified
  */
@@ -58,6 +59,9 @@ export interface CatalogModel {
 /** `auto`, or a language code of the model; see `languageFor`. */
 export type TranscriptionLanguage = string;
 
+export type LiveModelSource = 'unset' | 'user' | 'automatic';
+const LIVE_SOURCES: readonly LiveModelSource[] = ['unset', 'user', 'automatic'];
+
 export interface TranscriptionSettings {
   model: string;
   language: TranscriptionLanguage;
@@ -65,6 +69,11 @@ export interface TranscriptionSettings {
   keep_recordings: boolean;
   /** The model for a live transcript while recording; null: no live transcript. */
   live_model: string | null;
+  /**
+   * Who chose `live_model`: nobody yet (a new install), the user (any choice, Off included), or the app. Only the app
+   * may change an `unset` or `automatic` one by itself; settings from before this field count as the user's.
+   */
+  live_model_source: LiveModelSource;
   /** Tell speakers apart in transcripts made after a meeting, once the speaker model is downloaded. */
   speakers: boolean;
   updated_at: string | null;
@@ -242,13 +251,15 @@ export const VAD: CatalogModel = {
   ],
 };
 
-const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, speakers: true, updated_at: null };
+const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, live_model_source: 'unset', speakers: true, updated_at: null };
 /** Below this much memory the default model leaves little room, and the lighter one is suggested. */
 const LOW_MEMORY_BYTES = 8.5 * 1024 ** 3;
 const STALL_MS = 60_000;
 /** At most this much downloaded data waits in memory for the disk (a setting only tests change). */
 export const downloadLimits = { maxQueuedBytes: 64 * 1024 * 1024 };
 const ATTEMPTS = 3;
+/** How long a settings save waits for another dashboard's (a setting only tests change). */
+export const settingsLimits = { lockWaitMs: 5000 };
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
@@ -287,6 +298,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
     keep_recordings: (o['keep_recordings'] as boolean | undefined) ?? base.keep_recordings,
     speakers: (o['speakers'] as boolean | undefined) ?? base.speakers,
     live_model: o['live_model'] === undefined ? base.live_model : (o['live_model'] as string | null),
+    live_model_source: LIVE_SOURCES.includes(o['live_model_source'] as LiveModelSource) ? o['live_model_source'] as LiveModelSource : base.live_model_source,
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
 }
@@ -350,10 +362,18 @@ export class TranscriptionModelService {
   }
 
   async readSettings(): Promise<TranscriptionSettings> {
+    let raw: string;
     try {
-      return parseTranscriptionSettings(JSON.parse(await fsp.readFile(path.join(this.dir(), 'settings.json'), 'utf-8')), DEFAULTS, this.catalog);
+      raw = await fsp.readFile(path.join(this.dir(), 'settings.json'), 'utf-8');
+    } catch (err) {
+      // No settings at all is a new install; settings that cannot be read may hold a choice, so they count as one.
+      return { ...DEFAULTS, live_model_source: (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'unset' : 'user' };
+    }
+    try {
+      // Saved before the field existed: a live model of null may be an Off the user chose, so it is theirs.
+      return parseTranscriptionSettings(JSON.parse(raw), { ...DEFAULTS, live_model_source: 'user' }, this.catalog);
     } catch {
-      return { ...DEFAULTS };
+      return { ...DEFAULTS, live_model_source: 'user' };
     }
   }
 
@@ -376,23 +396,33 @@ export class TranscriptionModelService {
   }
 
   async updateSettings(input: unknown, now = new Date()): Promise<TranscriptionView> {
-    const next = parseTranscriptionSettings(input, await this.readSettings(), this.catalog);
-    // A GPU model is chosen once it showed, here, that it runs on the GPU; never for the live transcript. Only a new
-    // choice is checked: a verification lost later must not block saving the language or other settings.
-    const chosen = this.catalog.find((m) => m.id === next.model);
-    const choosing = typeof input === 'object' && input !== null && (input as { model?: unknown }).model !== undefined && (input as { model?: unknown }).model !== (await this.readSettings()).model;
-    if (choosing && chosen?.gpu && (!offered(chosen) || !ranOnGpu((await readSpeeds())[chosen.id]))) {
-      throw httpError(409, `${chosen.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
-    }
-    // The same for the live model: chosen anew, a GPU model must be verified here.
-    const liveInput = typeof input === 'object' && input !== null ? (input as { live_model?: unknown }).live_model : undefined;
-    const live = this.catalog.find((m) => m.id === next.live_model);
-    if (liveInput !== undefined && liveInput !== (await this.readSettings()).live_model && live?.gpu && (!offered(live) || !ranOnGpu((await readSpeeds())[live.id]))) {
-      throw httpError(409, `${live.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
-    }
-    next.updated_at = now.toISOString();
+    // Who chose the live model is never taken from a request: any live model sent, Off too, is the user's choice.
+    const { live_model_source: _ignored, ...rest } = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+    input = rest.live_model !== undefined ? { ...rest, live_model_source: 'user' } : rest;
     await fsp.mkdir(this.dir(), { recursive: true });
-    await atomicWrite(path.join(this.dir(), 'settings.json'), JSON.stringify(next, null, 2));
+    // One writer at a time, across dashboards: a save read before another's write would put back what it replaced
+    // (an explicit Off among it). Read, checked and written under the lock.
+    const held = await lock(path.join(this.dir(), 'settings.lock'), settingsLimits.lockWaitMs, () => httpError(409, 'Another dashboard is saving the transcription settings; try again in a moment'));
+    try {
+      const current = await this.readSettings();
+      const next = parseTranscriptionSettings(input, current, this.catalog);
+      // A GPU model is chosen once it showed, here, that it runs on the GPU. Only a new choice is checked: a
+      // verification lost later must not block saving the language or other settings.
+      const asked = input as { model?: unknown; live_model?: unknown };
+      const chosen = this.catalog.find((m) => m.id === next.model);
+      if (asked.model !== undefined && asked.model !== current.model && chosen?.gpu && (!offered(chosen) || !ranOnGpu((await readSpeeds())[chosen.id]))) {
+        throw httpError(409, `${chosen.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
+      }
+      // The same for the live model: chosen anew, a GPU model must be verified here.
+      const live = this.catalog.find((m) => m.id === next.live_model);
+      if (asked.live_model !== undefined && asked.live_model !== current.live_model && live?.gpu && (!offered(live) || !ranOnGpu((await readSpeeds())[live.id]))) {
+        throw httpError(409, `${live.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
+      }
+      next.updated_at = now.toISOString();
+      await atomicWrite(path.join(this.dir(), 'settings.json'), JSON.stringify(next, null, 2));
+    } finally {
+      await unlock(held);
+    }
     notify(true);
     return this.view();
   }
