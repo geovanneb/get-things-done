@@ -202,9 +202,14 @@ async function decodeAll(recognizer: Recognizer, vad: SherpaVad, job: Job): Prom
       const text = markRepeats(decoded.text.trim());
       // A live model that cannot tell the language with one set (Whisper): the detector listens to parts long enough.
       if (job.live && job.detector && decoded.detected === null && part.samples.length >= DETECT_MIN_SAMPLES) {
-        const stream = job.detector.createStream();
-        stream.acceptWaveform({ samples: input.samples, sampleRate: SAMPLE_RATE });
-        decoded.detected = detectedLanguage((await job.detector.decodeAsync(stream)).lang);
+        try {
+          const stream = job.detector.createStream();
+          stream.acceptWaveform({ samples: input.samples, sampleRate: SAMPLE_RATE });
+          decoded.detected = detectedLanguage((await job.detector.decodeAsync(stream)).lang);
+        } catch {
+          // Only a help for the suggestion: the live transcript goes on without it.
+          job.detector = undefined;
+        }
       }
       // For the language suggestion: the part's own speech, without its context, also when it found no words.
       if (job.live) send({ type: 'part', start: part.start / SAMPLE_RATE, end: (part.start + part.samples.length) / SAMPLE_RATE, detected: decoded.detected });
@@ -242,7 +247,10 @@ async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'f
   const recognizer = await load(sherpa, request.model, request.language);
   const vad = newVad(sherpa, request.model, SILENCE_SECONDS.live);
   // In Auto the detector hears nothing the live model does not, but a language can be set during the recording.
-  const detector = request.detector ? await sherpa.OfflineRecognizer.createAsync(recognizerConfig({ ...request.detector, threads: 1 }, 'auto')) : undefined;
+  // Optional: a detector that does not load leaves the live transcript as it is, only without a suggested language.
+  const detector = request.detector
+    ? await sherpa.OfflineRecognizer.createAsync(recognizerConfig({ ...request.detector, threads: 1 }, 'auto')).catch(() => undefined)
+    : undefined;
   const job = { ...newJob(request.model, request.language, control.changes), live: true, ...(detector ? { detector } : {}) };
   control.lateLanguage = (at) => job.lastPart > at;
   const file = await fsp.open(request.wav, 'r');

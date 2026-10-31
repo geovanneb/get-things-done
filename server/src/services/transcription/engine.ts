@@ -278,7 +278,8 @@ export class TranscriptionEngine {
         detector = undefined;
       }
     }
-    const release = async () => { await releaseModel(); await releaseDetector?.(); };
+    // Each lease on its own, so one that fails to go never keeps the other.
+    const release = async () => { await Promise.allSettled([releaseModel(), releaseDetector?.() ?? Promise.resolve()]); };
     if (busy || closing) { await release(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
     busy = true;
     let child: ChildProcess;
