@@ -429,6 +429,10 @@ test('models that wait still start when the download before them ends early, eac
   assert.equal((await other.view()).models[0]!.installed, true);
 });
 
+test('only large-v3 takes its memory in small pieces: the desktop app stops on its one big block, and it slows other models', () => {
+  assert.deepEqual(CATALOG.filter((m) => m.engine?.noArena).map((m) => m.id), ['whisper-large-v3']);
+});
+
 test('language changes: one at a moment, none that change nothing, and what a model lacks is Auto', () => {
   assert.equal(languageAt('auto', [{ at: 10, language: 'ja' }, { at: 20, language: 'en' }], 9.9), 'auto');
   assert.equal(languageAt('auto', [{ at: 10, language: 'ja' }, { at: 20, language: 'en' }], 10), 'ja');

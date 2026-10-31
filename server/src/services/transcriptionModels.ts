@@ -42,7 +42,11 @@ export interface CatalogModel {
   memory_gb: number;
   files: ModelFile[];
   /** How the transcription engine uses the files: which kind of model, and which file plays which part. */
-  engine?: { kind: 'whisper' | 'sensevoice'; files: Record<string, string> };
+  /**
+   * `noArena`: the engine takes its memory in small pieces instead of one growing block. Large-v3 needs it in the desktop
+   * app, whose allocator ends the process on that block; it costs other models speed.
+   */
+  engine?: { kind: 'whisper' | 'sensevoice'; files: Record<string, string>; noArena?: boolean };
 }
 
 /** `auto`, or a language code of the model; see `languageFor`. */
@@ -97,20 +101,38 @@ const SENSEVOICE_REPO = 'csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024
 const SENSEVOICE_COMMIT = '2365baeacb507f821a0c8120fcee3d484dba7a07';
 const WHISPER_REPO = 'csukuangfj/sherpa-onnx-whisper-turbo';
 const WHISPER_COMMIT = '2ca6ff69fc878651b770880507669577ac41c2ff';
+const WHISPER_V3_REPO = 'csukuangfj/sherpa-onnx-whisper-large-v3';
+const WHISPER_V3_COMMIT = '2a6507094dd6020d939d78e3f1834a1d06267fca';
 
 /**
  * The models on offer. Speeds and memory were measured on an Apple Silicon Mac, CPU only, with fictional English
  * and Japanese meetings; other computers may be slower. The 2024-07-17 SenseVoice is pinned on purpose: the
- * 2025-09-09 release drops kana from Japanese.
+ * 2025-09-09 release drops kana from Japanese. Most accurate first: Settings recommends the first that is quick enough.
  */
 export const CATALOG: CatalogModel[] = [
   {
-    id: 'whisper-large-v3-turbo',
-    name: 'Whisper large-v3-turbo',
-    summary: 'Most accurate. Takes longer.',
+    id: 'whisper-large-v3',
+    name: 'Whisper large-v3',
+    summary: 'Most accurate. Slow.',
     languages: '100 languages, including English and Japanese',
     language_options: WHISPER_LANGUAGES,
-    pros: ['The most accurate transcripts, in English and Japanese alike', 'Full punctuation', '100 languages'],
+    pros: ['The most accurate transcripts, also of short remarks', 'Full punctuation', '100 languages'],
+    cons: ['Slow: about real time on continuous speech, so an 8-hour meeting can take up to 8 hours', 'Needs about 5 GB of memory while transcribing', 'A 1.8 GB download'],
+    memory_gb: 5,
+    engine: { kind: 'whisper', files: { encoder: 'large-v3-encoder.int8.onnx', decoder: 'large-v3-decoder.int8.onnx', tokens: 'large-v3-tokens.txt' }, noArena: true },
+    files: [
+      { name: 'large-v3-encoder.int8.onnx', url: `${HF}/${WHISPER_V3_REPO}/resolve/${WHISPER_V3_COMMIT}/large-v3-encoder.int8.onnx`, size: 766671985, sha256: 'd531cf17248acc43e8c09b472a0877055e770877857a5332fc1304b36534ec85' },
+      { name: 'large-v3-decoder.int8.onnx', url: `${HF}/${WHISPER_V3_REPO}/resolve/${WHISPER_V3_COMMIT}/large-v3-decoder.int8.onnx`, size: 1008265203, sha256: 'ebc6bfd88e162a46cb3edee8a7e727e1dcbc65cabecb19e2573695e4d495e1af' },
+      { name: 'large-v3-tokens.txt', url: `${HF}/${WHISPER_V3_REPO}/resolve/${WHISPER_V3_COMMIT}/large-v3-tokens.txt`, size: 816730, sha256: 'b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126' },
+    ],
+  },
+  {
+    id: 'whisper-large-v3-turbo',
+    name: 'Whisper large-v3-turbo',
+    summary: 'Accurate, and about 4 times quicker than large-v3.',
+    languages: '100 languages, including English and Japanese',
+    language_options: WHISPER_LANGUAGES,
+    pros: ['Accurate transcripts, in English and Japanese alike', 'Full punctuation', '100 languages'],
     cons: ['Slower: about 4 times faster than real time, so an 8-hour meeting takes about 2 hours', 'Needs about 4 GB of memory while transcribing', 'A 1 GB download'],
     memory_gb: 4,
     engine: { kind: 'whisper', files: { encoder: 'turbo-encoder.int8.onnx', decoder: 'turbo-decoder.int8.onnx', tokens: 'turbo-tokens.txt' } },

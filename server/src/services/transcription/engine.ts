@@ -51,7 +51,7 @@ export const launchWorker: WorkerLauncher = () => {
 /** A check loads the model and stops; a model that takes this long to load is reported as failed. */
 const CHECK_TIMEOUT_MS = 5 * 60 * 1000;
 /** A transcription may take as long as the recording plus a margin: far more than the slowest model needs. */
-const transcriptionTimeout = (seconds: number) => Math.max(10 * 60 * 1000, seconds * 1000 * 1.5);
+const transcriptionTimeout = (seconds: number) => Math.max(10 * 60 * 1000, seconds * 1000 * 6);
 
 let busy = false;
 /** Workers still running, so the dashboard can end them when it shuts down. */
@@ -266,6 +266,7 @@ export class TranscriptionEngine {
       vad: path.join(vad, VAD.files[0]!.name),
       // Leave a core for the dashboard and the rest of the computer.
       threads: Math.max(1, Math.min(8, os.availableParallelism() - 1)),
+      ...(entry.engine.noArena ? { noArena: true } : {}),
     };
   }
 

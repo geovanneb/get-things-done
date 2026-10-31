@@ -7,6 +7,8 @@ export interface EngineModel {
   files: Record<string, string>;
   vad: string;
   threads: number;
+  /** See `noArena` in the catalog. */
+  noArena?: boolean;
 }
 
 export type WorkerRequest =
