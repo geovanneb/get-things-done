@@ -49,16 +49,25 @@ export function splitAtChanges(part: Part, seconds: readonly number[], shortest 
   return parts;
 }
 
-/** Who spoke when, in seconds. `speaker` is 1 for the first voice of the recording, 2 for the next. */
+/**
+ * Who spoke when, in seconds. `speaker` is 1 for the first voice of the recording, 2 for the next; 0 for a voice heard
+ * too little to name. Its turns still mark where the voice changes, so its words are never put under someone else.
+ */
 export interface SpeakerTurn { start: number; end: number; speaker: number }
+
+/** A voice heard for less than this in the whole recording is a sound, a cough or a click: it gets no label. */
+const LEAST_SPEECH = 2;
 
 /** The engine's turns in order, with sound times only, numbered by who speaks first. */
 export function speakerTurns(raw: readonly { start: number; end: number; speaker: number }[], seconds: number): SpeakerTurn[] {
   const labels = new Map<number, number>();
-  return raw
-    .filter((t) => Number.isFinite(t.start) && Number.isFinite(t.end) && t.start >= 0 && t.end > t.start && t.start < seconds)
+  const sound = raw.filter((t) => Number.isFinite(t.start) && Number.isFinite(t.end) && Number.isInteger(t.speaker) && t.start >= 0 && t.end > t.start && t.start < seconds);
+  const talk = new Map<number, number>();
+  for (const t of sound) talk.set(t.speaker, (talk.get(t.speaker) ?? 0) + Math.min(t.end, seconds) - t.start);
+  return sound
     .sort((a, b) => a.start - b.start)
     .map((t) => {
+      if (talk.get(t.speaker)! < LEAST_SPEECH) return { start: t.start, end: Math.min(t.end, seconds), speaker: 0 };
       if (!labels.has(t.speaker)) labels.set(t.speaker, labels.size + 1);
       return { start: t.start, end: Math.min(t.end, seconds), speaker: labels.get(t.speaker)! };
     });
@@ -69,12 +78,15 @@ export function speakerCuts(turns: readonly SpeakerTurn[]): number[] {
   return turns.filter((t, i) => i > 0 && t.speaker !== turns[i - 1]!.speaker).map((t) => t.start);
 }
 
-/** A part this much of one voice is that voice's. Below it the part stays unassigned: a guess must not become a name. */
+/**
+ * Who speaks in a stretch, when that is clear. A stretch holds pauses too, so this counts the speech the voices were
+ * heard in: one voice has most of it and another hardly any, and enough of the stretch is known speech at all.
+ * Otherwise it stays unassigned: a guess must not become a name.
+ */
 const CLEAR_SHARE = 0.6;
-/** At most this much of a second voice. */
 const OTHER_VOICE = 0.25;
+const KNOWN_SPEECH = 0.3;
 
-/** Who speaks in a stretch, when that is clear: most of its time is one voice, and hardly any is another. */
 export function speakerOf(start: number, end: number, turns: readonly SpeakerTurn[]): number | undefined {
   const heard = new Map<number, number>();
   for (const t of turns) {
@@ -82,8 +94,9 @@ export function speakerOf(start: number, end: number, turns: readonly SpeakerTur
     if (overlap > 0) heard.set(t.speaker, (heard.get(t.speaker) ?? 0) + overlap);
   }
   const [first, second] = [...heard].sort((a, b) => b[1] - a[1]);
-  const length = end - start;
-  return first && first[1] >= length * CLEAR_SHARE && (second?.[1] ?? 0) <= length * OTHER_VOICE ? first[0] : undefined;
+  const voiced = [...heard.values()].reduce((sum, s) => sum + s, 0);
+  if (!first || first[0] === 0 || voiced < (end - start) * KNOWN_SPEECH) return undefined;
+  return first[1] >= voiced * CLEAR_SHARE && (second?.[1] ?? 0) <= voiced * OTHER_VOICE ? first[0] : undefined;
 }
 
 /** The nearest cuts around a stretch, in seconds: its context stays inside them. */

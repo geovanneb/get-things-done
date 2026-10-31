@@ -148,8 +148,8 @@ function newVad(sherpa: Sherpa, model: EngineModel, silence: number): SherpaVad 
 }
 
 /** The language of a job, and what is known of the audio around its parts. */
-interface Job { model: EngineModel; start: string; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
-const newJob = (model: EngineModel, start: string, changes: LanguageChange[], turns: SpeakerTurn[] = []): Job => ({ model, start, changes, turns, voiceCuts: speakerCuts(turns), lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
+interface Job { model: EngineModel; start: string; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; shown: Map<number, number>; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
+const newJob = (model: EngineModel, start: string, changes: LanguageChange[], turns: SpeakerTurn[] = []): Job => ({ model, start, changes, turns, voiceCuts: speakerCuts(turns), shown: new Map(), lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
 
 /** The part with what can be had of its context, and where that starts and ends. */
 function withContext(part: Part, next: number | null, job: Job): { samples: Float32Array; from: number; to: number } {
@@ -192,7 +192,10 @@ async function decodeAll(recognizer: Recognizer, vad: SherpaVad, job: Job): Prom
       const text = markRepeats((await recognizer.decode(input.samples, language)).trim());
       if (text) {
         found++;
-        const speaker = speakerOf(part.start / SAMPLE_RATE, (part.start + part.samples.length) / SAMPLE_RATE, job.turns);
+        const voice = speakerOf(part.start / SAMPLE_RATE, (part.start + part.samples.length) / SAMPLE_RATE, job.turns);
+        // Numbered as the transcript meets them, so it always begins with Speaker 1.
+        if (voice && !job.shown.has(voice)) job.shown.set(voice, job.shown.size + 1);
+        const speaker = voice ? job.shown.get(voice) : undefined;
         send({ type: 'segment', start: input.from / SAMPLE_RATE, end: input.to / SAMPLE_RATE, text, ...(speaker ? { speaker } : {}) });
       }
     }
@@ -312,8 +315,8 @@ async function transcribe(sherpa: Sherpa, request: Extract<WorkerRequest, { type
   send({ type: 'done', seconds: format.duration, segments });
 }
 
-/** Above this similarity two stretches are one voice. Measured: lower finds people who are not there. */
-const SAME_SPEAKER = 0.85;
+/** Where two stretches count as one voice. Measured on real recordings: lower splits one person, 1.05 joins two. */
+const SAME_SPEAKER = 0.95;
 
 /** Who spoke when. Everything about voices stays in this process, which ends with the job; only the times leave it. */
 async function findSpeakers(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'speakers' }>): Promise<void> {

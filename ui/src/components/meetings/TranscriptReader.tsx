@@ -3,14 +3,17 @@ import Button from '@/components/common/Button';
 import { useApi } from '@/hooks/useApi';
 import { useDataVersion } from '@/store';
 import { apiPut } from '@/utils/api';
+import { speakerChoices, type SpeakerChoice } from '@/utils/speakerChoices';
 import { clockLine, transcriptParts, type Readable, type TranscriptPart } from '@/utils/transcriptReading';
-import type { SpeakerName, Stakeholder } from '@/types';
+import type { MeetingParticipant, SpeakerName, Stakeholder } from '@/types';
 
 const textStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
 
 /** A meeting's transcript, read here on the page. Give each transcript its own `key`: what is shown is always of this one. */
-export function TranscriptReader({ meetingId, title, transcript, onClose, canName, onNamed }: {
+export function TranscriptReader({ meetingId, title, transcript, onClose, canName, onNamed, participants = [] }: {
   meetingId: string; title: string; transcript: Readable; onClose: () => void;
+  /** Who was expected at the meeting: offered first when naming a speaker. */
+  participants?: MeetingParticipant[];
   /** The speakers can be named: a final transcript of a meeting no digest holds yet. */
   canName: boolean;
   onNamed: () => void;
@@ -58,8 +61,8 @@ export function TranscriptReader({ meetingId, title, transcript, onClose, canNam
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)' }}>
           <span style={{ color: 'var(--color-text-muted)' }}>{canName ? 'Who spoke? Name them here, or leave them for the analysis to propose:' : 'Speakers:'}</span>
           {naming
-            ? <SpeakerEditors labels={labels} nameOf={nameOf} onName={(label, person) => void name(label, person)} />
-            : labels.map((label) => <SpeakerNamer key={label} label={label} named={nameOf(label)} editable={false} people={[]} onName={() => {}} />)}
+            ? <SpeakerEditors labels={labels} nameOf={nameOf} participants={participants} onName={(label, person) => void name(label, person)} />
+            : labels.map((label) => <SpeakerNamer key={label} label={label} named={nameOf(label)} editable={false} choices={[]} onName={() => {}} />)}
         </div>
       )}
       {nameError && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-xs)' }}>{nameError}</p>}
@@ -85,20 +88,20 @@ export function TranscriptReader({ meetingId, title, transcript, onClose, canNam
 }
 
 /** The speakers with their names, to change. The stakeholders to choose from are loaded once, here. */
-function SpeakerEditors({ labels, nameOf, onName }: {
-  labels: string[]; nameOf: (label: string) => SpeakerName | undefined; onName: (label: string, person: Omit<SpeakerName, 'label'> | null) => void;
+function SpeakerEditors({ labels, nameOf, participants, onName }: {
+  labels: string[]; nameOf: (label: string) => SpeakerName | undefined; participants: MeetingParticipant[];
+  onName: (label: string, person: Omit<SpeakerName, 'label'> | null) => void;
 }) {
   const version = useDataVersion('stakeholders');
   const { data: people } = useApi<Stakeholder[]>('/api/stakeholders', [version]);
-  return <>{labels.map((label) => <SpeakerNamer key={label} label={label} named={nameOf(label)} editable people={people ?? []} onName={(person) => onName(label, person)} />)}</>;
+  const choices = speakerChoices(participants, people ?? []);
+  return <>{labels.map((label) => <SpeakerNamer key={label} label={label} named={nameOf(label)} editable choices={choices} onName={(person) => onName(label, person)} />)}</>;
 }
 
-/** What the box says for a stakeholder: the id tells two people of the same name apart. */
-const personOption = (p: Stakeholder) => `${p.name} (${p.id})`;
 
 /** One speaker label and its name: pick a stakeholder or type a name, or take the name back. */
-function SpeakerNamer({ label, named, editable, people, onName }: {
-  label: string; named: SpeakerName | undefined; editable: boolean; people: Stakeholder[]; onName: (person: Omit<SpeakerName, 'label'> | null) => void;
+function SpeakerNamer({ label, named, editable, choices, onName }: {
+  label: string; named: SpeakerName | undefined; editable: boolean; choices: SpeakerChoice[]; onName: (person: Omit<SpeakerName, 'label'> | null) => void;
 }) {
   const [editing, setEditing] = React.useState(false);
   const [value, setValue] = React.useState('');
@@ -106,8 +109,8 @@ function SpeakerNamer({ label, named, editable, people, onName }: {
   const close = () => { setEditing(false); setTimeout(() => button.current?.focus(), 0); };
   const save = () => {
     // Only what was picked from the list is a stakeholder; a name typed by hand stays a name.
-    const known = people.find((p) => personOption(p) === value.trim());
-    if (value.trim()) onName(known ? { name: known.name, ref: known.id } : { name: value.trim() });
+    const known = choices.find((c) => c.option === value.trim());
+    if (value.trim()) onName(known ? known.person : { name: value.trim() });
     close();
   };
   const link = { padding: '0 4px', border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-xs)' } as const;
@@ -119,7 +122,7 @@ function SpeakerNamer({ label, named, editable, people, onName }: {
         <input aria-label={`Who is ${label}`} list={list} value={value} autoFocus placeholder="Stakeholder or a name" onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); }}
           style={{ padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: 'var(--text-xs)' }} />
-        <datalist id={list}>{people.map((p) => <option key={p.id} value={personOption(p)} />)}</datalist>
+        <datalist id={list}>{choices.map((c) => <option key={c.option} value={c.option} />)}</datalist>
         <button type="button" style={link} onClick={save}>Save</button>
         <button type="button" style={link} onClick={close}>Cancel</button>
       </span>
