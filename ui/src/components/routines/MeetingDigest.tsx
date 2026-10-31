@@ -170,7 +170,8 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
     <Modal isOpen={isOpen} onClose={onClose} title="Meeting digest" size="md">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          A built-in routine for meetings. Add a meeting to the queue from <strong>Import</strong> in Context updates; on the days
+          A built-in routine for meetings. Record a meeting on the <strong>Meetings</strong> page, or add one from <strong>Import</strong>
+          in Context updates; on the days
           below, the queued meetings become one context update. The analysis drafts a record per meeting and proposes context
           changes for you to approve: you run it, or the dashboard starts it for you (below).
         </p>
