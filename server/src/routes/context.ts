@@ -4,10 +4,11 @@ import multer from 'multer';
 import { ContextService } from '../services/contextService';
 import { sendFile, sendZip } from '../utils/files';
 import { ContextCategory } from '../types';
+import { utf8FileNames } from '../utils/uploadNames';
 
 const router = Router();
 const contextService = new ContextService();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // GET /api/context
 router.get('/', async (req: Request, res: Response) => {
