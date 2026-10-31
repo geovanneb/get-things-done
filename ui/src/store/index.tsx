@@ -108,6 +108,8 @@ type Action =
   | { type: 'OPEN_NEW_TASK_DRAFT'; payload: NewTaskDraft }
   | { type: 'CLOSE_NEW_TASK_MODAL' }
   | { type: 'DATA_CHANGED'; payload: DataScope }
+  /** Every slice may be out of date, for example after the live event stream was down. */
+  | { type: 'ALL_DATA_CHANGED' }
   | { type: 'SET_AGENTIC_VISUAL_MODE'; payload: boolean }
   | { type: 'SET_SHOW_TASK_IDS'; payload: boolean }
   | { type: 'SET_SIDEBAR'; payload: SidebarPrefs }
@@ -116,7 +118,7 @@ type Action =
   | { type: 'SET_ACCENT'; payload: AccentName }
   | { type: 'SET_TEXT_SIZE'; payload: TextSize };
 
-const initialState: AppState = {
+export const initialState: AppState = {
   workspace: null,
   gitStatus: null,
   validationCount: { errors: 0, warnings: 0 },
@@ -134,7 +136,7 @@ const initialState: AppState = {
   textSize: readTextSize(),
 };
 
-function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'SET_WORKSPACE':
       return { ...state, workspace: action.payload };
@@ -195,6 +197,13 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, accent: action.payload };
     case 'SET_TEXT_SIZE':
       return { ...state, textSize: action.payload };
+    case 'ALL_DATA_CHANGED':
+      return {
+        ...state,
+        dataVersions: Object.fromEntries(
+          Object.entries(state.dataVersions).map(([scope, version]) => [scope, version + 1]),
+        ) as DataVersions,
+      };
     case 'DATA_CHANGED':
       return {
         ...state,
