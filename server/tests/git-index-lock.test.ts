@@ -11,6 +11,8 @@ fs.writeFileSync(path.join(workspace, 'workspace.yaml'), 'name: "Northwind Labs"
 execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: workspace });
 execFileSync('git', ['config', 'user.name', 'Jane Doe'], { cwd: workspace });
 execFileSync('git', ['config', 'user.email', 'jane@example.com'], { cwd: workspace });
+// A contributor's global commit signing would need their key here.
+execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: workspace });
 process.env['ESB_WORKSPACE_PATH'] = workspace;
 const lock = path.join(workspace, '.git', 'index.lock');
 
