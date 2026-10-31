@@ -1,9 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { apiPost } from '@/utils/api';
-import { microphoneAccess, reportRecording } from '@/utils/desktop';
+import { apiGet, apiPost, apiPut } from '@/utils/api';
+import { microphoneAccess, reportLanguageMenu, reportRecording } from '@/utils/desktop';
 import { mixSources } from '@/utils/recordingMix';
 import { BYTES_PER_SECOND, RecordingUploader, type SendResult } from '@/utils/recordingUpload';
-import type { MeetingParticipant, QueuedMeeting } from '@/types';
+import type { MeetingParticipant, QueuedMeeting, SpokenLanguage, Transcription } from '@/types';
 
 /**
  * The recorder, above the routes, so moving around the dashboard never stops it. The microphone goes to an AudioWorklet
@@ -36,6 +36,12 @@ export interface RecorderState {
   warning: string | null;
   /** What changed for good during this recording, such as the computer's sound no longer being recorded. */
   lost: string[];
+  /** The language being spoken, as this recording's transcripts should take it: `auto` detects it for each part. */
+  language: string;
+  /** What can be chosen: the languages of the chosen model. Empty when they could not be read. */
+  languages: SpokenLanguage[];
+  /** A change of language did not reach the server. */
+  languageError: string | null;
   error: string | null;
   /** The last recording that was saved, to say so. */
   notice: string | null;
@@ -45,11 +51,12 @@ interface RecorderContextValue extends RecorderState {
   active: boolean;
   start: (options: RecordingOptions) => Promise<void>;
   stop: () => Promise<void>;
+  setLanguage: (language: string) => Promise<void>;
   discard: () => Promise<void>;
   dismiss: () => void;
 }
 
-const idle: RecorderState = { status: 'idle', meetingId: null, title: '', elapsed: 0, captured: 0, saved: 0, gap: 0, level: 0, systemLevel: null, warning: null, lost: [], error: null, notice: null };
+const idle: RecorderState = { status: 'idle', meetingId: null, title: '', elapsed: 0, captured: 0, saved: 0, gap: 0, level: 0, systemLevel: null, warning: null, lost: [], language: 'auto', languages: [], languageError: null, error: null, notice: null };
 const RecorderContext = createContext<RecorderContextValue | null>(null);
 
 /** No sound above this for this long: the microphone is probably the wrong one, or muted. */
@@ -76,6 +83,8 @@ interface Session {
   lastBlock: number;
   timer: ReturnType<typeof setInterval>;
   stopListening?: () => void;
+  /** One change of language at a time, in the order they were made. */
+  languageChange: Promise<void>;
 }
 
 async function sendBlock(meetingId: string, token: string, offset: number, block: Uint8Array): Promise<SendResult> {
@@ -182,14 +191,17 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       const meeting = await apiPost<QueuedMeeting>('/api/meeting-queue', { title, meeting_date: date, participants });
       created = meeting.id;
       const token = crypto.randomUUID();
-      const opened = await apiPost<{ generation: string; offset: number }>(`/api/meeting-queue/${meeting.id}/recording`, { token });
+      const opened = await apiPost<{ generation: string; offset: number; language: string }>(`/api/meeting-queue/${meeting.id}/recording`, { token });
+      // Optional: without the list the recording goes on, with its language as it started.
+      const overview = await apiGet<Transcription>('/api/transcription').catch(() => null);
+      const languages = overview?.models.find((m) => m.id === overview.settings.model)?.language_options ?? [];
 
       const now = Date.now();
       const uploader = new RecordingUploader({ send: (offset, block) => sendBlock(meeting.id, token, offset, block) });
       const flush = () => uploader.flush().catch((err: Error) => update({ warning: err.message }));
       const running: Session = {
         meetingId: meeting.id, token, generation: opened.generation, stream, system, context, node, uploader,
-        startedAt: now, lastSound: now, lastBlock: now, timer: setInterval(() => undefined, 60_000),
+        startedAt: now, lastSound: now, lastBlock: now, timer: setInterval(() => undefined, 60_000), languageChange: Promise.resolve(),
       };
       session.current = running;
       phase.current = 'running';
@@ -253,7 +265,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         const systemLevel = meters.system && systemOn ? meters.system() : null;
         setState((s) => (s.status !== 'recording' ? s : { ...s, elapsed, captured, saved: uploader.saved / BYTES_PER_SECOND, gap, level: meters.microphone(), systemLevel, warning, lost: [...lost] }));
       }, 1000);
-      update({ status: 'recording', meetingId: meeting.id });
+      update({ status: 'recording', meetingId: meeting.id, language: opened.language, languages });
     } catch (err) {
       for (const track of [...(stream?.getTracks() ?? []), ...(system?.getTracks() ?? [])]) track.stop();
       void context?.close().catch(() => {});
@@ -263,6 +275,23 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       update({ ...idle, status: 'failed', error: microphoneMessage(err), title });
     }
   }, [ended, release, update]);
+
+  const setLanguage = useCallback((language: string): Promise<void> => {
+    // Of the recording it was asked for: it never reaches the next one.
+    const s = session.current;
+    if (!s || phase.current !== 'running') return Promise.resolve();
+    const change = async () => {
+      if (session.current !== s || phase.current !== 'running') return;
+      try {
+        const changed = await apiPut<{ language: string }>(`/api/meeting-queue/${s.meetingId}/recording/language`, { token: s.token, language });
+        if (session.current === s) update({ language: changed.language, languageError: null });
+      } catch (err) {
+        if (session.current === s) update({ languageError: `The language was not changed: ${(err as Error).message}` });
+      }
+    };
+    s.languageChange = s.languageChange.then(change);
+    return s.languageChange;
+  }, [update]);
 
   const stop = useCallback((): Promise<void> => {
     if (stopping.current) return stopping.current;
@@ -328,7 +357,15 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('beforeunload', warn);
   }, [active]);
 
-  const value = useMemo(() => ({ ...state, active, start, stop, discard, dismiss }), [state, active, start, stop, discard, dismiss]);
+  // The menu bar shows the usual languages and the current one, so a meeting can be switched without opening the window.
+  const { status, language, languages } = state;
+  useEffect(() => {
+    if (status !== 'recording' || languages.length === 0) return;
+    const shown = languages.filter((l) => l.common || l.id === language).map(({ id, label }) => ({ id, label }));
+    reportLanguageMenu({ current: language, options: [{ id: 'auto', label: 'Auto' }, ...shown] });
+  }, [status, language, languages]);
+
+  const value = useMemo(() => ({ ...state, active, start, stop, setLanguage, discard, dismiss }), [state, active, start, stop, setLanguage, discard, dismiss]);
   return <RecorderContext.Provider value={value}>{children}</RecorderContext.Provider>;
 }
 

@@ -6,8 +6,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { AddressInfo } from 'node:net';
-import { CATALOG, TranscriptionModelService, downloadLimits, languageFor, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
-import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES } from '../src/services/transcription/languages';
+import { CATALOG, TranscriptionModelService, downloadLimits, languageFor, languagesFor, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
+import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, languageAt, parseLanguageChanges, withLanguageChange } from '../src/services/transcription/languages';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
@@ -427,4 +427,17 @@ test('models that wait still start when the download before them ends early, eac
   await started;
   await TranscriptionModelService.settled();
   assert.equal((await other.view()).models[0]!.installed, true);
+});
+
+test('language changes: one at a moment, none that change nothing, and what a model lacks is Auto', () => {
+  assert.equal(languageAt('auto', [{ at: 10, language: 'ja' }, { at: 20, language: 'en' }], 9.9), 'auto');
+  assert.equal(languageAt('auto', [{ at: 10, language: 'ja' }, { at: 20, language: 'en' }], 10), 'ja');
+  assert.deepEqual(withLanguageChange('auto', [{ at: 5, language: 'ja' }], { at: 5, language: 'en' }), [{ at: 5, language: 'en' }]);
+  assert.deepEqual(withLanguageChange('auto', [{ at: 5, language: 'ja' }], { at: 7, language: 'ja' }), [{ at: 5, language: 'ja' }]);
+  assert.deepEqual(withLanguageChange('ja', [{ at: 5, language: 'en' }], { at: 5, language: 'ja' }), []);
+  assert.deepEqual(languagesFor('sensevoice-2024-07-17', 'vi', [{ at: 5, language: 'ja' }, { at: 9, language: 'vi' }, { at: 12, language: 'pl' }]), { language: 'auto', changes: [{ at: 5, language: 'ja' }, { at: 9, language: 'auto' }] });
+  for (const bad of ['x', [{ at: -1, language: 'ja' }], [{ at: 1, language: 'xx' }], [{ at: 2, language: 'ja' }, { at: 2, language: 'en' }], Array.from({ length: 201 }, (_, i) => ({ at: i, language: 'ja' }))]) {
+    assert.equal(parseLanguageChanges(bad), null);
+  }
+  assert.deepEqual(parseLanguageChanges([{ at: 0, language: 'auto' }]), [{ at: 0, language: 'auto' }]);
 });

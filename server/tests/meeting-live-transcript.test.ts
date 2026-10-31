@@ -32,11 +32,11 @@ function fakeModels(live: string | null = 'fast', main = 'fast'): TranscriptionM
   } as unknown as TranscriptionModelService;
 }
 
-interface FakeOptions { busy?: boolean; cover?: (sealed: number) => number; failWith?: string; progress?: (committed: number) => number }
+interface FakeOptions { busy?: boolean; cover?: (sealed: number) => number; failWith?: string; progress?: (committed: number) => number; lateLanguage?: boolean }
 
 /** A follow job that says one stretch of speech per second of committed audio, and covers what it is told to. */
 function fakeEngine(o: FakeOptions = {}) {
-  const state = { committed: 0, cancelled: false, sessions: 0 };
+  const state = { committed: 0, cancelled: false, sessions: 0, languages: [] as { at: number; language: string; afterAudio: number }[] };
   const engine = {
     follow: async (_wav: string, opts: { onSegment: (s: Segment) => void; onProgress?: (done: number, total: number) => void }): Promise<FollowSession> => {
       if (o.busy) throw Object.assign(new Error('A transcription is already running'), { engineBusy: true });
@@ -50,7 +50,8 @@ function fakeEngine(o: FakeOptions = {}) {
           opts.onProgress?.(o.progress ? o.progress(state.committed) : state.committed / 32_000, state.committed / 32_000);
           if (o.failWith) failed = o.failWith;
         },
-        end: async (bytes: number) => (o.failWith ? { ok: false as const, message: o.failWith } : { ok: true as const, bytes: o.cover ? o.cover(bytes) : bytes, seconds: bytes / 32_000, segments: said }),
+        language: (at: number, language: string) => { state.languages.push({ at, language, afterAudio: state.committed }); },
+        end: async (bytes: number) => (o.failWith ? { ok: false as const, message: o.failWith } : { ok: true as const, bytes: o.cover ? o.cover(bytes) : bytes, seconds: bytes / 32_000, segments: said, lateLanguage: o.lateLanguage === true }),
         cancel: async () => { state.cancelled = true; },
         get failed() { return failed; },
       };
@@ -295,4 +296,94 @@ test('a stretch that could not be saved is never shown or announced', async (t) 
   const read = await s.live.read(m.id, 0);
   assert.deepEqual([read.status, read.next, read.segments.length], ['stopped', 1, 1]);
   assert.deepEqual(await s.recording.append(m.id, TOKEN, offset, second), { offset: offset + 32_000 }, 'the recording goes on');
+});
+
+test('the spoken language changes during a recording: saved, told to the live job, and in the transcript', async (t) => {
+  const ws = await workspace(t);
+  const fake = fakeEngine();
+  const s = services(ws, fakeModels(), fake.engine);
+  const { id, generation, offset } = await record(s, 2);
+
+  assert.deepEqual(await s.recording.setLanguage(id, TOKEN, 'ja'), { language: 'ja', language_changes: [{ at: 2, language: 'ja' }], at: 2 });
+  assert.deepEqual(fake.state.languages, [{ at: 2, language: 'ja', afterAudio: 64_000 }]);
+  assert.deepEqual((await s.queue.loadMeeting(id)).live?.language_changes, [{ at: 2, language: 'ja' }], 'kept with the recording, so a crash does not lose it');
+  await assert.rejects(s.recording.setLanguage(id, 'fictional-other-token', 'en'), /no longer holds/);
+  await assert.rejects(s.recording.setLanguage(id, TOKEN, 'klingon'), /Invalid language/);
+
+  const done = await s.recording.finish(id, { token: TOKEN, offset, generation, queue: true });
+  assert.equal(done.files.find((f) => f.recording)!.recording?.status, 'done', 'made with what the recording asked for, so it is the transcript');
+  await assert.rejects(s.recording.setLanguage(id, TOKEN, 'en'), /no longer holds/, 'nothing changes after the seal');
+});
+
+test('two changes at one moment are one, and going back to the same language is none', async (t) => {
+  const ws = await workspace(t);
+  const s = services(ws, fakeModels(), fakeEngine().engine);
+  const { id } = await record(s, 1);
+  await s.recording.setLanguage(id, TOKEN, 'ja');
+  assert.deepEqual((await s.recording.setLanguage(id, TOKEN, 'en')).language_changes, [{ at: 1, language: 'en' }]);
+  assert.deepEqual((await s.recording.setLanguage(id, TOKEN, 'auto')).language_changes, [], 'back where it started');
+  assert.equal((await s.queue.loadMeeting(id)).live?.language_changes, undefined);
+});
+
+test('a change the live job did not follow sends the recording to the queue, with the changes', async (t) => {
+  const ws = await workspace(t);
+  for (const [label, o] of [['it came too late', { lateLanguage: true }], ['it was not told', {}], ['a later change hides one it was not told', {}]] as const) {
+    const s = services(ws, fakeModels(), fakeEngine(o).engine);
+    const { id, generation, offset } = await record(s, 2);
+    await s.recording.setLanguage(id, TOKEN, 'ja');
+    if (label !== 'it came too late') MeetingLiveTranscriptService.job(generation)!.changes = [];
+    let last = offset;
+    if (label === 'a later change hides one it was not told') {
+      last = (await s.recording.append(id, TOKEN, offset, second)).offset;
+      await s.recording.setLanguage(id, TOKEN, 'en');
+    }
+    const done = await s.recording.finish(id, { token: TOKEN, offset: last, generation, queue: true });
+    const r = done.files.find((f) => f.recording)!.recording!;
+    assert.equal(r.status, 'pending', label);
+    assert.deepEqual(r.target?.changes?.[0], { at: 2, language: 'ja' }, label);
+    assert.ok(r.draft, `${label}: the live text stays readable`);
+    if (label !== 'it was not told') assert.match(await fsp.readFile(path.join(s.folder(id), r.draft!.transcript), 'utf-8'), /parts around a change may be in the language before it/, `${label}: the header does not overstate it`);
+    await s.queue.removeMeeting(id);
+  }
+});
+
+test('the language of a recording is fixed at its start, and changes made while the model loads reach the worker first', async (t) => {
+  const ws = await workspace(t);
+  let language = 'ja';
+  const models = { ...fakeModels(), readSettings: async () => ({ model: 'fast', language, keep_recordings: false, live_model: 'fast', updated_at: null }), installedPath: async () => '/fictional/model' } as unknown as TranscriptionModelService;
+  const fake = fakeEngine();
+  let load: () => void = () => {};
+  const loading = new Promise<void>((r) => { load = r; });
+  const engine = { follow: async (...args: Parameters<TranscriptionEngine['follow']>) => { await loading; return fake.engine.follow(...args); } } as unknown as TranscriptionEngine;
+  const s = services(ws, models, engine);
+  const m = await s.queue.createMeeting({ title: 'Fictional live meeting', meeting_date: '2026-10-30' });
+  const { generation, language: started } = await s.recording.start(m.id, TOKEN);
+  assert.equal(started, 'ja');
+  language = 'en';
+  await s.recording.setLanguage(m.id, TOKEN, 'auto');
+  load();
+  await settle();
+  const offset = (await s.recording.append(m.id, TOKEN, 0, second)).offset;
+  await settle();
+  assert.deepEqual(fake.state.languages, [{ at: 0, language: 'auto', afterAudio: 0 }]);
+  const done = await s.recording.finish(m.id, { token: TOKEN, offset, generation, queue: true });
+  assert.equal(done.files.find((f) => f.recording)!.recording?.status, 'done', 'Settings changing meanwhile does not matter');
+});
+
+test('language changes that cannot be read leave Auto, never a forced language', async (t) => {
+  const ws = await workspace(t);
+  const s = services(ws, fakeModels(), fakeEngine().engine);
+  const { id } = await record(s, 1);
+  await s.recording.setLanguage(id, TOKEN, 'ja');
+  const manifest = path.join(s.folder(id), 'meeting.md');
+  const text = await fsp.readFile(manifest, 'utf-8');
+  await fsp.writeFile(manifest, text.replace(/(language_changes:\s*\n\s*- at: )\S+/, '$1 -5'));
+  const live = (await s.queue.loadMeeting(id)).live!;
+  assert.equal(live.language, 'auto');
+  assert.equal(live.language_changes, undefined);
+  assert.equal(live.state, 'recording', 'the recording itself is safe');
+
+  // From an older version, with no language of its own: damaged changes still leave Auto, not what Settings say.
+  await fsp.writeFile(manifest, text.replace(/^(\s*)language: auto\n/m, '').replace(/(language_changes:\s*\n\s*- at: )\S+/, '$1 -5'));
+  assert.equal((await s.queue.loadMeeting(id)).live?.language, 'auto');
 });

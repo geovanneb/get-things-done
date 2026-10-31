@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ChildProcess, fork } from 'child_process';
 import { CATALOG, TranscriptionModelService, VAD } from '../transcriptionModels';
 import { readWavFormat } from './wav';
+import type { LanguageChange } from './languages';
 import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './protocol';
 
 /**
@@ -23,8 +24,10 @@ export type WorkerLauncher = () => ChildProcess;
 export interface FollowSession {
   /** Audio saved so far, in bytes after the header. Only this much is read. */
   committed(bytes: number): void;
+  /** From `at` seconds of audio on, this language. Sent before the audio it applies to. */
+  language(at: number, language: string): void;
   /** The recording is sealed at `bytes`: reads to there, and resolves once the worker has exited. */
-  end(bytes: number, deadlineMs: number): Promise<{ ok: true; bytes: number; seconds: number; segments: number } | { ok: false; message: string }>;
+  end(bytes: number, deadlineMs: number): Promise<{ ok: true; bytes: number; seconds: number; segments: number; lateLanguage: boolean } | { ok: false; message: string }>;
   /** Ends the job without a result; resolves once the worker has exited. */
   cancel(): Promise<void>;
   /** Why the job stopped early, while the recording goes on; null while it runs. */
@@ -137,7 +140,7 @@ export class TranscriptionEngine {
   /** Transcribes a WAV file with the chosen model and language. Segments and progress arrive as they are ready. */
   async transcribe(
     wav: string,
-    options: { model?: string; language?: string; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {},
+    options: { model?: string; language?: string; changes?: LanguageChange[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {},
   ): Promise<TranscriptResult> {
     const settings = await this.models.readSettings();
     const id = options.model ?? settings.model;
@@ -156,7 +159,7 @@ export class TranscriptionEngine {
     const segments: Segment[] = [];
     let loadMs: number | null = null;
     let seconds = format.duration;
-    await this.run({ type: 'transcribe', model, wav, language }, transcriptionTimeout(format.duration), (reply) => {
+    await this.run({ type: 'transcribe', model, wav, language, ...(options.changes?.length ? { changes: options.changes } : {}) }, transcriptionTimeout(format.duration), (reply) => {
       if (reply.type === 'loaded') loadMs = reply.ms;
       if (reply.type === 'segment') {
         const segment = { start: reply.start, end: reply.end, text: reply.text };
@@ -203,7 +206,7 @@ export class TranscriptionEngine {
     });
     void exited.then(async () => { running.delete(child); busy = false; await release().catch(() => {}); });
 
-    let outcome: { ok: true; bytes: number; seconds: number; segments: number } | { ok: false; message: string } | null = null;
+    let outcome: { ok: true; bytes: number; seconds: number; segments: number; lateLanguage: boolean } | { ok: false; message: string } | null = null;
     const settle = (value: NonNullable<typeof outcome>) => { if (!outcome) { outcome = value; for (const w of waiting) w(); } };
     const waiting: (() => void)[] = [];
     const ended = () => new Promise<void>((resolve) => { if (outcome) resolve(); else waiting.push(resolve); });
@@ -215,7 +218,7 @@ export class TranscriptionEngine {
       if (reply.type === 'segment') options.onSegment({ start: reply.start, end: reply.end, text: reply.text });
       if (reply.type === 'progress') options.onProgress?.(reply.done, reply.total);
       if (reply.type === 'error') settle({ ok: false, message: reply.message });
-      if (reply.type === 'done') settle({ ok: true, bytes: reply.bytes ?? -1, seconds: reply.seconds, segments: reply.segments });
+      if (reply.type === 'done') settle({ ok: true, bytes: reply.bytes ?? -1, seconds: reply.seconds, segments: reply.segments, lateLanguage: reply.late_language === true });
     });
     child.on('error', (err) => settle({ ok: false, message: `The transcription engine could not start: ${err.message}` }));
     child.once('exit', (code, sig) => {
@@ -228,6 +231,7 @@ export class TranscriptionEngine {
 
     return {
       committed: (bytes: number) => sendControl({ type: 'committed', bytes }),
+      language: (at: number, language: string) => sendControl({ type: 'language', at, language }),
       end: async (bytes: number, deadlineMs: number) => {
         sendControl({ type: 'end', bytes });
         let deadline: ReturnType<typeof setTimeout> | undefined;

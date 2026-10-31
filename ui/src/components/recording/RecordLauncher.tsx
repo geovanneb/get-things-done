@@ -15,7 +15,7 @@ const LauncherContext = createContext<RecordLauncher | null>(null);
 
 /**
  * One record dialog for every way in: the top bar, ⌘K and the desktop app's menu-bar menu. The dialog's content stays
- * in RecordMeetingModal; this only decides when it opens, and stops a recording when the menu asks.
+ * in RecordMeetingModal; this only decides when it opens, and passes on what the menu asks of a running recording.
  */
 export function RecordLauncherProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorder();
@@ -36,7 +36,8 @@ export function RecordLauncherProvider({ children }: { children: React.ReactNode
 
   useEffect(() => onRecordingCommand((command) => {
     if (command === 'open') openRecordDialog();
-    else if (latest.current.status === 'recording') void latest.current.stop();
+    else if (command === 'stop') { if (latest.current.status === 'recording') void latest.current.stop(); }
+    else void latest.current.setLanguage(command.slice('language:'.length));
   }), [openRecordDialog]);
 
   const value = useMemo(() => ({ openRecordDialog, openRecordDialogFor }), [openRecordDialog, openRecordDialogFor]);

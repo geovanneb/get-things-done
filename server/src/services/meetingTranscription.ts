@@ -4,7 +4,8 @@ import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft } from './meetingDigestService';
-import { TranscriptionModelService, CATALOG } from './transcriptionModels';
+import { TranscriptionModelService, CATALOG, languagesFor } from './transcriptionModels';
+import type { LanguageChange } from './transcription/languages';
 import { TranscriptionEngine, Segment } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
 import { HeldLock, tryLock, unlock } from '../utils/fileLock';
@@ -47,7 +48,7 @@ export interface TranscriptionProgress { meeting: string; file: string; done: nu
 /** Notices for the dashboard when a transcription starts, moves or ends. */
 export const meetingTranscriptionEvents = new EventEmitter();
 
-interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string }
+interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string; changes: LanguageChange[] }
 /** The job this dashboard runs; null when none. */
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
@@ -59,8 +60,13 @@ function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
 }
 
+const languageWords = (language: string) => (language === 'auto' ? 'detected for each part' : language);
+/** For example `detected for each part, ja from 00:12:30`. */
+const languageLine = (language: string, changes: LanguageChange[]) =>
+  [languageWords(language), ...changes.map((c) => `${languageWords(c.language)} from ${clock(c.at)}`)].join(', ');
+
 /** A readable transcript of a recording, in the same shape as the copies of WebVTT transcripts. */
-export function audioTranscriptMarkdown(source: string, hash: string, model: string, language: string, seconds: number, segments: Segment[], complete: boolean): string {
+export function audioTranscriptMarkdown(source: string, hash: string, model: string, language: string, seconds: number, segments: Segment[], complete: boolean, changes: LanguageChange[] = [], changesLate = false): string {
   const body = segments.map((s) => `[${clock(s.start)} → ${clock(s.end)}]\n  ${s.text.replace(/\n+/g, ' ')}`).join('\n\n');
   let longest = 2;
   for (const m of body.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
@@ -69,7 +75,7 @@ export function audioTranscriptMarkdown(source: string, hash: string, model: str
   return [
     `# Transcript: ${source}`,
     '',
-    `Made on this computer from the recording \`${source}\` with ${name} (language: ${language === 'auto' ? 'detected for each part' : language}). Source SHA-256: \`${hash}\`.`,
+    `Made on this computer from the recording \`${source}\` with ${name} (language: ${languageLine(language, changes)}${changesLate ? ' as asked, but parts around a change may be in the language before it' : ''}). Source SHA-256: \`${hash}\`.`,
     '',
     `- Length: ${clock(seconds)}, ${segments.length} parts with speech`,
     '- Speakers are not told apart: each part is what was said, in order.',
@@ -291,12 +297,12 @@ export class MeetingTranscriptionService {
         if (!folder) continue;
         // A recording that cannot be read fails on its own; the queue goes on with the next one.
         let entry: QueuedMeeting['files'][number] | undefined;
-        let use = { model, language };
+        let use: { model: string; language: string; changes: LanguageChange[] } = { model, language, changes: [] };
         for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending')) {
           // Its own target, fixed when it was finished; a model that is not downloaded keeps it waiting, and the others go on.
           const wanted = candidate.recording?.target ?? { model, language };
           if (!await this.models.installedPath(wanted.model)) continue;
-          use = wanted;
+          use = { model: wanted.model, ...languagesFor(wanted.model, wanted.language, wanted.changes) };
           const read = await fileInside(folder, candidate.name).then(hashFile).catch((err: Error) => err);
           const problem = read instanceof Error ? `The recording cannot be read (${read.message}); remove the meeting and add it again.`
             : read.sha256 !== candidate.sha256 ? 'The recording changed since it was added; remove the meeting and add it again.' : null;
@@ -310,7 +316,7 @@ export class MeetingTranscriptionService {
         entry.recording = nextRecording(entry.recording, { status: 'running', generation, owner: { pid: process.pid, token }, started_at: new Date().toISOString(), model: use.model, language: use.language });
         await this.queue.saveMeeting(meeting);
         return {
-          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language,
+          meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes,
           progress: { meeting: meeting.id, file: entry.name, done: 0, total: 0, started_at: new Date().toISOString() },
         };
       }
@@ -341,7 +347,7 @@ export class MeetingTranscriptionService {
         await convert(source, wav, job.abort.signal);
       }
       const result = await this.engine.transcribe(wav, {
-        model, language, signal: job.abort.signal,
+        model, language, changes: job.changes, signal: job.abort.signal,
         onSegment: (s) => { segments.push(s); },
         onProgress: (done, total) => {
           job.progress = { ...job.progress, done, total };
@@ -402,7 +408,7 @@ export class MeetingTranscriptionService {
       let name = `${stem}.transcript.md`;
       for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
         || await fsp.lstat(path.join(folder, name)).then(() => true, () => false); n++) name = `${stem}-${n}.transcript.md`;
-      const content = Buffer.from(audioTranscriptMarkdown(entry.name, entry.sha256, model, language, seconds, segments, complete), 'utf-8');
+      const content = Buffer.from(audioTranscriptMarkdown(entry.name, entry.sha256, model, language, seconds, segments, complete, job.changes), 'utf-8');
       const target = path.join(folder, name);
       await atomicWrite(target, content);
       let replaced: string | null = null;

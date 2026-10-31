@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
@@ -178,6 +179,32 @@ test('real model: the worker transcribes English and Japanese samples with Sense
   const ja = await engine.transcribe(path.join(realAudio!, 'ja.wav'), { model: 'sensevoice-2024-07-17', language: 'ja' });
   assert.match(ja.segments.map((s) => s.text).join(''), /中学/);
   assert.ok(en.segments.every((s) => s.end > s.start && s.start >= 0));
+  // SenseVoice takes a language as a hint: a change must only leave it working.
+  const changed = await engine.transcribe(path.join(realAudio!, 'ja.wav'), { model: 'sensevoice-2024-07-17', language: 'auto', changes: [{ at: 0, language: 'en' }] });
+  assert.match(changed.segments.map((s) => s.text).join(''), /中学/);
+});
+
+test('real model: a change of language gives Whisper exactly what that language gives', { skip: !realModels || !realAudio || !fs.existsSync(path.join(realModels, 'whisper-large-v3-turbo')) ? 'set STT_TEST_MODELS, with Whisper, and STT_TEST_AUDIO to run' : false }, async (t) => {
+  const previous = process.env.ESB_MODELS_PATH;
+  process.env.ESB_MODELS_PATH = realModels;
+  t.after(() => { if (previous === undefined) delete process.env.ESB_MODELS_PATH; else process.env.ESB_MODELS_PATH = previous; });
+  const engine = new TranscriptionEngine();
+  const options = { model: 'whisper-large-v3-turbo' };
+  const text = (r: { segments: { text: string }[] }) => r.segments.map((s) => s.text).join('');
+  const wav = path.join(realAudio!, 'en.wav');
+  const switched = await engine.transcribe(wav, { ...options, language: 'en', changes: [{ at: 0, language: 'ja' }] });
+  assert.equal(text(switched), text(await engine.transcribe(wav, { ...options, language: 'ja' })));
+  assert.notEqual(text(switched), text(await engine.transcribe(wav, { ...options, language: 'en' })));
+
+  // Following a recording: a change sent before its audio, as the dashboard does.
+  const segments: { text: string }[] = [];
+  const session = await engine.follow(wav, { ...options, language: 'en', onSegment: (s) => segments.push(s) });
+  const bytes = (await fsp.stat(wav)).size - 44;
+  session.language(0, 'ja');
+  session.committed(bytes);
+  const result = await session.end(bytes, 120_000);
+  assert.ok(result.ok && !result.lateLanguage);
+  assert.equal(text({ segments }), text(switched));
 });
 
 test('a worker that ignores the stop signal is killed before the next job may start; the real worker exits when the dashboard goes away', async (t) => {
