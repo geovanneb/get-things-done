@@ -3,47 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getWorkspacePath } from '../utils/config';
 import { getRunningDaemon } from '../utils/daemon';
-import { isExistingWorkspace, upgradeWorkspace, type AiTool, type WorkspaceProfile } from '../utils/workspace';
-
-const AI_TOOLS: AiTool[] = ['claude-code', 'copilot', 'codex'];
-
-/**
- * Reads identity fields out of the executive profile frontmatter so template
- * placeholders interpolate to the same values `gtd init` used.
- */
-function readProfile(workspacePath: string): WorkspaceProfile {
-  const profile: WorkspaceProfile = { name: '', role: '', organization: '' };
-  const profilePath = path.join(workspacePath, 'profile', 'executive-profile.md');
-
-  if (!fs.existsSync(profilePath)) return profile;
-
-  const raw = fs.readFileSync(profilePath, 'utf-8');
-  const match = raw.match(/^---\n([\s\S]*?)\n---/);
-  if (!match) return profile;
-
-  for (const line of (match[1] ?? '').split('\n')) {
-    const kv = line.match(/^(\w+):\s*(.*)$/);
-    if (!kv) continue;
-    const key = kv[1] as string;
-    const value = (kv[2] ?? '').trim().replace(/^["']|["']$/g, '');
-    if (key === 'name' || key === 'role' || key === 'organization') {
-      profile[key] = value;
-    }
-  }
-  return profile;
-}
-
-/** Only refresh integrations the workspace already has, so upgrade never adds new ones. */
-function detectAiTools(workspacePath: string): AiTool[] {
-  const markers: Record<AiTool, string> = {
-    'claude-code': '.claude',
-    copilot: path.join('.github', 'copilot-instructions.md'),
-    codex: 'AGENTS.md',
-  };
-
-  const found = AI_TOOLS.filter((tool) => fs.existsSync(path.join(workspacePath, markers[tool])));
-  return found.length > 0 ? found : ['claude-code'];
-}
+import { isExistingWorkspace, refreshWorkspace } from '../utils/workspace';
 
 export const upgradeCommand = new Command('upgrade')
   .description('Refresh app-provided files in your workspace after updating the package')
@@ -76,10 +36,12 @@ export const upgradeCommand = new Command('upgrade')
 
     let result;
     try {
-      result = upgradeWorkspace(workspacePath, {
-        profile: readProfile(workspacePath),
-        aiTools: detectAiTools(workspacePath),
-      });
+      const outcome = await refreshWorkspace(workspacePath);
+      if (outcome.status === 'skipped') {
+        spinner.warn(`Nothing was changed: ${outcome.reason}.`);
+        return;
+      }
+      result = outcome.result;
     } catch (err) {
       spinner.fail('Upgrade failed');
       console.error(err instanceof Error ? err.message : String(err));

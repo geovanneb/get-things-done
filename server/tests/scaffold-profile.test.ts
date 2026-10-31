@@ -4,7 +4,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
-import { scaffoldWorkspace, upgradeWorkspace, readManifest, MANIFEST_RELATIVE_PATH } from '../src/services/scaffold';
+import { scaffoldWorkspace, upgradeWorkspace, readManifest, refreshAppFiles, newerVersion, MANIFEST_RELATIVE_PATH } from '../src/services/scaffold';
 
 test('an organization name ending in a full stop is not followed by a second one', async (t) => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-scaffold-'));
@@ -65,4 +65,79 @@ test('routine placeholders stay as written, and gtd upgrade repairs files that h
     assert.ok(result.updated.includes(rel), rel);
     assert.match(await fsp.readFile(path.join(dir, rel), 'utf8'), /\{\{date\}\}/, rel);
   }
+});
+
+test('opening a workspace brings its files up to the app, with the profile and tools it has, and keeps your edits', async (t) => {
+  const untouched = await oldWorkspace(t);
+  const result = refreshAppFiles(untouched.dir)!;
+  assert.ok(result.updated.includes('AGENTS.md'));
+  assert.match(await fsp.readFile(untouched.file, 'utf8'), /\*\*Alex Morgan\*\* — COO at Northwind Labs Inc\.$/m, 'the name from the profile');
+  assert.deepEqual(result.added, [], 'no tool the workspace did not have');
+  assert.equal(await fsp.access(path.join(untouched.dir, 'CLAUDE.md')).then(() => true, () => false), false, 'Codex only: no Claude Code files');
+
+  // A second opening changes nothing at all, the manifest included: a git workspace stays clean.
+  const manifest = path.join(untouched.dir, MANIFEST_RELATIVE_PATH);
+  const before = await fsp.readFile(manifest, 'utf8');
+  assert.deepEqual(refreshAppFiles(untouched.dir)!.updated, []);
+  assert.equal(await fsp.readFile(manifest, 'utf8'), before);
+  assert.deepEqual((await fsp.readdir(untouched.dir)).filter((n) => n.endsWith('.tmp')), [], 'no temporary files left');
+});
+
+test('a file you changed is kept, and so is a .new you are merging', async (t) => {
+  const edited = await oldWorkspace(t, '\nMy own note.\n');
+  assert.ok(refreshAppFiles(edited.dir)!.conflicted.includes('AGENTS.md'));
+  assert.match(await fsp.readFile(edited.file, 'utf8'), /My own note\./);
+  const newFile = `${edited.file}.new`;
+  await fsp.writeFile(newFile, 'User merge in progress');
+  refreshAppFiles(edited.dir);
+  assert.equal(await fsp.readFile(newFile, 'utf8'), 'User merge in progress');
+});
+
+test('an older app leaves a workspace alone, a quoted name reads back as written, and no tool is added', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-refresh-'));
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+  scaffoldWorkspace(dir, { profile: { name: 'Alex "Ace" Morgan', role: 'COO', organization: 'Northwind Labs' }, aiTools: ['codex'] });
+  assert.deepEqual(refreshAppFiles(dir)!.updated, [], 'a fresh workspace needs nothing, whatever its name');
+
+  const empty = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-refresh-'));
+  t.after(() => fsp.rm(empty, { recursive: true, force: true }));
+  scaffoldWorkspace(empty, { profile: { name: 'A', role: 'B', organization: 'C' }, aiTools: [] });
+  assert.equal(refreshAppFiles(empty)!.added.includes('CLAUDE.md'), false);
+
+  const manifest = path.join(dir, MANIFEST_RELATIVE_PATH);
+  const newer = { ...readManifest(dir)!, appVersion: '99.0.0' };
+  await fsp.writeFile(manifest, JSON.stringify(newer));
+  await fsp.writeFile(path.join(dir, 'AGENTS.md'), 'From a newer app');
+  assert.equal(refreshAppFiles(dir), null);
+  assert.equal(await fsp.readFile(path.join(dir, 'AGENTS.md'), 'utf8'), 'From a newer app');
+  assert.equal(newerVersion('0.10.0', '0.9.9'), true);
+  assert.equal(newerVersion('0.8.0', '0.8.0'), false);
+});
+
+test('a rewritten file keeps its permissions, and a failure to write the .new is not taken for one already there', { skip: process.platform === 'win32' ? 'POSIX permissions' : false }, async (t) => {
+  const untouched = await oldWorkspace(t);
+  await fsp.chmod(untouched.file, 0o600);
+  refreshAppFiles(untouched.dir);
+  assert.equal((await fsp.stat(untouched.file)).mode & 0o777, 0o600);
+  assert.deepEqual((await fsp.readdir(untouched.dir)).filter((n) => n.endsWith('.tmp')), []);
+
+  const edited = await oldWorkspace(t, '\nMy own note.\n');
+  await fsp.chmod(edited.dir, 0o500);
+  try {
+    assert.throws(() => refreshAppFiles(edited.dir), /EACCES|EPERM/);
+  } finally {
+    await fsp.chmod(edited.dir, 0o700);
+  }
+});
+
+test('one writer at a time: a second refresh while the first holds the workspace is skipped', async (t) => {
+  const { dir } = await oldWorkspace(t);
+  const { tryLock, unlock } = await import('../src/utils/fileLock');
+  const held = await tryLock(path.join(dir, '.situation-board', 'upgrade.lock'));
+  assert.notEqual(typeof held, 'string');
+  t.after(() => unlock(held as Exclude<typeof held, string>));
+  const { refreshWorkspace } = await import('../src/services/workspaceRefresh');
+  const outcome = await refreshWorkspace(dir);
+  assert.equal(outcome.status, 'skipped');
+  assert.match(await fsp.readFile(path.join(dir, 'AGENTS.md'), 'utf8'), /Inc\.\./, 'not touched');
 });

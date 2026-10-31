@@ -668,6 +668,9 @@ If the port is busy, it picks the next free one and tells you. Logs go to
 
 ### `gtd upgrade`
 
+The dashboard and the desktop app do the same each time a workspace opens, so this is only
+needed to upgrade a workspace without opening it.
+
 | Flag | Description |
 |---|---|
 | `-d, --dir <path>` | Workspace to upgrade (default: the configured one) |

@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { quoteYaml } from '../utils/yamlScalar';
+import { parseMarkdown } from '../utils/markdown';
 
 /**
  * Single source of truth for creating and upgrading a workspace.
@@ -340,6 +341,25 @@ function writeUiPreferences(workspacePath: string): void {
   );
 }
 
+/**
+ * Writes a whole file at once: a reader sees the old file or the new one, never a half-written one. It keeps the
+ * file's permissions. With `expected`, only while the file still has that hash, which narrows (it cannot close) the
+ * window for a change made meanwhile. False when it was not written.
+ */
+function replaceFile(dest: string, content: string | Buffer, expected: string | null): boolean {
+  const temp = `${dest}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
+  try {
+    const mode = fs.existsSync(dest) ? fs.statSync(dest).mode & 0o777 : undefined;
+    fs.writeFileSync(temp, content, { flag: 'wx', ...(mode !== undefined ? { mode } : {}) });
+    if (mode !== undefined) fs.chmodSync(temp, mode);
+    if (expected !== null && sha256(fs.readFileSync(dest)) !== expected) return false;
+    fs.renameSync(temp, dest);
+    return true;
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+}
+
 export function readManifest(workspacePath: string): AppManifest | null {
   const manifestPath = path.join(workspacePath, MANIFEST_RELATIVE_PATH);
   if (!fs.existsSync(manifestPath)) return null;
@@ -353,13 +373,17 @@ export function readManifest(workspacePath: string): AppManifest | null {
 export function writeManifest(workspacePath: string, files: ManifestEntry[]): void {
   const manifestPath = path.join(workspacePath, MANIFEST_RELATIVE_PATH);
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+  // Nothing changed: the file stays as it is, so an opening leaves a git workspace clean.
+  const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path));
+  const previous = readManifest(workspacePath);
+  if (previous?.appVersion === getAppVersion() && JSON.stringify(previous.files) === JSON.stringify(sorted)) return;
 
   const manifest: AppManifest = {
     appVersion: getAppVersion(),
     generatedAt: new Date().toISOString(),
-    files: [...files].sort((a, b) => a.path.localeCompare(b.path)),
+    files: sorted,
   };
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  replaceFile(manifestPath, JSON.stringify(manifest, null, 2), null);
 }
 
 /**
@@ -438,7 +462,7 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
 
     if (!fs.existsSync(destPath)) {
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.writeFileSync(destPath, nextContent);
+      replaceFile(destPath, nextContent, null);
       result.added.push(relPath);
       continue;
     }
@@ -452,12 +476,18 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
 
     const recordedHash = previousByPath.get(relPath);
     if (recordedHash && recordedHash === currentHash) {
-      // Untouched since we wrote it, so replacing it loses nothing.
-      fs.writeFileSync(destPath, nextContent);
-      result.updated.push(relPath);
+      // Untouched since we wrote it, so replacing it loses nothing; unless it changes while this runs.
+      if (replaceFile(destPath, nextContent, currentHash)) result.updated.push(relPath);
+      else result.conflicted.push(relPath);
     } else {
-      // Either user-edited, or predates the manifest. Never clobber it.
-      fs.writeFileSync(`${destPath}.new`, nextContent);
+      // Either user-edited, or predates the manifest. Never clobber it, nor a `.new` already there: someone may be
+      // merging it. A new one is made only where there is none.
+      try {
+        fs.writeFileSync(`${destPath}.new`, nextContent, { flag: 'wx' });
+      } catch (err) {
+        // Only one already there is kept; any other failure is a failure.
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
       result.conflicted.push(relPath);
     }
   }
@@ -483,4 +513,45 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
   writeManifest(workspacePath, manifestEntries);
 
   return result;
+}
+
+/** The executive's name, role and organization from the profile, so templates render as `gtd init` rendered them. */
+export function readWorkspaceProfile(workspacePath: string): WorkspaceProfile {
+  const profile: WorkspaceProfile = { name: '', role: '', organization: '' };
+  const profilePath = path.join(workspacePath, 'profile', 'executive-profile.md');
+  if (!fs.existsSync(profilePath)) return profile;
+  let data: Record<string, unknown>;
+  try { data = parseMarkdown(fs.readFileSync(profilePath, 'utf-8')).data as Record<string, unknown>; } catch { return profile; }
+  for (const key of ['name', 'role', 'organization'] as const) if (typeof data[key] === 'string') profile[key] = data[key].trim();
+  return profile;
+}
+
+/** Whether version `a` is newer than `b` (both like 0.8.1). */
+export function newerVersion(a: string, b: string): boolean {
+  const parts = (v: string) => v.split(/[.-]/).slice(0, 3).map((n) => Number.parseInt(n, 10) || 0);
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  return false;
+}
+
+/** The AI tools the workspace already has: a refresh never adds one. Every workspace has `.claude/`, so it is no sign. */
+export function detectAiTools(workspacePath: string): AiTool[] {
+  const markers: Record<AiTool, string> = {
+    'claude-code': 'CLAUDE.md',
+    copilot: path.join('.github', 'copilot-instructions.md'),
+    codex: 'AGENTS.md',
+  };
+  return (Object.keys(markers) as AiTool[]).filter((tool) => fs.existsSync(path.join(workspacePath, markers[tool])));
+}
+
+/**
+ * Brings a workspace's app-provided files (agent instructions, procedures, schemas) up to this version of the app,
+ * like `gtd upgrade`: a file the user changed is never replaced. The dashboard does it when a workspace opens, so the
+ * desktop app, which has no terminal, keeps its agents in step with the app.
+ */
+export function refreshAppFiles(workspacePath: string): UpgradeResult | null {
+  // An older app never takes a workspace back: two versions would rewrite the files in turn.
+  const recorded = readManifest(workspacePath)?.appVersion;
+  if (recorded && newerVersion(recorded, getAppVersion())) return null;
+  return upgradeWorkspace(workspacePath, { profile: readWorkspaceProfile(workspacePath), aiTools: detectAiTools(workspacePath) });
 }
