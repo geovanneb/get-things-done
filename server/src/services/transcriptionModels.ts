@@ -117,8 +117,8 @@ export const CATALOG: CatalogModel[] = [
     languages: '100 languages, including English and Japanese',
     language_options: WHISPER_LANGUAGES,
     pros: ['The most accurate transcripts, also of short remarks', 'Full punctuation', '100 languages'],
-    cons: ['Slow: about 1.4 times faster than real time, so an 8-hour meeting takes nearly 6 hours', 'Needs about 6 GB of memory while transcribing', 'A 1.8 GB download'],
-    memory_gb: 6,
+    cons: ['Slow: about real time on continuous speech, so an 8-hour meeting can take up to 8 hours', 'Needs about 5 GB of memory while transcribing', 'A 1.8 GB download'],
+    memory_gb: 5,
     engine: { kind: 'whisper', files: { encoder: 'large-v3-encoder.int8.onnx', decoder: 'large-v3-decoder.int8.onnx', tokens: 'large-v3-tokens.txt' }, noArena: true },
     files: [
       { name: 'large-v3-encoder.int8.onnx', url: `${HF}/${WHISPER_V3_REPO}/resolve/${WHISPER_V3_COMMIT}/large-v3-encoder.int8.onnx`, size: 766671985, sha256: 'd531cf17248acc43e8c09b472a0877055e770877857a5332fc1304b36534ec85' },

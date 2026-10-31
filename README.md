@@ -818,8 +818,8 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
   real time, so an 8-hour meeting takes about 2 hours) and needs about 4 GB of memory
   while it transcribes.
 - **Whisper large-v3**: the most accurate, also of short remarks, with the same
-  languages. It is slow (about 1.4 times faster than real time, so an 8-hour meeting
-  takes nearly 6 hours), needs about 6 GB of memory and is a 1.8 GB download.
+  languages. It is slow (about real time on continuous speech, so an 8-hour meeting
+  can take up to 8 hours), needs about 5 GB of memory and is a 1.8 GB download.
 - **SenseVoice**: very fast (about 80 times faster than real time, so an 8-hour meeting
   takes about 6 minutes) and light (under 1 GB), a little less accurate, in English, Japanese,
   Chinese, Korean and Cantonese.
