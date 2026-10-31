@@ -4,7 +4,7 @@ import { constants as fsConstants } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { withWorkspacePath, WorkspaceService } from './workspace';
 import { MeetingLiveTranscriptService } from './meetingLiveTranscript';
-import { SPEAKER_MODEL, TranscriptionModelService } from './transcriptionModels';
+import { CATALOG, SPEAKER_MODEL, TranscriptionModelService } from './transcriptionModels';
 import { knownLanguage, MAX_LANGUAGE_CHANGES, withLanguageChange, type LanguageChange } from './transcription/languages';
 import { hasWords } from './transcription/repeats';
 import { audioTranscriptMarkdown } from './meetingTranscription';
@@ -143,23 +143,55 @@ export class MeetingRecordingService {
    * The spoken language from now on, for this recording's transcripts: from what is saved so far, which is what
    * `at` in the reply says. Under the lock, so Finish and every block of audio are either before or after it.
    */
-  async setLanguage(id: string, token: string, language: unknown): Promise<{ language: string; language_changes: LanguageChange[]; at: number }> {
-    if (!knownLanguage(language)) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
+  /**
+   * The language spoken from now on. With `suggestion`, the id of the suggestion the page showed: its language,
+   * from where the run in it started (a set language that did not match) or from now (Auto), and only while that
+   * suggestion is still the current one, so it never undoes a change made since.
+   */
+  async setLanguage(id: string, token: string, language: unknown, suggestion?: string): Promise<{ language: string; language_changes: LanguageChange[]; at: number }> {
+    if (suggestion === undefined && !knownLanguage(language)) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
     return inWorkspaceOf(token, () => this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);
       const live = meeting.live;
       if (live?.state !== 'recording' || live.token_sha256 !== hashToken(token ?? '')) throw httpError(409, 'This page no longer holds the recording: it was finished, discarded or taken over elsewhere.');
       const { handle, saved } = await liveFile(path.join(await this.queue.meetingFolder(id), liveRecordingFile(live.generation)));
       await handle.close();
-      const at = saved / BYTES_PER_SECOND;
+      let at = saved / BYTES_PER_SECOND;
+      let chosen = language as string;
+      if (suggestion !== undefined) {
+        const offered = this.live.suggestion(live.generation);
+        if (!offered || offered.id !== suggestion || !knownLanguage(offered.language)) throw httpError(409, 'This suggestion is no longer current');
+        // The model that will transcribe after the meeting must have it, as Settings are now.
+        const model = (await this.models.readSettings().catch(() => null))?.model;
+        if (!CATALOG.find((m) => m.id === model)?.language_options?.some((o) => o.id === offered.language)) throw httpError(409, 'The transcription model in Settings does not have this language');
+        chosen = offered.language;
+        // From where the run started: never before the last change, and never past what is saved. With no change yet,
+        // a meeting that started in that language switches from its start.
+        const last = live.language_changes?.at(-1)?.at;
+        if (offered.mode === 'mismatch') {
+          if (!Number.isFinite(offered.since) || offered.since < 0 || (last !== undefined && offered.since <= last) || offered.since > at) throw httpError(409, 'This suggestion is no longer current');
+          at = offered.since;
+        }
+      }
       const start = live.language ?? 'auto';
-      const changes = withLanguageChange(start, live.language_changes ?? [], { at, language });
+      const changes = withLanguageChange(start, live.language_changes ?? [], { at, language: chosen });
       if (changes.length > MAX_LANGUAGE_CHANGES) throw httpError(409, 'The language was changed too many times in this recording');
       const { language_changes: _old, ...rest } = live;
       meeting.live = { ...rest, language: start, ...(changes.length ? { language_changes: changes } : {}) };
       await this.queue.saveMeeting(meeting);
-      this.live.language(live.generation, changes, { at, language });
-      return { language, language_changes: changes, at };
+      this.live.language(live.generation, changes, { at, language: chosen });
+      return { language: chosen, language_changes: changes, at };
+    }));
+  }
+
+  /** "Keep": the suggestion `suggestion` goes, and its language is not offered again in this recording. */
+  async keepLanguage(id: string, token: string, suggestion: unknown): Promise<{ kept: true }> {
+    if (typeof suggestion !== 'string') throw httpError(400, 'suggestion is required');
+    return inWorkspaceOf(token, () => this.queue.withQueue(async () => {
+      const live = (await this.queue.loadMeeting(id)).live;
+      if (live?.state !== 'recording' || live.token_sha256 !== hashToken(token ?? '')) throw httpError(409, 'This page no longer holds the recording');
+      if (!this.live.keep(live.generation, suggestion)) throw httpError(409, 'This suggestion is no longer current');
+      return { kept: true as const };
     }));
   }
 

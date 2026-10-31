@@ -3,8 +3,10 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { constants as fsConstants } from 'fs';
 import { MeetingDigestService, liveRecordingFile } from './meetingDigestService';
-import { languageFor, languagesFor, TranscriptionModelService } from './transcriptionModels';
-import { withLanguageChange, type LanguageChange } from './transcription/languages';
+import { CATALOG, languageFor, languagesFor, TranscriptionModelService } from './transcriptionModels';
+import { languageAt, withLanguageChange, type LanguageChange } from './transcription/languages';
+import { LanguageEvidence, type HeardPart, type Suggestion } from './transcription/languageSuggestion';
+import { randomUUID } from 'crypto';
 import { FollowSession, Segment, TranscriptionEngine } from './transcription/engine';
 import { withWorkspacePath } from './workspace';
 
@@ -82,6 +84,13 @@ export interface Job {
   behindSince: number | null;
   finishing: Promise<LiveResult | null> | null;
   deadline: number | null;
+  /**
+   * What the parts sounded like, for a suggestion of the spoken language. Kept in this dashboard only: the page that
+   * records, and the menu bar, are its users.
+   */
+  evidence: LanguageEvidence | null;
+  /** Parts from before the last change of language, or at it, say nothing about it. */
+  heardFrom: number;
 }
 
 /** A live transcript that covered all of a sealed recording. */
@@ -100,13 +109,18 @@ export interface LiveResult {
   mainModel: string;
 }
 
+/** Whether a catalog model has a language. */
+function modelHas(model: string, language: string): boolean {
+  return Boolean(CATALOG.find((m) => m.id === model)?.language_options?.some((o) => o.id === language));
+}
+
 /** Notices for the page: a recording's live transcript has more, or changed status. */
 export const liveTranscriptEvents = new EventEmitter();
 
 const jobs = new Map<string, Job>();
 
 function emit(job: Job): void {
-  liveTranscriptEvents.emit('change', { meeting: job.meetingId, generation: job.generation, next: job.saved, status: job.status });
+  liveTranscriptEvents.emit('change', { meeting: job.meetingId, generation: job.generation, next: job.saved, status: job.status, suggestion: job.evidence?.suggestion ?? null });
 }
 
 /** Ends the live transcript early; the recording goes on, and is transcribed after the meeting. */
@@ -139,7 +153,7 @@ export class MeetingLiveTranscriptService {
     const job: Job = {
       meetingId, generation, workspace, model: '', asked: language, language, changes, missedLanguage: false, mainModel: '',
       file: '', session: null, status: 'loading', reason: null, segments: [], saved: 0, starting: null, watch: null, sealedSince: null, bytes: 0,
-      writes: Promise.resolve(), writeFailed: false, committed: saved, audioAt: Date.now(), processed: 0, behindSince: null, finishing: null, deadline: null,
+      writes: Promise.resolve(), writeFailed: false, committed: saved, audioAt: Date.now(), processed: 0, behindSince: null, finishing: null, deadline: null, evidence: null, heardFrom: -Infinity,
     };
     jobs.set(generation, job);
     job.starting = this.open(job).catch(() => {});
@@ -156,6 +170,8 @@ export class MeetingLiveTranscriptService {
     job.model = settings.live_model;
     job.language = languageFor(settings.live_model, job.asked);
     job.mainModel = settings.model;
+    // Offered only in a language of the model that transcribes after the meeting: the one in Settings now (see `watch`).
+    job.evidence = new LanguageEvidence((language) => modelHas(job.mainModel, language), () => randomUUID());
     await withWorkspacePath(workspace, async () => {
       try {
         const folder = await this.queue.meetingFolder(meetingId);
@@ -168,6 +184,7 @@ export class MeetingLiveTranscriptService {
         const session = await this.engine.follow(path.join(folder, liveRecordingFile(generation)), {
           model: job.model, language: job.language,
           onSegment: (s) => this.add(job, s),
+          onPart: (part) => this.heard(job, part),
           onProgress: (done) => { job.processed = done; this.checkLag(job); },
         });
         // Finished, discarded or stopped while the model loaded: this worker has no recording to follow.
@@ -202,6 +219,9 @@ export class MeetingLiveTranscriptService {
     const job = jobs.get(generation);
     if (!job || job.status === 'stopped' || job.status === 'done') return;
     job.changes = withLanguageChange(job.asked, job.changes, change);
+    // What was heard before says nothing about the language set now; a suggestion it made goes.
+    job.heardFrom = Math.max(job.heardFrom, change.at);
+    if (job.evidence?.suggestion) { job.evidence.reset(); emit(job); } else job.evidence?.reset();
     if (JSON.stringify(job.changes) !== JSON.stringify(changes)) job.missedLanguage = true;
     job.session?.language(change.at, languageFor(job.model, change.language));
   }
@@ -213,6 +233,16 @@ export class MeetingLiveTranscriptService {
   async watch(job: Job): Promise<void> {
     if (job.status !== 'live') return;
     this.checkLag(job);
+    // The model that will transcribe after the meeting is the one in Settings at Finish: a suggestion follows it, and
+    // one from long ago goes.
+    const settings = await this.models.readSettings().catch(() => null);
+    if (settings?.model) job.mainModel = settings.model;
+    if (job.evidence) {
+      const before = job.evidence.suggestion?.id ?? null;
+      let after = job.evidence.expire(Math.max(job.processed, 0))?.id ?? null;
+      if (after && !modelHas(job.mainModel, job.evidence.suggestion!.language)) { job.evidence.reset(); after = null; }
+      if (after !== before) emit(job);
+    }
     const meeting = await withWorkspacePath(job.workspace, () => this.queue.loadMeeting(job.meetingId)).catch((err: { statusCode?: number }) => (err.statusCode === 404 ? null : undefined));
     if (meeting === undefined) return; // unreadable for a moment
     const live = meeting?.live;
@@ -241,6 +271,31 @@ export class MeetingLiveTranscriptService {
     if (behind <= LAG_SECONDS) { job.behindSince = null; return; }
     job.behindSince ??= Date.now();
     if (Date.now() - job.behindSince > LAG_MS) stopJob(job, 'This computer could not keep up with the live transcript, so the recording is transcribed after the meeting.');
+  }
+
+  /** A decoded part: evidence for the language suggestion. */
+  private heard(job: Job, part: HeardPart): void {
+    if (job.status !== 'live' || !job.evidence || part.start <= job.heardFrom) return;
+    const asked = languageAt(job.asked, job.changes, part.start);
+    // A language the live model does not have: it hears that speech as something else, so it says nothing about it.
+    if (languageFor(job.model, asked) !== asked) return;
+    const before = job.evidence.suggestion?.id ?? null;
+    const after = job.evidence.add(part, asked)?.id ?? null;
+    if (after !== before) emit(job);
+  }
+
+  /** The suggestion of a recording's live job, as the page and the menu bar show it; null when there is none. */
+  suggestion(generation: string): Suggestion | null {
+    const job = jobs.get(generation);
+    return job?.status === 'live' ? job.evidence?.suggestion ?? null : null;
+  }
+
+  /** "Keep": the suggestion `id` goes, and its language is not offered again in this recording. */
+  keep(generation: string, id: string): boolean {
+    const job = jobs.get(generation);
+    if (!job?.evidence?.keep(id)) return false;
+    emit(job);
+    return true;
   }
 
   /** A stretch of speech: written, numbered, before the page hears of it. */
@@ -316,7 +371,7 @@ export class MeetingLiveTranscriptService {
    * What the page shows: the live transcript from segment `from` on, and its status. A recording whose live transcript
    * runs in another dashboard, or not at all, says so.
    */
-  async read(meetingId: string, from: number): Promise<{ generation: string | null; status: LiveStatus | 'unavailable'; reason: string | null; next: number; segments: LiveSegment[] }> {
+  async read(meetingId: string, from: number): Promise<{ generation: string | null; status: LiveStatus | 'unavailable'; reason: string | null; next: number; segments: LiveSegment[]; suggestion?: Suggestion | null }> {
     const meeting = await this.queue.loadMeeting(meetingId);
     const generation = meeting.live?.generation ?? null;
     const job = generation ? jobs.get(generation) : undefined;
@@ -330,7 +385,7 @@ export class MeetingLiveTranscriptService {
     // Only what is saved to the file: the page never sees a stretch that a reload could not show again.
     const start = Math.max(0, Math.min(Number.isSafeInteger(from) ? from : 0, job.saved));
     const segments = job.segments.slice(start, Math.min(job.saved, start + PAGE));
-    return { generation, status: job.status, reason: job.reason, next: start + segments.length, segments };
+    return { generation, status: job.status, reason: job.reason, next: start + segments.length, segments, suggestion: this.suggestion(generation) };
   }
 
   /** For tests: forgets every job without touching files. */

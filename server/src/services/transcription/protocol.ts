@@ -44,6 +44,8 @@ export type WorkerReply =
   | { type: 'helper'; pid: number }
   | { type: 'progress'; done: number; total: number }
   | { type: 'segment'; start: number; end: number; text: string; speaker?: number }
+  /** A follow job's decoded part, with or without words: its own speech and the language it sounded like. */
+  | { type: 'part'; start: number; end: number; detected: string | null }
   | { type: 'turns'; turns: SpeakerTurn[] }
   /**
    * `bytes`: for a follow job, exactly how much audio it read, so the dashboard can tell it covered all of it.

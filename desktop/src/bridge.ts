@@ -21,16 +21,8 @@ async function microphoneAccess(): Promise<string> {
   return 'granted';
 }
 
-/** The language menu a page may show in the menu bar: short lists of plain language codes and names, nothing else. */
-export interface SpokenLanguageMenu { current: string; options: { id: string; label: string }[] }
-
-export function parseLanguageMenu(value: unknown): SpokenLanguageMenu | null {
-  const { current, options } = (value ?? {}) as Partial<SpokenLanguageMenu>;
-  const code = (id: unknown): id is string => typeof id === 'string' && /^[a-z]{2,4}$/.test(id);
-  if (!code(current) || !Array.isArray(options) || options.length > 12) return null;
-  if (!options.every((o) => code(o?.id) && typeof o.label === 'string' && o.label.length > 0 && o.label.length <= 40)) return null;
-  return { current, options: options.map(({ id, label }) => ({ id, label })) };
-}
+import { parseLanguageMenu, type SpokenLanguageMenu } from './language-menu';
+export { parseLanguageMenu, type SpokenLanguageMenu, type SuggestedLanguage } from './language-menu';
 
 export function registerBridge(
   getWindow: () => BrowserWindow | null,

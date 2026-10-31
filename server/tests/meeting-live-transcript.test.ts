@@ -32,13 +32,13 @@ function fakeModels(live: string | null = 'fast', main = 'fast'): TranscriptionM
   } as unknown as TranscriptionModelService;
 }
 
-interface FakeOptions { busy?: boolean; cover?: (sealed: number) => number; failWith?: string; progress?: (committed: number) => number; lateLanguage?: boolean }
+interface FakeOptions { /** The language each second of audio sounds like, reported as a part. */ detect?: (second: number) => string | null; busy?: boolean; cover?: (sealed: number) => number; failWith?: string; progress?: (committed: number) => number; lateLanguage?: boolean }
 
 /** A follow job that says one stretch of speech per second of committed audio, and covers what it is told to. */
 function fakeEngine(o: FakeOptions = {}) {
   const state = { committed: 0, cancelled: false, sessions: 0, languages: [] as { at: number; language: string; afterAudio: number }[] };
   const engine = {
-    follow: async (_wav: string, opts: { onSegment: (s: Segment) => void; onProgress?: (done: number, total: number) => void }): Promise<FollowSession> => {
+    follow: async (_wav: string, opts: { onSegment: (s: Segment) => void; onProgress?: (done: number, total: number) => void; onPart?: (p: { start: number; end: number; detected: string | null }) => void }): Promise<FollowSession> => {
       if (o.busy) throw Object.assign(new Error('A transcription is already running'), { engineBusy: true });
       state.sessions++;
       let said = 0;
@@ -46,7 +46,11 @@ function fakeEngine(o: FakeOptions = {}) {
       return {
         committed: (bytes: number) => {
           state.committed = Math.max(state.committed, bytes);
-          while ((said + 1) * 32_000 <= state.committed) { opts.onSegment({ start: said, end: said + 0.9, text: `Fictional words ${said}` }); said++; }
+          while ((said + 1) * 32_000 <= state.committed) {
+            opts.onSegment({ start: said, end: said + 0.9, text: `Fictional words ${said}` });
+            if (o.detect) opts.onPart?.({ start: said, end: said + 0.95, detected: o.detect(said) });
+            said++;
+          }
           opts.onProgress?.(o.progress ? o.progress(state.committed) : state.committed / 32_000, state.committed / 32_000);
           if (o.failWith) failed = o.failWith;
         },
@@ -430,4 +434,59 @@ test('with the live transcript off, the recording page says it is off, not that 
   const read = await s.live.read(id, 0);
   assert.equal(read.status, 'unavailable');
   assert.match(read.reason ?? '', /live transcript is off/);
+});
+
+test('a run of speech in another language is suggested; Switch applies from where it started, Keep mutes it, a stale answer is refused', async (t) => {
+  const ws = await workspace(t);
+  // English set; the live model hears Japanese from second 4 on.
+  const models = {
+    readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'en', keep_recordings: false, live_model: 'sensevoice-2024-07-17', updated_at: null }),
+    installedPath: async () => '/fictional/model',
+  } as unknown as TranscriptionModelService;
+  const { engine, state } = fakeEngine({ detect: (second) => (second >= 4 ? 'ja' : 'en') });
+  const s = services(ws, models, engine);
+  const first = await record(s, 14);
+  const offered = (await s.live.read(first.id, 0)).suggestion;
+  assert.deepEqual([offered?.language, offered?.mode, offered?.since], ['ja', 'mismatch', 4]);
+  await assert.rejects(s.recording.setLanguage(first.id, TOKEN, undefined, 'not-the-current-one'), /no longer current/);
+  const switched = await s.recording.setLanguage(first.id, TOKEN, undefined, offered!.id);
+  assert.deepEqual(switched.language_changes, [{ at: 4, language: 'ja' }], 'from where the Japanese started');
+  assert.deepEqual(state.languages.at(-1)?.at, 4, 'the live job is told too');
+  assert.equal((await s.live.read(first.id, 0)).suggestion, null, 'answered');
+  await assert.rejects(s.recording.setLanguage(first.id, TOKEN, undefined, offered!.id), /no longer current/, 'an answer is used once');
+
+  await s.recording.finish(first.id, { token: TOKEN, offset: first.offset, generation: first.generation, queue: true });
+
+  // Another recording: Keep, and the language is not offered again however long it goes on.
+  const { engine: engine2 } = fakeEngine({ detect: () => 'ja' });
+  const s2 = services(ws, models, engine2);
+  const second2 = await record(s2, 12);
+  const offer = (await s2.live.read(second2.id, 0)).suggestion!;
+  assert.equal(offer.language, 'ja');
+  await assert.rejects(s2.recording.keepLanguage(second2.id, 'fictional-wrong-token-0123456789', offer.id), /no longer holds/);
+  await s2.recording.keepLanguage(second2.id, TOKEN, offer.id);
+  let offset = second2.offset;
+  for (let i = 0; i < 12; i++) offset = (await s2.recording.append(second2.id, TOKEN, offset, Buffer.alloc(32_000, 1))).offset;
+  await settle();
+  assert.equal((await s2.live.read(second2.id, 0)).suggestion, null, 'kept');
+});
+
+test('a meeting that starts in the other language switches from its start; a model in Settings without it refuses', async (t) => {
+  const ws = await workspace(t);
+  let model = 'whisper-large-v3-turbo';
+  const models = {
+    readSettings: async () => ({ model, language: 'en', keep_recordings: false, live_model: 'sensevoice-2024-07-17', updated_at: null }),
+    installedPath: async () => '/fictional/model',
+  } as unknown as TranscriptionModelService;
+  const { engine } = fakeEngine({ detect: () => 'ja' });
+  const s = services(ws, models, engine);
+  const rec = await record(s, 12);
+  const offer = (await s.live.read(rec.id, 0)).suggestion!;
+  assert.equal(offer.since, 0);
+  // Settings changed to a model without Japanese (a fictional id: every Whisper model has it).
+  model = 'fictional-english-only';
+  await assert.rejects(s.recording.setLanguage(rec.id, TOKEN, undefined, offer.id), /does not have this language/);
+  model = 'whisper-large-v3-turbo';
+  const switched = await s.recording.setLanguage(rec.id, TOKEN, undefined, offer.id);
+  assert.deepEqual(switched.language_changes, [{ at: 0, language: 'ja' }], 'from the very start');
 });
