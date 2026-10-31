@@ -401,12 +401,17 @@ test('a part ends where the language changes, unless that leaves almost nothing'
   assert.deepEqual(pieces([0.5, 1.1, 11.9, 20]), [[16_000, 160_000]], 'outside it, or within a moment of its ends');
 });
 
-test('speaker turns: numbered by who speaks first, cut only where the voice changes, and a guess stays unassigned', () => {
-  const turns = speakerTurns([{ start: 9, end: 12, speaker: 0 }, { start: 1, end: 4, speaker: 7 }, { start: 4, end: 8, speaker: 7 }, { start: 20, end: 15, speaker: 3 }, { start: NaN, end: 2, speaker: 3 }, { start: 11, end: 99, speaker: 2 }], 13);
-  assert.deepEqual(turns, [{ start: 1, end: 4, speaker: 1 }, { start: 4, end: 8, speaker: 1 }, { start: 9, end: 12, speaker: 2 }, { start: 11, end: 13, speaker: 3 }]);
-  assert.deepEqual(speakerCuts(turns), [9, 11]);
+test('speaker turns: numbered by who speaks first, a short sound is no speaker, and a guess stays unassigned', () => {
+  const turns = speakerTurns([{ start: 9, end: 12, speaker: 0 }, { start: 1, end: 4, speaker: 7 }, { start: 4, end: 8, speaker: 7 }, { start: 20, end: 15, speaker: 3 }, { start: NaN, end: 2, speaker: 3 }, { start: 11, end: 99, speaker: 2 }, { start: 8.5, end: 9, speaker: 5 }], 13);
+  assert.deepEqual(turns, [{ start: 1, end: 4, speaker: 1 }, { start: 4, end: 8, speaker: 1 }, { start: 8.5, end: 9, speaker: 0 }, { start: 9, end: 12, speaker: 2 }, { start: 11, end: 13, speaker: 3 }], 'half a second of a fifth voice gets no number');
+  assert.deepEqual(speakerCuts(turns), [8.5, 9, 11], 'but it still marks where the voice changes');
+  // A short reply between two turns of another voice: its own part, under no name.
+  const reply = speakerTurns([{ start: 0, end: 3, speaker: 4 }, { start: 3, end: 4.5, speaker: 9 }, { start: 4.5, end: 7.5, speaker: 4 }], 8);
+  assert.deepEqual(speakerCuts(reply), [3, 4.5]);
+  assert.equal(speakerOf(3, 4.5, reply), undefined);
+  assert.equal(speakerOf(0, 3, reply), 1);
   assert.equal(speakerOf(1, 8, turns), 1);
-  assert.equal(speakerOf(9, 10.5, turns), 2);
+  assert.equal(speakerOf(0, 10, turns), 1, 'pauses in a part do not count against its voice');
   assert.equal(speakerOf(7, 10, turns), undefined, 'half one voice, half another');
   assert.equal(speakerOf(30, 31, turns), undefined, 'nobody known there');
   assert.equal(speakerOf(0, 10, [{ start: 4, end: 4.1, speaker: 1 }]), undefined, 'one known moment says nothing about ten seconds');
