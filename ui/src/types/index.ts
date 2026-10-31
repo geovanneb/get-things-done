@@ -778,10 +778,12 @@ export interface TranscriptionModel {
   speed: { realtime_x: number; load_ms: number | null; measured_at: string } | null;
 }
 
-export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; updated_at: string | null }
+export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; speakers: boolean; updated_at: string | null }
 
 export interface Transcription {
   models: TranscriptionModel[];
+  /** The optional speaker model, not one of the models to transcribe with. */
+  speakers: Pick<TranscriptionModel, 'id' | 'name' | 'summary' | 'size' | 'installed' | 'partial' | 'download'>;
   settings: TranscriptionSettings;
   defaults: TranscriptionSettings;
   vad_installed: boolean;

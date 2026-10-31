@@ -14,7 +14,7 @@ router.get('/', async (_req: Request, res: Response) => {
   res.json(await service.view());
 });
 
-// PUT /api/transcription/settings  { model?, language?, keep_recordings? }  how recordings are transcribed and kept
+// PUT /api/transcription/settings  { model?, language?, keep_recordings?, live_model?, speakers? }  how recordings are transcribed and kept
 router.put('/settings', async (req: Request, res: Response) => {
   res.json(await service.updateSettings(req.body));
 });

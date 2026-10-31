@@ -445,3 +445,27 @@ test('language changes: one at a moment, none that change nothing, and what a mo
   }
   assert.deepEqual(parseLanguageChanges([{ at: 0, language: 'auto' }]), [{ at: 0, language: 'auto' }]);
 });
+
+test('the speaker model downloads on its own, without the voice-activity model, and is no model to transcribe with', async (t) => {
+  await modelsFolder(t);
+  const { base } = await fileServer(t, files);
+  const { models: [model], vad } = catalog(base);
+  const speakers: CatalogModel = { ...model!, id: 'speaker-detection', name: 'Speaker detection' };
+  const service = new TranscriptionModelService([{ ...model!, id: 'transcribes' }], vad, fetch, speakers);
+  assert.equal((await service.view()).speakers.installed, false);
+  await service.download('speaker-detection');
+  await TranscriptionModelService.settled();
+  const view = await service.view();
+  assert.equal(view.speakers.installed, true);
+  assert.equal(view.vad_installed, false, 'finding speakers does not need it');
+  assert.deepEqual(view.models.map((m) => m.id), ['transcribes']);
+  assert.throws(() => parseTranscriptionSettings({ model: 'speaker-detection' }), /Invalid model/);
+  assert.equal((await service.remove('speaker-detection')).speakers.installed, false);
+});
+
+test('telling speakers apart is on by default, and can be turned off', () => {
+  assert.equal(parseTranscriptionSettings({}).speakers, true);
+  assert.equal(parseTranscriptionSettings({ speakers: false }).speakers, false);
+  assert.equal(parseTranscriptionSettings({}, parseTranscriptionSettings({ speakers: false })).speakers, false);
+  assert.throws(() => parseTranscriptionSettings({ speakers: 'yes' }), /Invalid speakers/);
+});
