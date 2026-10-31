@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as fs from 'node:fs';
 import { contextRange, cutsAround, RecentAudio, SHORTEST_TURN, speakerCuts, speakerOf, speakerTurns, splitAtChanges, splitLong } from '../src/services/transcription/parts';
-import { markRepeats } from '../src/services/transcription/repeats';
+import { hasWords, markRepeats } from '../src/services/transcription/repeats';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
@@ -490,4 +490,9 @@ test('finding speakers failing leaves the transcript, the slot is kept between t
   stop.abort();
   await assert.rejects(engine.transcribeWithSpeakers(wav, { signal: stop.signal }), /Cancelled/);
   assert.equal(TranscriptionEngine.isBusy(), false);
+});
+
+test('words in any script count; punctuation and repeat marks alone do not', () => {
+  assert.equal(hasWords([',', '.', ' 。', '、', '[repeated 7 times]']), false);
+  for (const text of ['Olá', '中学', 'ありがとう', '42', 'Привет']) assert.equal(hasWords([',', text]), true, text);
 });

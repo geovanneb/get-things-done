@@ -6,6 +6,7 @@ import { withWorkspacePath, WorkspaceService } from './workspace';
 import { MeetingLiveTranscriptService } from './meetingLiveTranscript';
 import { SPEAKER_MODEL, TranscriptionModelService } from './transcriptionModels';
 import { knownLanguage, MAX_LANGUAGE_CHANGES, withLanguageChange, type LanguageChange } from './transcription/languages';
+import { hasWords } from './transcription/repeats';
 import { audioTranscriptMarkdown } from './meetingTranscription';
 import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
 
@@ -273,9 +274,9 @@ export class MeetingRecordingService {
         // Hashing gigabytes runs without the lock; nothing can change a sealed recording.
         const checked = await this.checkSealed(id, sealed);
         // Its own text is the transcript when it is the chosen model and found speech; otherwise the queue transcribes it.
-        // Covered everything and found speech: its text is kept, as the transcript when it is the target model and
+        // Covered everything and found words: its text is kept, as the transcript when it is the target model and
         // language, else as a draft while the target model transcribes again.
-        const usable = live && !(live.segments.length === 0 && live.seconds > EMPTY_AUDIO_SECONDS) ? live : null;
+        const usable = live && !(!hasWords(live.segments.map((x) => x.text)) && live.seconds > EMPTY_AUDIO_SECONDS) ? live : null;
         const target = sealed.target;
         // Speakers come from the transcript after the meeting, so a live text stays a draft when they are wanted.
         const final = Boolean(usable && target && !target.speakers && usable.model === target.model && usable.asked === target.language && !usable.lateLanguage
