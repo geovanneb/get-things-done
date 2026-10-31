@@ -576,4 +576,31 @@ test('the page can read the transcript the server writes', () => {
     { time: '08:00:00', text: '<b>Fictional</b> ``` words' }, { time: '08:00:03', text: 'line one line two' },
   ]);
   assert.deepEqual(transcriptParts(audioTranscriptMarkdown('a.wav', 'hash', 'fast', 'auto', 10, [], true)), []);
+
+test('speakers are marked in the transcript, and when finding them fails the transcript is still made', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const models = { readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'auto', speakers: true }), installedPath: async () => '/fictional/model' } as unknown as TranscriptionModelService;
+  const read = async (id: string) => fsp.readFile(path.join(ws, 'context-updates', 'meeting-queue', id, 'workshop.transcript.md'), 'utf-8');
+  const run = async (note: string | null, transcribe: Transcribe) => {
+    const engine = { transcribeWithSpeakers: async (wav: string, o: Parameters<Transcribe>[1]) => ({ ...await transcribe(wav, o), speaker_note: note }) } as unknown as TranscriptionEngine;
+    const id = await queueRecording(queue, 'Workshop');
+    await new MeetingTranscriptionService(queue, models, engine).tick();
+    await MeetingTranscriptionService.settled();
+    return id;
+  };
+
+  const told = await run(null, async (_wav, o) => {
+    o.onSegment?.({ start: 0, end: 1, text: 'Fictional words.', speaker: 1 } as Segment);
+    return { segments: [], seconds: 1, load_ms: 1 };
+  });
+  assert.equal((await recording(queue, told)).status, 'done');
+  assert.match(await read(told), /\[00:00:00 → 00:00:01\] Speaker 1\n {2}Fictional words\./);
+  assert.match(await read(told), /1 voice told apart\. Speaker 1 and so on are labels for this recording, not names/);
+  await queue.removeMeeting(told);
+
+  const failed = await run('speaker detection failed', speaks(['Fictional words.']));
+  assert.equal((await recording(queue, failed)).status, 'done', 'the transcript does not depend on it');
+  assert.match(await read(failed), /Speakers are not told apart \(speaker detection failed\)/);
+  assert.match(await read(failed), /Fictional words\./);
 });

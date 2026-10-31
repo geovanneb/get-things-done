@@ -387,3 +387,15 @@ test('language changes that cannot be read leave Auto, never a forced language',
   await fsp.writeFile(manifest, text.replace(/^(\s*)language: auto\n/m, '').replace(/(language_changes:\s*\n\s*- at: )\S+/, '$1 -5'));
   assert.equal((await s.queue.loadMeeting(id)).live?.language, 'auto');
 });
+
+test('with speakers wanted, a live transcript of the chosen model stays a draft: speakers come from the transcript after the meeting', async (t) => {
+  const ws = await workspace(t);
+  const models = { ...fakeModels(), readSettings: async () => ({ model: 'fast', language: 'auto', keep_recordings: false, live_model: 'fast', speakers: true, updated_at: null }), installedPath: async () => '/fictional/model' } as unknown as TranscriptionModelService;
+  const s = services(ws, models, fakeEngine().engine);
+  const { id, generation, offset } = await record(s, 2);
+  const done = await s.recording.finish(id, { token: TOKEN, offset, generation, queue: true });
+  const r = done.files.find((f) => f.recording)!.recording!;
+  assert.equal(r.status, 'pending');
+  assert.ok(r.draft);
+  assert.deepEqual(r.target, { model: 'fast', language: 'auto', speakers: true });
+});

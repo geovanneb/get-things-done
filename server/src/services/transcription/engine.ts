@@ -2,9 +2,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ChildProcess, fork } from 'child_process';
-import { CATALOG, TranscriptionModelService, VAD } from '../transcriptionModels';
+import { CATALOG, SPEAKER_MODEL, TranscriptionModelService, VAD } from '../transcriptionModels';
 import { readWavFormat } from './wav';
 import type { LanguageChange } from './languages';
+import type { SpeakerTurn } from './parts';
 import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './protocol';
 
 /**
@@ -14,8 +15,9 @@ import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './p
  * desktop app with Electron's own binary running as Node.
  */
 
-export interface Segment { start: number; end: number; text: string }
+export interface Segment { start: number; end: number; text: string; speaker?: number }
 export interface TranscriptResult { segments: Segment[]; seconds: number; load_ms: number | null }
+export interface TranscribeOptions { model?: string; language?: string; changes?: LanguageChange[]; turns?: SpeakerTurn[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal }
 export interface EngineStatus { available: boolean; version: string | null; error: string | null }
 
 export type WorkerLauncher = () => ChildProcess;
@@ -52,6 +54,10 @@ export const launchWorker: WorkerLauncher = () => {
 const CHECK_TIMEOUT_MS = 5 * 60 * 1000;
 /** A transcription may take as long as the recording plus a margin: far more than the slowest model needs. */
 const transcriptionTimeout = (seconds: number) => Math.max(10 * 60 * 1000, seconds * 1000 * 6);
+/** Finding speakers takes about a tenth of the recording; a job at its length is stuck. */
+const speakerTimeout = (seconds: number) => Math.max(10 * 60 * 1000, seconds * 1000);
+/** Longest recording whose speakers are looked for: its audio is held in memory whole. */
+const MAX_SPEAKER_SECONDS = 4 * 3600;
 
 let busy = false;
 /** Workers still running, so the dashboard can end them when it shuts down. */
@@ -138,37 +144,81 @@ export class TranscriptionEngine {
   }
 
   /** Transcribes a WAV file with the chosen model and language. Segments and progress arrive as they are ready. */
-  async transcribe(
-    wav: string,
-    options: { model?: string; language?: string; changes?: LanguageChange[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal } = {},
-  ): Promise<TranscriptResult> {
+  async transcribe(wav: string, options: TranscribeOptions = {}): Promise<TranscriptResult> {
     const settings = await this.models.readSettings();
     const id = options.model ?? settings.model;
-    const language = options.language ?? settings.language;
     // Held until the worker has really exited, so the model cannot be removed while it is in use, from any dashboard.
     const release = await this.models.lease(id);
-    let model: EngineModel;
-    let format: Awaited<ReturnType<typeof readWavFormat>>;
+    let prepared: Awaited<ReturnType<TranscriptionEngine['prepare']>>;
     try {
-      model = await this.engineModel(id);
-      format = await readWavFormat(wav);
+      prepared = await this.prepare(wav, id);
     } catch (err) {
       await release();
       throw err;
     }
+    return this.recognize(wav, prepared, options.language ?? settings.language, options, release, false);
+  }
+
+  /**
+   * Finds who spoke when, in a worker of its own, then transcribes with what it found. One job: the slot and both models
+   * are held from start to end, so nothing gets in between and no detection is done twice. If finding speakers
+   * fails the transcript is still made, and `speaker_note` says why they are missing; only a Stop ends the job.
+   */
+  async transcribeWithSpeakers(wav: string, options: TranscribeOptions = {}): Promise<TranscriptResult & { speaker_note: string | null }> {
+    if (closing) throw httpError(503, 'The dashboard is shutting down');
+    if (busy) throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true });
+    busy = true;
+    const leases: (() => Promise<void>)[] = [];
+    const giveBack = async () => { for (const release of leases.splice(0)) await release().catch(() => {}); };
+    try {
+      const settings = await this.models.readSettings();
+      const id = options.model ?? settings.model;
+      leases.push(await this.models.lease(id));
+      const prepared = await this.prepare(wav, id);
+      let turns: SpeakerTurn[] = [];
+      let note: string | null = null;
+      if (prepared.format.duration > MAX_SPEAKER_SECONDS) note = 'the recording is too long for speaker detection';
+      else {
+        try {
+          leases.push(await this.models.lease(SPEAKER_MODEL.id));
+          const dir = await this.models.installedPath(SPEAKER_MODEL.id);
+          if (!dir) throw new Error('The speaker model is not downloaded');
+          await this.run({
+            type: 'speakers', wav, segmentation: path.join(dir, SPEAKER_MODEL.files[0]!.name), embedding: path.join(dir, SPEAKER_MODEL.files[1]!.name),
+            threads: Math.max(1, Math.min(8, os.availableParallelism() - 1)),
+          }, speakerTimeout(prepared.format.duration), (reply) => { if (reply.type === 'turns') turns = reply.turns; }, options.signal, undefined, true);
+        } catch (err) {
+          if (options.signal?.aborted || closing) throw err;
+          console.error(`[transcription] Speakers: ${(err as Error).message}`);
+          note = 'speaker detection failed';
+        }
+      }
+      const result = await this.recognize(wav, prepared, options.language ?? settings.language, { ...options, turns }, undefined, true);
+      return { ...result, speaker_note: note };
+    } finally {
+      busy = false;
+      await giveBack();
+    }
+  }
+
+  private async prepare(wav: string, id: string): Promise<{ id: string; model: EngineModel; format: Awaited<ReturnType<typeof readWavFormat>> }> {
+    return { id, model: await this.engineModel(id), format: await readWavFormat(wav) };
+  }
+
+  private async recognize(wav: string, { model, format }: Awaited<ReturnType<TranscriptionEngine['prepare']>>, language: string, options: TranscribeOptions, release: (() => Promise<void>) | undefined, held: boolean): Promise<TranscriptResult> {
     const segments: Segment[] = [];
     let loadMs: number | null = null;
     let seconds = format.duration;
-    await this.run({ type: 'transcribe', model, wav, language, ...(options.changes?.length ? { changes: options.changes } : {}) }, transcriptionTimeout(format.duration), (reply) => {
+    await this.run({ type: 'transcribe', model, wav, language, ...(options.changes?.length ? { changes: options.changes } : {}), ...(options.turns?.length ? { turns: options.turns } : {}) }, transcriptionTimeout(format.duration), (reply) => {
       if (reply.type === 'loaded') loadMs = reply.ms;
       if (reply.type === 'segment') {
-        const segment = { start: reply.start, end: reply.end, text: reply.text };
+        const segment = { start: reply.start, end: reply.end, text: reply.text, ...(reply.speaker ? { speaker: reply.speaker } : {}) };
         segments.push(segment);
         options.onSegment?.(segment);
       }
       if (reply.type === 'progress') options.onProgress?.(reply.done, reply.total);
       if (reply.type === 'done') seconds = reply.seconds;
-    }, options.signal, release);
+    }, options.signal, release, held);
     return { segments, seconds, load_ms: loadMs };
   }
 
@@ -274,16 +324,17 @@ export class TranscriptionEngine {
    * One job in a fresh worker. Ends it on success, error, timeout or cancel. The one-job slot and `afterExit` (a
    * model lease) are given back only once the worker has really exited, even when that takes longer than the job.
    */
-  private async run(request: WorkerRequest, timeoutMs: number, onReply: (reply: WorkerReply) => void, signal?: AbortSignal, afterExit?: () => Promise<void>): Promise<void> {
+  private async run(request: WorkerRequest, timeoutMs: number, onReply: (reply: WorkerReply) => void, signal?: AbortSignal, afterExit?: () => Promise<void>, held = false): Promise<void> {
     const giveBack = async () => { await afterExit?.().catch(() => {}); };
     if (closing) { await giveBack(); throw httpError(503, 'The dashboard is shutting down'); }
-    if (busy) { await giveBack(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
+    // `held`: part of a job that already has the slot, and keeps it after this worker.
+    if (busy && !held) { await giveBack(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
     busy = true;
     let child: ChildProcess;
     try {
       child = this.launcher();
     } catch (err) {
-      busy = false;
+      if (!held) busy = false;
       await giveBack();
       throw new Error(`The transcription engine could not start: ${(err as Error).message}`, { cause: err });
     }
@@ -320,8 +371,9 @@ export class TranscriptionEngine {
       });
     } finally {
       // The next job starts only once this worker has really exited, so two never hold a model's memory at once.
-      const done = async () => { running.delete(child); busy = false; await giveBack(); };
+      const done = async () => { running.delete(child); if (!held) busy = false; await giveBack(); };
       if (await stop(child)) await done();
+      else if (held) await new Promise<void>((resolve) => { child.once('exit', () => { void done().finally(resolve); }); });
       else child.once('exit', () => { void done(); });
     }
   }

@@ -32,19 +32,69 @@ export function splitLong(part: Part, longest = LONGEST_PART, search = SEARCH): 
 
 /** A piece this short around a change of language is not worth a part of its own. */
 const SHORTEST_PIECE = SAMPLE_RATE / 4;
+/** Where the voice changes a part ends even for a short remark: it must not end up under the other voice. */
+export const SHORTEST_TURN = SAMPLE_RATE / 10;
 
 /** Ends a part where the language changes, so the speech after the change is not read in the language before it. */
-export function splitAtChanges(part: Part, seconds: number[]): Part[] {
+export function splitAtChanges(part: Part, seconds: readonly number[], shortest = SHORTEST_PIECE): Part[] {
   const parts: Part[] = [];
   let offset = 0;
   for (const at of seconds) {
     const cut = Math.round(at * SAMPLE_RATE) - part.start;
-    if (cut - offset < SHORTEST_PIECE || part.samples.length - cut < SHORTEST_PIECE) continue;
+    if (cut - offset < shortest || part.samples.length - cut < shortest) continue;
     parts.push({ start: part.start + offset, samples: part.samples.subarray(offset, cut) });
     offset = cut;
   }
   parts.push({ start: part.start + offset, samples: part.samples.subarray(offset) });
   return parts;
+}
+
+/** Who spoke when, in seconds. `speaker` is 1 for the first voice of the recording, 2 for the next. */
+export interface SpeakerTurn { start: number; end: number; speaker: number }
+
+/** The engine's turns in order, with sound times only, numbered by who speaks first. */
+export function speakerTurns(raw: readonly { start: number; end: number; speaker: number }[], seconds: number): SpeakerTurn[] {
+  const labels = new Map<number, number>();
+  return raw
+    .filter((t) => Number.isFinite(t.start) && Number.isFinite(t.end) && t.start >= 0 && t.end > t.start && t.start < seconds)
+    .sort((a, b) => a.start - b.start)
+    .map((t) => {
+      if (!labels.has(t.speaker)) labels.set(t.speaker, labels.size + 1);
+      return { start: t.start, end: Math.min(t.end, seconds), speaker: labels.get(t.speaker)! };
+    });
+}
+
+/** Where one voice gives way to another. */
+export function speakerCuts(turns: readonly SpeakerTurn[]): number[] {
+  return turns.filter((t, i) => i > 0 && t.speaker !== turns[i - 1]!.speaker).map((t) => t.start);
+}
+
+/** A part this much of one voice is that voice's. Below it the part stays unassigned: a guess must not become a name. */
+const CLEAR_SHARE = 0.6;
+/** At most this much of a second voice. */
+const OTHER_VOICE = 0.25;
+
+/** Who speaks in a stretch, when that is clear: most of its time is one voice, and hardly any is another. */
+export function speakerOf(start: number, end: number, turns: readonly SpeakerTurn[]): number | undefined {
+  const heard = new Map<number, number>();
+  for (const t of turns) {
+    const overlap = Math.min(end, t.end) - Math.max(start, t.start);
+    if (overlap > 0) heard.set(t.speaker, (heard.get(t.speaker) ?? 0) + overlap);
+  }
+  const [first, second] = [...heard].sort((a, b) => b[1] - a[1]);
+  const length = end - start;
+  return first && first[1] >= length * CLEAR_SHARE && (second?.[1] ?? 0) <= length * OTHER_VOICE ? first[0] : undefined;
+}
+
+/** The nearest cuts around a stretch, in seconds: its context stays inside them. */
+export function cutsAround(cuts: readonly number[], start: number, end: number): { before: number; after: number | null } {
+  let before = 0;
+  let after: number | null = null;
+  for (const cut of cuts) {
+    if (cut <= start) before = cut;
+    else if (cut >= end) { after = cut; break; }
+  }
+  return { before, after };
 }
 
 export interface Around {

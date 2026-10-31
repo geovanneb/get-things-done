@@ -1,5 +1,6 @@
 /** Messages between the dashboard and the transcription worker (see worker.ts). */
 import type { LanguageChange } from './languages';
+import type { SpeakerTurn } from './parts';
 
 /** A model as the worker needs it: which engine, and the full paths of its files and of the VAD model. */
 export interface EngineModel {
@@ -14,7 +15,9 @@ export interface EngineModel {
 export type WorkerRequest =
   | { type: 'version' }
   | { type: 'check'; model: EngineModel }
-  | { type: 'transcribe'; model: EngineModel; wav: string; language: string; changes?: LanguageChange[] }
+  | { type: 'transcribe'; model: EngineModel; wav: string; language: string; changes?: LanguageChange[]; turns?: SpeakerTurn[] }
+  /** Who spoke when in a whole recording. A job of its own: if it fails, the transcript does not. */
+  | { type: 'speakers'; wav: string; segmentation: string; embedding: string; threads: number }
   /**
    * Follows a recording as it is made: a 16 kHz mono 16-bit WAV that grows. The worker reads only audio the dashboard
    * says is saved (`committed`), then everything up to `end` once the recording is sealed.
@@ -28,7 +31,8 @@ export type WorkerReply =
   | { type: 'version'; version: string }
   | { type: 'loaded'; ms: number }
   | { type: 'progress'; done: number; total: number }
-  | { type: 'segment'; start: number; end: number; text: string }
+  | { type: 'segment'; start: number; end: number; text: string; speaker?: number }
+  | { type: 'turns'; turns: SpeakerTurn[] }
   /**
    * `bytes`: for a follow job, exactly how much audio it read, so the dashboard can tell it covered all of it.
    * `late_language`: a language change came after a part it applies to was already transcribed.

@@ -173,7 +173,7 @@ export interface LiveRecording {
 }
 
 /** What to transcribe a recording with. `changes`: when the spoken language changed during the recording. */
-export interface RecordingTarget { model: string; language: string; changes?: LanguageChange[] }
+export interface RecordingTarget { model: string; language: string; changes?: LanguageChange[]; speakers?: boolean }
 
 /** The manifest's record of a recording in progress. One that cannot be read is kept as damaged, never dropped: it protects audio. */
 function parseLive(value: unknown): LiveRecording | undefined {
@@ -294,7 +294,7 @@ function parseDraft(value: unknown): TranscriptDraft | undefined {
 function parseTarget(value: unknown): RecordingTarget | undefined {
   const t = obj(value);
   if (typeof t['model'] !== 'string' || !t['model'] || typeof t['language'] !== 'string' || !t['language']) return undefined;
-  const target = { model: t['model'], language: t['language'] };
+  const target = { model: t['model'], language: t['language'], ...(t['speakers'] === true ? { speakers: true } : {}) };
   if (t['changes'] === undefined) return target;
   // As for a recording in progress: changes that cannot be read are never replaced by one forced language.
   const changes = parseLanguageChanges(t['changes']);

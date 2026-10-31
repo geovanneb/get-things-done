@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as fs from 'node:fs';
-import { contextRange, RecentAudio, splitAtChanges, splitLong } from '../src/services/transcription/parts';
+import { contextRange, cutsAround, RecentAudio, SHORTEST_TURN, speakerCuts, speakerOf, speakerTurns, splitAtChanges, splitLong } from '../src/services/transcription/parts';
 import { markRepeats } from '../src/services/transcription/repeats';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -399,4 +399,84 @@ test('a part ends where the language changes, unless that leaves almost nothing'
   assert.deepEqual(pieces([5]), [[16_000, 64_000], [80_000, 96_000]]);
   assert.deepEqual(pieces([3, 7]), [[16_000, 32_000], [48_000, 64_000], [112_000, 64_000]]);
   assert.deepEqual(pieces([0.5, 1.1, 11.9, 20]), [[16_000, 160_000]], 'outside it, or within a moment of its ends');
+});
+
+test('speaker turns: numbered by who speaks first, cut only where the voice changes, and a guess stays unassigned', () => {
+  const turns = speakerTurns([{ start: 9, end: 12, speaker: 0 }, { start: 1, end: 4, speaker: 7 }, { start: 4, end: 8, speaker: 7 }, { start: 20, end: 15, speaker: 3 }, { start: NaN, end: 2, speaker: 3 }, { start: 11, end: 99, speaker: 2 }], 13);
+  assert.deepEqual(turns, [{ start: 1, end: 4, speaker: 1 }, { start: 4, end: 8, speaker: 1 }, { start: 9, end: 12, speaker: 2 }, { start: 11, end: 13, speaker: 3 }]);
+  assert.deepEqual(speakerCuts(turns), [9, 11]);
+  assert.equal(speakerOf(1, 8, turns), 1);
+  assert.equal(speakerOf(9, 10.5, turns), 2);
+  assert.equal(speakerOf(7, 10, turns), undefined, 'half one voice, half another');
+  assert.equal(speakerOf(30, 31, turns), undefined, 'nobody known there');
+  assert.equal(speakerOf(0, 10, [{ start: 4, end: 4.1, speaker: 1 }]), undefined, 'one known moment says nothing about ten seconds');
+  assert.equal(speakerOf(0, 10, [{ start: 0, end: 9, speaker: 1 }, { start: 3, end: 7, speaker: 2 }]), undefined, 'two voices at once');
+  assert.deepEqual(cutsAround([2, 5, 9], 5, 8), { before: 5, after: 9 });
+  assert.deepEqual(cutsAround([2, 5, 9], 0.5, 1), { before: 0, after: 2 });
+  assert.deepEqual(cutsAround([], 1, 2), { before: 0, after: null });
+  // A short remark between two turns of another voice keeps a part of its own.
+  const part = { start: 0, samples: new Float32Array(32_000) };
+  assert.deepEqual(splitAtChanges(part, [1, 1.2], SHORTEST_TURN).map((p) => [p.start, p.samples.length]), [[0, 16_000], [16_000, 3200], [19_200, 12_800]]);
+});
+
+test('real model: two voices are told apart and each part says whose it is', { skip: !realModels || !realAudio || !fs.existsSync(path.join(realModels, 'speaker-detection')) ? 'set STT_TEST_MODELS, with the speaker model, and STT_TEST_AUDIO to run' : false }, async (t) => {
+  const previous = process.env.ESB_MODELS_PATH;
+  process.env.ESB_MODELS_PATH = realModels;
+  t.after(() => { if (previous === undefined) delete process.env.ESB_MODELS_PATH; else process.env.ESB_MODELS_PATH = previous; });
+  // Two different voices, one after the other.
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-speakers-'));
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+  const [en, ja] = await Promise.all(['en.wav', 'ja.wav'].map((n) => fsp.readFile(path.join(realAudio!, n))));
+  const body = Buffer.concat([en!.subarray(44), ja!.subarray(44), en!.subarray(44), ja!.subarray(44)]);
+  const head = Buffer.from(en!.subarray(0, 44));
+  head.writeUInt32LE(36 + body.length, 4);
+  head.writeUInt32LE(body.length, 40);
+  const wav = path.join(dir, 'two.wav');
+  await fsp.writeFile(wav, Buffer.concat([head, body]));
+  const engine = new TranscriptionEngine();
+  const { segments, speaker_note } = await engine.transcribeWithSpeakers(wav, { model: 'sensevoice-2024-07-17', language: 'auto' });
+  assert.equal(speaker_note, null);
+  assert.equal(TranscriptionEngine.isBusy(), false, 'the slot is free afterwards');
+  const of = (text: RegExp) => segments.filter((s) => text.test(s.text)).map((s) => s.speaker);
+  assert.equal(new Set(of(/tribal/i)).size, 1, 'the English voice is one speaker');
+  assert.equal(new Set(of(/中学/)).size, 1, 'the Japanese voice is one speaker');
+  assert.notEqual(of(/tribal/i)[0], of(/中学/)[0]);
+});
+
+test('finding speakers failing leaves the transcript, the slot is kept between the two jobs, and a Stop ends both', async (t) => {
+  const dir = await tmp(t);
+  const replies: Record<string, string> = {
+    speakers: "process.exit(9)",
+    transcribe: "process.send({ type: 'segment', start: 0, end: 1, text: 'Fictional words.' }); process.send({ type: 'done', seconds: 1, segments: 1 })",
+  };
+  const script = path.join(dir, 'worker.cjs');
+  await fsp.writeFile(script, `process.on('message', (m) => { ({ ${Object.entries(replies).map(([k, v]) => `${k}: () => { ${v} }`).join(', ')} })[m.type](); });`);
+  const seen: boolean[] = [];
+  const launcher: WorkerLauncher = () => { seen.push(TranscriptionEngine.isBusy()); return fork(script, [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] }); };
+  const models = {
+    readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'auto' }),
+    lease: async () => async () => {},
+    installedPath: async () => dir,
+  } as unknown as TranscriptionModelService;
+  const engine = new TranscriptionEngine(models, launcher);
+  (engine as unknown as { engineModel: () => Promise<unknown> }).engineModel = async () => ({ kind: 'whisper', files: {}, vad: '', threads: 1 });
+  const wav = path.join(dir, 'a.wav');
+  const data = Buffer.alloc(32_000);
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0, 'ascii'); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8, 'ascii');
+  head.write('fmt ', 12, 'ascii'); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(16000, 24); head.writeUInt32LE(32000, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+  head.write('data', 36, 'ascii'); head.writeUInt32LE(data.length, 40);
+  await fsp.writeFile(wav, Buffer.concat([head, data]));
+
+  const result = await engine.transcribeWithSpeakers(wav);
+  assert.equal(result.speaker_note, 'speaker detection failed');
+  assert.deepEqual(result.segments.map((s) => s.text), ['Fictional words.']);
+  assert.deepEqual(seen, [true, true], 'nothing else could take the slot before either worker');
+  assert.equal(TranscriptionEngine.isBusy(), false);
+
+  const stop = new AbortController();
+  stop.abort();
+  await assert.rejects(engine.transcribeWithSpeakers(wav, { signal: stop.signal }), /Cancelled/);
+  assert.equal(TranscriptionEngine.isBusy(), false);
 });
