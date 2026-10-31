@@ -4,8 +4,9 @@ import multer from 'multer';
 import { TaskService } from '../services/taskService';
 import { ExecutionPackageService } from '../services/executionPackageService';
 import { TaskStatus, Priority } from '../types';
+import { utf8FileNames } from '../utils/uploadNames';
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limits: { fileSize: 50 * 1024 * 1024 } });
 
 const router = Router();
 const taskService = new TaskService();

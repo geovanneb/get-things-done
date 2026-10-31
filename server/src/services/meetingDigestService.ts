@@ -11,7 +11,7 @@ import { hashFile } from '../utils/fileHash';
 import { lock, unlock } from '../utils/fileLock';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
-import { fileInside, topLevelName, workspaceEntry } from '../utils/files';
+import { fileInside, safeFileName, topLevelName, workspaceEntry } from '../utils/files';
 import { Schedule, ScheduleError, describeSchedule, localDate, nextOccurrences, occurrencesBetween, parseSchedule } from './routineSchedule';
 import { reserveIds, reservedSequence } from './idReservations';
 import { processAlive } from './runState';
@@ -491,8 +491,8 @@ export function parseSettings(input: unknown, base: DigestSettings = defaultSett
 
 /** A file name as it is saved: the characters saveAttachment keeps, never hidden or the manifest. */
 function safeName(name: string): string {
-  const safe = path.basename(name).replace(/[^\w.-]/g, '_').replace(/^\.+/, '') || 'file';
-  return safe.toLowerCase() === MANIFEST ? `_${safe}` : safe.slice(0, 120);
+  const safe = safeFileName(name, 120).replace(/^\.+/, '') || 'file';
+  return safe.toLowerCase() === MANIFEST ? `_${safe}` : safe;
 }
 
 /** A string as a JSON literal, so a title or file name can never read as structure in meetings.md. */

@@ -479,6 +479,14 @@ try {
     form.append('file', new Blob(['slide text']), 'deck.txt');
     const up = await fetch(`${base}/api/context-updates/${created.id}/materials`, { method: 'POST', body: form });
     check('material uploads to a context update', up.status === 201);
+    const unicodeForm = new FormData();
+    unicodeForm.append('file', new Blob(['議事']), 'ação 会議 (1).txt');
+    const unicodeUp = await fetch(`${base}/api/context-updates/${created.id}/materials`, { method: 'POST', body: unicodeForm });
+    const unicodeName = unicodeUp.ok ? (await unicodeUp.json()).name : '';
+    const unicodeBack = unicodeName ? await fetch(`${base}/api/context-updates/${created.id}/materials/${encodeURIComponent(unicodeName)}`) : null;
+    check('an uploaded file keeps a Japanese or Portuguese name', unicodeName === 'ação_会議__1_.txt' && (await unicodeBack?.text()) === '議事', `name=${unicodeName}`);
+    const unicodeGone = unicodeName ? await fetch(`${base}/api/context-updates/${created.id}/materials/${encodeURIComponent(unicodeName)}`, { method: 'DELETE' }) : null;
+    check('a file with such a name can be removed again', unicodeGone?.status === 204, `status=${unicodeGone?.status}`);
     const escape = await fetch(`${base}/api/context-updates/${created.id}/materials/..%2Fupdate.md`);
     check('material downloads cannot leave the materials folder', escape.status === 400, `status=${escape.status}`);
     const badId = await fetch(`${base}/api/context-updates/..%2Fcontext`);
