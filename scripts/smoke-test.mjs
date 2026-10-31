@@ -111,6 +111,8 @@ try {
   const wsFilesBefore = fs.readdirSync(ws).sort().join(',');
   const iconSaved = await (await putIcon(tinyPng)).json();
   const iconConfig = await (await fetch(`${base}/api/workspace`)).json();
+  check('the workspace config names the running app version', iconConfig.app_version === JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version,
+    `app_version=${iconConfig.app_version}`);
   const iconImage = await fetch(`${base}/api/workspace/icon`);
   check('a workspace picture is saved and served as a PNG',
     Boolean(iconSaved.icon_version) && iconConfig.icon_version === iconSaved.icon_version &&

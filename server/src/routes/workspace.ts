@@ -8,6 +8,7 @@ import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
 import { GitService, GitUnavailableError } from '../services/gitService';
 import { activateWorkspace } from '../services/workspaceActivation';
+import { getAppVersion } from '../services/scaffold';
 import { MeetingRecordingService } from '../services/meetingRecording';
 import {
   InvalidIconError, decodeIcon, removeWorkspaceIcon, saveWorkspaceIcon, workspaceIconPath, workspaceIconVersion,
@@ -133,7 +134,7 @@ router.get('/', async (req: Request, res: Response) => {
   const config = workspaceService.getWorkspaceConfig();
   const git_enabled = await gitService.isGitRepo();
   const git_installed = await gitService.isInstalled();
-  res.json({ ...config, git_enabled, git_installed });
+  res.json({ ...config, git_enabled, git_installed, app_version: getAppVersion() });
 });
 
 // PUT /api/workspace — update workspace name

@@ -1114,7 +1114,7 @@ export default function SettingsView() {
 
       {/* Section 5: About */}
       <SectionCard title="About">
-        <AboutRow label="Version"        value="1.0.0" />
+        <AboutRow label="Version"        value={config?.app_version ?? ''} />
         <AboutRow label="API"            value={window.location.host} mono />
         <AboutRow label="Workspace Path" value={config?.path ?? ''} mono />
         <AboutRow
