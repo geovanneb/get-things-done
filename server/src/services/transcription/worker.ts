@@ -17,6 +17,7 @@ import { contextRange, cutsAround, RecentAudio, SHORTEST_TURN, speakerCuts, spea
 import { markRepeats } from './repeats';
 import { readWavFormat, wavChunks, WavError } from './wav';
 import { HelperError, startHelper } from './whisperHelper';
+import { detectedLanguage } from './languageSuggestion';
 
 const SAMPLE_RATE = 16000;
 /** Enough for the context around any part: a stretch is cut well before this. */
@@ -31,7 +32,7 @@ const VAD_LONGEST_SECONDS = 20;
 const SILENCE_SECONDS = { after: 2, live: 0.5 };
 
 interface SherpaStream { acceptWaveform(input: { samples: Float32Array; sampleRate: number }): void }
-interface SherpaRecognizer { createStream(): SherpaStream; decodeAsync(stream: SherpaStream): Promise<{ text: string }>; setConfig(config: unknown): void }
+interface SherpaRecognizer { createStream(): SherpaStream; decodeAsync(stream: SherpaStream): Promise<{ text: string; lang?: string }>; setConfig(config: unknown): void }
 interface SherpaVad { acceptWaveform(samples: Float32Array): void; isEmpty(): boolean; front(enableExternalBuffer: boolean): { samples: Float32Array; start: number }; pop(): void; flush(): void }
 interface SherpaResampler { resample(samples: Float32Array): Float32Array; flush(samples: Float32Array): Float32Array }
 interface Sherpa {
@@ -85,7 +86,8 @@ function recognizerConfig(model: EngineModel, language: string): unknown {
 
 /** What turns one part into text, whichever engine does it. One part at a time. */
 interface Recognizer {
-  decode(samples: Float32Array, language: string): Promise<string>;
+  /** `detected`: the language the part sounded like, when this model can tell even with another one set. */
+  decode(samples: Float32Array, language: string): Promise<{ text: string; detected: string | null }>;
   close(): Promise<void>;
   /** Ends it at once; resolves once nothing of it runs any more. */
   abort(): Promise<void>;
@@ -118,7 +120,8 @@ async function loadRecognizer(sherpa: Sherpa, model: EngineModel, language: stri
       },
     });
     send({ type: 'loaded', ms: Math.round(performance.now() - started), backend: helper.backend });
-    return { decode: async (samples, lang) => (await helper.decode(samples, lang)).text, close: () => helper.close(), abort: () => helper.abort() };
+    // No detected language yet: the GPU engine's report is not checked like the CPU engine's.
+    return { decode: async (samples, lang) => ({ text: (await helper.decode(samples, lang)).text, detected: null }), close: () => helper.close(), abort: () => helper.abort() };
   }
   if (model.noArena) await prepareNoArena(model);
   const recognizer = await sherpa.OfflineRecognizer.createAsync(recognizerConfig(model, language));
@@ -132,7 +135,11 @@ async function loadRecognizer(sherpa: Sherpa, model: EngineModel, language: stri
       }
       const stream = recognizer.createStream();
       stream.acceptWaveform({ samples, sampleRate: SAMPLE_RATE });
-      return (await recognizer.decodeAsync(stream)).text;
+      const result = await recognizer.decodeAsync(stream);
+      // SenseVoice reports the language it heard even when another is set; Whisper only says what it was told,
+      // unless it detects the language itself (Auto).
+      const telling = model.kind === 'sensevoice' || (model.kind === 'whisper' && lang === 'auto');
+      return { text: result.text, detected: telling ? detectedLanguage(result.lang) : null };
     },
     close: async () => {},
     abort: async () => {},
@@ -148,7 +155,7 @@ function newVad(sherpa: Sherpa, model: EngineModel, silence: number): SherpaVad 
 }
 
 /** The language of a job, and what is known of the audio around its parts. */
-interface Job { model: EngineModel; start: string; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; shown: Map<number, number>; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
+interface Job { model: EngineModel; start: string; /** A live job: every part says what it sounded like. */ live?: boolean; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; shown: Map<number, number>; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
 const newJob = (model: EngineModel, start: string, changes: LanguageChange[], turns: SpeakerTurn[] = []): Job => ({ model, start, changes, turns, voiceCuts: speakerCuts(turns), shown: new Map(), lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
 
 /** The part with what can be had of its context, and where that starts and ends. */
@@ -189,7 +196,10 @@ async function decodeAll(recognizer: Recognizer, vad: SherpaVad, job: Job): Prom
       const language = languageAt(job.start, job.changes, part.start / SAMPLE_RATE);
       const input = withContext(part, parts[i + 1]?.start ?? nextSegment, job);
       job.previousEnd = part.start + part.samples.length;
-      const text = markRepeats((await recognizer.decode(input.samples, language)).trim());
+      const decoded = await recognizer.decode(input.samples, language);
+      const text = markRepeats(decoded.text.trim());
+      // For the language suggestion: the part's own speech, without its context, also when it found no words.
+      if (job.live) send({ type: 'part', start: part.start / SAMPLE_RATE, end: (part.start + part.samples.length) / SAMPLE_RATE, detected: decoded.detected });
       if (text) {
         found++;
         const voice = speakerOf(part.start / SAMPLE_RATE, (part.start + part.samples.length) / SAMPLE_RATE, job.turns);
@@ -223,7 +233,7 @@ function onControl(message: WorkerControl): void {
 async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'follow' }>): Promise<void> {
   const recognizer = await load(sherpa, request.model, request.language);
   const vad = newVad(sherpa, request.model, SILENCE_SECONDS.live);
-  const job = newJob(request.model, request.language, control.changes);
+  const job = { ...newJob(request.model, request.language, control.changes), live: true };
   control.lateLanguage = (at) => job.lastPart > at;
   const file = await fsp.open(request.wav, 'r');
   const HEADER = 44;

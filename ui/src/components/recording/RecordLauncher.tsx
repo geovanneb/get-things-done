@@ -37,7 +37,10 @@ export function RecordLauncherProvider({ children }: { children: React.ReactNode
   useEffect(() => onRecordingCommand((command) => {
     if (command === 'open') openRecordDialog();
     else if (command === 'stop') { if (latest.current.status === 'recording') void latest.current.stop(); }
-    else void latest.current.setLanguage(command.slice('language:'.length));
+    else if (command.startsWith('suggestion:')) {
+      const [, answer, id] = command.split(':');
+      void latest.current.answerSuggestion(answer as 'switch' | 'keep', id!);
+    } else void latest.current.setLanguage(command.slice('language:'.length));
   }), [openRecordDialog]);
 
   const value = useMemo(() => ({ openRecordDialog, openRecordDialogFor }), [openRecordDialog, openRecordDialogFor]);

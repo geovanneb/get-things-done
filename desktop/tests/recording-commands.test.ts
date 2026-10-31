@@ -48,3 +48,15 @@ test('a command left long ago does not open the dialog out of nowhere', () => {
   now += COMMAND_TTL_MS;
   assert.equal(commands.take(), 'open', 'still in time at the limit');
 });
+
+test('an answer to a language suggestion is a language command: it never replaces a Stop and goes with the recording', () => {
+  let now = 1000;
+  const commands = new RecordingCommands(() => now);
+  commands.leave('stop');
+  commands.leave('suggestion:switch:3f1c2b7e-0000-4000-8000-000000000000');
+  assert.equal(commands.take(), 'stop');
+  commands.leave('suggestion:keep:3f1c2b7e-0000-4000-8000-000000000000');
+  commands.dropLanguage();
+  assert.equal(commands.take(), null, 'the recording ended: it does not reach the next one');
+  now += 1;
+});

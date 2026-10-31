@@ -68,10 +68,18 @@ router.put('/:id/recording', express.raw({ type: 'application/octet-stream', lim
   res.json(await recording.append(queueId(param(req, 'id')), req.get('x-recording-token') ?? '', offset, req.body as Buffer));
 });
 
-// PUT /api/meeting-queue/:id/recording/language  { token, language }  the language being spoken from now on
+// PUT /api/meeting-queue/:id/recording/language  { token, language } | { token, suggestion }  the language being
+// spoken from now on, or the suggested one (see setLanguage)
 router.put('/:id/recording/language', async (req: Request, res: Response) => {
-  const { token, language } = req.body as { token?: string; language?: unknown };
-  res.json(await recording.setLanguage(queueId(param(req, 'id')), token as string, language));
+  const { token, language, suggestion } = req.body as { token?: string; language?: unknown; suggestion?: unknown };
+  if (suggestion !== undefined && typeof suggestion !== 'string') { res.status(400).json({ error: 'Bad Request', message: 'suggestion must be an id' }); return; }
+  res.json(await recording.setLanguage(queueId(param(req, 'id')), token as string, language, suggestion as string | undefined));
+});
+
+// POST /api/meeting-queue/:id/recording/language/keep  { token, suggestion }  keep the language: the suggestion goes
+router.post('/:id/recording/language/keep', async (req: Request, res: Response) => {
+  const { token, suggestion } = req.body as { token?: string; suggestion?: unknown };
+  res.json(await recording.keepLanguage(queueId(param(req, 'id')), token as string, suggestion));
 });
 
 // GET /api/meeting-queue/:id/recording/transcript?from=N  the live transcript of the recording being made, from segment N

@@ -253,7 +253,11 @@ export class TranscriptionEngine {
    * on how much audio is saved; `end` seals it and resolves with exactly how much was read; `cancel` ends it, and
    * resolves once the worker has exited.
    */
-  async follow(wav: string, options: { model: string; language: string; onSegment: (s: Segment) => void; onProgress?: (done: number, total: number) => void }): Promise<FollowSession> {
+  async follow(wav: string, options: {
+    model: string; language: string; onSegment: (s: Segment) => void; onProgress?: (done: number, total: number) => void;
+    /** Each decoded part, with or without words, and the language it sounded like (see languageSuggestion.ts). */
+    onPart?: (part: { start: number; end: number; detected: string | null }) => void;
+  }): Promise<FollowSession> {
     if (closing) throw httpError(503, 'The dashboard is shutting down');
     if (busy) throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true });
     const release = await this.models.lease(options.model);
@@ -291,6 +295,7 @@ export class TranscriptionEngine {
       if (outcome) return;
       if (reply.type === 'loaded') { loaded = true; clearTimeout(loadTimer); }
       if (reply.type === 'segment') options.onSegment({ start: reply.start, end: reply.end, text: reply.text });
+      if (reply.type === 'part') options.onPart?.({ start: reply.start, end: reply.end, detected: reply.detected });
       if (reply.type === 'progress') options.onProgress?.(reply.done, reply.total);
       if (reply.type === 'error') settle({ ok: false, message: reply.message });
       if (reply.type === 'done') settle({ ok: true, bytes: reply.bytes ?? -1, seconds: reply.seconds, segments: reply.segments, lateLanguage: reply.late_language === true });

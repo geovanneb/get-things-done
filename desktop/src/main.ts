@@ -1,6 +1,6 @@
 // Electron main process: starts the same server as `gtd start` in a utility process and shows the dashboard in a window.
 // The app keeps running in the tray when the window is closed, so routines still run on schedule.
-import { app, BrowserWindow, Menu, Tray, dialog, nativeImage, powerSaveBlocker, session, shell, utilityProcess, UtilityProcess } from 'electron';
+import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, powerSaveBlocker, session, shell, utilityProcess, UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { registerBridge } from './bridge';
@@ -8,7 +8,7 @@ import { stopServer } from './server-lifecycle';
 import { holdUpdatesWhile, installNow, startUpdateChecks } from './updates';
 import { classifyLink } from './links';
 import { RecordingCommands, type RecordingCommand } from './recording-commands';
-import type { SpokenLanguageMenu } from './bridge';
+import type { SpokenLanguageMenu } from './language-menu';
 import { DEFAULT_PORT, findFreePort } from './port';
 
 const APP_NAME = 'Get Things Done';
@@ -173,6 +173,8 @@ function setRecording(active: boolean): void {
   if (!active) {
     languageMenu = null;
     recordingCommands.dropLanguage();
+    announced.clear();
+    closeSuggestionNote();
   }
   // Also called from the window's 'closed' event, when its page is already destroyed and cannot be changed.
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
@@ -184,9 +186,74 @@ function setRecording(active: boolean): void {
     keepAwake = null;
   }
   tray?.setToolTip(active ? `${APP_NAME}: recording` : APP_NAME);
-  // macOS shows text next to the menu-bar icon: a recording is visible even with the window closed.
-  if (process.platform === 'darwin') tray?.setTitle(active ? 'REC' : '');
+  showRecordingTitle();
   setTrayMenu(pendingUpdate);
+}
+
+/** macOS shows text next to the menu-bar icon: a recording is visible even with the window closed, and a suggestion too. */
+function showRecordingTitle(): void {
+  if (process.platform !== 'darwin') return;
+  const offer = recording ? languageMenu?.suggested : undefined;
+  tray?.setTitle(!recording ? '' : offer ? `REC · ${offer.language.toUpperCase()}?` : 'REC');
+}
+
+/** The suggestions already said in this recording, so each is said once however often the page reports its menu. */
+const announced = new Set<string>();
+/** The notification of the current suggestion, closed when the suggestion goes. */
+let shownNote: { id: string; note: Notification } | null = null;
+
+/** Answers a suggestion from the menu bar or a notification, only while it is still the one offered. */
+function answerSuggestion(answer: 'switch' | 'keep', id: string): void {
+  if (recording && languageMenu?.suggested?.id === id) sendRecordingCommand(`suggestion:${answer}:${id}`);
+}
+
+/** The suggestion went (answered, replaced, or the recording ended): its notification must not act any more. */
+function closeSuggestionNote(): void {
+  if (shownNote && shownNote.id !== (recording ? languageMenu?.suggested?.id : undefined)) {
+    shownNote.note.close();
+    shownNote = null;
+  }
+}
+
+/**
+ * Says a new suggestion through the system, for when the app is hidden behind a call: switch from the notification
+ * (an action on macOS, a click on Windows). Closing it, or letting it time out, changes nothing.
+ */
+function announceSuggestion(menu: SpokenLanguageMenu): void {
+  closeSuggestionNote();
+  const offer = menu.suggested;
+  if (!recording || !offer || announced.has(offer.id) || !Notification.isSupported()) return;
+  const current = menu.current === 'auto' ? 'Auto' : menu.options.find((o) => o.id === menu.current)?.label ?? menu.current;
+  const mac = process.platform === 'darwin';
+  const switchLabel = offer.mode === 'auto' ? `Set ${offer.label}` : `Switch to ${offer.label}`;
+  const note = new Notification({
+    title: offer.mode === 'auto' ? `Most speech sounds like ${offer.label}` : `This sounds like ${offer.label}`,
+    body: offer.mode === 'auto'
+      ? `Set ${offer.label} for a more accurate transcript.${mac ? '' : ' Click to set it.'}`
+      : `The recording is set to ${current}.${mac ? '' : ` Click to switch to ${offer.label}.`}`,
+    ...(mac ? { actions: [{ type: 'button' as const, text: switchLabel }, { type: 'button' as const, text: `Keep ${current}` }] } : {}),
+  });
+  // Buttons depend on the system's alert style and may not show: the menu bar and the banner offer the same choice.
+  note.on('action', (_event, index) => {
+    if (index === 0) answerSuggestion('switch', offer.id);
+    else if (index === 1) answerSuggestion('keep', offer.id);
+  });
+  // On macOS a click on the notification itself opens the app; elsewhere it is the way to switch.
+  note.on('click', () => { if (mac) showWindow(); else answerSuggestion('switch', offer.id); });
+  // Said once; a notification the system could not show may be tried again with the next report of the menu.
+  note.on('failed', () => {
+    announced.delete(offer.id);
+    if (shownNote?.note === note) shownNote = null;
+  });
+  try {
+    announced.add(offer.id);
+    shownNote = { id: offer.id, note };
+    note.show();
+  } catch {
+    // No notification: the menu bar still shows it.
+    announced.delete(offer.id);
+    shownNote = null;
+  }
 }
 
 /**
@@ -228,6 +295,16 @@ function setTrayMenu(update: string | null): void {
       recording
         ? { label: 'Stop recording and save', click: () => sendRecordingCommand('stop') }
         : { label: 'Record a meeting…', click: () => sendRecordingCommand('open') },
+      ...(recording && languageMenu?.suggested ? (() => {
+        const offer = languageMenu.suggested;
+        const current = languageMenu.current === 'auto' ? 'Auto' : languageMenu.options.find((o) => o.id === languageMenu?.current)?.label ?? languageMenu.current;
+        return [
+          { label: offer.mode === 'auto' ? `Most speech sounds like ${offer.label}` : `Sounds like ${offer.label}`, enabled: false },
+          { label: offer.mode === 'auto' ? `Set ${offer.label}` : `Switch to ${offer.label}`, click: () => answerSuggestion('switch', offer.id) },
+          { label: `Keep ${current}`, click: () => answerSuggestion('keep', offer.id) },
+          { type: 'separator' as const },
+        ];
+      })() : []),
       ...(recording && languageMenu ? [{
         label: 'Spoken language',
         submenu: languageMenu.options.map(({ id, label }) => ({
@@ -280,6 +357,8 @@ if (!app.requestSingleInstanceLock()) {
     });
     registerBridge(() => mainWindow, () => appUrl, setRecording, () => recordingCommands.take(), (menu) => {
       languageMenu = menu;
+      if (menu) announceSuggestion(menu);
+      showRecordingTitle();
       setTrayMenu(pendingUpdate);
     });
     holdUpdatesWhile(() => recording);
