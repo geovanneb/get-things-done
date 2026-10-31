@@ -558,9 +558,14 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     const msg = u.status === 'done'
       ? `Delete this record? Context changes it made stay; only the record goes${records.some((r) => r.confirmation === 'confirmed') ? ', including its confirmed meeting records' : ''}.`
       : `Delete this update and its materials${confirmedCount > 0 ? ', including the meeting records you confirmed' : ''}? Nothing in your context has changed yet.`;
-    if (!window.confirm(msg)) return;
+    // A digest's meetings left the queue when it was made, so its folder is their only copy.
+    const meetings = u.digest_meetings?.length ?? 0;
+    const onlyCopy = u.origin === 'meetings' && meetings > 0 && (u.status !== 'done' || u.keep_materials)
+      ? ` ${meetings === 1 ? 'Its meeting already left' : `Its ${meetings} meetings already left`} the queue, so this is the only copy of their recordings, transcripts and speaker names.`
+      : '';
+    if (!window.confirm(`${msg}${onlyCopy} The update's folder goes to the trash (.situation-board/trash/), where you can still get the files back.`)) return;
     void (async () => {
-      try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update deleted.'); onBack(); changed(); } catch (err) {
+      try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update moved to the trash.'); onBack(); changed(); } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Could not delete.');
       }
     })();
