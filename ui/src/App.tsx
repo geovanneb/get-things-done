@@ -5,6 +5,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useAppDispatch } from './store';
 import AppLayout from './components/layout/AppLayout';
+import { useLoadSidebar } from './hooks/useSidebar';
 import { useLiveEvents } from './hooks/useLiveEvents';
 import { apiGet } from './utils/api';
 import { WorkspaceConfig, GitStatus } from './types';
@@ -31,6 +32,8 @@ function AppInitializer() {
 
   // Live workspace updates (file watcher -> SSE -> refetch)
   useLiveEvents();
+  // The sidebar order is saved per workspace.
+  useLoadSidebar();
 
   useEffect(() => {
     // Fetch workspace config

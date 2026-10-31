@@ -1,9 +1,11 @@
 import React from 'react';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { NavLink, useLocation } from 'react-router-dom';
-import { useAppState } from '../../store';
+import { useAppDispatch, useAppState } from '../../store';
 import { usePendingActions, TONE_COLOR, type PendingAction } from '../../hooks/usePendingActions';
-import { navGroups, type NavItemId } from './navGroups';
+import { arrangeSidebar, isActivePath, navGroups, type NavItemId } from './navGroups';
+import SidebarEditor from './SidebarEditor';
+import NavMore from './NavMore';
 
 interface NavItem {
   path: string;
@@ -169,9 +171,12 @@ const NAV_ICONS: Record<NavItemId, React.ReactNode> = {
 const NAV_COLLAPSE_KEY = 'gtd:nav-collapsed';
 const NAV_WIDTH_EXPANDED = '242px';
 const NAV_WIDTH_COLLAPSED = '60px';
+// Wider while customizing, so the full names fit next to the arrow and eye buttons.
+const NAV_WIDTH_EDITING = '288px';
 
 export default function NavRail() {
-  const { validationCount, agenticVisualMode } = useAppState();
+  const { validationCount, agenticVisualMode, sidebar, sidebarEditing } = useAppState();
+  const dispatch = useAppDispatch();
   const location = useLocation();
   const pending = usePendingActions();
   const [preferredCollapsed, setCollapsed] = React.useState<boolean>(() => {
@@ -189,7 +194,22 @@ export default function NavRail() {
     query.addEventListener('change', changed);
     return () => query.removeEventListener('change', changed);
   }, []);
-  const collapsed = narrow || preferredCollapsed;
+  // Customizing needs the labels, so the sidebar opens up while it lasts.
+  const collapsed = !sidebarEditing && (narrow || preferredCollapsed);
+
+  // Hover or keyboard focus shows the "Customize" link; a right click on the list offers the same.
+  const [hovered, setHovered] = React.useState(false);
+  const [customizeFocused, setCustomizeFocused] = React.useState(false);
+  const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const startEditing = () => {
+    setMenu(null);
+    dispatch({ type: 'SET_SIDEBAR_EDITING', payload: true });
+  };
+  const closeMenu = React.useCallback(() => setMenu(null), []);
+  const openMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -211,23 +231,27 @@ export default function NavRail() {
       : 'var(--color-success)';
   const healthLabel = `Workspace health: ${validationCount.errors > 0 ? 'errors' : validationCount.warnings > 0 ? 'warnings' : 'good'}`;
 
-  const groups = navGroups({ agentFloor: agenticVisualMode }).map((group) => ({
-    ...group,
-    items: group.items.map((entry): NavItem => ({
-      path: entry.path,
-      label: entry.label,
-      icon: NAV_ICONS[entry.id],
-      pending: pending.find((p) => p.navPath === entry.path),
-    })),
-  }));
+  const toItem = (entry: { path: string; label: string; id: NavItemId }): NavItem => ({
+    path: entry.path,
+    label: entry.label,
+    icon: NAV_ICONS[entry.id],
+    pending: pending.find((p) => p.navPath === entry.path),
+  });
+  const arranged = arrangeSidebar(navGroups({ agentFloor: agenticVisualMode }), sidebar);
+  const groups = arranged
+    .map((group) => ({ ...group, items: group.items.filter((entry) => !entry.hidden).map(toItem) }))
+    .filter((group) => group.items.length > 0);
+  const hiddenItems = arranged.flatMap((group) => group.items.filter((entry) => entry.hidden).map(toItem));
   const mainGroups = groups.filter((g) => g.id !== 'account');
   const bottomItems = groups.find((g) => g.id === 'account')?.items ?? [];
 
   return (
     <nav
       aria-label="Main navigation"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        width: collapsed ? NAV_WIDTH_COLLAPSED : NAV_WIDTH_EXPANDED,
+        width: sidebarEditing ? NAV_WIDTH_EDITING : collapsed ? NAV_WIDTH_COLLAPSED : NAV_WIDTH_EXPANDED,
         flexShrink: 0,
         height: '100vh',
         background: 'var(--nav-bg)',
@@ -276,29 +300,120 @@ export default function NavRail() {
         </div>
       </div>
 
-      {/* Main nav items, in groups */}
-      <div style={{ flex: 1, padding: '8px 8px', overflowY: 'auto' }}>
-        {mainGroups.map((group) => (
-          <div key={group.id} role={group.heading ? 'group' : undefined} aria-label={group.heading}>
-            {group.heading && <NavGroupHeading heading={group.heading} collapsed={collapsed} />}
+      {sidebarEditing ? (
+        <SidebarEditor icons={NAV_ICONS} />
+      ) : (
+        <>
+          {/* Main nav items, in groups */}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }} onContextMenu={openMenu}>
+            <div style={{ flex: 1, padding: '8px 8px', overflowY: 'auto' }}>
+              {mainGroups.map((group) => (
+                <div key={group.id} role={group.heading ? 'group' : undefined} aria-label={group.heading}>
+                  {group.heading && <NavGroupHeading heading={group.heading} collapsed={collapsed} />}
+                  <ul role="list" style={{ listStyle: 'none' }}>
+                    {group.items.map((item) => (
+                      <NavRailItem key={item.path} item={item} currentPath={location.pathname} collapsed={collapsed} />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {hiddenItems.length > 0 && (
+                <>
+                  {!collapsed && <div aria-hidden="true" style={{ height: 8 }} />}
+                  {collapsed && <NavGroupHeading heading="" collapsed />}
+                  <ul role="list" style={{ listStyle: 'none' }}>
+                    <NavMore items={hiddenItems} collapsed={collapsed} currentPath={location.pathname} />
+                  </ul>
+                </>
+              )}
+            </div>
+            {/* A control of the sidebar itself, not a destination: pinned to the panel's edge, right-aligned and
+                quieter than the items. Collapsed, it is left out; right click and Settings still offer it. */}
+            {!collapsed && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '2px 10px 8px' }}>
+                <CustomizeLink visible={hovered || customizeFocused} onClick={startEditing} onFocusChange={setCustomizeFocused} />
+              </div>
+            )}
+          </div>
+
+          {/* Bottom items */}
+          <div style={{ borderTop: '1px solid var(--nav-border)', padding: '8px 8px' }} onContextMenu={openMenu}>
             <ul role="list" style={{ listStyle: 'none' }}>
-              {group.items.map((item) => (
+              {bottomItems.map((item) => (
                 <NavRailItem key={item.path} item={item} currentPath={location.pathname} collapsed={collapsed} />
               ))}
             </ul>
           </div>
-        ))}
-      </div>
-
-      {/* Bottom items */}
-      <div style={{ borderTop: '1px solid var(--nav-border)', padding: '8px 8px' }}>
-        <ul role="list" style={{ listStyle: 'none' }}>
-          {bottomItems.map((item) => (
-            <NavRailItem key={item.path} item={item} currentPath={location.pathname} collapsed={collapsed} />
-          ))}
-        </ul>
-      </div>
+        </>
+      )}
+      {menu && <CustomizeMenu at={menu} onCustomize={startEditing} onClose={closeMenu} />}
     </nav>
+  );
+}
+
+function CustomizeLink({ visible, onClick, onFocusChange }: {
+  visible: boolean; onClick: () => void; onFocusChange: (focused: boolean) => void;
+}) {
+  const idle = { color: 'var(--nav-text)', borderColor: 'transparent', background: 'transparent' };
+  const hover = { color: 'var(--nav-text-active)', borderColor: 'var(--nav-border)', background: 'var(--nav-hover-bg)' };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onFocus={(e) => { onFocusChange(true); Object.assign(e.currentTarget.style, hover); }}
+      onBlur={(e) => { onFocusChange(false); Object.assign(e.currentTarget.style, idle); }}
+      onMouseEnter={(e) => Object.assign(e.currentTarget.style, hover)}
+      onMouseLeave={(e) => Object.assign(e.currentTarget.style, idle)}
+      style={{
+        ...idle,
+        display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 9px',
+        border: '1px solid transparent', borderRadius: 999, cursor: 'pointer',
+        fontSize: 'var(--text-xs)', whiteSpace: 'nowrap',
+        opacity: visible ? 1 : 0, transition: 'opacity 0.15s, color 0.1s, background 0.1s, border-color 0.1s',
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10.5 2.5l3 3L6 13H3v-3l7.5-7.5Z" />
+      </svg>
+      Customize sidebar
+    </button>
+  );
+}
+
+function CustomizeMenu({ at, onCustomize, onClose }: { at: { x: number; y: number }; onCustomize: () => void; onClose: () => void }) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    ref.current?.querySelector('button')?.focus();
+    const outside = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    document.addEventListener('mousedown', outside);
+    return () => document.removeEventListener('mousedown', outside);
+  }, [onClose]);
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      aria-label="Sidebar"
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      style={{
+        position: 'fixed', left: Math.min(at.x, window.innerWidth - 200), top: Math.min(at.y, window.innerHeight - 50),
+        zIndex: 1000, padding: 4, minWidth: 180, background: 'var(--nav-bg)', border: '1px solid var(--nav-border)',
+        borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-md)',
+      }}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onClick={onCustomize}
+        onBlur={(e) => { if (!ref.current?.contains(e.relatedTarget as Node)) onClose(); }}
+        style={{
+          display: 'block', width: '100%', height: 32, padding: '0 10px', border: 'none', textAlign: 'left',
+          borderRadius: 'var(--radius-sm)', background: 'var(--nav-hover-bg)', color: 'var(--nav-text-active)',
+          fontSize: 'var(--text-sm)', cursor: 'pointer',
+        }}
+      >
+        Customize sidebar…
+      </button>
+    </div>
   );
 }
 
@@ -327,12 +442,7 @@ function NavGroupHeading({ heading, collapsed }: { heading: string; collapsed: b
 }
 
 function NavRailItem({ item, currentPath, collapsed }: { item: NavItem; currentPath: string; collapsed: boolean }) {
-  const isActive =
-    item.path === '/board'
-      ? currentPath.startsWith('/board')
-      : item.path === '/stakeholders'
-      ? currentPath.startsWith('/stakeholders')
-      : currentPath === item.path || currentPath.startsWith(item.path + '/');
+  const isActive = isActivePath(item.path, currentPath);
 
   return (
     <li role="listitem">

@@ -15,6 +15,7 @@ import { cleanupSummary } from '@/components/routines/SystemCleanup';
 import WorkspaceAvatar from '@/components/layout/WorkspaceAvatar';
 import WorkspaceIconCrop from '@/components/layout/WorkspaceIconCrop';
 import TranscriptionSettings from '@/components/settings/TranscriptionSettings';
+import SidebarSettings from '@/components/settings/SidebarSettings';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
 import type { ThemeMode, TextSize } from '@/utils/theme';
 import type { WorkspaceConfig, GitStatus, ValidationResult, SystemCleanup } from '@/types';
@@ -1034,6 +1035,10 @@ export default function SettingsView() {
           />
         </FieldRow>
 
+        <FieldRow label="Sidebar">
+          <SidebarSettings />
+        </FieldRow>
+
         <FieldRow label="Task IDs on Board">
           <Toggle
             id="show-task-ids"
@@ -1052,8 +1057,8 @@ export default function SettingsView() {
             lineHeight: 1.5,
           }}
         >
-          Appearance is stored in this browser, not in the workspace. Other people opening
-          the same workspace keep their own settings.
+          Theme, accent color, text size and task IDs are stored in this browser. The sidebar
+          order is saved in the workspace, so it follows you to the desktop app and other computers.
         </p>
       </SectionCard>
 
@@ -1092,7 +1097,7 @@ export default function SettingsView() {
               }}
             >
               Adds an <strong style={{ fontWeight: 600 }}>Agent Floor</strong> item to the sidebar,
-              below Insights. It draws your workspace as a pixel-art office: the backlog is a stack of
+              under Automation. It draws your workspace as a pixel-art office: the backlog is a stack of
               paper on a desk, agents walk over to pick up a task, read it, research it at the
               bookshelf and the terminal, then carry the finished sheet to the Done desk. Everything
               on screen is driven by real task files and live file-change events.
