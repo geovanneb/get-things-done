@@ -3,6 +3,7 @@ import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppState } from '../../store';
 import { usePendingActions, TONE_COLOR, type PendingAction } from '../../hooks/usePendingActions';
+import { navGroups, type NavItemId } from './navGroups';
 
 interface NavItem {
   path: string;
@@ -150,6 +151,21 @@ function IconCollapse({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+const NAV_ICONS: Record<NavItemId, React.ReactNode> = {
+  situation: <IconSituation />,
+  board: <IconBoard />,
+  meetings: <IconMic />,
+  insights: <IconChart />,
+  context: <IconBook />,
+  stakeholders: <IconPeople />,
+  outputs: <IconFile />,
+  agents: <IconAgent />,
+  routines: <IconRepeat />,
+  'agent-floor': <IconArcade />,
+  profile: <IconPerson />,
+  settings: <IconGear />,
+};
+
 const NAV_COLLAPSE_KEY = 'gtd:nav-collapsed';
 const NAV_WIDTH_EXPANDED = '242px';
 const NAV_WIDTH_COLLAPSED = '60px';
@@ -195,31 +211,17 @@ export default function NavRail() {
       : 'var(--color-success)';
   const healthLabel = `Workspace health: ${validationCount.errors > 0 ? 'errors' : validationCount.warnings > 0 ? 'warnings' : 'good'}`;
 
-  const navItems: NavItem[] = [
-    { path: '/situation', label: 'Situation', icon: <IconSituation /> },
-    { path: '/board', label: 'Board', icon: <IconBoard /> },
-    { path: '/meetings', label: 'Meetings', icon: <IconMic /> },
-    { path: '/routines', label: 'Routines', icon: <IconRepeat /> },
-    { path: '/stakeholders', label: 'Stakeholders', icon: <IconPeople /> },
-    { path: '/outputs', label: 'Outputs', icon: <IconFile /> },
-    { path: '/context', label: 'Context', icon: <IconBook /> },
-    { path: '/agents', label: 'Agents & Skills', icon: <IconAgent /> },
-    { path: '/insights', label: 'Insights', icon: <IconChart /> },
-  ];
-
-  // Experimental view, shown only while the Settings switch is on.
-  if (agenticVisualMode) {
-    navItems.push({ path: '/agent-floor', label: 'Agent Floor', icon: <IconArcade /> });
-  }
-
-  const bottomItems: NavItem[] = [
-    { path: '/profile', label: 'Profile', icon: <IconPerson /> },
-    { path: '/settings', label: 'Settings', icon: <IconGear /> },
-  ];
-
-  for (const item of [...navItems, ...bottomItems]) {
-    item.pending = pending.find((p) => p.navPath === item.path);
-  }
+  const groups = navGroups({ agentFloor: agenticVisualMode }).map((group) => ({
+    ...group,
+    items: group.items.map((entry): NavItem => ({
+      path: entry.path,
+      label: entry.label,
+      icon: NAV_ICONS[entry.id],
+      pending: pending.find((p) => p.navPath === entry.path),
+    })),
+  }));
+  const mainGroups = groups.filter((g) => g.id !== 'account');
+  const bottomItems = groups.find((g) => g.id === 'account')?.items ?? [];
 
   return (
     <nav
@@ -274,15 +276,19 @@ export default function NavRail() {
         </div>
       </div>
 
-      {/* Main nav items */}
-      <ul
-        role="list"
-        style={{ flex: 1, padding: '8px 8px', listStyle: 'none', overflowY: 'auto' }}
-      >
-        {navItems.map((item) => (
-          <NavRailItem key={item.path} item={item} currentPath={location.pathname} collapsed={collapsed} />
+      {/* Main nav items, in groups */}
+      <div style={{ flex: 1, padding: '8px 8px', overflowY: 'auto' }}>
+        {mainGroups.map((group) => (
+          <div key={group.id} role={group.heading ? 'group' : undefined} aria-label={group.heading}>
+            {group.heading && <NavGroupHeading heading={group.heading} collapsed={collapsed} />}
+            <ul role="list" style={{ listStyle: 'none' }}>
+              {group.items.map((item) => (
+                <NavRailItem key={item.path} item={item} currentPath={location.pathname} collapsed={collapsed} />
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
 
       {/* Bottom items */}
       <div style={{ borderTop: '1px solid var(--nav-border)', padding: '8px 8px' }}>
@@ -293,6 +299,30 @@ export default function NavRail() {
         </ul>
       </div>
     </nav>
+  );
+}
+
+// Collapsed, the heading becomes a thin divider so the grouping survives without text.
+function NavGroupHeading({ heading, collapsed }: { heading: string; collapsed: boolean }) {
+  if (collapsed) {
+    return <div aria-hidden="true" style={{ height: 1, margin: '10px 12px', background: 'var(--nav-border)' }} />;
+  }
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        padding: '14px 10px 6px',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        color: 'var(--nav-text)',
+        opacity: 0.7,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {heading}
+    </div>
   );
 }
 

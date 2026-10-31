@@ -8,6 +8,15 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- **The sidebar is grouped by job and ordered by how often you use it.** Your daily work comes
+  first (Situation, Board, Meetings, Insights), then **Memory**, what the agents read before
+  they write (Context, Stakeholders, Output templates), then **Automation**, what you set up
+  once (Agents & Skills, Routines, Agent Floor when it is on). Profile and Settings stay at
+  the bottom. In the collapsed sidebar the group headings become thin dividers. "Outputs" is
+  now called "Output templates", like its page. (#191)
+
 ## [0.7.0] - 2026-10-29
 
 Get Things Done now comes as a **desktop app for Mac and Windows**: download it, open it, and a
