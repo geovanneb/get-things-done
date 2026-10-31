@@ -268,6 +268,22 @@ test('a published digest removed by hand before the handoff keeps its meetings o
   assert.match(made.message, /Made digest/);
 });
 
+test('deleting a digest moves its folder to the trash: it is the only copy of meetings that left the queue', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const a = await queueMeeting(service, 'Weekly sync', '2026-10-28', [['transcript.vtt', vtt('Jane Doe', 'Budget next week.')]]);
+  const made = (await service.runNow(new Date('2026-10-28T18:00:00'))).context_update!;
+  assert.deepEqual((await service.readQueue()).meetings, [], 'the meeting left the queue');
+
+  await updates.remove(made);
+  await assert.rejects(fsp.access(path.join(ws, 'context-updates', made)));
+  const trash = path.join(ws, '.situation-board', 'trash');
+  const [entry, ...others] = await fsp.readdir(trash);
+  assert.ok(entry?.endsWith(`-${made}`) && others.length === 0, 'one trash entry, named after the update');
+  const kept = await fsp.readFile(path.join(trash, entry!, 'materials', `${a}-transcript.vtt`), 'utf-8');
+  assert.match(kept, /Budget next week/, 'the transcript can still be got back');
+});
+
 test('a readable copy never replaces another original, whatever the upload order', async (t) => {
   await workspace(t);
   const service = new MeetingDigestService();

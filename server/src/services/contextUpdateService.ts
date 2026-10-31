@@ -1528,13 +1528,18 @@ export class ContextUpdateService {
     await fsp.rm(path.join(dir, 'proposals'), { recursive: true, force: true });
   }
 
+  /**
+   * Moves the update's folder to the trash. Its materials can be the only copy of what was uploaded: a
+   * digest's meetings leave the queue once it holds them, recordings and transcripts included.
+   */
   async remove(id: string): Promise<void> {
     return this.serialized(id, async () => {
       const { update } = await this.read(id);
       // Applying may have written some files already; deleting the record would hide what happened.
       this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
       await this.requireNoRun(id, 'delete the update');
-      await fsp.rm(this.updateDir(id), { recursive: true, force: true });
+      const ws = workspaceService.getWorkspacePath();
+      await moveToTrash(ws, await workspaceEntry(ws, this.updateDir(id)));
     });
   }
 }
