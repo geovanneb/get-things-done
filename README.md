@@ -785,6 +785,9 @@ settings.
   Transcription** (see below); the transcript then goes into the digest with the meeting.
 - **Meetings**, in the left menu, is where recording, the live transcript, the queue and
   its transcripts are. The Meeting digest card in Routines keeps the schedule and settings.
+- Starting a recording opens the Meetings page with its live text. After Stop the page
+  shows the transcript, the live text first and the final one once it is ready, and
+  **Read it** on any meeting opens its transcript there.
 - **Record** in the top bar (or **Record a meeting** on the Meetings page, in ⌘K search,
   or in the desktop app's menu-bar menu) records the microphone, in the desktop app
   and in the browser (Chrome or Edge, with the dashboard opened at localhost). While it

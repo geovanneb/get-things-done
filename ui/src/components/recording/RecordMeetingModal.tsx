@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
@@ -19,6 +20,7 @@ function today(): string {
 /** Starts a recording: what it is called, which microphone, and a reminder to tell the others, each time. */
 export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boolean; onClose: () => void; prefill: RecordPrefill | null }) {
   const { start } = useRecorder();
+  const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [date, setDate] = useState(today);
   const [participants, setParticipants] = useState<MeetingParticipant[]>([]);
@@ -82,7 +84,7 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
         </label>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!told || !date} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio }); onClose(); }}>Start recording</Button>
+          <Button variant="primary" disabled={!told || !date} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio }); onClose(); navigate('/meetings'); }}>Start recording</Button>
         </div>
       </div>
     </Modal>

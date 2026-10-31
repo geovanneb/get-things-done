@@ -45,6 +45,8 @@ export interface RecorderState {
   error: string | null;
   /** The last recording that was saved, to say so. */
   notice: string | null;
+  /** That meeting, so its transcript can be opened. */
+  lastMeetingId: string | null;
 }
 
 interface RecorderContextValue extends RecorderState {
@@ -56,7 +58,7 @@ interface RecorderContextValue extends RecorderState {
   dismiss: () => void;
 }
 
-const idle: RecorderState = { status: 'idle', meetingId: null, title: '', elapsed: 0, captured: 0, saved: 0, gap: 0, level: 0, systemLevel: null, warning: null, lost: [], language: 'auto', languages: [], languageError: null, error: null, notice: null };
+const idle: RecorderState = { status: 'idle', meetingId: null, title: '', elapsed: 0, captured: 0, saved: 0, gap: 0, level: 0, systemLevel: null, warning: null, lost: [], language: 'auto', languages: [], languageError: null, error: null, notice: null, lastMeetingId: null };
 const RecorderContext = createContext<RecorderContextValue | null>(null);
 
 /** No sound above this for this long: the microphone is probably the wrong one, or muted. */
@@ -323,7 +325,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       await apiPost(`/api/meeting-queue/${meetingId}/recording/finish`, { token, offset: uploader.saved, generation, queue: true });
       const notCaptured = gap > 90 ? `About ${Math.round(gap / 60)} min of the meeting was not captured.` : gap > GAP_SECONDS ? `About ${Math.round(gap)} s of the meeting was not captured.` : '';
       const missing = [notCaptured, complete ? '' : 'The last moments may be missing.'].filter(Boolean).map((m) => ` ${m}`).join('');
-      setState((current) => ({ ...idle, notice: `"${current.title}" is saved and waits for its transcript.${missing}` }));
+      setState((current) => ({ ...idle, notice: `"${current.title}" is saved and waits for its transcript.${missing}`, lastMeetingId: meetingId }));
     };
     const running = run()
       .catch((err: Error) => update({ status: 'failed', error: `${err.message} The audio is saved: finish it on the Meetings page.` }))
@@ -347,7 +349,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     setState(idle);
   }, [ended, release, state.meetingId, update]);
 
-  const dismiss = useCallback(() => setState(idle), []);
+  const dismiss = useCallback(() => setState((s) => ({ ...idle, lastMeetingId: s.lastMeetingId })), []);
 
   const active = state.status === 'starting' || state.status === 'recording' || state.status === 'saving';
   useEffect(() => {

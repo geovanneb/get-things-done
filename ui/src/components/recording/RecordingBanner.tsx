@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useRecorder } from './RecordingProvider';
 import Button from '@/components/common/Button';
 
@@ -23,6 +23,7 @@ function Meter({ label, level }: { label: string; level: number }) {
 /** Shows on every view while a recording runs: what is captured, what is really saved, and how to stop. */
 export function RecordingBanner() {
   const r = useRecorder();
+  const onMeetings = useLocation().pathname === '/meetings';
   if (r.status === 'idle' && !r.notice) return null;
   const line: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
   return (
@@ -34,7 +35,10 @@ export function RecordingBanner() {
       {r.notice && r.status === 'idle' && (
         <>
           <p role="status" style={{ margin: 0 }}>{r.notice}</p>
-          <div><Button size="sm" variant="ghost" onClick={r.dismiss}>OK</Button></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {!onMeetings && r.lastMeetingId && <Link to="/meetings" style={{ color: 'var(--color-accent)' }}>Open transcript</Link>}
+            <Button size="sm" variant="ghost" onClick={r.dismiss}>OK</Button>
+          </div>
         </>
       )}
       {r.status === 'starting' && <p style={{ margin: 0 }}>Starting the microphone…</p>}

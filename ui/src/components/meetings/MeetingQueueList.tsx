@@ -17,9 +17,10 @@ function minutes(seconds: number): string {
 }
 
 /** One recording of a queued meeting: where its transcription stands, and what can be done about it. */
-function RecordingLine({ meeting, file, state, progress, disabled, installed, speeds, onAction }: {
+function RecordingLine({ meeting, file, state, progress, disabled, installed, speeds, onAction, onRead }: {
   meeting: QueuedMeeting; file: string; state: RecordingState; progress: TranscriptionProgress | null; disabled: boolean; installed: string[] | null; speeds: Record<string, number>;
   onAction: (action: 'stop' | 'retry' | 'accept' | 'use-live', message: string, body?: Record<string, string>, stopFirst?: boolean) => void;
+  onRead: () => void;
 }) {
   let text: string;
   let tone = 'var(--color-text-muted)';
@@ -60,7 +61,7 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
           }}>Stop</Button>
       )}
       {draft && (
-        <a href={`/api/meeting-queue/${meeting.id}/transcripts/${encodeURIComponent(draft.transcript)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--color-accent)' }}>Read it</a>
+        <Button size="sm" variant="ghost" onClick={onRead}>Read it</Button>
       )}
       {draft && (
         <Button size="sm" variant="ghost" disabled={disabled}
@@ -89,7 +90,7 @@ export function recordingElsewhere(m: QueuedMeeting | MeetingDigest['queue'][num
 }
 
 /** The meetings on their way into a digest: their recordings, transcripts and what can be done about them. */
-export function MeetingQueueList({ job, onChanged }: { job: MeetingDigest; onChanged: () => void }) {
+export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDigest; onChanged: () => void; onRead: (meeting: string, file: string) => void }) {
   const recorder = useRecorder();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
@@ -159,13 +160,13 @@ export function MeetingQueueList({ job, onChanged }: { job: MeetingDigest; onCha
                 </div>
               )}
               {m.files.filter((f) => f.recording?.status === 'done' && f.recording.transcript).map((f) => (
-                <div key={`read-${f.name}`} style={{ flexBasis: '100%', paddingLeft: 12, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Transcript ready{f.recording!.accepted_live ? ' (the live one)' : ''}.{' '}
-                  <a href={`/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(f.recording!.transcript!)}`} target="_blank" rel="noreferrer" style={{ color: 'var(--color-accent)' }}>Read it</a>
+                <div key={`read-${f.name}`} style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  Transcript ready{f.recording!.accepted_live ? ' (the live one)' : ''}.
+                  <Button size="sm" variant="ghost" onClick={() => onRead(m.id, f.name)}>Read it</Button>
                 </div>
               ))}
               {m.status === 'queued' && m.files.filter((f) => f.recording && !(f.recording.status === 'done')).map((f) => (
-                <RecordingLine key={f.name} meeting={m} file={f.name} state={f.recording!}
+                <RecordingLine key={f.name} meeting={m} file={f.name} state={f.recording!} onRead={() => onRead(m.id, f.name)}
                   progress={job.transcription?.meeting === m.id && job.transcription.file === f.name ? job.transcription : null}
                   installed={job.installed_models} speeds={job.model_speeds} disabled={busy !== null || m.in_digest}
                   onAction={(action, message, body, stopFirst) => act(`${action}-${m.id}-${f.name}`, async () => {
