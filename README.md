@@ -828,6 +828,12 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
   the transcript made after the meeting both follow it. It applies from the audio saved
   so far, so to the speech part that starts next. Whisper then writes that language;
   SenseVoice takes it as a hint and still follows clear speech in another language.
+- **Parts of a meeting**: a transcript made after a meeting cuts it at 2 seconds of
+  silence, and a live transcript at half a second, so text keeps coming. Each part is
+  given a moment of the audio around it, speech too long for the model is split at a
+  quiet moment, and text a model repeated in a loop is marked `[repeated N times]`. A live
+  transcript that is final at Stop keeps its shorter parts. These choices follow
+  [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) (MIT).
 - Downloads show their progress, can be cancelled and continue where they stopped. Press
   Download on a second model while one runs and it waits its turn;
   every file is checked against its pinned checksum before it is used. On a computer

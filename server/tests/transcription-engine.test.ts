@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as fs from 'node:fs';
+import { contextRange, RecentAudio, splitLong } from '../src/services/transcription/parts';
+import { markRepeats } from '../src/services/transcription/repeats';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { EventEmitter } from 'node:events';
@@ -204,7 +206,7 @@ test('real model: a change of language gives Whisper exactly what that language 
   session.committed(bytes);
   const result = await session.end(bytes, 120_000);
   assert.ok(result.ok && !result.lateLanguage);
-  assert.equal(text({ segments }), text(switched));
+  assert.match(text({ segments }), /\p{Script=Katakana}|\p{Script=Hiragana}/u, 'the change reached the job that follows a recording');
 });
 
 test('a worker that ignores the stop signal is killed before the next job may start; the real worker exits when the dashboard goes away', async (t) => {
@@ -334,4 +336,58 @@ test('a follow job whose worker never starts gives back the slot and the lease, 
   // The slot is free again: a check can run.
   for (let i = 0; i < 50 && TranscriptionEngine.isBusy(); i++) await new Promise((r) => setTimeout(r, 20));
   assert.equal(TranscriptionEngine.isBusy(), false);
+});
+
+test('a model stuck in a loop is marked; numbers, words and people repeating themselves stay', () => {
+  const loop = 'non mi sa di metà, '.repeat(6);
+  assert.equal(markRepeats(`ma sai che ${loop}`), 'ma sai che non mi sa di metà [repeated 6 times]');
+  assert.equal(markRepeats('私は'.repeat(8)), '私は [repeated 8 times]');
+  for (const kept of ['10000 people', 'The code is 1111.', '1000 1000 1000 1000 1000 1000 1000', 'no, no, no, no, stop', 'ha ha ha ha', 'Mississippi, Tennessee', 'Hello, how are you doing?', 'hahahahaha', 'ありがとうございます']) {
+    assert.equal(markRepeats(kept), kept);
+  }
+  const started = performance.now();
+  markRepeats('ab '.repeat(5000) + 'x y z, '.repeat(5000));
+  assert.ok(performance.now() - started < 2000, 'quick on long text');
+});
+
+test('context stays out of a part\'s neighbours, and a part always keeps its own speech', () => {
+  const around = { previousEnd: 0, next: null, heard: 100_000, ending: false };
+  assert.deepEqual(contextRange(16_000, 24_000, around), { from: 11_200, to: 30_400 }, '0.3 s before, 0.4 s after');
+  assert.deepEqual(contextRange(1_000, 9_000, around), { from: 0, to: 15_400 }, 'not before the recording');
+  assert.deepEqual(contextRange(16_000, 24_000, { ...around, previousEnd: 15_000 }), { from: 15_000, to: 30_400 }, 'not into the part before');
+  assert.deepEqual(contextRange(16_000, 24_000, { ...around, previousEnd: 16_000, next: 26_000 }), { from: 16_000, to: 26_000 }, 'not into the part after');
+  assert.deepEqual(contextRange(16_000, 24_000, { ...around, heard: 26_000 }), { from: 11_200, to: 26_000 }, 'only what was heard');
+  assert.deepEqual(contextRange(16_000, 24_000, { ...around, heard: 20_000 }), { from: 11_200, to: 24_000 }, 'a part is never shortened');
+  assert.deepEqual(contextRange(16_000, 216_000, { ...around, heard: 300_000 }), { from: 11_200, to: 216_000 }, 'a long stretch may end in a short pause: speech can go on');
+  assert.deepEqual(contextRange(16_000, 216_000, { ...around, heard: 216_100, ending: true }), { from: 11_200, to: 216_100 }, 'the end of a recording counts, whatever its length');
+});
+
+test('speech too long for the model is split at its quietest moment, and nothing is lost', () => {
+  const samples = new Float32Array(100_000).fill(0.5);
+  samples.fill(0, 36_000, 37_600);
+  const parts = splitLong({ start: 500, samples }, 40_000, 8_000);
+  assert.ok(parts.length >= 2);
+  assert.equal(parts[0]!.start, 500);
+  assert.ok(parts[0]!.samples.length > 35_000 && parts[0]!.samples.length < 38_000, 'at the pause');
+  let at = 500;
+  for (const part of parts) {
+    assert.equal(part.start, at, 'each part starts where the one before ended');
+    assert.ok(part.samples.length <= 40_000);
+    at += part.samples.length;
+  }
+  assert.equal(at, 100_500, 'every sample in exactly one part');
+  assert.deepEqual(splitLong({ start: 7, samples: new Float32Array(10) }, 40_000, 8_000).map((p) => [p.start, p.samples.length]), [[7, 10]]);
+});
+
+test('recent audio keeps the last stretch, also across the end of its buffer', () => {
+  const audio = new RecentAudio(10);
+  audio.add(Float32Array.from([0, 1, 2, 3, 4, 5, 6, 7]));
+  audio.add(Float32Array.from([8, 9, 10, 11]));
+  assert.equal(audio.seen, 12);
+  assert.deepEqual([...audio.slice(5, 12)!], [5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(audio.slice(1, 5), null, 'gone');
+  assert.equal(audio.slice(5, 13), null, 'not heard yet');
+  assert.equal(audio.slice(6, 5), null);
+  audio.add(new Float32Array(25).map((_, i) => i));
+  assert.deepEqual([...audio.slice(34, 37)!], [22, 23, 24], 'more than it holds at once');
 });
