@@ -23,6 +23,8 @@ const file = [
 ].join('\n');
 assert.deepEqual(transcriptParts(file), [{ time: '00:00:01', text: 'Fictional words.' }, { time: '01:02:03', text: '[ten past] in brackets' }]);
 assert.deepEqual(transcriptParts('# Transcript\n\n```text\n\n```\n'), [], 'a transcript with no speech');
+assert.deepEqual(transcriptParts('```text\n[00:00:01 → 00:00:04] Speaker 2\n  Fictional words.\n```\n'), [{ time: '00:00:01', speaker: 'Speaker 2', text: 'Fictional words.' }]);
+assert.equal(transcriptParts('```text\n[00:00:01 → 00:00:04] Speaker two\n  Fictional.\n```\n'), null, 'anything else after the time is not ours');
 assert.equal(transcriptParts('nothing here'), null, 'not a transcript: never reported as no speech');
 assert.equal(transcriptParts('```text\nsome other format\n```\n'), null);
 assert.equal(transcriptParts('```text\n[00:00:01 → 00:00:02]\n  no end'), null);

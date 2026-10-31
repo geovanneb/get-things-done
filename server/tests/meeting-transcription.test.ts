@@ -576,6 +576,11 @@ test('the page can read the transcript the server writes', () => {
     { time: '08:00:00', text: '<b>Fictional</b> ``` words' }, { time: '08:00:03', text: 'line one line two' },
   ]);
   assert.deepEqual(transcriptParts(audioTranscriptMarkdown('a.wav', 'hash', 'fast', 'auto', 10, [], true)), []);
+  const voices = [{ start: 1, end: 2, text: 'Fictional words.', speaker: 2 }, { start: 3, end: 4, text: 'Not clear whose.' }];
+  assert.deepEqual(transcriptParts(audioTranscriptMarkdown('a.wav', 'hash', 'fast', 'auto', 4, voices, true)), [
+    { time: '00:00:01', speaker: 'Speaker 2', text: 'Fictional words.' }, { time: '00:00:03', text: 'Not clear whose.' },
+  ], 'speakers too');
+});
 
 test('speakers are marked in the transcript, and when finding them fails the transcript is still made', async (t) => {
   const ws = await workspace(t);

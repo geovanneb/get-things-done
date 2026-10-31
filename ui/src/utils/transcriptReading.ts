@@ -1,6 +1,7 @@
 import type { QueuedMeeting } from '@/types';
 
-export interface TranscriptPart { time: string; text: string }
+/** `speaker`: `Speaker 2`, a label for one recording, when the part is clearly one voice. */
+export interface TranscriptPart { time: string; speaker?: string; text: string }
 
 /** The transcript to read of a recording: the final one when there is one, else the live draft. */
 export interface Readable { name: string; final: boolean }
@@ -37,9 +38,9 @@ export function transcriptParts(markdown: string): TranscriptPart[] | null {
   if (close < 0) return null;
   const parts: TranscriptPart[] = [];
   for (const line of lines.slice(open + 1, close)) {
-    const time = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\]$/.exec(line);
+    const time = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\]( Speaker \d{1,3})?$/.exec(line);
     const last = parts[parts.length - 1];
-    if (time) parts.push({ time: time[1]!, text: '' });
+    if (time) parts.push({ time: time[1]!, ...(time[2] ? { speaker: time[2].trim() } : {}), text: '' });
     else if (line.startsWith('  ') && last) last.text += (last.text ? ' ' : '') + line.trim();
     else if (line.trim()) return null;
   }

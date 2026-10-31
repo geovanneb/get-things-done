@@ -33,6 +33,7 @@ export function TranscriptReader({ meetingId, title, transcript, onClose }: { me
         {loaded?.parts?.map((p, i) => (
           <p key={i} style={{ margin: '0 0 6px' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 8 }}>{clockLine(p.time)}</span>
+            {p.speaker && <span style={{ fontWeight: 600, marginRight: 6 }}>{p.speaker}:</span>}
             {p.text}
           </p>
         ))}
