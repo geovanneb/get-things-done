@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { getBundledScaffoldPath } from './paths';
 
 /**
@@ -81,4 +82,14 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
 
 export function getAppVersion(): string {
   return load().getAppVersion();
+}
+
+/**
+ * What the dashboard does when a workspace opens: its app-provided files brought up to this version, one writer at a
+ * time. Loaded next to the scaffolder, from the same build.
+ */
+export async function refreshWorkspace(workspacePath: string): Promise<{ status: 'done'; result: UpgradeResult } | { status: 'skipped'; reason: string }> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const refresh = require(path.join(path.dirname(getBundledScaffoldPath()), 'workspaceRefresh.js')) as { refreshWorkspace: typeof refreshWorkspace };
+  return refresh.refreshWorkspace(workspacePath);
 }

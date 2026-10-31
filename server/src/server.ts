@@ -12,6 +12,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { watcherService } from './services/watcherService';
 import { routineScheduler } from './services/routineScheduler';
 import { WorkspaceService } from './services/workspace';
+import { refreshWorkspaceFiles } from './services/workspaceActivation';
 import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 import { AgentRunnerService } from './services/agentRunner';
@@ -140,6 +141,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       try {
         const workspacePath = workspaceService.getWorkspacePath();
         console.log(`Watching workspace: ${workspacePath}`);
+        if (workspaceService.isExistingWorkspace(workspacePath)) void refreshWorkspaceFiles(workspacePath);
         watcherService.start(workspacePath);
         // Notes left while the dashboard was closed: the watcher only reports what changes from now on.
         void scheduleKaizenIntake();
