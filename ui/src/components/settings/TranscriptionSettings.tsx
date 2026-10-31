@@ -14,10 +14,14 @@ function size(bytes: number): string {
   return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
 }
 
-function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onAction, onTested }: {
+function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize, onChoose, onAction, onTested }: {
   model: TranscriptionModel;
   chosen: boolean;
+  /** A download or a save runs, so nothing else may touch the model files. */
   busy: boolean;
+  saving: boolean;
+  /** Another dashboard downloads: a download here has to wait for it. */
+  elsewhere: boolean;
   /** The model is here but the voice-activity model every transcription needs is not. */
   vadMissing: boolean;
   vadSize: number;
@@ -52,6 +56,7 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
   };
   const d = model.download;
   const running = d?.status === 'downloading' || d?.status === 'verifying';
+  const queued = d?.status === 'queued';
   const percent = d && d.total ? Math.floor((d.received / d.total) * 100) : 0;
   return (
     <div style={{
@@ -59,7 +64,7 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
       background: chosen ? 'var(--color-accent-subtle)' : 'transparent', display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
-        <input type="radio" name="transcription-model" checked={chosen} onChange={onChoose} disabled={busy} style={{ marginTop: 4 }} />
+        <input type="radio" name="transcription-model" checked={chosen} onChange={onChoose} disabled={saving} style={{ marginTop: 4 }} />
         <span style={{ flex: 1 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 'var(--text-sm)' }}>{model.name}</strong>
@@ -88,6 +93,7 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
           </p>
         </div>
       )}
+      {queued && <p role="status" style={hintStyle}>Waiting for the download before it. It starts by itself.</p>}
       {!running && d?.message && (
         <p role="alert" style={{ ...hintStyle, color: d.status === 'failed' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{d.message}</p>
       )}
@@ -100,7 +106,7 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
         <p role={check.ok ? 'status' : 'alert'} style={{ ...hintStyle, color: check.ok ? 'var(--color-success)' : 'var(--color-critical)' }}>{check.message}</p>
       )}
       <div style={{ display: 'flex', gap: 8 }}>
-        {running
+        {running || queued
           ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
           : model.installed
             ? <>
@@ -109,7 +115,7 @@ function ModelCard({ model, chosen, busy, vadMissing, vadSize, onChoose, onActio
               {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={speedTest.running} onClick={() => void runSpeedTest()}>{model.speed ? 'Test speed again' : 'Test speed'}</Button>}
               <Button size="sm" variant="ghost" disabled={busy || check.running || speedTest.running} onClick={() => onAction('delete')}>Delete</Button>
             </>
-            : <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>
+            : <Button size="sm" variant="secondary" disabled={saving || elsewhere} onClick={() => onAction('download')}>
               {model.partial > 0 ? `Continue download (${size(model.partial)} of ${size(model.size)})` : `Download (${size(model.size)})`}
             </Button>}
       </div>
@@ -186,7 +192,7 @@ export default function TranscriptionSettings() {
       })()}
       <div role="radiogroup" aria-label="Transcription model" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {data.models.map((m) => (
-          <ModelCard key={m.id} model={m} chosen={m.id === data.settings.model} busy={saving || (downloading && m.download === null)}
+          <ModelCard key={m.id} model={m} chosen={m.id === data.settings.model} busy={saving || (downloading && m.download?.status !== 'downloading')} saving={saving} elsewhere={data.downloading_elsewhere}
             vadMissing={!data.vad_installed} vadSize={data.vad_size}
             onChoose={() => void save({ model: m.id })} onAction={(a) => void act(m, a)} onTested={refetch} />
         ))}

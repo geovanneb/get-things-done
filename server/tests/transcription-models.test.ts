@@ -373,3 +373,58 @@ test('each model offers the languages it has, and a language it lacks goes back 
   assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17' }, whisper).language, 'auto', 'a saved language the model lacks would stop its engine');
   assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17', language: 'vi' }).language, 'auto');
 });
+
+test('a second download waits its turn, can be taken out of the queue, and goes on after one that failed', async (t) => {
+  await modelsFolder(t);
+  const server = http.createServer((req, res) => {
+    const body = (files as Record<string, Buffer>)[(req.url ?? '/').slice(1)];
+    if (!body) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { 'Content-Length': body.length });
+    // Slow, so the first download is still running when the others are asked for.
+    setTimeout(() => res.end(body), 150);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise<void>((r) => server.close(() => r())));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const { models: [first], vad } = catalog(base);
+  const named = (id: string): CatalogModel => ({ ...first!, id, name: id });
+  const broken: CatalogModel = { ...named('broken'), files: first!.files.map((f) => ({ ...f, url: `${base}/broken/${f.name}` })) };
+  const service = new TranscriptionModelService([broken, named('second'), named('third')], vad);
+  const status = async (id: string) => (await service.view()).models.find((m) => m.id === id)!.download?.status;
+
+  await service.download('broken');
+  await service.download('second');
+  await service.download('second');
+  await service.download('third');
+  assert.equal(await status('second'), 'queued');
+  assert.equal(await status('third'), 'queued');
+  await service.cancel('third');
+  assert.equal(await status('third'), undefined, 'out of the queue, nothing else stops');
+
+  await TranscriptionModelService.settled();
+  const view = await service.view();
+  assert.equal(await status('broken'), 'failed');
+  assert.equal(view.models.find((m) => m.id === 'second')!.installed, true, 'the one that waited went on after the failure');
+  assert.equal(view.models.find((m) => m.id === 'third')!.installed, false);
+});
+
+test('models that wait still start when the download before them ends early, each with the service that took it', async (t) => {
+  await modelsFolder(t);
+  const { base } = await fileServer(t, files);
+  const { models: [model], vad } = catalog(base);
+  // The first download finds it has nothing to do, after the second was asked for.
+  let open: () => void = () => {};
+  const gate = new Promise<void>((r) => { open = r; });
+  class Installed extends TranscriptionModelService {
+    override async installed(): Promise<boolean> { await gate; return true; }
+  }
+  const first = new Installed([{ ...model!, id: 'first', name: 'first' }], vad);
+  const other = new TranscriptionModelService([{ ...model!, id: 'second', name: 'second' }], vad);
+  const started = first.download('first');
+  await other.download('second');
+  assert.equal((await other.view()).models[0]!.download?.status, 'queued');
+  open();
+  await started;
+  await TranscriptionModelService.settled();
+  assert.equal((await other.view()).models[0]!.installed, true);
+});
