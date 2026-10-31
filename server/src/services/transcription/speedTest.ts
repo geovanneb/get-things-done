@@ -34,7 +34,12 @@ export interface SpeedResult {
   measured_at: string;
   /** The computer it was measured on. */
   cpu: string;
+  /** For the GPU engine: the device it really used. Only "MTL…" (Metal) makes a GPU model one to choose. */
+  backend?: string;
 }
+
+/** A GPU model tested on this computer and shown to run on the GPU, not silently on its CPU. */
+export const ranOnGpu = (speed: SpeedResult | null | undefined): boolean => Boolean(speed?.backend?.startsWith('MTL'));
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
@@ -82,7 +87,8 @@ export async function readSpeeds(): Promise<Record<string, SpeedResult>> {
     if (!MODEL_ID.test(id)) continue;
     // A damaged or edited file is ignored; testing again replaces it.
     const r = await readResult(path.join(speedDir(), name));
-    if (r && r.cpu === here && Number.isFinite(r.realtime_x) && r.realtime_x > 0 && r.realtime_x < 10_000) out[id] = r;
+    const forgotten = revoked.get(id);
+    if (r && !(forgotten !== undefined && !(Date.parse(r.measured_at) > forgotten)) && r.cpu === here && Number.isFinite(r.realtime_x) && r.realtime_x > 0 && r.realtime_x < 10_000) out[id] = r;
   }
   return out;
 }
@@ -128,11 +134,17 @@ export async function runSpeedTest(engine: TranscriptionEngine, id: string, fetc
     await fsp.writeFile(wav, Buffer.concat([wavHeader(body.length), body]), { mode: 0o600 });
     const started = Date.now();
     // Shown to the user as it is, like the download's: a failed engine is what the test is there to find.
-    const result = await engine.transcribe(wav, { model: id, language: 'auto' }).catch((err: Error & { statusCode?: number }) => {
+    // A test that fails on the model itself forgets its earlier result: a GPU model that once passed must not stay
+    // chosen once it no longer works. A busy engine says nothing about the model.
+    const result = await engine.transcribe(wav, { model: id, language: 'auto' }).catch(async (err: Error & { statusCode?: number; engineBusy?: boolean }) => {
+      if (!err.engineBusy) await forgetSpeed(id);
       throw err.statusCode ? err : httpError(424, `The speed test failed: ${err.message}`);
     });
     // The sample is speech, so an engine that hears none is not working, however fast it was.
-    if (result.segments.length === 0) throw httpError(424, 'The speed test failed: the model found no speech in the sample.');
+    if (result.segments.length === 0) {
+      await forgetSpeed(id);
+      throw httpError(424, 'The speed test failed: the model found no speech in the sample.');
+    }
     const work = (Date.now() - started - (result.load_ms ?? 0)) / 1000;
     const seconds = body.length / BYTES_PER_SECOND;
     const speed: SpeedResult = {
@@ -140,10 +152,27 @@ export async function runSpeedTest(engine: TranscriptionEngine, id: string, fetc
       load_ms: result.load_ms,
       measured_at: new Date().toISOString(),
       cpu: thisComputer(),
+      ...(result.backend ? { backend: result.backend } : {}),
     };
     await atomicWrite(speedFile(id), JSON.stringify(speed, null, 2));
+    // Passed here: whatever was forgotten before, this result counts.
+    revoked.delete(id);
     return speed;
   } finally {
     fs.rmSync(wav, { force: true });
   }
+}
+
+/**
+ * When a result was forgotten in this process, by model: also when its file could not be removed (a read-only
+ * folder), a result measured before that counts for nothing. A newer one, from a new test here or in another
+ * dashboard, counts.
+ */
+const revoked = new Map<string, number>();
+
+/** Forgets a model's result: a GPU model that failed must show again, with a new test, that it runs on the GPU. */
+export async function forgetSpeed(id: string): Promise<void> {
+  if (!MODEL_ID.test(id)) return;
+  revoked.set(id, Date.now());
+  await fsp.rm(speedFile(id), { force: true }).catch(() => {});
 }

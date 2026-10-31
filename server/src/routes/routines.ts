@@ -3,7 +3,7 @@ import { param } from '../utils/params';
 import { RoutineService, routineId } from '../services/routineService';
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
 
-import { TranscriptionModelService } from '../services/transcriptionModels';
+import { TranscriptionModelService, CATALOG, runnableModel } from '../services/transcriptionModels';
 const router = Router();
 const service = new RoutineService();
 const transcription = new MeetingTranscriptionService();
@@ -62,8 +62,12 @@ router.get('/meeting-digest', async (_req: Request, res: Response) => {
     ...await service.meetingDigest(), transcription: transcription.progress(),
     installed_models: models ? models.map((m) => m.id) : null,
     // Names to show instead of ids, and the model chosen now: a waiting recording can switch to it.
-    model_names: Object.fromEntries((view?.models ?? []).map((m) => [m.id, m.name])),
-    chosen_model: view?.settings.model ?? null,
+    // Every model's name, also of one not offered here (a GPU model named by a copied workspace).
+    model_names: Object.fromEntries(CATALOG.map((m) => [m.id, m.name])),
+    // The model a waiting recording would really get now: a GPU model not verified here is its CPU counterpart.
+    chosen_model: view ? await runnableModel(view.settings.model) : null,
+    // The model each model really runs as here: a waiting recording's target is shown, and checked, as that one.
+    runnable_models: Object.fromEntries(await Promise.all(CATALOG.map(async (m) => [m.id, await runnableModel(m.id)] as const))),
     // How fast each is on this computer, when tested: for how long a recording will take.
     model_speeds: Object.fromEntries((models ?? []).flatMap((m) => (m.speed ? [[m.id, m.speed.realtime_x]] : []))),
   });

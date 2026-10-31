@@ -4,9 +4,10 @@ import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft, namesFor, parseSpeakerNames, SPEAKER_LABEL, transcriptSpeakers, MAX_SPEAKER_NAMES } from './meetingDigestService';
-import { TranscriptionModelService, CATALOG, languagesFor, SPEAKER_MODEL } from './transcriptionModels';
+import { TranscriptionModelService, CATALOG, languagesFor, runnableModel, SPEAKER_MODEL } from './transcriptionModels';
 import type { LanguageChange } from './transcription/languages';
 import { hasWords } from './transcription/repeats';
+import { forgetSpeed, ranOnGpu } from './transcription/speedTest';
 import { TranscriptionEngine, Segment, engineEvents, setLiveRoomMaker, type TranscribeOptions } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
 import { HeldLock, tryLock, unlock } from '../utils/fileLock';
@@ -58,6 +59,8 @@ export interface TranscriptionProgress { meeting: string; file: string; done: nu
 export const meetingTranscriptionEvents = new EventEmitter();
 
 interface Job { meeting: string; file: string; generation: string; token: string; abort: AbortController; progress: TranscriptionProgress; lock: HeldLock; model: string; language: string; changes: LanguageChange[]; speakers: boolean; speakerNote?: string;
+  /** Why it was made with another model than the one asked for (the GPU failed, so the CPU made it). */
+  engineNote?: string;
   /** It found the engine busy and went back in line: it waits for the engine to come free, not for this job's end. */
   engineBusy?: boolean;
   /** How many times the engine had come free when this job started (see `frees`). */
@@ -70,6 +73,9 @@ interface Job { meeting: string; file: string; generation: string; token: string
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
 let ticking = 0;
+/** Failures of the GPU engine itself, after which a recording is made again on the CPU (see whisperHelper.ts). */
+const GPU_FAILURES = ['gpu', 'load', 'missing', 'timeout', 'protocol'];
+
 /** Recordings whose live transcript is about to start: no transcription starts meanwhile. */
 let heldForLive = 0;
 /** Checks choosing a recording to transcribe, past the first look: a recording waits for them. */
@@ -98,7 +104,7 @@ const languageLine = (language: string, changes: LanguageChange[]) =>
   [languageWords(language), ...changes.map((c) => `${languageWords(c.language)} from ${clock(c.at)}`)].join(', ');
 
 /** A readable transcript of a recording, in the same shape as the copies of WebVTT transcripts. */
-export function audioTranscriptMarkdown(source: string, hash: string, model: string, language: string, seconds: number, segments: Segment[], complete: boolean, changes: LanguageChange[] = [], changesLate = false, speakerNote: string | null = null): string {
+export function audioTranscriptMarkdown(source: string, hash: string, model: string, language: string, seconds: number, segments: Segment[], complete: boolean, changes: LanguageChange[] = [], changesLate = false, speakerNote: string | null = null, engineNote: string | null = null): string {
   const body = segments.map((s) => `[${clock(s.start)} → ${clock(s.end)}]${s.speaker ? ` Speaker ${s.speaker}` : ''}\n  ${s.text.replace(/\n+/g, ' ')}`).join('\n\n');
   const voices = new Set(segments.map((s) => s.speaker).filter(Boolean)).size;
   let longest = 2;
@@ -113,6 +119,7 @@ export function audioTranscriptMarkdown(source: string, hash: string, model: str
     `- Length: ${clock(seconds)}, ${segments.length} parts with speech`,
     voices ? `- ${voices} ${voices === 1 ? 'voice' : 'voices'} told apart. Speaker 1 and so on are labels for this recording, not names; a part without one is not clear.`
       : `- Speakers are not told apart${speakerNote ? ` (${speakerNote})` : ''}: each part is what was said, in order.`,
+    ...(engineNote ? [`- ${engineNote}`] : []),
     '',
     complete
       ? '**Complete.** Every part of the recording with speech is below.'
@@ -250,7 +257,8 @@ export class MeetingTranscriptionService {
     const settings = await this.models.readSettings();
     // "Use <model>" names the model it showed; another dashboard may have changed Settings meanwhile.
     if (model !== undefined && !CATALOG.some((m) => m.id === model)) throw httpError(400, 'Not a transcription model');
-    const use = model ?? settings.model;
+    const use = await runnableModel(model ?? settings.model);
+    if (model !== undefined && use !== model) throw httpError(409, 'That GPU model is not verified here: run its speed test first');
     if (!await this.models.installedPath(use)) throw httpError(409, model ? 'That model is not downloaded' : 'The model chosen in Settings > Transcription is not downloaded yet: download it there first');
     const speakers = settings.speakers === true && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
     const meeting = await this.change(meetingId, file, async (r, m) => {
@@ -415,7 +423,10 @@ export class MeetingTranscriptionService {
         // Keyed by the meeting's folder, so the same meeting id in another workspace is another recording.
         for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending' && (setAside.get(path.join(folder, f.name)) ?? 0) <= Date.now())) {
           // Its own target, fixed when it was finished; a model that is not downloaded keeps it waiting, and the others go on.
-          const wanted = candidate.recording?.target ?? { model, language };
+          const target = candidate.recording?.target ?? { model, language };
+          // A GPU model that is not verified here (never tested, failed since, or another computer) runs as its CPU
+          // counterpart: it is never retried as it was, and a copied workspace still gets transcribed.
+          const wanted = { ...target, model: await runnableModel(target.model) };
           if (!await this.models.installedPath(wanted.model)) continue;
           use = { model: wanted.model, ...languagesFor(wanted.model, wanted.language, wanted.changes) };
           wantSpeakers = candidate.recording?.target ? candidate.recording.target.speakers === true : speakers;
@@ -449,6 +460,8 @@ export class MeetingTranscriptionService {
     let seconds = 0;
     let error: Error | null = null;
     let notified = 0;
+    /** The model that made it: the one asked for, or its CPU counterpart when the GPU failed. */
+    let used = model;
     // Checked on its own clock, through conversion and model loading too: a Stop or a removal from another
     // dashboard ends the job even while it reports no progress.
     const owner = setInterval(() => {
@@ -472,7 +485,37 @@ export class MeetingTranscriptionService {
           if (now - notified >= NOTIFY_MS) { notified = now; meetingTranscriptionEvents.emit('change'); }
         },
       };
-      const result = job.speakers ? await this.engine.transcribeWithSpeakers(wav, options) : { ...await this.engine.transcribe(wav, options), speaker_note: null };
+      const attempt = async (with_: string) => {
+        segments.length = 0;
+        const run = { ...options, model: with_ };
+        return job.speakers ? await this.engine.transcribeWithSpeakers(wav!, run) : { ...await this.engine.transcribe(wav!, run), speaker_note: null };
+      };
+      const gpu = CATALOG.find((c) => c.id === model)?.gpu;
+      let result: Awaited<ReturnType<typeof attempt>>;
+      try {
+        result = await attempt(model);
+        // Done, but not on the GPU (the engine fell back to the CPU by itself): a GPU failure like any other.
+        if (gpu && !ranOnGpu({ backend: result.backend } as Parameters<typeof ranOnGpu>[0])) {
+          throw Object.assign(new Error(`The GPU engine ran on ${result.backend ?? 'an unknown device'}, not the graphics chip`), { failure: 'gpu' });
+        }
+      } catch (err) {
+        // The GPU model failed on the GPU itself (not a Stop, a busy engine or a recording it cannot read): it must
+        // pass a new speed test before it is chosen again, and this recording is made once more, whole, on the CPU.
+        const failure = (err as { failure?: string }).failure;
+        if (!gpu || job.abort.signal.aborted || !failure || !GPU_FAILURES.includes(failure)) throw err;
+        await forgetSpeed(model);
+        // What the GPU heard is not kept: the CPU starts over, and the page shows it from the beginning.
+        segments.length = 0;
+        job.progress = { ...job.progress, done: 0, total: 0 };
+        meetingTranscriptionEvents.emit('change');
+        const cpu = CATALOG.find((c) => c.id === gpu.cpu)!;
+        if (!await this.models.installedPath(cpu.id)) throw new Error(`The GPU engine failed (${(err as Error).message}). Download ${cpu.name} in Settings > Transcription to transcribe it on the CPU instead, then try again.`, { cause: err });
+        if (job.abort.signal.aborted || !await this.stillOurs(job)) throw new Error('Cancelled.', { cause: err });
+        console.error(`[transcription] ${job.meeting}/${job.file}: the GPU engine failed, transcribing on the CPU: ${(err as Error).message}`);
+        job.engineNote = `Made with ${cpu.name} on the CPU: the GPU engine failed (${(err as Error).message.slice(0, 200)}).`;
+        used = cpu.id;
+        result = await attempt(used);
+      }
       job.speakerNote = result.speaker_note ?? undefined;
       seconds = result.seconds;
     } catch (err) {
@@ -483,7 +526,7 @@ export class MeetingTranscriptionService {
       if (converted && wav) await fsp.rm(wav, { force: true }).catch(() => {});
     }
     try {
-      await this.publish(job, model, language, segments, seconds || job.progress.total, error);
+      await this.publish(job, used, language, segments, seconds || job.progress.total, error);
     } catch (err) {
       // Left running on disk: recovery puts it back in line, and it waits a while so the others go first.
       job.unsaved = true;
@@ -532,7 +575,7 @@ export class MeetingTranscriptionService {
       let name = `${stem}.transcript.md`;
       for (let n = 2; meeting.files.some((f) => f.name.toLowerCase() === name.toLowerCase())
         || await fsp.lstat(path.join(folder, name)).then(() => true, () => false); n++) name = `${stem}-${n}.transcript.md`;
-      const content = Buffer.from(audioTranscriptMarkdown(entry.name, entry.sha256, model, language, seconds, segments, complete, job.changes, false, job.speakerNote ?? null), 'utf-8');
+      const content = Buffer.from(audioTranscriptMarkdown(entry.name, entry.sha256, model, language, seconds, segments, complete, job.changes, false, job.speakerNote ?? null, job.engineNote ?? null), 'utf-8');
       const target = path.join(folder, name);
       await atomicWrite(target, content);
       let replaced: string | null = null;

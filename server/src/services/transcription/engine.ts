@@ -18,7 +18,8 @@ import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './p
  */
 
 export interface Segment { start: number; end: number; text: string; speaker?: number }
-export interface TranscriptResult { segments: Segment[]; seconds: number; load_ms: number | null }
+/** `backend`: for the GPU engine, the device it really used (e.g. "MTL0"). */
+export interface TranscriptResult { segments: Segment[]; seconds: number; load_ms: number | null; backend?: string }
 export interface TranscribeOptions { model?: string; language?: string; changes?: LanguageChange[]; turns?: SpeakerTurn[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal }
 /** `gpu`: the GPU engine (gtd-whisper) is part of this install. Whether it works here is for the speed test to show. */
 export interface EngineStatus { available: boolean; version: string | null; error: string | null; gpu: boolean }
@@ -248,9 +249,10 @@ export class TranscriptionEngine {
   private async recognize(wav: string, { model, format }: Awaited<ReturnType<TranscriptionEngine['prepare']>>, language: string, options: TranscribeOptions, release: (() => Promise<void>) | undefined, held: boolean): Promise<TranscriptResult> {
     const segments: Segment[] = [];
     let loadMs: number | null = null;
+    let backend: string | undefined;
     let seconds = format.duration;
     await this.run({ type: 'transcribe', model, wav, language, ...(options.changes?.length ? { changes: options.changes } : {}), ...(options.turns?.length ? { turns: options.turns } : {}) }, transcriptionTimeout(format.duration), (reply) => {
-      if (reply.type === 'loaded') loadMs = reply.ms;
+      if (reply.type === 'loaded') { loadMs = reply.ms; backend = reply.backend; }
       if (reply.type === 'segment') {
         const segment = { start: reply.start, end: reply.end, text: reply.text, ...(reply.speaker ? { speaker: reply.speaker } : {}) };
         segments.push(segment);
@@ -259,7 +261,7 @@ export class TranscriptionEngine {
       if (reply.type === 'progress') options.onProgress?.(reply.done, reply.total);
       if (reply.type === 'done') seconds = reply.seconds;
     }, options.signal, release, held);
-    return { segments, seconds, load_ms: loadMs };
+    return { segments, seconds, load_ms: loadMs, ...(backend ? { backend } : {}) };
   }
 
   /**
@@ -276,6 +278,8 @@ export class TranscriptionEngine {
     detector?: string;
   }): Promise<FollowSession> {
     if (closing) throw httpError(503, 'The dashboard is shutting down');
+    // The GPU engine transcribes after a meeting only.
+    if (CATALOG.find((m) => m.id === options.model)?.gpu) throw httpError(400, 'A GPU model is not for the live transcript');
     if (busy) throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true });
     const releaseModel = await this.models.lease(options.model);
     let model: EngineModel;
@@ -372,8 +376,12 @@ export class TranscriptionEngine {
     if (!dir) throw httpError(409, `${entry.name} is not downloaded yet: download it in Settings > Transcription`);
     const vad = await this.models.installedPath(VAD.id);
     if (!vad) throw httpError(409, 'The voice-activity model is missing: download it in Settings > Transcription');
+    // The GPU engine is a program of the desktop app: without it, the model cannot run here.
+    const helper = entry.engine.kind === 'whisper-cpp' ? whisperHelperPath() : null;
+    if (entry.engine.kind === 'whisper-cpp' && !helper) throw Object.assign(httpError(409, `${entry.name} needs the desktop app on an Apple Silicon Mac`), { failure: 'missing' });
     return {
       kind: entry.engine.kind,
+      ...(helper ? { helper } : {}),
       files: Object.fromEntries(Object.entries(entry.engine.files).map(([role, name]) => [role, path.join(dir, name)])),
       vad: path.join(vad, VAD.files[0]!.name),
       // Leave a core for the dashboard and the rest of the computer.
@@ -427,7 +435,8 @@ export class TranscriptionEngine {
           if (reply.type === 'done' || reply.type === 'error') helper = null;
           // Once the job has ended (done, failed, cancelled, timed out), whatever the worker still sends is ignored.
           if (settled) return;
-          if (reply.type === 'error') { finish(new Error(reply.message)); return; }
+          // The GPU engine says what kind of failure it was: the queue falls back to the CPU only for a GPU one.
+          if (reply.type === 'error') { finish(Object.assign(new Error(reply.message), reply.failure ? { failure: reply.failure } : {})); return; }
           try { onReply(reply); } catch (err) { finish(err as Error); return; }
           if (reply.type === 'done' || reply.type === 'version') finish();
         });

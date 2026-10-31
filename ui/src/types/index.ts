@@ -746,6 +746,8 @@ export interface MeetingDigest {
   model_names: Record<string, string>;
   /** The model chosen in Settings now; null when unknown. */
   chosen_model: string | null;
+  /** The model each model really runs as here (a GPU model not verified here runs as its CPU counterpart). */
+  runnable_models?: Record<string, string>;
   queue_problems: { id: string; reason: string }[];
   max_meetings_limit: number;
 }
@@ -791,13 +793,19 @@ export interface TranscriptionModel {
   partial: number;
   download: { model: string; status: 'queued' | 'downloading' | 'verifying' | 'failed' | 'cancelled'; received: number; total: number; file: string; message?: string } | null;
   /** How fast it transcribed on this computer, when tested: seconds of speech per second of work. */
-  speed: { realtime_x: number; load_ms: number | null; measured_at: string } | null;
+  speed: { realtime_x: number; load_ms: number | null; measured_at: string; backend?: string } | null;
+  /** A model for the GPU engine: its CPU counterpart. */
+  gpu?: { cpu: string };
+  /** A GPU model: Test speed showed it runs on the GPU here, so it can be chosen. */
+  gpu_ready?: boolean;
 }
 
 export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; speakers: boolean; updated_at: string | null }
 
 export interface Transcription {
   models: TranscriptionModel[];
+  /** The model transcriptions run with now: the chosen one, or the CPU one of a GPU model not verified here. */
+  effective_model?: string;
   /** The optional speaker model, not one of the models to transcribe with. */
   speakers: Pick<TranscriptionModel, 'id' | 'name' | 'summary' | 'size' | 'installed' | 'partial' | 'download'>;
   settings: TranscriptionSettings;

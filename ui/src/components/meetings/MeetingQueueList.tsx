@@ -19,25 +19,29 @@ function minutes(seconds: number): string {
 }
 
 /** One recording of a queued meeting: where its transcription stands, and what can be done about it. */
-function RecordingLine({ meeting, file, state, progress, disabled, installed, speeds, names, chosen, onAction, onRead }: {
+function RecordingLine({ meeting, file, state, progress, disabled, installed, speeds, names, chosen, runnable, onAction, onRead }: {
   meeting: QueuedMeeting; file: string; state: RecordingState; progress: TranscriptionProgress | null; disabled: boolean; installed: string[] | null; speeds: Record<string, number>;
   /** Model names by id, and the model chosen in Settings now. */
   names: Record<string, string>; chosen: string | null;
+  /** The model each model really runs as here: a GPU model not verified here runs as its CPU counterpart. */
+  runnable: Record<string, string>;
   onAction: (action: 'stop' | 'retry' | 'accept' | 'use-live', message: string, body?: Record<string, string>, stopFirst?: boolean) => void;
   onRead: () => void;
 }) {
   let text: string;
   let tone = 'var(--color-text-muted)';
   const name = (id: string) => names[id] ?? id;
+  // The model this recording will really be transcribed with, which is what it waits for.
+  const target = state.target ? runnable[state.target.model] ?? state.target.model : null;
   // Fixed to a model that is not downloaded: it can switch to the one chosen now, when that one is.
-  const missing = state.status === 'pending' && Boolean(state.target) && Boolean(installed) && !installed!.includes(state.target!.model);
-  const switchTo = missing && chosen && chosen !== state.target!.model && installed!.includes(chosen) ? chosen : null;
+  const missing = state.status === 'pending' && target !== null && Boolean(installed) && !installed!.includes(target);
+  const switchTo = missing && chosen && chosen !== target && installed!.includes(chosen) ? chosen : null;
   if (state.status === 'running') {
     text = progress && progress.total > 0
       ? `Transcribing: ${Math.min(99, Math.floor((progress.done / progress.total) * 100))}% of ${minutes(progress.total)}`
       : progress ? 'Transcribing: loading the model' : 'Transcribing in another dashboard';
   } else if (missing) {
-    text = `Waits for ${name(state.target!.model)}, which is not downloaded: download it in Settings > Transcription${switchTo ? `, or use ${name(switchTo)}` : ''}`;
+    text = `Waits for ${name(target!)}, which is not downloaded: download it in Settings > Transcription${switchTo ? `, or use ${name(switchTo)}` : ''}`;
     tone = 'var(--color-warning)';
   } else if (state.status === 'pending') text = 'Waits for transcription; one recording at a time';
   else if (state.status === 'stopped') { text = 'Stopped: the meeting waits until you try again or remove it'; tone = 'var(--color-warning)'; }
@@ -48,14 +52,14 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   const draft = state.draft;
   if (draft) {
     const accurate = state.status === 'running' ? text.replace(/^Transcribing/, 'being made')
-      : state.status === 'pending' ? (missing ? `waits for ${name(state.target!.model)}, which is not downloaded (Settings > Transcription)` : 'waits its turn')
+      : state.status === 'pending' ? (missing ? `waits for ${name(target!)}, which is not downloaded (Settings > Transcription)` : 'waits its turn')
         : state.status === 'stopped' ? 'stopped'
           : state.status === 'failed' ? `failed (${state.error ?? 'unknown error'})`
             : 'partial: use one of them, or try again';
     // From Test speed, when the model was tested; a model that has not been gives no estimate.
-    const speed = state.target ? speeds[state.target.model] : undefined;
+    const speed = target ? speeds[target] : undefined;
     const estimate = speed && state.status === 'pending' && tone !== 'var(--color-warning)' ? `, about ${minutes(draft.seconds / speed)} of work` : '';
-    text = `Live transcript ready. The more accurate one${state.target ? ` (${name(state.target.model)})` : ''}: ${accurate}${estimate}`;
+    text = `Live transcript ready. The more accurate one${target ? ` (${name(target)})` : ''}: ${accurate}${estimate}`;
   }
   return (
     <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
@@ -113,7 +117,7 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
   const [query, setQuery] = React.useState('');
   const [all, setAll] = React.useState(false);
   // What needs you is always there; a search shows every match; otherwise the newest few, and the rest on request.
-  const { shown, hidden } = visibleMeetings(job.queue, query, all, job.installed_models ?? null);
+  const { shown, hidden } = visibleMeetings(job.queue, query, all, job.installed_models ?? null, SHOWN_MEETINGS, job.runnable_models ?? {});
   const found = matching(job.queue, query);
   const act = async (kind: string, fn: () => Promise<string | void>) => {
     setBusy(kind);
@@ -196,7 +200,7 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
               {m.status === 'queued' && m.files.filter((f) => f.recording && !(f.recording.status === 'done')).map((f) => (
                 <RecordingLine key={f.name} meeting={m} file={f.name} state={f.recording!} onRead={() => onRead(m.id, f.name)}
                   progress={job.transcription?.meeting === m.id && job.transcription.file === f.name ? job.transcription : null}
-                  installed={job.installed_models} speeds={job.model_speeds} names={job.model_names ?? {}} chosen={job.chosen_model ?? null}
+                  installed={job.installed_models} speeds={job.model_speeds} names={job.model_names ?? {}} chosen={job.chosen_model ?? null} runnable={job.runnable_models ?? {}}
                   disabled={busy !== null || m.in_digest}
                   onAction={(action, message, body, stopFirst) => act(`${action}-${m.id}-${f.name}`, async () => {
                     const base = `/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(f.name)}`;
