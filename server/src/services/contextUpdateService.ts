@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import { createHash } from 'crypto';
 import { WorkspaceService } from './workspace';
-import { reservedSequence } from './idReservations';
+import { reserveIds, reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
@@ -1530,7 +1530,8 @@ export class ContextUpdateService {
 
   /**
    * Moves the update's folder to the trash. Its materials can be the only copy of what was uploaded: a
-   * digest's meetings leave the queue once it holds them, recordings and transcripts included.
+   * digest's meetings leave the queue once it holds them, recordings and transcripts included. The id
+   * stays taken, so digest receipts and run history that name it never point at a newer update.
    */
   async remove(id: string): Promise<void> {
     return this.serialized(id, async () => {
@@ -1539,6 +1540,7 @@ export class ContextUpdateService {
       this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
       await this.requireNoRun(id, 'delete the update');
       const ws = workspaceService.getWorkspacePath();
+      await reserveIds([id]);
       await moveToTrash(ws, await workspaceEntry(ws, this.updateDir(id)));
     });
   }
