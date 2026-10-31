@@ -1,11 +1,23 @@
 const BASE_URL = '';
 
+/**
+ * What to tell the user about a failed request. The server's error handler sends `{ error, message }`,
+ * where `error` is only a name such as "Error" or "Bad Request"; a few routes send just `{ error }`.
+ */
+export function errorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') return fallback;
+  const { message, error } = body as { message?: unknown; error?: unknown };
+  if (typeof message === 'string' && message.trim()) return message;
+  if (typeof error === 'string' && error.trim()) return error;
+  return fallback;
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let message = `HTTP ${res.status}: ${res.statusText}`;
+    const fallback = `HTTP ${res.status}: ${res.statusText}`;
+    let message = fallback;
     try {
-      const body = await res.json();
-      message = body.error || body.message || message;
+      message = errorMessage(await res.json(), fallback);
     } catch {
       // ignore parse error
     }
