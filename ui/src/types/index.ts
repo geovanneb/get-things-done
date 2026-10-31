@@ -362,6 +362,8 @@ export interface WorkspaceConfig {
   git_installed?: boolean;
   /** Set when the workspace has a picture; changes with it. Older servers leave it out. */
   icon_version?: string | null;
+  /** The running app's version, from its package.json. Older servers leave it out. */
+  app_version?: string;
 }
 
 /** A workspace opened on this machine before, as listed by `GET /api/workspace/recent`. */
