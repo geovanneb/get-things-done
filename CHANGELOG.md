@@ -8,6 +8,17 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Customize the sidebar.** Right click the sidebar, use **Customize sidebar** (shown at its
+  bottom edge when you point at the sidebar), or go to **Settings → Appearance → Sidebar**. Drag items, or use the arrow buttons, to
+  change their order inside a group, and hide the ones you never use. Hidden items stay one click
+  away under **More**, which also shows their dots, so a broken routine is never hidden with its
+  item. Situation and Settings are always shown. **Reset to default** brings the standard sidebar
+  back. The order is saved in the workspace (`.situation-board/ui-preferences.json`), so it follows
+  you between the browser, the desktop app and other computers, and items from future releases
+  show up in their default place. (#191)
+
 ### Changed
 
 - **The sidebar is grouped by job and ordered by how often you use it.** Your daily work comes

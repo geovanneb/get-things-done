@@ -89,6 +89,20 @@ try {
     !htmlPreview.headers.get('content-security-policy')?.includes('allow-scripts') &&
     !htmlPreview.headers.get('content-security-policy')?.includes('allow-same-origin'));
 
+  // Sidebar order: saved in the workspace next to the scaffolded UI preferences, which it keeps.
+  const sidebarPrefs = { order: { work: ['board', 'situation', 'meetings', 'insights'] }, hidden: ['routines'] };
+  const sidebarSaved = await fetch(`${base}/api/workspace/sidebar`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sidebarPrefs),
+  });
+  const uiPrefs = JSON.parse(fs.readFileSync(path.join(ws, '.situation-board', 'ui-preferences.json'), 'utf-8'));
+  check('the sidebar order is saved in the workspace and read back',
+    sidebarSaved.ok && JSON.stringify(await (await fetch(`${base}/api/workspace/sidebar`)).json()) === JSON.stringify(sidebarPrefs) &&
+    JSON.stringify(uiPrefs.sidebar) === JSON.stringify(sidebarPrefs) && uiPrefs.default_view === 'situation');
+  const sidebarBad = await fetch(`${base}/api/workspace/sidebar`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: ['../escape'] }),
+  });
+  check('an invalid sidebar order is refused', sidebarBad.status === 400);
+
   // Workspace picture: a cropped PNG kept in the home config, never in the workspace folder.
   const putIcon = (image) => fetch(`${base}/api/workspace/icon`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }),

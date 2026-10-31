@@ -12,6 +12,9 @@ import { MeetingRecordingService } from '../services/meetingRecording';
 import {
   InvalidIconError, decodeIcon, removeWorkspaceIcon, saveWorkspaceIcon, workspaceIconPath, workspaceIconVersion,
 } from '../services/workspaceIcon';
+import {
+  InvalidSidebarPreferencesError, readSidebarPreferences, saveSidebarPreferences,
+} from '../services/sidebarPreferences';
 
 const router = Router();
 const workspaceService = new WorkspaceService();
@@ -186,6 +189,24 @@ router.put('/icon', async (req: Request, res: Response) => {
 router.delete('/icon', async (_req: Request, res: Response) => {
   await removeWorkspaceIcon(workspaceService.getWorkspacePath());
   res.json({ icon_version: null });
+});
+
+// GET /api/workspace/sidebar — the user's sidebar order and hidden items for this workspace
+router.get('/sidebar', async (_req: Request, res: Response) => {
+  res.json(await readSidebarPreferences(workspaceService.getWorkspacePath()));
+});
+
+// PUT /api/workspace/sidebar — save them; { order: {}, hidden: [] } is the default sidebar
+router.put('/sidebar', async (req: Request, res: Response) => {
+  try {
+    res.json(await saveSidebarPreferences(workspaceService.getWorkspacePath(), req.body));
+  } catch (err) {
+    if (err instanceof InvalidSidebarPreferencesError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
 });
 
 // POST /api/workspace/init

@@ -13,6 +13,7 @@ import {
   storeTextSize,
   watchSystemTheme,
 } from '../utils/theme';
+import { DEFAULT_SIDEBAR, type SidebarPrefs } from '../components/layout/navGroups';
 
 interface Notification {
   id: string;
@@ -84,6 +85,10 @@ interface AppState {
   /** Experimental: show the Agent Floor visualisation in the nav. */
   agenticVisualMode: boolean;
   showTaskIds: boolean;
+  /** The user's sidebar order and hidden items, saved in the workspace. */
+  sidebar: SidebarPrefs;
+  /** The sidebar is in "Customize" mode. */
+  sidebarEditing: boolean;
   /** Appearance preferences, persisted per browser. */
   theme: ThemeMode;
   accent: AccentName;
@@ -105,6 +110,8 @@ type Action =
   | { type: 'DATA_CHANGED'; payload: DataScope }
   | { type: 'SET_AGENTIC_VISUAL_MODE'; payload: boolean }
   | { type: 'SET_SHOW_TASK_IDS'; payload: boolean }
+  | { type: 'SET_SIDEBAR'; payload: SidebarPrefs }
+  | { type: 'SET_SIDEBAR_EDITING'; payload: boolean }
   | { type: 'SET_THEME'; payload: ThemeMode }
   | { type: 'SET_ACCENT'; payload: AccentName }
   | { type: 'SET_TEXT_SIZE'; payload: TextSize };
@@ -120,6 +127,8 @@ const initialState: AppState = {
   dataVersions: initialVersions,
   agenticVisualMode: readAgenticMode(),
   showTaskIds: readShowTaskIds(),
+  sidebar: DEFAULT_SIDEBAR,
+  sidebarEditing: false,
   theme: readThemeMode(),
   accent: readAccent(),
   textSize: readTextSize(),
@@ -176,6 +185,10 @@ function reducer(state: AppState, action: Action): AppState {
         // Preference is still applied for this session.
       }
       return { ...state, showTaskIds: action.payload };
+    case 'SET_SIDEBAR':
+      return { ...state, sidebar: action.payload };
+    case 'SET_SIDEBAR_EDITING':
+      return { ...state, sidebarEditing: action.payload };
     case 'SET_THEME':
       return { ...state, theme: action.payload };
     case 'SET_ACCENT':
