@@ -666,6 +666,8 @@ try {
       recordStart.status === 201 && firstBlock.status === 200 && sameBlock.offset === 32000
       && sealedResponse.status === 200 && sealedMeeting.files?.[0]?.recording?.status === 'pending',
       `start=${recordStart.status} block=${firstBlock.status} again=${sameBlock.offset} finish=${sealedResponse.status}`);
+    const unnamed = await json('PUT', `/api/meeting-queue/${liveMeeting.id}/recordings/missing.wav/speakers`, { transcript_sha256: 'x', names: { 'Speaker 1': { name: 'Kim Park' } } });
+    check('speakers can only be named on a recording that has a transcript', unnamed.status === 404, `status=${unnamed.status}`);
     // The engine loads in its worker on this machine (no model needed).
     const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
     check('the transcription engine loads in its worker', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));

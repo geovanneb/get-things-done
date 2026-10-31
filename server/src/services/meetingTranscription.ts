@@ -3,7 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
-import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft } from './meetingDigestService';
+import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft, namesFor, parseSpeakerNames, SPEAKER_LABEL, transcriptSpeakers, MAX_SPEAKER_NAMES } from './meetingDigestService';
 import { TranscriptionModelService, CATALOG, languagesFor, SPEAKER_MODEL } from './transcriptionModels';
 import type { LanguageChange } from './transcription/languages';
 import { TranscriptionEngine, Segment, type TranscribeOptions } from './transcription/engine';
@@ -222,6 +222,31 @@ export class MeetingTranscriptionService {
         status: 'done', model: draft.model, language: draft.language, transcript: draft.transcript, transcript_sha256: draft.transcript_sha256,
         seconds: draft.seconds, accepted_live: true, ...(r.target ? { target: r.target } : {}),
       };
+    });
+  }
+
+  /**
+   * Names the speakers of a recording's transcript: `{ "Speaker 2": { name, ref } }`, null to take a name back. Only for
+   * the transcript the page showed, and only labels that transcript has.
+   */
+  async nameSpeakers(meetingId: string, file: string, input: unknown): Promise<QueuedMeeting> {
+    const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const asked = (body['names'] && typeof body['names'] === 'object' && !Array.isArray(body['names']) ? body['names'] : {}) as Record<string, unknown>;
+    return this.change(meetingId, file, async (r) => {
+      if (!r.transcript || !r.transcript_sha256 || (r.status !== 'done' && r.status !== 'partial')) throw httpError(409, 'This recording has no transcript to name speakers in');
+      if (body['transcript_sha256'] !== r.transcript_sha256) throw httpError(409, 'The transcript changed meanwhile; look again');
+      const labels = transcriptSpeakers(await fsp.readFile(await fileInside(await this.queue.meetingFolder(meetingId), r.transcript), 'utf-8'));
+      const names = new Map(namesFor(r).map((n) => [n.label, n] as const));
+      for (const [label, value] of Object.entries(asked)) {
+        if (!SPEAKER_LABEL.test(label) || !labels.has(label)) throw httpError(400, `This transcript has no ${label}`);
+        if (value === null) { names.delete(label); continue; }
+        const [named] = parseSpeakerNames([{ ...(value && typeof value === 'object' ? value : {}), label }]);
+        if (!named) throw httpError(400, `Invalid name for ${label}`);
+        names.set(label, named);
+      }
+      if (names.size > MAX_SPEAKER_NAMES) throw httpError(400, `At most ${MAX_SPEAKER_NAMES} speakers can be named in one transcript`);
+      const { speaker_names: _old, ...rest } = r;
+      return names.size ? { ...rest, speaker_names: { transcript_sha256: r.transcript_sha256, names: [...names.values()] } } : rest;
     });
   }
 

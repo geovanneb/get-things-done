@@ -234,6 +234,8 @@ export interface DigestRecording {
   complete: boolean;
   /** The recording's name in the materials; null when it was not kept. */
   file: string | null;
+  /** Who its speakers are, as the user named them after the meeting. */
+  speaker_names?: { label: string; name: string; ref?: string }[];
 }
 
 /**

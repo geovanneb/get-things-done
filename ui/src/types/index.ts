@@ -675,9 +675,12 @@ export interface RecordingState {
   language?: string;
   /** The transcript made from it, a file of the same meeting. */
   transcript?: string;
+  transcript_sha256?: string;
   /** Seconds of audio. */
   seconds?: number;
   accepted?: boolean;
+  /** Who the speakers are, as the user named them: only for the transcript with this hash. */
+  speaker_names?: { transcript_sha256: string; names: SpeakerName[] };
   error?: string;
 }
 
@@ -761,6 +764,8 @@ export interface RoutinePreview {
 }
 
 export type TranscriptionLanguage = string;
+
+export interface SpeakerName { label: string; name: string; ref?: string }
 
 export interface SpokenLanguage { id: string; label: string; common?: boolean }
 
