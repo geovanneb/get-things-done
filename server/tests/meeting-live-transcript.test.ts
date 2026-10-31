@@ -48,7 +48,8 @@ function fakeEngine(o: FakeOptions = {}) {
           state.committed = Math.max(state.committed, bytes);
           while ((said + 1) * 32_000 <= state.committed) {
             opts.onSegment({ start: said, end: said + 0.9, text: `Fictional words ${said}` });
-            if (o.detect) opts.onPart?.({ start: said, end: said + 0.95, detected: o.detect(said) });
+            // Parts as long as real speech parts: a short one says nothing about the language.
+            if (o.detect) opts.onPart?.({ start: said, end: said + 2.5, detected: o.detect(said) });
             said++;
           }
           opts.onProgress?.(o.progress ? o.progress(state.committed) : state.committed / 32_000, state.committed / 32_000);

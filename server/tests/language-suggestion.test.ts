@@ -20,7 +20,7 @@ test('a wrong short part, a gap or an unknown part breaks a run; two long parts 
   const e = new LanguageEvidence(has(['en', 'ja']));
   e.add(part(0, 2, 'ja'), 'en');
   e.add(part(3, 2, 'ja'), 'en');
-  e.add(part(6, 1.8, null), 'en');
+  e.add(part(6, 2.5, null), 'en');
   assert.equal(e.add(part(8, 5, 'ja'), 'en'), null, 'an unknown part started it again');
   e.add(part(14, 3, 'ja'), 'en');
   assert.equal(e.add(part(60, 3, 'ja'), 'en'), null, 'a long pause started it again');
@@ -108,4 +108,17 @@ test('Auto judges exactly the first two minutes, also when a part crosses the ma
   for (let i = 0; i < 29; i++) { t += 11; assert.equal(e.add(part(t, 10, 'ja'), 'auto'), null, `at ${129 + (i + 1) * 10} s of speech`); }
   t += 11;
   assert.equal(e.add(part(t, 1, 'ja'), 'auto')?.language, 'ja', 'exactly at 420 s of speech the window is complete');
+});
+
+test('with a language set, short parts say nothing: on a real microphone they echo the set language', () => {
+  // The pattern of a real hand test, English set: Japanese in parts of 3-5 s, with short parts between them that the
+  // model reported as English though they were Japanese too.
+  const parts: [number, number, string][] = [[1.3, 5.1, 'en'], [7.8, 4.1, 'en'], [13.8, 4.5, 'en'], [21.9, 4.4, 'ja'], [27.2, 0.6, 'en'],
+    [28.7, 1.4, 'en'], [31.2, 4.5, 'ja'], [37.0, 3.4, 'ja']];
+  const e = new LanguageEvidence(has(['en', 'ja']));
+  let s = null;
+  for (const [start, seconds, detected] of parts) s = e.add(part(start, seconds, detected), 'en');
+  assert.deepEqual([s?.language, s?.since], ['ja', 21.9], 'from where the Japanese started');
+  // A long part in the set language still ends the run.
+  assert.equal(e.add(part(41, 4, 'en'), 'en'), null);
 });

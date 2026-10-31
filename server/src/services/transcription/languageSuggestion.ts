@@ -26,6 +26,11 @@ const RUN_PARTS = 3;
 const RUN_SECONDS = 8;
 const LONG_RUN_PARTS = 2;
 const LONG_RUN_SECONDS = 20;
+/**
+ * With a language set, a part shorter than this says nothing either way: measured on a real microphone, SenseVoice
+ * reports short parts in the set language whatever was said, while longer ones it reports as they sound.
+ */
+const SHORT_PART_SECONDS = 2;
 /** A pause this long ends a run, and a suggestion with it: the next speech may be someone else, or something else. */
 const RUN_GAP_SECONDS = 30;
 /** In Auto: the first two minutes of speech are judged once, then each complete five minutes. */
@@ -69,6 +74,7 @@ export class LanguageEvidence {
     if (!Number.isFinite(seconds) || seconds === 0) return this.current;
     if (this.current && !this.supported(this.current.language)) this.current = null;
     if (asked === 'auto') return this.addAuto(part, seconds);
+    if (seconds < SHORT_PART_SECONDS) return this.current;
     // A part in the set language, or one without a detection, ends the run; and the suggestion it made goes.
     if (!part.detected || part.detected === asked) {
       this.run = null;
