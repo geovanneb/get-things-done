@@ -13,6 +13,7 @@ on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'native/**'
       - 'server/**'
       - 'ui/**'
       - 'src/**'
@@ -72,6 +73,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm ci --prefix desktop
+      - name: Build the GPU engine (Apple Silicon)
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        run: npm run helper --prefix desktop
 
       - name: Require Mac signing for releases
         if: (inputs.release_tag || inputs.sign) && startsWith(matrix.os, 'macos-') && env.MAC_SIGNING != 'true'
@@ -125,7 +129,7 @@ jobs:
             test -s "$APPLE_API_KEY"
           fi
           npm run build --prefix desktop
-          npm run stage --prefix desktop
+          GTD_REQUIRE_WHISPER_HELPER="$([ "$RUNNER_OS" = 'macOS' ] && [ "$RUNNER_ARCH" = 'ARM64' ] && echo 1 || true)" npm run stage --prefix desktop
           cd desktop && npx electron-builder --publish never "${args[@]}"
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.MAC_SIGNING }}

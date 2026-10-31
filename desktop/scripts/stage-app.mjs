@@ -44,4 +44,19 @@ if (!fs.existsSync(path.join(gtd, 'node_modules', `sherpa-onnx-${platform}`, 'sh
   throw new Error(`Staged app is missing the transcription engine for ${platform} (sherpa-onnx-${platform})`);
 }
 fs.rmSync(tarball);
+
+// Whisper on the GPU (native/whisper-helper), built by `npm run helper` for Apple Silicon Macs. The folder always exists
+// on a Mac, so the Intel build packs it empty. CI sets GTD_REQUIRE_WHISPER_HELPER where the helper must be in the app.
+if (process.platform === 'darwin') {
+  const helper = path.join(root, 'native', 'whisper-helper', 'build', 'gtd-whisper');
+  const into = path.join(stage, 'whisper');
+  fs.mkdirSync(into, { recursive: true });
+  if (process.arch === 'arm64' && fs.existsSync(helper)) {
+    fs.copyFileSync(helper, path.join(into, 'gtd-whisper'));
+    fs.chmodSync(path.join(into, 'gtd-whisper'), 0o755);
+    console.log('Staged the GPU engine (gtd-whisper)');
+  } else if (process.env['GTD_REQUIRE_WHISPER_HELPER']) {
+    throw new Error('The GPU engine is missing: run `npm run helper --prefix desktop` first');
+  }
+}
 console.log(`Staged ${JSON.parse(fs.readFileSync(path.join(app, 'package.json'), 'utf-8')).version} into ${path.relative(desktop, gtd)}`);

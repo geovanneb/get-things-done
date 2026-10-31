@@ -13,7 +13,8 @@
     "dist": "npm run build && npm run stage && electron-builder --publish never",
     "package": "npm run build && npm run stage && electron-builder --dir --publish never -c.mac.identity=-",
     "smoke": "node scripts/smoke-packaged.mjs",
-    "dist:unsigned": "npm run build && npm run stage && electron-builder --publish never -c.mac.identity=-"
+    "dist:unsigned": "npm run build && npm run stage && electron-builder --publish never -c.mac.identity=-",
+    "helper": "node scripts/build-whisper-helper.mjs"
   },
   "devDependencies": {
     "electron": "45.0.0",
@@ -58,7 +59,13 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Get Things Done records the meetings you choose to record, and saves them in your workspace.",
         "NSAudioCaptureUsageDescription": "Get Things Done records the sound of a meeting you choose to record, such as the other people in a call, and saves it in your workspace."
-      }
+      },
+      "extraResources": [
+        {
+          "from": "stage/whisper",
+          "to": "whisper"
+        }
+      ]
     },
     "win": {
       "target": [
