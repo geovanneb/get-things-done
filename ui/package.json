@@ -26,7 +26,8 @@
     "test:live-transcript": "tsx src/utils/liveTranscript.test.ts",
     "test:live-events": "tsx src/utils/liveEvents.test.ts",
     "test:transcript-reading": "tsx src/utils/transcriptReading.test.ts",
-    "test:meeting-queue": "tsx src/utils/meetingQueue.test.ts"
+    "test:meeting-queue": "tsx src/utils/meetingQueue.test.ts",
+    "test:api": "tsx src/utils/api.test.ts"
   },
   "dependencies": {
     "date-fns": "^3.6.0",

@@ -1,11 +1,13 @@
 const BASE_URL = '';
 
-async function handleResponse<T>(res: Response): Promise<T> {
+export async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let message = `HTTP ${res.status}: ${res.statusText}`;
     try {
       const body = await res.json();
-      message = body.error || body.message || message;
+      // The API's error handler sends the error class name in `error` ("Error")
+      // and the useful text in `message`; routes that send only `error` still work.
+      message = body.message || body.error || message;
     } catch {
       // ignore parse error
     }
