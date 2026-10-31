@@ -444,6 +444,8 @@ try {
       method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
     });
     const created = await (await json('POST', '/api/context-updates', { title: 'Fictional steering committee', source_date: '2026-10-20', text: 'Transcript of a fictional meeting' })).json();
+    const speakerRefused = await json('PUT', `/api/context-updates/${created.id}/meeting-records/M-01/speaker`, { label: 'Speaker 1', source: 'a.transcript.md', person: null, revision: 'x' });
+    check('a speaker can only be changed while an update is in review', speakerRefused.status === 409, `status=${speakerRefused.status}`);
     check('a context update is created as ready, with pasted text saved as material',
       /^CU-\d{4}-\d{4}$/.test(created.id) && created.status === 'ready' && created.materials.some((m) => m.name === 'pasted-text.md'), JSON.stringify(created).slice(0, 200));
     const invalidDate = await json('POST', '/api/context-updates', { source_date: '2026-02-30' });

@@ -471,11 +471,15 @@ export interface KaizenAnalysis {
 export interface MeetingPerson { ref: string | null; name: string; ref_found?: boolean }
 
 /** One meeting in the material, confirmed or rejected apart from the proposals. */
+/** Who a voice in a transcript may be: the agent's proposal until the user confirms the record. */
+export interface MeetingSpeaker { label: string; person: MeetingPerson | null; reason: string; source: string }
+
 export interface MeetingRecord {
   id: string;
   title: string;
   meeting_date: string;
   attendees: MeetingPerson[];
+  speakers: MeetingSpeaker[];
   decisions: string[];
   open_questions: string[];
   /** `task_ref`: the task created from the item in the dashboard; `task_found` (detail only): it still exists. */

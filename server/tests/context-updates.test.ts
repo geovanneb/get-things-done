@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { ContextUpdateService, proposalTarget, updateId } from '../src/services/contextUpdateService';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
+import { setAnalysisRunning } from '../src/services/runState';
 
 /** A throwaway fictional workspace; the service reads its path from ESB_WORKSPACE_PATH. */
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -680,4 +681,69 @@ test('a Word document gets a readable text copy in the same record; an encrypted
   assert.equal(enc.transcript, undefined);
   assert.match(enc.transcript_problem!, /encrypted .* sensitivity label/);
   assert.equal((await service.addMaterial(id, 'deck.pptx', Buffer.from('PK fictional'))).transcript_problem, undefined, 'other Office files are just files');
+});
+
+test('speakers: proposed in a record, changed by the user, and a change needs a new confirmation', async (t) => {
+  const speakers = [
+    { label: 'Speaker 1', source: 'a.transcript.md', person: { ref: 'STK-0004', name: 'Jane Doe' }, reason: 'Says this is Jane' },
+    { label: 'Speaker 2', source: 'a.transcript.md', reason: 'Nothing says who this is' },
+  ];
+  const { ws, service, id, choose } = await withMeetings(t, [{ id: 'M-01', title: 'Fictional', speakers }]);
+  const shown = (await service.get(id)).meeting_records[0]!;
+  assert.deepEqual(shown.problems, []);
+  assert.equal(shown.speakers[1]!.person, null, 'unknown stays unknown');
+  await fsp.mkdir(path.join(ws, 'context-updates', id, 'materials'), { recursive: true });
+  await fsp.writeFile(path.join(ws, 'context-updates', id, 'materials', 'a.transcript.md'), 'Fictional transcript');
+  await choose({ 'M-01': 'confirmed' });
+
+  const speaker = { label: 'Speaker 1', source: 'a.transcript.md' };
+  await assert.rejects(service.setSpeaker(id, 'M-01', { ...speaker, person: null, revision: 'stale' }), /changed since you loaded it/);
+  await assert.rejects(service.setSpeaker(id, 'M-01', { label: 'Speaker 9', source: 'a.transcript.md', person: null, revision: shown.revision }), /Invalid speaker/);
+  await assert.rejects(service.setSpeaker(id, 'M-01', { ...speaker, person: { ref: '../x', name: 'Odd' }, revision: shown.revision }), /not a stakeholder id/);
+
+  const changed = (await service.setSpeaker(id, 'M-01', { ...speaker, person: { name: 'Kim Park' }, revision: shown.revision })).meeting_records[0]!;
+  assert.deepEqual(changed.speakers[0], { ...speaker, person: { ref: null, name: 'Kim Park' }, reason: 'Set by you' });
+  assert.equal(changed.confirmation, null, 'what was confirmed is no longer what is shown');
+  assert.notEqual(changed.revision, shown.revision);
+
+  const unknown = (await service.setSpeaker(id, 'M-01', { ...speaker, person: null, revision: changed.revision })).meeting_records[0]!;
+  assert.equal(unknown.speakers[0]!.person, null);
+});
+
+test('speakers rest on their transcript: a replaced transcript stops the review', async (t) => {
+  const speakers = [{ label: 'Speaker 1', source: 'a.transcript.md', reason: 'Says so' }];
+  const { ws, service, id, choose } = await withMeetings(t, [{ id: 'M-01', title: 'Fictional', speakers }]);
+  await assert.rejects(choose({ 'M-01': 'confirmed' }), /not among the materials/);
+  const material = path.join(ws, 'context-updates', id, 'materials', 'a.transcript.md');
+  await fsp.mkdir(path.dirname(material), { recursive: true });
+  await fsp.writeFile(material, 'Fictional transcript');
+  await choose({ 'M-01': 'confirmed' });
+  await fsp.writeFile(material, 'Another transcript');
+  await assert.rejects(service.approve(id), /changed after you confirmed it/);
+  await fsp.writeFile(material, 'Fictional transcript');
+  await service.approve(id);
+  assert.equal((await service.get(id)).meeting_records[0]!.confirmation, 'confirmed');
+});
+
+test('nobody changes a speaker or a confirmation while an analysis runs', async (t) => {
+  const speakers = [{ label: 'Speaker 1', source: 'a.transcript.md' }];
+  const { ws, service, id, choose } = await withMeetings(t, [{ id: 'M-01', title: 'Fictional', speakers }]);
+  const shown = (await service.get(id)).meeting_records[0]!;
+  setAnalysisRunning(ws, id, true);
+  t.after(() => setAnalysisRunning(ws, id, false));
+  await assert.rejects(service.setSpeaker(id, 'M-01', { label: 'Speaker 1', source: 'a.transcript.md', person: null, revision: shown.revision }), /analysis is running/);
+  await assert.rejects(choose({ 'M-01': 'rejected' }), /analysis is running/);
+});
+
+test('a record with odd speakers cannot be confirmed; a record without any is as it was', async (t) => {
+  const { service, id } = await withMeetings(t, [
+    { id: 'M-01', title: 'Odd', speakers: [{ label: 'Jane', source: 'a.md' }, { label: 'Speaker 1', source: 'a.md' }, { label: 'Speaker 1', source: 'a.md' }] },
+    { id: 'M-02', title: 'Without speakers' },
+  ]);
+  const [odd, plain] = (await service.get(id)).meeting_records;
+  assert.equal(odd!.problems.length, 2);
+  const unsourced = await withMeetings(t, [{ id: 'M-01', title: 'No source', speakers: [{ label: 'Speaker 1' }] }]);
+  assert.match((await unsourced.service.get(unsourced.id)).meeting_records[0]!.problems[0]!, /which transcript/);
+  assert.deepEqual(plain!.problems, []);
+  assert.deepEqual(plain!.speakers, []);
 });

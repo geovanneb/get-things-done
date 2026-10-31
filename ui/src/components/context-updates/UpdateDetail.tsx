@@ -13,7 +13,7 @@ import { diffLines, diffStats } from '@/utils/lineDiff';
 import { formatRelativeDate } from '@/utils/format';
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
-import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord, Stakeholder } from '@/types';
+import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord, MeetingSpeaker, Stakeholder } from '@/types';
 import AnalysisRun from './AnalysisRun';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
@@ -69,13 +69,77 @@ function PersonName({ person }: { person: MeetingPerson }) {
   );
 }
 
-function MeetingRecordCard({ record, reviewing, confirmation, onChoose, onCreateTask }: {
+/** What the box says for a stakeholder: the id tells two people of the same name apart. */
+const personOption = (p: Stakeholder) => `${p.name} (${p.id})`;
+
+/** One voice of a meeting: who the agent thinks it is and why. In review the user changes it, or leaves it unknown. */
+function SpeakerRow({ speaker, reviewing, people, onSet }: {
+  speaker: MeetingSpeaker;
+  reviewing: boolean;
+  people: Stakeholder[];
+  onSet: (person: { ref?: string; name: string } | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  const change = useRef<HTMLButtonElement>(null);
+  const close = () => { setEditing(false); setTimeout(() => change.current?.focus(), 0); };
+  const save = () => {
+    // Only what was picked from the list is a link; a name typed by hand stays a name.
+    const known = people.find((p) => personOption(p) === name.trim());
+    if (name.trim()) onSet(known ? { ref: known.id, name: known.name } : { name: name.trim() });
+    close();
+  };
+  const who = `${speaker.label} of ${speaker.source}`;
+  const link = { padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-xs)', marginLeft: 8 } as const;
+  return (
+    <li>
+      {speaker.label}: {speaker.person ? <PersonName person={speaker.person} /> : <span style={{ color: 'var(--color-text-muted)' }}>unknown</span>}
+      {speaker.reason && <span style={{ color: 'var(--color-text-muted)' }}> · {speaker.reason}</span>}
+      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}> · {speaker.source}</span>
+      {reviewing && !editing && <button ref={change} type="button" style={link} onClick={() => { setName(''); setEditing(true); }} aria-label={`Change ${who}`}>Change</button>}
+      {reviewing && !editing && speaker.person && <button type="button" style={link} onClick={() => onSet(null)} aria-label={`Leave ${who} unknown`}>Leave unknown</button>}
+      {editing && (
+        <span style={{ marginLeft: 8 }}>
+          <input aria-label={`Who is ${who}`} list="speaker-people" value={name} autoFocus onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); }}
+            style={{ padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
+          <button type="button" style={link} onClick={save}>Save</button>
+          <button type="button" style={link} onClick={close}>Cancel</button>
+        </span>
+      )}
+    </li>
+  );
+}
+
+/** The voices of one meeting. The stakeholders to choose from load only where there are voices to name. */
+function SpeakerList({ speakers, title, reviewing, onSet }: {
+  speakers: MeetingSpeaker[];
+  title: string;
+  reviewing: boolean;
+  onSet: (speaker: MeetingSpeaker, person: { ref?: string; name: string } | null) => void;
+}) {
+  const version = useDataVersion('stakeholders');
+  const { data } = useApi<Stakeholder[]>('/api/stakeholders', [version]);
+  const people = data ?? [];
+  return (
+    <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+      <div style={{ fontWeight: 600 }}>{title}</div>
+      <datalist id="speaker-people">{people.map((p) => <option key={p.id} value={personOption(p)} />)}</datalist>
+      <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>
+        {speakers.map((s) => <SpeakerRow key={`${s.source}/${s.label}`} speaker={s} reviewing={reviewing} people={people} onSet={(person) => onSet(s, person)} />)}
+      </ul>
+    </div>
+  );
+}
+
+function MeetingRecordCard({ record, reviewing, confirmation, onChoose, onCreateTask, onSpeaker }: {
   record: MeetingRecord;
   reviewing: boolean;
   confirmation: MeetingRecord['confirmation'];
   onChoose: (value: MeetingRecord['confirmation']) => void;
   /** Set when the record's action items can become tasks: it is confirmed and the update is done. */
   onCreateTask?: (item: number) => void;
+  onSpeaker: (speaker: MeetingSpeaker, person: { ref?: string; name: string } | null) => void;
 }) {
   const confirmed = confirmation === 'confirmed';
   const rejected = confirmation === 'rejected';
@@ -98,6 +162,9 @@ function MeetingRecordCard({ record, reviewing, confirmation, onChoose, onCreate
           <span style={{ fontWeight: 600 }}>Attendees: </span>
           {record.attendees.map((p, i) => <span key={i}>{i > 0 && ', '}<PersonName person={p} /></span>)}
         </div>
+      )}
+      {record.speakers.length > 0 && (
+        <SpeakerList speakers={record.speakers} title={`Speakers${confirmed ? '' : ' (proposed, until you confirm this record)'}`} reviewing={reviewing} onSet={onSpeaker} />
       )}
       <RecordList label="Decisions" items={record.decisions} />
       <RecordList label="Open questions" items={record.open_questions} />
@@ -411,6 +478,22 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const saveDecision = (pid: string, change: Partial<Decisions[string]>) => saveDecisions({ [pid]: change });
 
   /** Confirms or rejects one record, naming the revision the user saw, and takes the server's answer. */
+  const setSpeaker = async (record: MeetingRecord, speaker: MeetingSpeaker, person: { ref?: string; name: string } | null) => {
+    // Counted with the choices, so nothing finishes the review while this is on its way.
+    const ticket = pendingRecords.current.start(record.id);
+    updateSaving();
+    try {
+      await apiPut(`/api/context-updates/${u.id}/meeting-records/${record.id}/speaker`, { label: speaker.label, source: speaker.source, person, revision: record.revision });
+      setConfirmations((c) => ({ ...c, [record.id]: null }));
+      await refetch();
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Could not change the speaker.');
+    } finally {
+      pendingRecords.current.finish(record.id, ticket);
+      updateSaving();
+    }
+  };
+
   const chooseRecord = async (record: MeetingRecord, value: MeetingRecord['confirmation']) => {
     const rid = record.id;
     const previous = recordChoice(record);
@@ -646,6 +729,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
                 {records.map((r, i) => (
                   <MeetingRecordCard key={`${i}-${r.id}`} record={r} reviewing={reviewing} confirmation={recordChoice(r)}
                     onChoose={(value) => void chooseRecord(r, value)}
+                    onSpeaker={(speaker, person) => void setSpeaker(r, speaker, person)}
                     onCreateTask={r.confirmation === 'confirmed' && u.status === 'done' ? (item) => void createTask(r, item) : undefined} />
                 ))}
               </section>

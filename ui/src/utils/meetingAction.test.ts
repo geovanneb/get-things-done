@@ -11,7 +11,7 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 const record: MeetingRecord = {
-  id: 'M-01', title: 'Fictional steering', meeting_date: '2026-10-20', attendees: [], decisions: [], open_questions: [],
+  id: 'M-01', title: 'Fictional steering', meeting_date: '2026-10-20', attendees: [], speakers: [], decisions: [], open_questions: [],
   action_items: [
     { description: 'Send the revised plan', owner: { ref: 'STK-0001', name: 'Priya Natarajan' }, due_date: '2026-10-27', task_ref: null },
     { description: 'x'.repeat(250), owner: null, due_date: '', task_ref: null },
