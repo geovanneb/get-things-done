@@ -31,6 +31,7 @@ node_modules/
 /dist/
 /server/dist/
 /ui/dist/
+/native/whisper-helper/build/
 
 # Logs and caches
 *.log

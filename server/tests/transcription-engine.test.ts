@@ -11,6 +11,7 @@ import { fork, type ChildProcess } from 'node:child_process';
 import { readWavFormat, wavChunks, WavError } from '../src/services/transcription/wav';
 import { TranscriptionEngine, launchWorker, type WorkerLauncher } from '../src/services/transcription/engine';
 import { TranscriptionModelService } from '../src/services/transcriptionModels';
+import { whisperHelperPath } from '../src/services/transcription/whisperHelper';
 import type { WorkerReply, WorkerRequest } from '../src/services/transcription/protocol';
 
 async function tmp(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -137,7 +138,7 @@ test('engine: status, a model that is not downloaded, errors and crashes, one jo
     if (request.type === 'version') reply({ type: 'version', version: '9.9.9' });
   });
   const engine = new TranscriptionEngine(new TranscriptionModelService(), ok.launcher);
-  assert.deepEqual(await engine.status(), { available: true, version: '9.9.9', error: null });
+  assert.deepEqual(await engine.status(), { available: true, version: '9.9.9', error: null, gpu: whisperHelperPath() !== null });
 
   // Nothing downloaded: a plain reason, and no worker started.
   const before = ok.runs.length;
@@ -146,7 +147,7 @@ test('engine: status, a model that is not downloaded, errors and crashes, one jo
 
   // The engine fails to load, or the worker dies: reported, never thrown at the dashboard as a crash.
   const broken = fakeWorker((_request, reply) => reply({ type: 'error', message: 'The transcription engine failed: fictional' }));
-  assert.deepEqual(await new TranscriptionEngine(new TranscriptionModelService(), broken.launcher).status(), { available: false, version: null, error: 'The transcription engine failed: fictional' });
+  assert.deepEqual(await new TranscriptionEngine(new TranscriptionModelService(), broken.launcher).status(), { available: false, version: null, error: 'The transcription engine failed: fictional', gpu: whisperHelperPath() !== null });
   const dying = fakeWorker((_request, _reply, child) => { child.exitCode = 134; child.emit('exit', 134, null); });
   assert.match((await new TranscriptionEngine(new TranscriptionModelService(), dying.launcher).status()).error!, /stopped unexpectedly \(exit code 134\)/);
 

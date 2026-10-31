@@ -163,6 +163,21 @@ try {
   // The worker starts as Electron running as Node and loads the native engine from inside the app (no model needed).
   const engine = await (await fetch(`${base}/api/transcription/engine`)).json();
   check('the transcription engine loads inside the app', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));
+  // Whisper on the GPU ships in the Apple Silicon build only. It must be inside the app, signed with it, and start
+  // there; a model to run it is not needed for that (the build machine's GPU is not the user's).
+  if (process.platform === 'darwin') {
+    const helper = path.join(path.dirname(path.dirname(executable)), 'Resources', 'whisper', 'gtd-whisper');
+    const expected = process.arch === 'arm64' && process.env['GTD_SMOKE_EXPECT_GPU'] !== '0';
+    check(expected ? 'the app has the GPU engine' : 'the Intel app has no GPU engine', engine.gpu === expected && fs.existsSync(helper) === expected, JSON.stringify(engine));
+    if (expected) {
+      let answer = '';
+      try { execFileSync(helper, [], { stdio: ['ignore', 'pipe', 'ignore'] }); } catch (err) { answer = String(err.stdout ?? ''); }
+      check('the GPU engine starts from inside the app', answer.includes('"type":"error"'), answer);
+      let signed = true;
+      try { execFileSync('codesign', ['--verify', '--strict', helper], { stdio: 'ignore' }); } catch { signed = false; }
+      check('the GPU engine is signed with the app', signed);
+    }
+  }
 
   if (models) {
     const model = async () => (await (await fetch(`${base}/api/transcription`)).json()).models.find((m) => m.id === MODEL);

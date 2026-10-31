@@ -70,7 +70,11 @@ function startServerProcess(port: number): Promise<string> {
   server = utilityProcess.fork(path.join(__dirname, 'server-host.js'), [], {
     serviceName: `${APP_NAME} server`,
     stdio: 'pipe',
-    env: { ...process.env, GTD_PORT: String(port), GTD_APP_ROOT: appRoot, NODE_ENV: 'production' },
+    env: {
+      ...process.env, GTD_PORT: String(port), GTD_APP_ROOT: appRoot, NODE_ENV: 'production',
+      // Whisper on the GPU: built for Apple Silicon Macs only, and the server checks it is really there.
+      ...(process.platform === 'darwin' && process.arch === 'arm64' ? { GTD_WHISPER_HELPER: path.join(process.resourcesPath, 'whisper', 'gtd-whisper') } : {}),
+    },
   });
   server.stdout?.pipe(log);
   server.stderr?.pipe(log);

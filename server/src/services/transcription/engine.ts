@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ChildProcess, fork } from 'child_process';
 import { CATALOG, SPEAKER_MODEL, TranscriptionModelService, VAD } from '../transcriptionModels';
 import { readWavFormat } from './wav';
+import { whisperHelperPath } from './whisperHelper';
 import type { LanguageChange } from './languages';
 import type { SpeakerTurn } from './parts';
 import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './protocol';
@@ -18,7 +19,8 @@ import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './p
 export interface Segment { start: number; end: number; text: string; speaker?: number }
 export interface TranscriptResult { segments: Segment[]; seconds: number; load_ms: number | null }
 export interface TranscribeOptions { model?: string; language?: string; changes?: LanguageChange[]; turns?: SpeakerTurn[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal }
-export interface EngineStatus { available: boolean; version: string | null; error: string | null }
+/** `gpu`: the GPU engine (gtd-whisper) is part of this install. Whether it works here is for the speed test to show. */
+export interface EngineStatus { available: boolean; version: string | null; error: string | null; gpu: boolean }
 
 export type WorkerLauncher = () => ChildProcess;
 
@@ -49,6 +51,22 @@ export const launchWorker: WorkerLauncher = () => {
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
 };
+
+/**
+ * A worker that was killed may leave its GPU engine running for a moment: the engine ends itself when its worker is
+ * gone (within about 3 seconds). Until then it holds the model's memory, so the slot waits. Only waits, never kills:
+ * by now the number may belong to another process, which is also why the wait has an end.
+ */
+const HELPER_EXIT_MS = 30_000;
+async function helperGone(pid: number | null): Promise<void> {
+  if (!pid) return;
+  const until = Date.now() + HELPER_EXIT_MS;
+  for (;;) {
+    try { process.kill(pid, 0); } catch { return; }
+    if (Date.now() > until) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 
 /** A check loads the model and stops; a model that takes this long to load is reported as failed. */
 const CHECK_TIMEOUT_MS = 5 * 60 * 1000;
@@ -122,9 +140,9 @@ export class TranscriptionEngine {
     try {
       let version: string | null = null;
       await this.run({ type: 'version' }, 60_000, (reply) => { if (reply.type === 'version') version = reply.version; });
-      return { available: true, version, error: null };
+      return { available: true, version, error: null, gpu: whisperHelperPath() !== null };
     } catch (err) {
-      return { available: false, version: null, error: (err as Error).message };
+      return { available: false, version: null, error: (err as Error).message, gpu: whisperHelperPath() !== null };
     }
   }
 
@@ -339,6 +357,7 @@ export class TranscriptionEngine {
       throw new Error(`The transcription engine could not start: ${(err as Error).message}`, { cause: err });
     }
     running.add(child);
+    let helper: number | null = null;
     let stderr = '';
     child.stderr?.on('data', (d: Buffer) => { if (stderr.length < 4000) stderr += d.toString(); });
     try {
@@ -356,6 +375,12 @@ export class TranscriptionEngine {
         if (signal?.aborted) { onAbort(); return; }
         signal?.addEventListener('abort', onAbort, { once: true });
         child.on('message', (reply: WorkerReply) => {
+          // The worker closes its GPU engine before it says the job ended; until then the engine may still run.
+          if (reply.type === 'helper') {
+            helper = reply.pid;
+            if (child.connected) child.send({ type: 'helper-known' } satisfies WorkerControl);
+          }
+          if (reply.type === 'done' || reply.type === 'error') helper = null;
           // Once the job has ended (done, failed, cancelled, timed out), whatever the worker still sends is ignored.
           if (settled) return;
           if (reply.type === 'error') { finish(new Error(reply.message)); return; }
@@ -371,7 +396,7 @@ export class TranscriptionEngine {
       });
     } finally {
       // The next job starts only once this worker has really exited, so two never hold a model's memory at once.
-      const done = async () => { running.delete(child); if (!held) busy = false; await giveBack(); };
+      const done = async () => { await helperGone(helper); running.delete(child); if (!held) busy = false; await giveBack(); };
       if (await stop(child)) await done();
       else if (held) await new Promise<void>((resolve) => { child.once('exit', () => { void done().finally(resolve); }); });
       else child.once('exit', () => { void done(); });

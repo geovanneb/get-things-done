@@ -16,6 +16,7 @@ import { languageAt, type LanguageChange } from './languages';
 import { contextRange, cutsAround, RecentAudio, SHORTEST_TURN, speakerCuts, speakerOf, speakerTurns, splitAtChanges, splitLong, type Part, type SpeakerTurn } from './parts';
 import { markRepeats } from './repeats';
 import { readWavFormat, wavChunks, WavError } from './wav';
+import { HelperError, startHelper } from './whisperHelper';
 
 const SAMPLE_RATE = 16000;
 /** Enough for the context around any part: a stretch is cut well before this. */
@@ -41,12 +42,23 @@ interface Sherpa {
   OfflineSpeakerDiarization: new (config: unknown) => { process(samples: Float32Array): { start: number; end: number; speaker: number }[] };
 }
 
-function send(reply: WorkerReply): void {
+function sendNow(reply: WorkerReply): void {
   if (process.connected) process.send?.(reply);
 }
 
-// The dashboard went away (it quit, crashed or ended this job): nothing is waiting for the result.
-process.on('disconnect', () => process.exit(0));
+/**
+ * The job's end waits until its recognizer is closed: the dashboard frees the job's slot and model when it hears it,
+ * and a GPU engine still running then would hold the model's memory into the next job.
+ */
+let ending: WorkerReply | null = null;
+function send(reply: WorkerReply): void {
+  if (reply.type === 'done' || reply.type === 'error') ending ??= reply;
+  else sendNow(reply);
+}
+
+// The dashboard went away or stopped this job: nothing is waiting for the result. A GPU engine goes first.
+const quit = () => { void (loaded?.abort() ?? starting?.() ?? Promise.resolve()).catch(() => {}).finally(() => process.exit(0)); };
+process.on('disconnect', quit);
 
 function loadSherpa(): Sherpa {
   // eslint-disable-next-line @typescript-eslint/no-require-imports -- native addon, loaded only inside the worker
@@ -71,12 +83,60 @@ function recognizerConfig(model: EngineModel, language: string): unknown {
   return { featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 }, modelConfig: { ...modelConfig, numThreads: model.threads, provider, debug: 0 } };
 }
 
-async function load(sherpa: Sherpa, model: EngineModel, language: string): Promise<SherpaRecognizer> {
-  if (model.noArena) await prepareNoArena(model);
+/** What turns one part into text, whichever engine does it. One part at a time. */
+interface Recognizer {
+  decode(samples: Float32Array, language: string): Promise<string>;
+  close(): Promise<void>;
+  /** Ends it at once; resolves once nothing of it runs any more. */
+  abort(): Promise<void>;
+}
+
+/** The job's recognizer, closed when the job ends however it ends; before it has loaded, how to end its GPU engine. */
+let loaded: Recognizer | null = null;
+let starting: (() => Promise<void>) | null = null;
+
+async function load(sherpa: Sherpa, model: EngineModel, language: string): Promise<Recognizer> {
+  loaded = await loadRecognizer(sherpa, model, language);
+  return loaded;
+}
+
+async function loadRecognizer(sherpa: Sherpa, model: EngineModel, language: string): Promise<Recognizer> {
   const started = performance.now();
+  if (model.kind === 'whisper-cpp') {
+    if (!model.helper || !model.files['model']) throw new HelperError('missing', 'The GPU engine is not part of this install');
+    // Stopped by the dashboard: end the GPU engine before this process, not after, also while it still loads.
+    process.on('SIGTERM', quit);
+    const helper = await startHelper(model.helper, model.files['model'], {
+      threads: model.threads,
+      beforeLoad: (pid, abort) => {
+        starting = abort;
+        sendNow({ type: 'helper', pid });
+        return new Promise<void>((resolve, reject) => {
+          control.helperKnown = resolve;
+          setTimeout(() => reject(new Error('the dashboard did not confirm it')), 30_000).unref();
+        });
+      },
+    });
+    send({ type: 'loaded', ms: Math.round(performance.now() - started), backend: helper.backend });
+    return { decode: async (samples, lang) => (await helper.decode(samples, lang)).text, close: () => helper.close(), abort: () => helper.abort() };
+  }
+  if (model.noArena) await prepareNoArena(model);
   const recognizer = await sherpa.OfflineRecognizer.createAsync(recognizerConfig(model, language));
   send({ type: 'loaded', ms: Math.round(performance.now() - started) });
-  return recognizer;
+  let current = language;
+  return {
+    async decode(samples, lang) {
+      if (lang !== current) {
+        recognizer.setConfig(recognizerConfig(model, lang));
+        current = lang;
+      }
+      const stream = recognizer.createStream();
+      stream.acceptWaveform({ samples, sampleRate: SAMPLE_RATE });
+      return (await recognizer.decodeAsync(stream)).text;
+    },
+    close: async () => {},
+    abort: async () => {},
+  };
 }
 
 /** Speech segments of limited length, cut at `silence` seconds of silence. */
@@ -88,8 +148,8 @@ function newVad(sherpa: Sherpa, model: EngineModel, silence: number): SherpaVad 
 }
 
 /** The language of a job, and what is known of the audio around its parts. */
-interface Job { model: EngineModel; start: string; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; current: string; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
-const newJob = (model: EngineModel, start: string, changes: LanguageChange[], turns: SpeakerTurn[] = []): Job => ({ model, start, changes, turns, voiceCuts: speakerCuts(turns), current: start, lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
+interface Job { model: EngineModel; start: string; changes: LanguageChange[]; turns: SpeakerTurn[]; voiceCuts: number[]; lastPart: number; audio: RecentAudio; previousEnd: number; ending: boolean }
+const newJob = (model: EngineModel, start: string, changes: LanguageChange[], turns: SpeakerTurn[] = []): Job => ({ model, start, changes, turns, voiceCuts: speakerCuts(turns), lastPart: -1, audio: new RecentAudio(RECENT_SAMPLES), previousEnd: 0, ending: false });
 
 /** The part with what can be had of its context, and where that starts and ends. */
 function withContext(part: Part, next: number | null, job: Job): { samples: Float32Array; from: number; to: number } {
@@ -113,7 +173,7 @@ function withContext(part: Part, next: number | null, job: Job): { samples: Floa
 }
 
 /** Recognizes each finished speech segment and sends it; returns how many had text. A part ends at a change of language. */
-async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Job): Promise<number> {
+async function decodeAll(recognizer: Recognizer, vad: SherpaVad, job: Job): Promise<number> {
   let found = 0;
   while (!vad.isEmpty()) {
     // A copy: Electron, where this worker runs in the desktop app, refuses buffers that live in native memory.
@@ -127,16 +187,9 @@ async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Job)
       // Here, between two decodes: a change arriving during a decode only joins the list.
       job.lastPart = (part.start + part.samples.length) / SAMPLE_RATE;
       const language = languageAt(job.start, job.changes, part.start / SAMPLE_RATE);
-      if (language !== job.current) {
-        recognizer.setConfig(recognizerConfig(job.model, language));
-        job.current = language;
-      }
       const input = withContext(part, parts[i + 1]?.start ?? nextSegment, job);
       job.previousEnd = part.start + part.samples.length;
-      const stream = recognizer.createStream();
-      stream.acceptWaveform({ samples: input.samples, sampleRate: SAMPLE_RATE });
-      const result = await recognizer.decodeAsync(stream);
-      const text = markRepeats(result.text.trim());
+      const text = markRepeats((await recognizer.decode(input.samples, language)).trim());
       if (text) {
         found++;
         const speaker = speakerOf(part.start / SAMPLE_RATE, (part.start + part.samples.length) / SAMPLE_RATE, job.turns);
@@ -148,8 +201,9 @@ async function decodeAll(recognizer: SherpaRecognizer, vad: SherpaVad, job: Job)
 }
 
 /** What the dashboard said about a recording being followed: saved so far, and sealed at. */
-const control = { committed: 0, end: null as number | null, wake: null as (() => void) | null, changes: [] as LanguageChange[], lateLanguage: null as ((at: number) => boolean) | null, late: false };
+const control = { helperKnown: null as (() => void) | null, committed: 0, end: null as number | null, wake: null as (() => void) | null, changes: [] as LanguageChange[], lateLanguage: null as ((at: number) => boolean) | null, late: false };
 function onControl(message: WorkerControl): void {
+  if (message?.type === 'helper-known') control.helperKnown?.();
   if (message?.type === 'language') {
     control.changes.push({ at: message.at, language: message.language });
     if (control.lateLanguage?.(message.at)) control.late = true;
@@ -312,8 +366,12 @@ process.once('message', (request: WorkerRequest) => {
   // Whatever comes after the request is a control for a follow job; it may arrive while the model loads.
   process.on('message', onControl);
   handle(request)
-    .catch((err: unknown) => send({ type: 'error', message: err instanceof WavError ? err.message : `The transcription engine failed: ${(err as Error)?.message ?? String(err)}` }))
-    .finally(() => {
+    .catch((err: unknown) => send(err instanceof HelperError
+      ? { type: 'error', message: err.message, failure: err.failure }
+      : { type: 'error', message: err instanceof WavError ? err.message : `The transcription engine failed: ${(err as Error)?.message ?? String(err)}` }))
+    .finally(async () => {
+      await (loaded?.close() ?? starting?.())?.catch(() => {});
+      if (ending) sendNow(ending);
       // Let the last message reach the dashboard, then end: one job per process.
       if (process.connected) process.disconnect();
       else process.exit(0);
