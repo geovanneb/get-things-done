@@ -756,13 +756,14 @@ export interface RoutinePreview {
   next_runs: { at: string; due_date: string | null }[];
 }
 
-export type TranscriptionLanguage = 'auto' | 'en' | 'ja';
+export type TranscriptionLanguage = string;
 
 export interface TranscriptionModel {
   id: string;
   name: string;
   summary: string;
   languages: string;
+  language_options?: { id: string; label: string; common?: boolean }[];
   pros: string[];
   cons: string[];
   memory_gb: number;

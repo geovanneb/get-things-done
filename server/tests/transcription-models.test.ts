@@ -6,7 +6,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { createHash } from 'node:crypto';
 import { AddressInfo } from 'node:net';
-import { CATALOG, TranscriptionModelService, downloadLimits, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
+import { CATALOG, TranscriptionModelService, downloadLimits, languageFor, parseTranscriptionSettings, transcriptionEvents, type CatalogModel } from '../src/services/transcriptionModels';
+import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES } from '../src/services/transcription/languages';
 
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 
@@ -82,7 +83,7 @@ test('the catalog: the accurate model is the default, every file is pinned, and 
       assert.match(f.url, /^https:\/\/huggingface\.co\/csukuangfj\/[^/]+\/resolve\/[0-9a-f]{40}\//, 'pinned to a commit');
     }
   }
-  assert.throws(() => parseTranscriptionSettings({ language: 'fr' }), /auto, en or ja/);
+  assert.throws(() => parseTranscriptionSettings({ language: 'xx' }), /Invalid language/);
   assert.throws(() => parseTranscriptionSettings({ model: 'unknown' }), /Invalid model/);
 });
 
@@ -197,7 +198,7 @@ test('settings are saved outside the workspace and only known values are accepte
   assert.deepEqual([view.settings.model, view.settings.language], ['sensevoice-2024-07-17', 'ja']);
   assert.equal(view.models_dir, dir);
   assert.match(await fsp.readFile(path.join(dir, 'settings.json'), 'utf-8'), /sensevoice-2024-07-17/);
-  await assert.rejects(service.updateSettings({ language: 'de' }), /Invalid language/);
+  await assert.rejects(service.updateSettings({ language: 'xx' }), /Invalid language/);
   assert.equal(view.models.find((m) => m.id === 'whisper-large-v3-turbo')!.size, 674716297 + 361080764 + 816730);
 });
 
@@ -357,4 +358,18 @@ test('a takeover guard is cleared only when its holder is gone, never by age whi
   await TranscriptionModelService.settled();
   assert.equal(await service.installed('fictional-model'), true);
   await assert.rejects(fsp.access(guard));
+});
+
+test('each model offers the languages it has, and a language it lacks goes back to Auto', () => {
+  assert.equal(WHISPER_LANGUAGES.length, 100);
+  assert.equal(new Set(WHISPER_LANGUAGES.map((l) => l.id)).size, 100);
+  assert.deepEqual(WHISPER_LANGUAGES.filter((l) => l.common).map((l) => l.label), ['English', 'Japanese', 'Korean', 'Vietnamese']);
+  assert.deepEqual(SENSEVOICE_LANGUAGES.map((l) => l.id), ['en', 'ja', 'ko', 'yue', 'zh']);
+  assert.equal(languageFor('sensevoice-2024-07-17', 'vi'), 'auto');
+  assert.equal(languageFor('sensevoice-2024-07-17', 'ko'), 'ko');
+  assert.equal(languageFor('whisper-large-v3-turbo', 'vi'), 'vi');
+  const whisper = parseTranscriptionSettings({ model: 'whisper-large-v3-turbo', language: 'vi' });
+  assert.equal(whisper.language, 'vi');
+  assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17' }, whisper).language, 'auto', 'a saved language the model lacks would stop its engine');
+  assert.equal(parseTranscriptionSettings({ model: 'sensevoice-2024-07-17', language: 'vi' }).language, 'auto');
 });

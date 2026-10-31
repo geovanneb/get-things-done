@@ -9,6 +9,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { readSpeeds, type SpeedResult } from './transcription/speedTest';
 import { processAlive } from './runState';
 import { HeldLock, ownsToken, readLock, tryLock, unlock } from '../utils/fileLock';
+import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, type LanguageOption } from './transcription/languages';
 
 /**
  * Speech-to-text models for offline transcription: a fixed catalog, downloaded on request from Settings.
@@ -33,6 +34,8 @@ export interface CatalogModel {
   /** Short and plain, shown on the model's card. */
   summary: string;
   languages: string;
+  /** What Settings offers for this model, next to Auto. */
+  language_options?: LanguageOption[];
   pros: string[];
   cons: string[];
   /** Memory while transcribing, roughly, in GB. */
@@ -42,8 +45,8 @@ export interface CatalogModel {
   engine?: { kind: 'whisper' | 'sensevoice'; files: Record<string, string> };
 }
 
-export type TranscriptionLanguage = 'auto' | 'en' | 'ja';
-export const LANGUAGES: TranscriptionLanguage[] = ['auto', 'en', 'ja'];
+/** `auto`, or a language code of the model; see `languageFor`. */
+export type TranscriptionLanguage = string;
 
 export interface TranscriptionSettings {
   model: string;
@@ -105,8 +108,9 @@ export const CATALOG: CatalogModel[] = [
     id: 'whisper-large-v3-turbo',
     name: 'Whisper large-v3-turbo',
     summary: 'Most accurate. Takes longer.',
-    languages: '99 languages, including English and Japanese',
-    pros: ['The most accurate transcripts, in English and Japanese alike', 'Full punctuation', '99 languages'],
+    languages: '100 languages, including English and Japanese',
+    language_options: WHISPER_LANGUAGES,
+    pros: ['The most accurate transcripts, in English and Japanese alike', 'Full punctuation', '100 languages'],
     cons: ['Slower: about 4 times faster than real time, so an 8-hour meeting takes about 2 hours', 'Needs about 4 GB of memory while transcribing', 'A 1 GB download'],
     memory_gb: 4,
     engine: { kind: 'whisper', files: { encoder: 'turbo-encoder.int8.onnx', decoder: 'turbo-decoder.int8.onnx', tokens: 'turbo-tokens.txt' } },
@@ -121,8 +125,9 @@ export const CATALOG: CatalogModel[] = [
     name: 'SenseVoice',
     summary: 'Very fast and light. A little less accurate.',
     languages: 'English, Japanese, Chinese, Korean and Cantonese',
+    language_options: SENSEVOICE_LANGUAGES,
     pros: ['Very fast: about 80 times faster than real time, so an 8-hour meeting takes about 6 minutes', 'Light: under 1 GB of memory', 'A 240 MB download'],
-    cons: ['A little less accurate: small slips and less punctuation', 'Five languages only'],
+    cons: ['A little less accurate: small slips and less punctuation', 'Five languages only: English, Japanese, Korean, Chinese and Cantonese'],
     memory_gb: 1,
     engine: { kind: 'sensevoice', files: { model: 'model.int8.onnx', tokens: 'tokens.txt' } },
     files: [
@@ -162,16 +167,24 @@ export function modelsDir(): string {
   return process.env['ESB_MODELS_PATH'] || path.join(os.homedir(), '.gtd', 'models');
 }
 
+/** The language to give a model: the one asked for when the model has it, otherwise Auto. It refuses any other. */
+export function languageFor(model: string, language: string, catalog: CatalogModel[] = CATALOG): string {
+  const options = catalog.find((m) => m.id === model)?.language_options;
+  return !options || language === 'auto' || options.some((o) => o.id === language) ? language : 'auto';
+}
+
 /** Validates settings from a request or the file, filling anything missing from `base`. */
 export function parseTranscriptionSettings(input: unknown, base: TranscriptionSettings = DEFAULTS, catalog: CatalogModel[] = CATALOG): TranscriptionSettings {
   const o = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   if (o['model'] !== undefined && !catalog.some((m) => m.id === o['model'])) throw httpError(400, 'Invalid model');
-  if (o['language'] !== undefined && !LANGUAGES.includes(o['language'] as TranscriptionLanguage)) throw httpError(400, 'Invalid language: use auto, en or ja');
+  if (o['language'] !== undefined && o['language'] !== 'auto' && !WHISPER_LANGUAGES.some((l) => l.id === o['language'])) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
   if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
   if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'])) throw httpError(400, 'Invalid live_model: a catalog model, or null for no live transcript');
+  const model = (o['model'] as string | undefined) ?? base.model;
   return {
-    model: (o['model'] as string | undefined) ?? base.model,
-    language: (o['language'] as TranscriptionLanguage | undefined) ?? base.language,
+    model,
+    // Moving to a model without the language chosen goes back to Auto.
+    language: languageFor(model, (o['language'] as TranscriptionLanguage | undefined) ?? base.language, catalog),
     keep_recordings: (o['keep_recordings'] as boolean | undefined) ?? base.keep_recordings,
     live_model: o['live_model'] === undefined ? base.live_model : (o['live_model'] as string | null),
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,

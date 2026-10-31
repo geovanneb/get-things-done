@@ -814,7 +814,7 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
 `~/.gtd/models/`, outside the workspace).
 
 - **Whisper large-v3-turbo** (the default): the most accurate, in English and
-  Japanese alike, with full punctuation and 99 languages. It takes longer (about 4
+  Japanese alike, with full punctuation and 100 languages. It takes longer (about 4
   times faster than real time, so an 8-hour meeting takes about 2 hours) and needs
   about 4 GB of memory while it transcribes.
 - **SenseVoice**: very fast (about 80 times faster than real time, so an 8-hour meeting

@@ -665,7 +665,7 @@ try {
     check('the transcription engine loads in its worker', engine.available === true && typeof engine.version === 'string', JSON.stringify(engine));
     // Read only: never downloads a model or writes settings into the real home folder.
     const stt = await (await fetch(`${base}/api/transcription`)).json();
-    const badLanguage = await json('PUT', '/api/transcription/settings', { language: 'de' });
+    const badLanguage = await json('PUT', '/api/transcription/settings', { language: 'xx' });
     check('transcription lists the models with pluses and minuses, the accurate one first and chosen, and refuses an unknown language',
       stt.models?.[0]?.id === 'whisper-large-v3-turbo' && stt.settings?.model && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
       && ['auto', 'en', 'ja'].includes(stt.settings.language) && badLanguage.status === 400,

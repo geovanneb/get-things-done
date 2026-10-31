@@ -3,7 +3,7 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { constants as fsConstants } from 'fs';
 import { MeetingDigestService, liveRecordingFile } from './meetingDigestService';
-import { TranscriptionModelService } from './transcriptionModels';
+import { languageFor, TranscriptionModelService } from './transcriptionModels';
 import { FollowSession, Segment, TranscriptionEngine } from './transcription/engine';
 import { withWorkspacePath } from './workspace';
 
@@ -127,7 +127,7 @@ export class MeetingLiveTranscriptService {
       return;
     }
     job.model = settings.live_model;
-    job.language = settings.language;
+    job.language = languageFor(settings.live_model, settings.language);
     job.mainModel = settings.model;
     await withWorkspacePath(workspace, async () => {
       try {
