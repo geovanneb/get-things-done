@@ -16,6 +16,7 @@
     "test:meeting-participants": "tsx src/utils/meetingParticipants.test.ts",
     "test:review-choices": "tsx src/utils/reviewChoices.test.ts",
     "test:update-types": "tsx src/utils/updateTypes.test.ts",
+    "test:api-errors": "tsx src/utils/api.test.ts",
     "test:meeting-action": "tsx src/utils/meetingAction.test.ts",
     "test:desktop-bridge": "tsx src/utils/desktop.test.ts",
     "test:setup": "tsx src/utils/setup.test.ts",
