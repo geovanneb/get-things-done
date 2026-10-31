@@ -10,7 +10,7 @@ const VIEW_LABELS: Record<string, string> = {
   '/situation': 'Situation',
   '/board': 'Board',
   '/stakeholders': 'Stakeholders',
-  '/outputs': 'Outputs',
+  '/outputs': 'Output templates',
   '/context': 'Context',
   '/agents': 'Agents & Skills',
   '/insights': 'Insights',
