@@ -4,11 +4,12 @@ import { test } from 'node:test';
 const unhandled: unknown[] = [];
 process.on('unhandledRejection', (reason) => { unhandled.push(reason); });
 import assert from 'node:assert/strict';
+import { transcriptParts } from '../../ui/src/utils/transcriptReading';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
-import { MeetingTranscriptionService, transcriptionTimings } from '../src/services/meetingTranscription';
+import { audioTranscriptMarkdown, MeetingTranscriptionService, transcriptionTimings } from '../src/services/meetingTranscription';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { TranscriptionModelService } from '../src/services/transcriptionModels';
 import type { Segment, TranscriptionEngine } from '../src/services/transcription/engine';
@@ -567,4 +568,12 @@ test('an engine busy with something else, such as a speed test, leaves the recor
 test('no background job left an unhandled rejection', async () => {
   await MeetingTranscriptionService.settled();
   assert.deepEqual(unhandled, []);
+});
+
+test('the page can read the transcript the server writes', () => {
+  const segments = [{ start: 28_800, end: 28_802, text: '<b>Fictional</b> ``` words' }, { start: 28_803, end: 28_804, text: 'line one\nline two' }];
+  assert.deepEqual(transcriptParts(audioTranscriptMarkdown('a.wav', 'hash', 'fast', 'auto', 28_804, segments, true)), [
+    { time: '08:00:00', text: '<b>Fictional</b> ``` words' }, { time: '08:00:03', text: 'line one line two' },
+  ]);
+  assert.deepEqual(transcriptParts(audioTranscriptMarkdown('a.wav', 'hash', 'fast', 'auto', 10, [], true)), []);
 });
