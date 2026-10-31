@@ -95,6 +95,10 @@ export function speakerOf(start: number, end: number, turns: readonly SpeakerTur
   }
   const [first, second] = [...heard].sort((a, b) => b[1] - a[1]);
   const voiced = [...heard.values()].reduce((sum, s) => sum + s, 0);
+  // One voice in the whole recording: a part with speech is it, even where the voice was hardly heard, unless most of
+  // what was heard there is a short other sound (someone's brief reply, which has no voice of its own).
+  const voices = new Set(turns.map((t) => t.speaker).filter((v) => v > 0));
+  if (voices.size === 1 && (heard.get(0) ?? 0) <= voiced / 2) return [...voices][0];
   if (!first || first[0] === 0 || voiced < (end - start) * KNOWN_SPEECH) return undefined;
   return first[1] >= voiced * CLEAR_SHARE && (second?.[1] ?? 0) <= voiced * OTHER_VOICE ? first[0] : undefined;
 }
