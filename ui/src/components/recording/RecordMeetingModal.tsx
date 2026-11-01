@@ -6,8 +6,9 @@ import Button from '@/components/common/Button';
 import { useRecorder } from './RecordingProvider';
 import { ParticipantsField } from '@/components/meetings/ParticipantsField';
 import { systemAudioSupport } from '@/utils/desktop';
+import { apiGet } from '@/utils/api';
 import { consentSentence, type RecordPrefill } from '@/utils/meetingParticipants';
-import type { MeetingParticipant } from '@/types';
+import type { MeetingParticipant, SpokenLanguage, Transcription } from '@/types';
 
 const inputStyle: React.CSSProperties = { padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' };
 const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
@@ -30,6 +31,13 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
   const [systemAudio, setSystemAudio] = useState(true);
   const [systemSupport, setSystemSupport] = useState<string | null>(null);
   const [told, setTold] = useState(false);
+  // The meeting's spoken language: Settings' choice to start with, changed here for this one meeting.
+  const [language, setLanguage] = useState('auto');
+  const [languages, setLanguages] = useState<SpokenLanguage[]>([]);
+  /** The chosen model's name, and whether this opening's Settings are read (Start waits for them). */
+  const [modelName, setModelName] = useState('');
+  const [allLanguages, setAllLanguages] = useState<SpokenLanguage[]>([]);
+  const [languageReady, setLanguageReady] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -39,7 +47,24 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
     setDate(today());
     setParticipants(prefill?.participants ?? []);
     void systemAudioSupport().then(setSystemSupport);
-    void navigator.mediaDevices?.enumerateDevices().then((all) => setDevices(all.filter((d) => d.kind === 'audioinput'))).catch(() => setDevices([]));
+    // This meeting starts from Settings, never from the last meeting's choice; a late answer for an earlier opening is
+    // not used. Without Settings, the server decides as before.
+    let current = true;
+    setLanguage('auto');
+    setLanguages([]);
+    setLanguageReady(false);
+    void apiGet<Transcription>('/api/transcription').then((t) => {
+      if (!current) return;
+      const model = t.models.find((m) => m.id === t.settings.model);
+      setLanguage(t.settings.language);
+      setLanguages(model?.language_options ?? []);
+      setModelName(model?.name ?? '');
+      setAllLanguages(t.models.flatMap((m) => m.language_options ?? []));
+    }).catch(() => undefined).finally(() => { if (current) setLanguageReady(true); });
+    void navigator.mediaDevices?.enumerateDevices()
+      .then((all) => { if (current) setDevices(all.filter((d) => d.kind === 'audioinput')); })
+      .catch(() => { if (current) setDevices([]); });
+    return () => { current = false; };
   }, [isOpen, prefill]);
 
   return (
@@ -54,6 +79,25 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
         </label>
         <ParticipantsField value={participants} onChange={(next) => { setParticipants(next); setTold(false); }} />
+        {languages.length > 0 && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            Spoken language
+            <select aria-label="Spoken language of this meeting" value={language} onChange={(e) => setLanguage(e.target.value)} style={inputStyle}>
+              <option value="auto">Auto (each part in its own language)</option>
+              {/* A language in Settings that the model lacks: shown as it is, so what is sent is what is seen. */}
+              {language !== 'auto' && !languages.some((l) => l.id === language) && (
+                <option value={language}>{allLanguages.find((l) => l.id === language)?.label ?? language} (not in {modelName || 'the chosen model'}: read as Auto)</option>
+              )}
+              {languages.filter((l) => l.common || l.id === language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+              {languages.some((l) => !l.common && l.id !== language) && (
+                <optgroup label="Other languages">
+                  {languages.filter((l) => !l.common && l.id !== language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                </optgroup>
+              )}
+            </select>
+            <span style={hintStyle}>For this meeting only; the default is in Settings &gt; Transcription. It can be changed during the recording too.</span>
+          </label>
+        )}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           Microphone
           <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} style={inputStyle}>
@@ -84,7 +128,7 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
         </label>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!told || !date} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio }); onClose(); navigate('/meetings'); }}>Start recording</Button>
+          <Button variant="primary" disabled={!told || !date || !languageReady} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio, ...(languageReady && languages.length > 0 ? { language } : {}) }); onClose(); navigate('/meetings'); }}>Start recording</Button>
         </div>
       </div>
     </Modal>
