@@ -117,6 +117,37 @@ jobs:
           STT_TEST_AUDIO: ${{ runner.temp }}/audio
         run: node --import tsx --test --test-concurrency=1 --test-name-pattern="real model" tests/transcription-engine.test.ts tests/meeting-acceptance.test.ts
 
+  design:
+    name: Design (browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # Not a dependency of the package: installed here only, without touching package-lock.json.
+      - name: Install Playwright and Chromium
+        run: |
+          npm i --no-save playwright@1.57.0
+          npx playwright install --with-deps chromium
+      # Layout, labels, names, contrast and keyboard checks on every page; screenshots compared where
+      # ui/visual-baselines/linux exists (see docs/design-system.md).
+      - run: npm run test:visual
+      - name: Keep the screenshots for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: design-screenshots
+          path: .visual-output/
+          if-no-files-found: ignore
+          retention-days: 14
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

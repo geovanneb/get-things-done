@@ -37,6 +37,11 @@ module.exports = tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    // Runs in Node, but the functions it passes to page.evaluate() run in the browser.
+    files: ['scripts/visual-check.mjs'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+  },
+  {
     files: ['bin/**/*.js', 'eslint.config.js'],
     languageOptions: { sourceType: 'commonjs' },
     rules: { '@typescript-eslint/no-require-imports': 'off' },

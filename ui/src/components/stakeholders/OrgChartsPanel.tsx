@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '@/components/common/Avatar';
 import Button from '@/components/common/Button';
@@ -61,6 +62,7 @@ interface PanelProps {
 }
 
 export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeholderCreated }: PanelProps) {
+  const confirm = useConfirm();
   const dispatch = useAppDispatch();
   const { workspace } = useAppState();
   const workspaceKey = workspace?.path ?? 'default';
@@ -341,9 +343,8 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
             .replace(/^(.+)$/, `Its $1 move to "${parentName}".`)
         : [subUnits && `Its ${count(subUnits, 'sub-unit moves', 'sub-units move')} to the top level.`,
            people && `Its ${count(people, 'person is', 'people are')} left without a unit.`].filter(Boolean).join(' ');
-      const message = `Delete the unit "${unit.name}"?${moves ? ` ${moves}` : ''} Nobody is removed from the chart.`;
-      if (!window.confirm(message)) return;
-      saveChart(deleteUnit(units, members, unit.id));
+      void confirm({ title: `Delete the unit "${unit.name}"?`, message: `${moves ? `${moves} ` : ''}Nobody is removed from the chart.`, confirmLabel: 'Delete unit', tone: 'danger' })
+        .then((ok) => { if (ok) saveChart(deleteUnit(units, members, unit.id)); });
     }
   }
 
@@ -402,7 +403,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
 
   async function deleteChart() {
     if (!chart) return;
-    if (!window.confirm(`Delete the org chart "${chart.name}"? The stakeholders themselves are kept.`)) return;
+    if (!(await confirm({ title: `Delete the org chart "${chart.name}"?`, message: 'The chart and its units are deleted. The stakeholders themselves are kept.', confirmLabel: 'Delete org chart', tone: 'danger' }))) return;
     try {
       await apiDelete(`/api/org-charts/${chart.id}`);
       const rest = charts.filter((c) => c.id !== chart.id);

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Notice from '@/components/common/Notice';
 import Button from '@/components/common/Button';
 import Input from '@/components/common/Input';
 import Toggle from '@/components/common/Toggle';
@@ -51,21 +52,7 @@ const footer: React.CSSProperties = { display: 'flex', justifyContent: 'space-be
 
 function Choice({ heading, text, onClick, primary }: { heading: string; text: string; onClick: () => void; primary?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        textAlign: 'left',
-        width: '100%',
-        padding: '16px 18px',
-        borderRadius: 'var(--radius-lg)',
-        border: `1px solid ${primary ? 'var(--color-accent)' : 'var(--color-border)'}`,
-        background: primary ? 'var(--color-accent-subtle)' : 'var(--color-surface)',
-        color: 'var(--color-text)',
-        cursor: 'pointer',
-        fontFamily: 'var(--font-sans)',
-      }}
-    >
+    <button type="button" onClick={onClick} className={`gtd-choice${primary ? ' gtd-choice--primary' : ''}`}>
       <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginBottom: 4 }}>{heading}</div>
       <div style={muted}>{text}</div>
     </button>
@@ -73,21 +60,7 @@ function Choice({ heading, text, onClick, primary }: { heading: string; text: st
 }
 
 function ErrorBox({ message }: { message: string }) {
-  return (
-    <div
-      role="alert"
-      style={{
-        marginTop: 16,
-        padding: '10px 12px',
-        borderRadius: 'var(--radius-md)',
-        background: 'var(--color-critical-subtle)',
-        color: 'var(--color-critical)',
-        fontSize: 'var(--text-sm)',
-      }}
-    >
-      {message}
-    </div>
-  );
+  return <Notice tone="critical" style={{ marginTop: 'var(--space-4)' }}>{message}</Notice>;
 }
 
 async function postSetup(body: unknown): Promise<{ status: number; data: { error?: string; needs_init?: boolean; path?: string } }> {

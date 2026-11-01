@@ -1,4 +1,5 @@
 import { describeSpeed, GPU_LIVE_X, gpuLiveOffer, recommendModel } from '@/utils/transcriptionSpeed';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import React from 'react';
 import Button from '@/components/common/Button';
 import Badge from '@/components/common/Badge';
@@ -181,6 +182,7 @@ function SpeakerDetection({ speakers, enabled, saving, downloading, onToggle, on
  * language. Models stay on this computer, outside the workspace.
  */
 export default function TranscriptionSettings() {
+  const confirm = useConfirm();
   const { dataVersions } = useAppState();
   const { data, error, refetch } = useApi<Transcription>('/api/transcription', [dataVersions.transcription]);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -204,7 +206,7 @@ export default function TranscriptionSettings() {
   };
   const act = async (model: Pick<TranscriptionModel, 'id' | 'name' | 'size'>, action: 'download' | 'cancel' | 'delete') => {
     setNotice(null);
-    if (action === 'delete' && !window.confirm(`Delete ${model.name} (${size(model.size)}) from this computer? You can download it again later.`)) return;
+    if (action === 'delete' && !(await confirm({ title: `Delete ${model.name}?`, message: `${size(model.size)} is freed on this computer. You can download the model again later.`, confirmLabel: 'Delete model', tone: 'danger' }))) return;
     try {
       if (action === 'download') await apiPost(`/api/transcription/models/${model.id}/download`);
       if (action === 'cancel') await apiPost(`/api/transcription/models/${model.id}/cancel`);
@@ -334,7 +336,7 @@ export default function TranscriptionSettings() {
       </label>
       {notice && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{notice}</p>}
       <p style={hintStyle}>
-        Models are kept in <code>{data.models_dir}</code>, shared by every workspace. Speeds were measured on an Apple Silicon
+        Models are kept in <code style={{ overflowWrap: 'anywhere' }}>{data.models_dir}</code>, shared by every workspace. Speeds were measured on an Apple Silicon
         Mac; other computers may be slower.
       </p>
     </div>

@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import Card from '@/components/common/Card';
+import Notice from '@/components/common/Notice';
+import Page from '@/components/common/Page';
 import { Link, useParams } from 'react-router-dom';
 
 import Avatar from '@/components/common/Avatar';
@@ -140,39 +143,7 @@ interface SectionCardProps {
 }
 
 function SectionCard({ title, badge, children }: SectionCardProps) {
-  return (
-    <section
-      style={{
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '14px 20px',
-          borderBottom: '1px solid var(--color-border)',
-        }}
-      >
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 'var(--text-md)',
-            fontWeight: 600,
-            color: 'var(--color-text)',
-          }}
-        >
-          {title}
-        </h2>
-        {badge}
-      </div>
-      <div style={{ padding: '16px 20px' }}>{children}</div>
-    </section>
-  );
+  return <Card title={title} badge={badge} headingLevel={2}>{children}</Card>;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,39 +306,34 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
     return () => { cancelled = true; };
   }, [id]);
 
+  // Standalone, the page frame; inside an org chart panel, no frame of its own.
+  const Frame = ({ children }: { children: React.ReactNode }) => embedded
+    ? <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>{children}</div>
+    : <Page width="narrow" style={{ gap: 'var(--space-4)' }}>{children}</Page>;
+
   // ---- Loading ----
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '80px 0' }}>
-        <LoadingSpinner />
-      </div>
-    );
-  }
+  if (loading) return <LoadingSpinner text="Loading stakeholder…" />;
 
   // ---- 404 ----
   if (notFound) {
     return (
-      <div style={{ padding: embedded ? 0 : 16, maxWidth: 720, margin: '0 auto' }}>
+      <Frame>
         {!embedded && <BackButton />}
-        <div style={{ marginTop: embedded ? 0 : 32 }}>
-          <EmptyState
-            title="Stakeholder not found"
-            description="This stakeholder may have been deleted or the link is incorrect."
-          />
-        </div>
-      </div>
+        <EmptyState
+          title="Stakeholder not found"
+          description="This stakeholder may have been deleted, or the link is out of date."
+        />
+      </Frame>
     );
   }
 
   // ---- Error ----
   if (fetchError) {
     return (
-      <div style={{ padding: embedded ? 0 : 16, maxWidth: 720, margin: '0 auto' }}>
+      <Frame>
         {!embedded && <BackButton />}
-        <p role="alert" style={{ marginTop: embedded ? 0 : 24, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>
-          {fetchError}
-        </p>
-      </div>
+        <Notice tone="critical" title="Could not load this stakeholder.">{fetchError}</Notice>
+      </Frame>
     );
   }
 
@@ -377,36 +343,16 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
   const hasTags = stakeholder.tags && stakeholder.tags.length > 0;
 
   return (
-    <div
-      onClickCapture={embedded && onNavigate ? (e) => { if ((e.target as HTMLElement).closest('a')) onNavigate(); } : undefined}
-      style={{
-        padding: embedded ? 0 : 16,
-        maxWidth: 720,
-        margin: '0 auto',
-        boxSizing: 'border-box',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-      }}
-    >
+    <div onClickCapture={embedded && onNavigate ? (e) => { if ((e.target as HTMLElement).closest('a')) onNavigate(); } : undefined}>
+    <Frame>
       {!embedded && <BackButton />}
 
       {/* Profile card */}
-      <div
-        style={{
-          background: 'var(--color-surface)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-lg)',
-          padding: 24,
-          display: 'flex',
-          gap: 20,
-          alignItems: 'flex-start',
-        }}
-      >
+      <div className="gtd-card" style={{ flexDirection: 'row', padding: 'var(--space-5)', gap: 'var(--space-5)', alignItems: 'flex-start' }}>
         <Avatar name={stakeholder.name} size="lg" />
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          {React.createElement(embedded ? 'h3' : 'h1', {
+          {React.createElement(embedded ? 'h3' : 'h2', {
             style: {
               margin: 0,
               fontSize: 'var(--text-xl)',
@@ -572,6 +518,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
           </div>
         )}
       </SectionCard>
+    </Frame>
     </div>
   );
 }
@@ -602,19 +549,9 @@ function OrgRow({ label, people, empty }: { label: string; people: OrgPersonSumm
 function BackButton() {
   return (
     <div>
-      <Link
-        to="/stakeholders"
-        style={{ display: 'inline-block' }}
-      >
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<BackArrowIcon />}
-          iconPosition="left"
-          style={{ marginLeft: -6 }}
-        >
-          Back to Stakeholders
-        </Button>
+      <Link to="/stakeholders" className="gtd-btn gtd-btn--ghost gtd-btn--sm" style={{ marginLeft: -6 }}>
+        <span aria-hidden="true" style={{ display: 'flex' }}><BackArrowIcon /></span>
+        Back to stakeholders
       </Link>
     </div>
   );

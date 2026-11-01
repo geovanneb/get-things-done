@@ -1,7 +1,7 @@
 ---
 name: meeting-prep
 description: "Prepares the executive for an upcoming meeting. Use before any significant meeting: board presentations, stakeholder negotiations, client reviews, or difficult conversations. Reads the task, relevant stakeholders, and context to produce a concise brief with objectives, talking points, likely questions, and red lines."
-model: claude-sonnet-5
+model: opus
 tools:
   - Read
   - Write

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test:primitives": "tsx src/components/common/primitives.test.tsx",
     "test:agent-floor": "tsx src/components/agentic/engine/simulation.test.ts",
     "test:org-chart": "tsx src/utils/orgChart.test.ts",
     "test:files": "tsx src/utils/attachedFiles.test.ts",

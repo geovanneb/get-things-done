@@ -1,7 +1,7 @@
 ---
 name: stakeholder-advisor
 description: Analyzes stakeholder dynamics and drafts tailored communications. Use when planning a sensitive conversation, when a message needs to be calibrated for a specific audience, when you need to map influence and political considerations, or when preparing for a high-stakes interaction. Produces drafts for human review — never sends or distributes anything.
-model: claude-sonnet-5
+model: opus
 tools:
   - Read
   - Write

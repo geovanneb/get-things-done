@@ -1,10 +1,14 @@
 import { useState, useCallback, useMemo, createContext, useContext } from 'react';
+import Page from '@/components/common/Page';
+import { SearchInput } from '@/components/common/Input';
+import { CountBadge, SegmentedControl, Tabs } from '@/components/common/Tabs';
+import IconButton, { icons } from '@/components/common/IconButton';
+import { useNotify } from '@/hooks/useNotify';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { Task, Stakeholder } from '../types';
 import Badge from '../components/common/Badge';
 import Avatar from '../components/common/Avatar';
-import Input from '../components/common/Input';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
 import { useAppDispatch, useAppState, useDataVersion } from '../store';
@@ -122,7 +126,7 @@ function AgentWorkingIndicator({ task }: { task: Task }) {
         height="11"
         viewBox="0 0 24 24"
         fill="none"
-        style={{ animation: 'esb-spin 0.75s linear infinite', flexShrink: 0 }}
+        className="gtd-spin" style={{ flexShrink: 0 }}
       >
         <circle cx="12" cy="12" r="10" stroke="var(--color-border-strong)" strokeWidth="3" />
         <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" />
@@ -138,7 +142,6 @@ function AgentWorkingIndicator({ task }: { task: Task }) {
       }}>
         {label}
       </span>
-      <style>{`@keyframes esb-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -304,24 +307,14 @@ function KanbanCol({
       {/* Column header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
-        padding: '12px 14px',
+        padding: 'var(--space-2) var(--space-2) var(--space-2) var(--space-3)',
         borderBottom: '1px solid var(--color-border)',
         flexShrink: 0,
       }}>
-        <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{column.label}</span>
-        <Badge size="sm">{tasks.length}</Badge>
+        <h2 style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{column.label}</h2>
+        <CountBadge count={tasks.length} label={`${tasks.length} tasks`} />
         <div style={{ flex: 1 }} />
-        <button
-          aria-label={`Add task to ${column.label}`}
-          onClick={() => onAddTask(column.statuses[0])}
-          style={{ color: 'var(--color-text-muted)', cursor: 'pointer', border: 'none', background: 'transparent', display: 'flex' }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-accent)'; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-muted)'; }}
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
+        <IconButton label={`Add a task to ${column.label}`} icon={icons.plus} onClick={() => onAddTask(column.statuses[0])} />
       </div>
 
       {/* Cards */}
@@ -379,61 +372,37 @@ function ListView({
   ];
 
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}>
+    <div className="gtd-table-wrap">
+      <table className="gtd-table">
         <thead>
-          <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+          <tr>
             {cols.map((col) => (
-              <th
-                key={col.key as string}
-                scope="col"
-                onClick={() => handleSort(col.key)}
-                style={{
-                  padding: '8px 14px',
-                  textAlign: 'left',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 600,
-                  color: 'var(--color-text-muted)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  width: col.width,
-                  userSelect: 'none',
-                }}
-              >
-                {col.label}
-                {sortKey === col.key && <span aria-hidden="true">{sortDir === 'asc' ? ' ↑' : ' ↓'}</span>}
+              <th key={col.key as string} scope="col" style={{ width: col.width }}
+                aria-sort={sortKey === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}>
+                <button type="button" className="gtd-sort-btn" onClick={() => handleSort(col.key)}>
+                  {col.label}
+                  {sortKey === col.key && <span aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>}
+                </button>
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
           {sorted.map((task) => (
-            <tr
-              key={task.id}
-              onClick={() => onRowClick(task.id)}
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && onRowClick(task.id)}
-              style={{
-                borderBottom: '1px solid var(--color-border)',
-                cursor: 'pointer',
-                transition: 'background 0.1s',
-              }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = 'var(--color-surface-hover)'}
-              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = 'transparent'}
-            >
-              <td style={{ padding: '10px 14px' }}>
+            <tr key={task.id} onClick={() => onRowClick(task.id)} style={{ cursor: 'pointer' }}>
+              <td>
                 <Badge variant={`priority-${task.priority}` as 'priority-critical'} size="sm">
                   {formatPriorityLabel(task.priority)}
                 </Badge>
               </td>
-              <td style={{ padding: '10px 14px', fontWeight: 500, maxWidth: 360 }}>
-                <span className="truncate" style={{ display: 'block' }}>{task.title}</span>
+              <td style={{ maxWidth: 360 }}>
+                {/* The title is the keyboard way in; the row is the mouse target. */}
+                <button type="button" className="gtd-link-strong truncate" style={{ display: 'block', maxWidth: '100%', textAlign: 'left', fontWeight: 500 }}
+                  onClick={(e) => { e.stopPropagation(); onRowClick(task.id); }}>
+                  {task.title}
+                </button>
                 {showTaskIds && (
-                  <span style={{ display: 'block', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontWeight: 400 }}>
-                    {task.id}
-                  </span>
+                  <span className="mono" style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{task.id}</span>
                 )}
                 {task.tags.length > 0 && (
                   <div style={{ marginTop: 2, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -441,27 +410,16 @@ function ListView({
                   </div>
                 )}
               </td>
-              <td style={{ padding: '10px 14px' }}>
-                <Badge variant={`status-${task.status}` as 'status-done'} size="sm">
-                  {formatStatusLabel(task.status)}
-                </Badge>
+              <td>
+                <Badge variant={`status-${task.status}` as 'status-done'} size="sm">{formatStatusLabel(task.status)}</Badge>
               </td>
-              <td style={{ padding: '10px 14px' }}>
-                <DueDateChip dueDate={task.due_date} />
-              </td>
-              <td style={{ padding: '10px 14px', color: 'var(--color-text-secondary)' }}>{task.task_type}</td>
-              <td style={{ padding: '10px 14px', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>
-                {formatDate(task.created_at)}
-              </td>
+              <td><DueDateChip dueDate={task.due_date} /></td>
+              <td style={{ color: 'var(--color-text-secondary)' }}>{task.task_type}</td>
+              <td className="mono" style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>{formatDate(task.created_at)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      {sorted.length === 0 && (
-        <div style={{ padding: '32px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-          No tasks match the current filters.
-        </div>
-      )}
     </div>
   );
 }
@@ -473,6 +431,7 @@ export default function BoardView() {
   const [search, setSearch] = useState('');
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
+  const notify = useNotify();
 
   // Refetch whenever tasks change anywhere: a new task from the modal, a drag
   // between columns, or an agent editing task.md on disk.
@@ -507,98 +466,29 @@ export default function BoardView() {
     try {
       await apiPut(`/api/tasks/${taskId}`, { status });
       dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
-    } catch {
-      // ignore
+    } catch (err) {
+      // The card goes back to its column on the next refresh; say why it did not move.
+      notify.error(err, 'Could not move the task. Try again.');
+      dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     }
-  }, [dispatch]);
+  }, [dispatch, notify]);
 
   const priorities: PriorityFilter[] = ['all', 'critical', 'high', 'medium', 'low'];
 
   return (
     <StakeholderLookup.Provider value={stakeholderLookup}>
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-      {/* Tabs */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 2,
-        padding: '0 20px',
-        borderBottom: '1px solid var(--color-border)',
-        background: 'var(--color-surface)',
-        flexShrink: 0,
-      }}>
-        {(['kanban', 'list', 'archive'] as ViewTab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            aria-selected={tab === t}
-            role="tab"
-            style={{
-              padding: '12px 14px',
-              fontSize: 'var(--text-sm)',
-              fontWeight: tab === t ? 600 : 400,
-              color: tab === t ? 'var(--color-text)' : 'var(--color-text-muted)',
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              borderBottom: tab === t ? '2px solid var(--color-accent)' : '2px solid transparent',
-              transition: 'color 0.1s',
-              textTransform: 'capitalize',
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+    <Page width="full" flush style={{ overflow: 'hidden' }}>
+      <Tabs label="Board views" value={tab} onChange={setTab} idPrefix="board"
+        style={{ padding: '0 var(--page-gutter)', background: 'var(--color-surface)', flexShrink: 0 }}
+        items={[{ id: 'kanban', label: 'Kanban' }, { id: 'list', label: 'List' }, { id: 'archive', label: 'Archive' }]} />
 
       {/* Filter bar */}
       {tab !== 'archive' && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '10px 20px',
-          borderBottom: '1px solid var(--color-border)',
-          background: 'var(--color-surface)',
-          flexShrink: 0,
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {priorities.map((p) => (
-              <button
-                key={p}
-                onClick={() => setPriorityFilter(p)}
-                aria-pressed={priorityFilter === p}
-                style={{
-                  padding: '3px 10px',
-                  fontSize: 'var(--text-xs)',
-                  fontWeight: 500,
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid',
-                  cursor: 'pointer',
-                  transition: 'background 0.1s, color 0.1s',
-                  ...(priorityFilter === p
-                    ? { background: 'var(--color-accent)', color: 'var(--color-text-on-accent)', borderColor: 'var(--color-accent)' }
-                    : { background: 'transparent', color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)' }),
-                }}
-              >
-                {p === 'all' ? 'All' : formatPriorityLabel(p)}
-              </button>
-            ))}
-          </div>
-          <Input
-            value={search}
-            onChange={setSearch}
-            placeholder="Search title or ID..."
-            style={{ maxWidth: 220 }}
-            icon={
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
-                <circle cx="5.5" cy="5.5" r="4" stroke="currentColor" strokeWidth="1.2" />
-                <path d="M8.5 8.5L11 11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-              </svg>
-            }
-          />
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
+        <div className="gtd-toolbar">
+          <SegmentedControl label="Priority" value={priorityFilter} onChange={setPriorityFilter}
+            options={priorities.map((p) => ({ value: p, label: p === 'all' ? 'All' : formatPriorityLabel(p) }))} />
+          <SearchInput value={search} onChange={setSearch} placeholder="Search tasks by title or ID" width={240} size="sm" />
+          <span role="status" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
             {filtered.length} task{filtered.length !== 1 ? 's' : ''}
           </span>
         </div>
@@ -606,10 +496,10 @@ export default function BoardView() {
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {loading && <LoadingSpinner text="Loading tasks..." />}
+        {loading && <LoadingSpinner text="Loading tasks…" />}
 
         {!loading && tab === 'kanban' && (
-          <div style={{ flex: 1, display: 'flex', gap: 14, padding: '16px 20px', overflowX: 'auto', overflowY: 'hidden', minHeight: 0 }}>
+          <div id="board-panel" role="tabpanel" aria-labelledby="board-tab-kanban" style={{ flex: 1, display: 'flex', gap: 'var(--space-4)', padding: 'var(--space-4) var(--page-gutter)', overflowX: 'auto', overflowY: 'hidden', minHeight: 0 }}>
             {KANBAN_COLUMNS.map((col) => (
               <KanbanCol
                 key={col.id}
@@ -624,31 +514,37 @@ export default function BoardView() {
         )}
 
         {!loading && tab === 'list' && (
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {filtered.length === 0 ? (
-              <EmptyState
-                title="No tasks"
-                description="Add tasks to start tracking your work."
-                action={{ label: 'Create task', onClick: () => {} }}
-              />
-            ) : (
-              <ListView tasks={filtered} onRowClick={(id) => navigate(`/board/task/${id}`)} />
-            )}
+          <div id="board-panel" role="tabpanel" aria-labelledby="board-tab-list" style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4) var(--page-gutter)' }}>
+            <div className="gtd-card">
+              {filtered.length === 0 ? (
+                search || priorityFilter !== 'all' ? (
+                  <EmptyState size="compact" title="No tasks match these filters" description="Try another word or priority."
+                    action={{ label: 'Clear filters', onClick: () => { setSearch(''); setPriorityFilter('all'); } }} />
+                ) : (
+                  <EmptyState size="compact" title="No tasks yet" description="A task is one piece of work, with the deliverables an agent will make for it."
+                    action={{ label: 'New task', onClick: () => openNewTask('backlog') }} />
+                )
+              ) : (
+                <ListView tasks={filtered} onRowClick={(id) => navigate(`/board/task/${id}`)} />
+              )}
+            </div>
           </div>
         )}
 
         {!loading && tab === 'archive' && (
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
-            {tasks.length === 0 ? (
-              <EmptyState title="Archive is empty" description="Completed and archived tasks will appear here." />
-            ) : (
-              <ListView tasks={tasks} onRowClick={(id) => navigate(`/board/task/${id}`)} />
-            )}
+          <div id="board-panel" role="tabpanel" aria-labelledby="board-tab-archive" style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4) var(--page-gutter)' }}>
+            <div className="gtd-card">
+              {tasks.length === 0 ? (
+                <EmptyState size="compact" title="The archive is empty" description="Archived tasks appear here. Move a task to Archived from its status field." />
+              ) : (
+                <ListView tasks={tasks} onRowClick={(id) => navigate(`/board/task/${id}`)} />
+              )}
+            </div>
           </div>
         )}
       </div>
 
-    </div>
+    </Page>
     <Outlet context={{ refetchTasks: refetch }} />
     </StakeholderLookup.Provider>
   );

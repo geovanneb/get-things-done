@@ -275,7 +275,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, paddingTop: 4 }}>
           {saving && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginRight: 'auto' }}>{saving}</span>}
-          <Button variant="secondary" onClick={onClose} disabled={!!saving}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={!!saving}>Cancel</Button>
           <Button variant="primary" onClick={save} disabled={!!saving || !hasContent}>{mode === 'meeting' ? 'Add to the queue' : 'Save and get command'}</Button>
         </div>
       </div>

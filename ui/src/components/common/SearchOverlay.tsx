@@ -156,7 +156,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 2000,
+        zIndex: 'var(--z-command)',
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',
@@ -212,6 +212,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
               flex: 1,
               background: 'transparent',
               border: 'none',
+              // design-exception: the palette's only field, focused whenever it is open; the open palette is the indicator
               outline: 'none',
               fontSize: 'var(--text-md)',
               color: 'var(--color-text)',
@@ -219,7 +220,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
           />
           {loading && (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"
-              style={{ animation: 'spin 0.7s linear infinite', color: 'var(--color-accent)', flexShrink: 0 }}>
+              className="gtd-spin" style={{ color: 'var(--color-accent)', flexShrink: 0 }}>
               <circle cx="12" cy="12" r="10" stroke="var(--color-border)" strokeWidth="3" />
               <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
             </svg>
@@ -348,7 +349,6 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
           <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>Esc</kbd> close</span>
         </div>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>,
     document.body
   );

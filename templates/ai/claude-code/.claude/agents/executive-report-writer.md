@@ -1,7 +1,7 @@
 ---
 name: executive-report-writer
 description: Creates high-quality executive deliverables. Use for quarterly reports, presentations, memos, decision briefs, and strategic documents. Reads the task, all stakeholder files, and context notes before writing. Adapts every output to the specific audience and output template. This is the primary production agent for finished deliverables.
-model: claude-opus-5
+model: opus
 tools:
   - Read
   - Write

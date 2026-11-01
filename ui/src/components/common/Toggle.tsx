@@ -78,7 +78,7 @@ export default function Toggle({ checked, onChange, label, disabled, id }: Toggl
           borderRadius: '50%',
           background: 'var(--color-surface)',
           transition: 'left 0.15s ease',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.25)',
+          boxShadow: 'var(--shadow-sm)',
           pointerEvents: 'none',
         }}
       />

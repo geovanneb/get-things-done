@@ -1,4 +1,6 @@
 import React from 'react';
+import Card from '@/components/common/Card';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link } from 'react-router-dom';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
@@ -64,10 +66,6 @@ function formatWhen(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-const cardStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', background: 'var(--color-surface)', padding: 16,
-};
-
 export function SystemCleanupCard({ job, onEdit, onChanged }: { job: SystemCleanup; onEdit: () => void; onChanged: () => void }) {
   const [busy, setBusy] = React.useState<'toggle' | 'run' | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
@@ -89,7 +87,7 @@ export function SystemCleanupCard({ job, onEdit, onChanged }: { job: SystemClean
   };
 
   return (
-    <article id="system-cleanup" style={{ ...cardStyle, opacity: settings.enabled ? 1 : 0.75 }} aria-label="System cleanup">
+    <Card as="article" padding="compact" id="system-cleanup" aria-label="System cleanup">
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -137,7 +135,7 @@ export function SystemCleanupCard({ job, onEdit, onChanged }: { job: SystemClean
           </span>
         )}
       </div>
-    </article>
+    </Card>
   );
 }
 
@@ -149,6 +147,7 @@ function daysValue(v: string): number | string {
 }
 
 export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen: boolean; job: SystemCleanup | null; onClose: () => void; onSaved: () => void }) {
+  const confirm = useConfirm();
   const [draft, setDraft] = React.useState<CleanupSettings | null>(null);
   const [days, setDays] = React.useState<Record<string, string>>({});
   const [preview, setPreview] = React.useState<CleanupPreview | null>(null);
@@ -206,7 +205,13 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
       const p = preview ?? await runPreview();
       if (!p) return;
       const lines = newlyPermanent.map((r) => `- ${r.label}: ${p.plan.counts[r.type]} now, older than ${days[r.type]} days`).join('\n');
-      if (!window.confirm(`Delete permanently, without the trash?\n\n${lines}\n\nDeleted files cannot be restored. Choose "Move to trash" to keep a way back.`)) return;
+      const ok = await confirm({
+        title: 'Delete permanently, without the trash?',
+        message: `${lines}\n\nDeleted files cannot be restored. Choose "Move to trash" to keep a way back.`,
+        confirmLabel: 'Delete permanently',
+        tone: 'danger',
+      });
+      if (!ok) return;
     }
     setSaving(true);
     setError(null);

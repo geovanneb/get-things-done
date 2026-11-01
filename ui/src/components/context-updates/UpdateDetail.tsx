@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
@@ -363,6 +364,7 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
 }
 
 export default function UpdateDetail({ id, onBack }: { id: string; onBack: () => void }) {
+  const confirm = useConfirm();
   const version = useDataVersion('context-updates');
   const { data, loading, error, refetch } = useApi<ContextUpdate>(`/api/context-updates/${id}`, [version]);
   const dispatch = useAppDispatch();
@@ -535,26 +537,26 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     if (errors.length) throw new Error(errors.join('; '));
   });
 
-  const removeFile = (name: string) => {
-    if (!window.confirm(`Remove "${name}" from this update?`)) return;
+  const removeFile = async (name: string) => {
+    if (!(await confirm({ title: `Remove "${name}" from this update?`, message: 'The file is deleted from the update before it is analyzed.', confirmLabel: 'Remove file', tone: 'danger' }))) return;
     void run('remove', () => apiDelete(`/api/context-updates/${u.id}/materials/${encodeURIComponent(name)}`));
   };
 
-  const reopen = () => {
+  const reopen = async () => {
     const msg = u.status === 'analyzing'
       ? 'Stop waiting for the agent and go back to collecting? Run the analysis again afterwards.'
       : `Add more material? The current proposals${records.length ? ' and meeting records (also confirmed ones)' : ''} are discarded, and the next analysis looks at all material together.`;
-    if (window.confirm(msg)) void run('reopen', () => apiPost(`/api/context-updates/${u.id}/reopen`));
+    if (await confirm({ title: u.status === 'analyzing' ? 'Stop waiting for the agent?' : 'Add more material?', message: msg, confirmLabel: u.status === 'analyzing' ? 'Stop waiting' : 'Add material' })) void run('reopen', () => apiPost(`/api/context-updates/${u.id}/reopen`));
   };
 
-  const close = () => {
+  const close = async () => {
     const files = u.keep_materials ? 'the materials are kept until you release them' : 'the materials are deleted';
     const kept = confirmedCount > 0 ? ' Confirmed meeting records are kept.' : '';
-    if (!window.confirm(`Close this update without changing any context file? The record stays; ${files}.${kept}`)) return;
+    if (!(await confirm({ title: 'Close without changes?', message: `No context file is changed. The record stays; ${files}.${kept}`, confirmLabel: 'Close without changes' }))) return;
     void run('close', () => apiPost(`/api/context-updates/${u.id}/close`), 'Closed without changes.');
   };
 
-  const remove = () => {
+  const remove = async () => {
     const msg = u.status === 'done'
       ? `Delete this record? Context changes it made stay; only the record goes${records.some((r) => r.confirmation === 'confirmed') ? ', including its confirmed meeting records' : ''}.`
       : `Delete this update and its materials${confirmedCount > 0 ? ', including the meeting records you confirmed' : ''}? Nothing in your context has changed yet.`;
@@ -563,7 +565,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     const onlyCopy = u.origin === 'meetings' && meetings > 0 && (u.status !== 'done' || u.keep_materials)
       ? ` ${meetings === 1 ? 'Its meeting already left' : `Its ${meetings} meetings already left`} the queue, so this is the only copy of their recordings, transcripts and speaker names.`
       : '';
-    if (!window.confirm(`${msg}${onlyCopy} The update's folder goes to the trash (.situation-board/trash/), where you can still get the files back.`)) return;
+    if (!(await confirm({ title: u.status === 'done' ? 'Delete this record?' : 'Delete this update?', message: `${msg}${onlyCopy} The update's folder goes to the trash (.situation-board/trash/), where you can still get the files back.`, confirmLabel: u.status === 'done' ? 'Delete record' : 'Delete update', tone: 'danger' }))) return;
     void (async () => {
       try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update moved to the trash.'); onBack(); changed(); } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Could not delete.');
@@ -573,8 +575,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
   const keepMaterials = (keep: boolean) => run('keep', () => apiPut(`/api/context-updates/${u.id}/keep-materials`, { keep }));
 
-  const releaseMaterials = () => {
-    if (!window.confirm('Delete the kept files of this update? The record stays. This cannot be undone.')) return;
+  const releaseMaterials = async () => {
+    if (!(await confirm({ title: 'Delete the kept files of this update?', message: 'The record stays. This cannot be undone.', confirmLabel: 'Delete files', tone: 'danger' }))) return;
     void run('keep', () => apiPut(`/api/context-updates/${u.id}/keep-materials`, { keep: false }), 'Files released.');
   };
 
@@ -785,7 +787,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       )}
 
       {reviewing && (
-        <div style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md, 0 -2px 12px rgba(0,0,0,0.08))' }}>
+        <div style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md)' }}>
           {u.proposals.length > 0 && (
             <>
               <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{acceptedCount} of {u.proposals.length} selected</span>
@@ -814,7 +816,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
       {/* Waiting on a command: keep the step in view wherever the user has scrolled. */}
       {command && (
-        <div role="region" aria-label="Your next step" style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1.5px solid var(--color-accent)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md, 0 -2px 12px rgba(0,0,0,0.08))' }}>
+        <div role="region" aria-label="Your next step" style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1.5px solid var(--color-accent)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md)' }}>
           <span aria-live="polite" style={{ flex: '1 1 260px', minWidth: 0, fontSize: 'var(--text-sm)', lineHeight: 1.45 }}>
             {copied ? (
               <><strong style={{ color: 'var(--color-success)' }}>Copied.</strong> Paste it into Claude Code and press Enter. This page updates by itself when the agent starts.</>

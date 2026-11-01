@@ -5,6 +5,10 @@ import { apiPost } from '@/utils/api';
 import { useDataVersion } from '@/store';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
+import Card from '@/components/common/Card';
+import Notice from '@/components/common/Notice';
+import Page, { PageHeader } from '@/components/common/Page';
+import { CountBadge } from '@/components/common/Tabs';
 import { LiveTranscript } from '@/components/meetings/LiveTranscript';
 import { TranscriptReader } from '@/components/meetings/TranscriptReader';
 import { MeetingQueueList, recordingElsewhere } from '@/components/meetings/MeetingQueueList';
@@ -13,8 +17,6 @@ import { useRecorder } from '@/components/recording/RecordingProvider';
 import { readableTranscript, transcriptOnItsWay } from '@/utils/transcriptReading';
 import type { MeetingDigest } from '@/types';
 
-const cardStyle = { border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', background: 'var(--color-surface)', padding: 16 } as const;
-const headingStyle = { margin: '0 0 10px', fontSize: 'var(--text-base)', fontWeight: 600 } as const;
 
 const REFRESH_MS = 10_000;
 
@@ -45,14 +47,14 @@ function DigestNow({ job, onDone }: { job: MeetingDigest; onDone: () => void }) 
   return (
     <>
       {job.open_digest
-        ? <span style={line}>Digest <Link to={`/context/updates/${job.open_digest}`} style={{ color: 'var(--color-accent)' }}>{job.open_digest}</Link> is open for review: the next one waits for it.</span>
+        ? <span style={line}>Digest <Link to={`/context/updates/${job.open_digest}`} className="gtd-link">{job.open_digest}</Link> is open for review: the next one waits for it.</span>
         : when && waiting > 0 && <span style={line}>Next digest {when}</span>}
       <Button size="sm" variant="secondary" loading={busy} disabled={busy || waiting === 0 || Boolean(job.open_digest)}
         title={waiting === 0 ? 'No meeting waits for a digest' : 'Make a digest from the queue now, without waiting for the schedule'}
         onClick={() => void run()}>
         Make digest now
       </Button>
-      {notice && <span role={notice.error ? 'alert' : 'status'} style={{ ...line, flexBasis: '100%', color: notice.error ? 'var(--color-critical)' : line.color }}>{notice.text}</span>}
+      {notice && <span role={notice.error ? 'alert' : 'status'} style={{ ...line, flexBasis: '100%', textAlign: 'right', color: notice.error ? 'var(--color-critical)' : line.color }}>{notice.text}</span>}
     </>
   );
 }
@@ -90,34 +92,31 @@ export default function MeetingsView() {
   const following = own ?? elsewhere?.id ?? null;
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <section style={cardStyle} aria-label="Recording">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h3 style={{ ...headingStyle, margin: 0, flex: 1 }}>{own ? recorder.title : elsewhere ? `${elsewhere.title}, recording in another page` : 'Record a meeting'}</h3>
-          {!recorder.active && !elsewhere && <Button size="sm" variant="primary" onClick={openRecordDialog}>Record a meeting</Button>}
-        </div>
-        {following
-          ? <div style={{ marginTop: 10 }}><LiveTranscript meetingId={following} /></div>
-          : <p style={{ margin: '6px 0 0', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>The recording is transcribed on this computer. With a live model in Settings &gt; Transcription, the text appears here as people speak.</p>}
-      </section>
-      {shown && (transcript || waiting) && (
-        <section style={cardStyle} aria-label="Transcript of the meeting">
-          {transcript
-            ? <TranscriptReader key={`${shown.id}/${transcript.file}/${transcript.name}/${transcript.sha256}`} meetingId={shown.id} title={shown.title} transcript={transcript}
-              canName={transcript.final && !shown.in_digest} onNamed={refetch} participants={shown.participants ?? []}
-              onClose={() => { if (pickedMeeting) setPicked(null); else setClosed(shown.id); }} />
-            : <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{shown.title}: the transcript appears here when it is ready.</p>}
-        </section>
+    <Page width="narrow">
+      <PageHeader description="Record a meeting, read its transcript, and follow it into the next digest. The digest's schedule is in Routines." />
+      <Card
+        title={own ? recorder.title : elsewhere ? `${elsewhere.title}, recording in another page` : 'Recording'}
+        description={following ? undefined : 'Transcribed on this computer. With a live model in Settings > Transcription, the text appears here as people speak.'}
+        actions={!recorder.active && !elsewhere && <Button variant="primary" onClick={openRecordDialog}>Record a meeting</Button>}
+      >
+        {following ? <LiveTranscript meetingId={following} /> : null}
+      </Card>
+      {shown && transcript && (
+        <TranscriptReader key={`${shown.id}/${transcript.file}/${transcript.name}/${transcript.sha256}`} meetingId={shown.id} title={shown.title} transcript={transcript}
+          canName={transcript.final && !shown.in_digest} onNamed={refetch} participants={shown.participants ?? []}
+          onClose={() => { if (pickedMeeting) setPicked(null); else setClosed(shown.id); }} />
       )}
-      <section style={cardStyle} aria-label="Meetings in the queue">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <h3 style={{ ...headingStyle, margin: 0, flex: 1 }}>Queue</h3>
-          {data && <DigestNow job={data} onDone={refetch} />}
-        </div>
-        {error && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</p>}
-        {!data && !error && <LoadingSpinner text="Loading meetings..." />}
-        {data && <MeetingQueueList job={data} onChanged={refetch} onRead={(meeting, file) => setPicked({ meeting, file })} />}
-      </section>
-    </div>
+      {shown && !transcript && waiting && (
+        <Card title={shown.title}>
+          <LoadingSpinner inline text="The transcript appears here when it is ready." />
+        </Card>
+      )}
+      <Card title="Queue" padding="none" badge={data && data.queue.length > 0 ? <CountBadge count={data.queue.length} /> : undefined}
+        actions={data && <DigestNow job={data} onDone={refetch} />}>
+        {error && <div style={{ padding: 'var(--space-4) var(--space-5)' }}><Notice tone="critical" title="Could not load the queue.">{error}</Notice></div>}
+        {!data && !error && <LoadingSpinner text="Loading meetings…" />}
+        {data && <MeetingQueueList job={data} onChanged={refetch} onRecord={recorder.active ? undefined : openRecordDialog} onRead={(meeting, file) => setPicked({ meeting, file })} />}
+      </Card>
+    </Page>
   );
 }

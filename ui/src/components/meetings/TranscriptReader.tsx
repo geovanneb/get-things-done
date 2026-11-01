@@ -1,13 +1,14 @@
 import React from 'react';
 import Button from '@/components/common/Button';
+import Card from '@/components/common/Card';
+import IconButton, { icons } from '@/components/common/IconButton';
+import Notice from '@/components/common/Notice';
 import { useApi } from '@/hooks/useApi';
 import { useDataVersion } from '@/store';
 import { apiPut } from '@/utils/api';
 import { speakerChoices, type SpeakerChoice } from '@/utils/speakerChoices';
 import { clockLine, transcriptParts, type Readable, type TranscriptPart } from '@/utils/transcriptReading';
 import type { MeetingParticipant, SpeakerName, Stakeholder } from '@/types';
-
-const textStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
 
 /** A meeting's transcript, read here on the page. Give each transcript its own `key`: what is shown is always of this one. */
 export function TranscriptReader({ meetingId, title, transcript, onClose, canName, onNamed, participants = [] }: {
@@ -51,39 +52,43 @@ export function TranscriptReader({ meetingId, title, transcript, onClose, canNam
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <p role="status" style={{ ...textStyle, flex: 1 }}>{title}, {transcript.file}: {transcript.final ? 'transcript' : 'live transcript, shown until the more accurate one is ready'}</p>
-        <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-accent)' }}>Open as a file</a>
-        <Button size="sm" variant="ghost" onClick={onClose}>Close</Button>
-      </div>
-      {labels.length > 0 && transcript.final && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-xs)' }}>
-          <span style={{ color: 'var(--color-text-muted)' }}>{canName ? 'Who spoke? Name them here, or leave them for the analysis to propose:' : 'Speakers:'}</span>
-          {naming
-            ? <SpeakerEditors labels={labels} nameOf={nameOf} participants={participants} onName={(label, person) => void name(label, person)} />
-            : labels.map((label) => <SpeakerNamer key={label} label={label} named={nameOf(label)} editable={false} choices={[]} onName={() => {}} />)}
+    <Card
+      title={title}
+      description={<span role="status">{transcript.file}: {transcript.final ? 'transcript' : 'live transcript, shown until the more accurate one is ready'}</span>}
+      actions={<>
+        <a href={url} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open as a file</a>
+        <IconButton label="Close the transcript" icon={icons.close} onClick={onClose} />
+      </>}
+    >
+      <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
+        {labels.length > 0 && transcript.final && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
+            <span style={{ color: 'var(--color-text-secondary)' }}>{canName ? 'Who spoke? Name them here, or leave them for the analysis to propose:' : 'Speakers:'}</span>
+            {naming
+              ? <SpeakerEditors labels={labels} nameOf={nameOf} participants={participants} onName={(label, person) => void name(label, person)} />
+              : labels.map((label) => <SpeakerNamer key={label} label={label} named={nameOf(label)} editable={false} choices={[]} onName={() => {}} />)}
+          </div>
+        )}
+        {nameError && <Notice tone="critical" title="The name was not saved.">{nameError}</Notice>}
+        {error && <Notice tone="critical">{error}</Notice>}
+        <div aria-label="Transcript" tabIndex={0} className="gtd-reading-box">
+          {!loaded && !error && <span style={{ color: 'var(--color-text-muted)' }}>Reading the transcript…</span>}
+          {loaded?.parts?.length === 0 && <span style={{ color: 'var(--color-text-muted)' }}>No speech was found.</span>}
+          {loaded && !loaded.parts && <pre style={{ margin: 0, whiteSpace: 'pre-wrap', font: 'inherit' }}>{loaded.text}</pre>}
+          {loaded?.parts?.map((p, i) => (
+            <p key={i}>
+              <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>{clockLine(p.time)}</span>
+              {p.speaker && (
+                <span style={{ fontWeight: 600, marginRight: 6 }}>
+                  {nameOf(p.speaker)?.name ?? p.speaker}{nameOf(p.speaker) && <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}> ({p.speaker})</span>}:
+                </span>
+              )}
+              {p.text}
+            </p>
+          ))}
         </div>
-      )}
-      {nameError && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-xs)' }}>{nameError}</p>}
-      {error && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</p>}
-      <div aria-label="Transcript" tabIndex={0} style={{ maxHeight: 480, minHeight: 120, overflowY: 'auto', padding: 12, borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontSize: 'var(--text-sm)' }}>
-        {!loaded && !error && <span style={{ color: 'var(--color-text-muted)' }}>Reading the transcript…</span>}
-        {loaded?.parts?.length === 0 && <span style={{ color: 'var(--color-text-muted)' }}>No speech was found.</span>}
-        {loaded && !loaded.parts && <pre style={{ margin: 0, whiteSpace: 'pre-wrap', font: 'inherit' }}>{loaded.text}</pre>}
-        {loaded?.parts?.map((p, i) => (
-          <p key={i} style={{ margin: '0 0 6px' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 8 }}>{clockLine(p.time)}</span>
-            {p.speaker && (
-              <span style={{ fontWeight: 600, marginRight: 6 }}>
-                {nameOf(p.speaker)?.name ?? p.speaker}{nameOf(p.speaker) && <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}> ({p.speaker})</span>}:
-              </span>
-            )}
-            {p.text}
-          </p>
-        ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -113,26 +118,25 @@ function SpeakerNamer({ label, named, editable, choices, onName }: {
     if (value.trim()) onName(known ? known.person : { name: value.trim() });
     close();
   };
-  const link = { padding: '0 4px', border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-xs)' } as const;
   const list = `speaker-people-${label.replace(/\s/g, '-')}`;
   if (editing) {
     return (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-1)' }}>
         {label}:
         <input aria-label={`Who is ${label}`} list={list} value={value} autoFocus placeholder="Stakeholder or a name" onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); }}
-          style={{ padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: 'var(--text-xs)' }} />
+          className="gtd-control gtd-control--sm" style={{ width: 200 }} />
         <datalist id={list}>{choices.map((c) => <option key={c.option} value={c.option} />)}</datalist>
-        <button type="button" style={link} onClick={save}>Save</button>
-        <button type="button" style={link} onClick={close}>Cancel</button>
+        <Button size="sm" variant="ghost" onClick={close}>Cancel</Button>
+        <Button size="sm" variant="primary" onClick={save}>Save</Button>
       </span>
     );
   }
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 6px', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)' }}>
+    <span className="gtd-chip">
       {label}{named ? `: ${named.name}` : ''}
-      {editable && <button ref={button} type="button" style={link} aria-label={`${named ? 'Change' : 'Name'} ${label}`} onClick={() => { setValue(''); setEditing(true); }}>{named ? 'Change' : 'Name'}</button>}
-      {editable && named && <button type="button" style={link} aria-label={`Remove the name of ${label}`} onClick={() => onName(null)}>Remove</button>}
+      {editable && <button ref={button} type="button" className="gtd-chip__action" aria-label={`${named ? 'Change' : 'Name'} ${label}`} onClick={() => { setValue(''); setEditing(true); }}>{named ? 'Change' : 'Name'}</button>}
+      {editable && named && <button type="button" className="gtd-chip__action" aria-label={`Remove the name of ${label}`} onClick={() => onName(null)}>Remove</button>}
     </span>
   );
 }

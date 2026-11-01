@@ -67,6 +67,7 @@ export default function SidebarEditor({ icons }: { icons: Record<NavItemId, Reac
         <h2
           ref={titleRef}
           tabIndex={-1}
+          // design-exception: outline none on a heading that only receives focus from code (tabIndex -1), never from Tab
           style={{ margin: 0, fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--nav-text-active)', outline: 'none' }}
         >
           Customize sidebar
@@ -122,8 +123,8 @@ export default function SidebarEditor({ icons }: { icons: Record<NavItemId, Reac
             <span style={{ flexBasis: '100%', padding: '0 4px 4px', fontSize: 'var(--text-xs)', color: 'var(--nav-text-active)' }}>
               Reset the sidebar to the default order and show every item?
             </span>
-            <EditorButton onClick={reset} strong>Reset</EditorButton>
             <EditorButton onClick={() => setConfirmReset(false)}>Cancel</EditorButton>
+            <EditorButton onClick={reset} strong>Reset</EditorButton>
           </>
         ) : (
           <>

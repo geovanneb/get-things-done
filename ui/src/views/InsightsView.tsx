@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import Notice from '@/components/common/Notice';
+import Page, { PageHeader } from '@/components/common/Page';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import EmptyState from '@/components/common/EmptyState';
 import Panel from '@/components/insights/Panel';
@@ -24,9 +26,9 @@ const WINDOW_LABEL: Record<WindowValue, string> = {
 
 const GRID_TWO_COL: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))',
   alignItems: 'start',
-  gap: 16,
+  gap: 'var(--space-4)',
 };
 
 export default function InsightsView() {
@@ -39,29 +41,18 @@ export default function InsightsView() {
     [tasksVersion],
   );
 
-  if (loading && !data) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: 320,
-        }}
-      >
-        <LoadingSpinner />
-      </div>
-    );
-  }
+  if (loading && !data) return <LoadingSpinner text="Loading insights…" />;
 
   // Only fall back to the empty state when there is nothing to show. A failed
   // background refetch (the SSE watcher fires one on every file change) must not
   // blank out a dashboard that is already on screen.
   if (!data) {
     return (
-      <div style={{ padding: 24 }}>
-        <EmptyState message={error ?? 'No insights data available.'} />
-      </div>
+      <Page width="wide">
+        {error
+          ? <Notice tone="critical" title="Could not load insights.">{error}</Notice>
+          : <EmptyState title="No insights yet" description="Insights appear once tasks move across the board." />}
+      </Page>
     );
   }
 
@@ -71,55 +62,11 @@ export default function InsightsView() {
   return (
     // Hold the previous render at reduced opacity while a refetch is in flight,
     // rather than flashing a skeleton and jumping the layout.
-    <div
-      style={{
-        padding: 24,
-        maxWidth: 1180,
-        margin: '0 auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-        opacity: loading ? 0.6 : 1,
-        transition: 'opacity 120ms ease',
-      }}
-    >
+    <Page width="wide" aria-busy={loading || undefined} style={{ gap: 'var(--space-4)', opacity: loading ? 0.6 : 1, transition: 'opacity 120ms ease' }}>
       {/* One filter row, scoping everything below it. */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
-        <p
-          style={{
-            fontSize: 'var(--text-sm)',
-            color: 'var(--color-text-muted)',
-            margin: 0,
-          }}
-        >
-          Delivery, effort and quality across your workspace.
-        </p>
-        <WindowFilter value={window} onChange={setWindow} />
-      </div>
+      <PageHeader description="Delivery, effort and quality across your workspace." actions={<WindowFilter value={window} onChange={setWindow} />} />
 
-      {error && (
-        <div
-          role="status"
-          style={{
-            fontSize: 'var(--text-sm)',
-            color: 'var(--color-critical)',
-            backgroundColor: 'var(--color-critical-subtle)',
-            border: '1px solid var(--color-critical)',
-            borderRadius: 'var(--radius-md)',
-            padding: '8px 12px',
-          }}
-        >
-          Could not refresh: {error}. Showing the last loaded data.
-        </div>
-      )}
+      {error && <Notice tone="warning" title="Could not refresh.">{error}. Showing the last loaded data.</Notice>}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <StatTile
@@ -242,6 +189,6 @@ export default function InsightsView() {
           <TurnaroundChart data={data.turnaround_buckets} />
         </Panel>
       </div>
-    </div>
+    </Page>
   );
 }

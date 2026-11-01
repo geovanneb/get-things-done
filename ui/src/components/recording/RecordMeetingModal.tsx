@@ -1,8 +1,8 @@
-import type React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import Modal from '@/components/common/Modal';
+import Modal, { FormActions } from '@/components/common/Modal';
 import Button from '@/components/common/Button';
+import Input, { Checkbox, Field, FormSection, Select } from '@/components/common/Input';
 import { useRecorder } from './RecordingProvider';
 import { ParticipantsField } from '@/components/meetings/ParticipantsField';
 import { systemAudioSupport } from '@/utils/desktop';
@@ -10,8 +10,6 @@ import { apiGet } from '@/utils/api';
 import { consentSentence, type RecordPrefill } from '@/utils/meetingParticipants';
 import type { MeetingParticipant, SpokenLanguage, Transcription } from '@/types';
 
-const inputStyle: React.CSSProperties = { padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' };
-const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
 
 function today(): string {
   const d = new Date();
@@ -67,68 +65,73 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
     return () => { current = false; };
   }, [isOpen, prefill]);
 
+  const startRecording = () => {
+    void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio, ...(languageReady && languages.length > 0 ? { language } : {}) });
+    onClose();
+    navigate('/meetings');
+  };
+  const microphones = devices.filter((d) => d.deviceId && d.deviceId !== 'default');
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Record a meeting" size="sm">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 'var(--text-sm)' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          Title
-          <input value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
-        </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          Date
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
-        </label>
-        <ParticipantsField value={participants} onChange={(next) => { setParticipants(next); setTold(false); }} />
-        {languages.length > 0 && (
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            Spoken language
-            <select aria-label="Spoken language of this meeting" value={language} onChange={(e) => setLanguage(e.target.value)} style={inputStyle}>
-              <option value="auto">Auto (each part in its own language)</option>
-              {/* A language in Settings that the model lacks: shown as it is, so what is sent is what is seen. */}
-              {language !== 'auto' && !languages.some((l) => l.id === language) && (
-                <option value={language}>{allLanguages.find((l) => l.id === language)?.label ?? language} (not in {modelName || 'the chosen model'}: read as Auto)</option>
-              )}
-              {languages.filter((l) => l.common || l.id === language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-              {languages.some((l) => !l.common && l.id !== language) && (
-                <optgroup label="Other languages">
-                  {languages.filter((l) => !l.common && l.id !== language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
-                </optgroup>
-              )}
-            </select>
-            <span style={hintStyle}>For this meeting only; the default is in Settings &gt; Transcription. It can be changed during the recording too.</span>
-          </label>
-        )}
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          Microphone
-          <select value={deviceId} onChange={(e) => setDeviceId(e.target.value)} style={inputStyle}>
-            <option value="">The system's default</option>
-            {devices.filter((d) => d.deviceId && d.deviceId !== 'default').map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${i + 1}`}</option>)}
-          </select>
-        </label>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-          <input type="checkbox" checked={voiceCleanup} onChange={(e) => setVoiceCleanup(e.target.checked)} />
-          <span>Clean up the voice<br /><span style={hintStyle}>Good for a laptop microphone. Turn it off for a conference microphone, which usually does this itself.</span></span>
-        </label>
-        {systemSupport === 'yes' ? (
-          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-            <input type="checkbox" checked={systemAudio} onChange={(e) => setSystemAudio(e.target.checked)} />
-            <span>Also record the computer&apos;s sound<br /><span style={hintStyle}>The other people in a video call, also when you wear headphones. The first time, the system asks to allow it.</span></span>
-          </label>
-        ) : (
-          <p style={hintStyle}>{systemSupport ?? 'Only the microphone is recorded, so people heard through headphones are not.'}</p>
-        )}
-        <p style={hintStyle}>
-          The audio is saved in your workspace as it
-          arrives, and stays on this computer unless the workspace folder is synced. It is removed once its transcript is in a
-          digest, unless Keep recordings is on in Settings.
-        </p>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-          <input type="checkbox" checked={told} onChange={(e) => setTold(e.target.checked)} />
-          <span>{consentSentence(participants)}</span>
-        </label>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Record a meeting"
+      description="The recording is transcribed on this computer. Nothing is sent anywhere."
+      size="lg"
+      keepWhileTyping
+      footer={
+        <FormActions start={!told ? <span className="gtd-field__hint">Confirm that everyone knows, to start.</span> : undefined}>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!told || !date || !languageReady} onClick={() => { void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio, ...(languageReady && languages.length > 0 ? { language } : {}) }); onClose(); navigate('/meetings'); }}>Start recording</Button>
+          <Button variant="primary" disabled={!told || !date || !languageReady} onClick={startRecording}>Start recording</Button>
+        </FormActions>
+      }
+    >
+      <div className="gtd-stack" style={{ gap: 'var(--space-5)' }}>
+        <FormSection title="Meeting">
+          <div className="gtd-form-grid">
+            <Input label="Title" value={title} maxLength={200} onChange={setTitle} placeholder="Recorded meeting" autoFocus
+              hint="Optional. Without one, the meeting is called Recorded meeting." />
+            <Input label="Date" type="date" required value={date} onChange={setDate} error={!date ? 'Choose the date of the meeting.' : undefined} />
+          </div>
+          <ParticipantsField value={participants} onChange={(next) => { setParticipants(next); setTold(false); }} />
+          {languages.length > 0 && (
+            <Field label="Spoken language" htmlFor="record-language"
+              hint="For this meeting only; the default is in Settings > Transcription. It can be changed during the recording too.">
+              <select id="record-language" className="gtd-control" value={language} onChange={(e) => setLanguage(e.target.value)}
+                aria-describedby="record-language-hint">
+                <option value="auto">Auto (each part in its own language)</option>
+                {/* A language in Settings that the model lacks: shown as it is, so what is sent is what is seen. */}
+                {language !== 'auto' && !languages.some((l) => l.id === language) && (
+                  <option value={language}>{allLanguages.find((l) => l.id === language)?.label ?? language} (not in {modelName || 'the chosen model'}: read as Auto)</option>
+                )}
+                {languages.filter((l) => l.common || l.id === language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                {languages.some((l) => !l.common && l.id !== language) && (
+                  <optgroup label="Other languages">
+                    {languages.filter((l) => !l.common && l.id !== language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </Field>
+          )}
+        </FormSection>
+
+        <FormSection title="Audio"
+          description="The audio is saved in your workspace as it arrives, and stays on this computer unless the workspace folder is synced. It is removed once its transcript is in a digest, unless Keep recordings is on in Settings.">
+          <Select label="Microphone" value={deviceId} onChange={setDeviceId}
+            options={[{ value: '', label: "The system's default" }, ...microphones.map((d, i) => ({ value: d.deviceId, label: d.label || `Microphone ${i + 1}` }))]} />
+          <Checkbox checked={voiceCleanup} onChange={setVoiceCleanup} label="Clean up the voice"
+            description="Good for a laptop microphone. Turn it off for a conference microphone, which usually does this itself." />
+          {systemSupport === 'yes' ? (
+            <Checkbox checked={systemAudio} onChange={setSystemAudio} label="Also record the computer's sound"
+              description="The other people in a video call, also when you wear headphones. The first time, the system asks to allow it." />
+          ) : (
+            <p className="gtd-field__hint">{systemSupport ?? 'Only the microphone is recorded, so people heard through headphones are not.'}</p>
+          )}
+        </FormSection>
+
+        <div className="gtd-consent">
+          <Checkbox checked={told} onChange={setTold} label={consentSentence(participants)} />
         </div>
       </div>
     </Modal>

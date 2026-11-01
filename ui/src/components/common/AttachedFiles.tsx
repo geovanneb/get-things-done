@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNotify } from '@/hooks/useNotify';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import OfficeCheckBadge from '@/components/common/OfficeCheckBadge';
@@ -38,6 +40,8 @@ const iconButton: React.CSSProperties = {
  * Each subfolder starts collapsed, showing its name and file count; clicking it shows its files.
  */
 export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFilesProps) {
+  const confirm = useConfirm();
+  const notify = useNotify();
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -77,17 +81,17 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
       if (!res.ok) throw await responseError(res, 'Upload failed');
       const saved = await res.json();
       setFiles((prev) => [saved, ...prev.filter((f) => f.name !== saved.name)]);
-    } catch (err) { alert(err instanceof Error ? err.message : 'Upload failed'); }
+    } catch (err) { notify.error(err, 'Could not upload the file. Try again.'); }
     finally { setUploading(false); if (inputRef.current) inputRef.current.value = ''; }
   };
 
   const handleDelete = async (name: string) => {
-    if (!window.confirm(`Remove "${name}"?`)) return;
+    if (!(await confirm({ title: `Remove "${name}"?`, message: 'The file is deleted from the workspace.', confirmLabel: 'Remove file', tone: 'danger' }))) return;
     try {
       const res = await fetch(fileUrl(name), { method: 'DELETE' });
       if (!res.ok) throw await responseError(res, 'Remove failed');
       setFiles((prev) => prev.filter((f) => f.name !== name));
-    } catch (err) { alert(err instanceof Error ? err.message : 'Delete failed'); }
+    } catch (err) { notify.error(err, 'Could not remove the file. Try again.'); }
   };
 
   if (loading) return <LoadingSpinner />;
@@ -100,7 +104,7 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {archiveUrl && files.length > 0 && (
             <a href={archiveUrl} download title="Download everything in this folder as one .zip"
-              onClick={(e) => { e.preventDefault(); void downloadArchive(archiveUrl); }}
+              onClick={(e) => { e.preventDefault(); void downloadArchive(archiveUrl).catch((err) => notify.error(err, 'Could not download the files. Try again.')); }}
               style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', textDecoration: 'none', whiteSpace: 'nowrap' }}
               onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
               onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
@@ -185,22 +189,18 @@ function FileRow({ file, url, label, onRemove, note }: { file: AttachedFile; url
 
 /**
  * Fetches the folder's ZIP and saves it. When the server refuses (too many files, a name a ZIP cannot hold),
- * its message is shown instead of a failed or half-empty download.
+ * it throws with the server's message, which the caller shows instead of a failed or half-empty download.
  */
 async function downloadArchive(url: string): Promise<void> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const body = await res.json().catch(() => null) as { message?: string } | null;
-      throw new Error(body?.message?.replace(/^Invalid: /, '') ?? `Download failed (${res.status})`);
-    }
-    const name = /filename="?([^";]+)"?/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'files.zip';
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(await res.blob());
-    link.download = name;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  } catch (err) {
-    alert(err instanceof Error ? err.message : 'Download failed');
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { message?: string } | null;
+    throw new Error(body?.message?.replace(/^Invalid: /, '') ?? `Download failed (${res.status})`);
   }
+  const name = /filename="?([^";]+)"?/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'files.zip';
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(await res.blob());
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }

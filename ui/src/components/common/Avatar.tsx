@@ -1,6 +1,6 @@
 import { getInitials } from '../../utils/format';
 
-type AvatarSize = 'sm' | 'md' | 'lg';
+type AvatarSize = 'sm' | 'md' | 'lg' | 'xl';
 
 interface AvatarProps {
   name: string;
@@ -24,9 +24,10 @@ function hashColor(name: string): string {
 
 const sizeMap: Record<AvatarSize, { size: number; fontSize: string }> = {
   // Two initials have to fit inside 24px, so the small size uses a fixed, tighter font.
-  sm: { size: 24, fontSize: '10px' },
+  sm: { size: 24, fontSize: '10px' }, // design-exception: two initials must fit a 24px circle at every text size
   md: { size: 32, fontSize: 'var(--text-sm)' },
   lg: { size: 44, fontSize: 'var(--text-md)' },
+  xl: { size: 64, fontSize: 'var(--text-xl)' },
 };
 
 export default function Avatar({ name, size = 'md', color, initials: explicitInitials, role }: AvatarProps) {
@@ -45,7 +46,7 @@ export default function Avatar({ name, size = 'md', color, initials: explicitIni
         justifyContent: 'center',
         width: px,
         height: px,
-        borderRadius: '50%',
+        borderRadius: 'var(--radius-full)',
         background: bg,
         color: 'oklch(1 0 0)',
         fontSize,

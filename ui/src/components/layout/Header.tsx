@@ -19,6 +19,7 @@ const VIEW_LABELS: Record<string, string> = {
   '/agent-floor': 'Agent Floor',
   '/profile': 'Profile',
   '/settings': 'Settings',
+  '/design-system': 'Design system',
 };
 
 function getBreadcrumb(pathname: string): { label: string; sub?: string } {

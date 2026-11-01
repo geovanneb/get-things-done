@@ -1,4 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import Card, { CardGrid } from '@/components/common/Card';
+import IconButton, { icons } from '@/components/common/IconButton';
+import Notice from '@/components/common/Notice';
+import Page, { PageHeader, Section } from '@/components/common/Page';
+import { CountBadge } from '@/components/common/Tabs';
+import { useNotify } from '@/hooks/useNotify';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import Modal from '@/components/common/Modal';
@@ -117,91 +124,33 @@ function AgentCard({
   const extraTools = agent.tools.length - visibleTools.length;
 
   return (
-    <div
-      style={{
-        backgroundColor: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        padding: 16,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-        minWidth: 0,
-        overflowWrap: 'anywhere',
-      }}
-    >
-      {/* Name */}
-      <div
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontWeight: 700,
-          fontSize: 'var(--text-sm)',
-          color: 'var(--color-text)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={agent.name}
-      >
-        {agent.name}
-      </div>
-
-      {/* Description */}
-      <div
-        style={{
-          fontSize: 'var(--text-sm)',
-          color: 'var(--color-text-secondary)',
-          lineHeight: 1.5,
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-          minHeight: '3em',
-        } as React.CSSProperties}
-      >
-        {agent.description || 'No description provided.'}
-      </div>
-
-      {/* Scope + Model */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-        <Badge variant={agent.scope === 'workspace' ? 'accent-subtle' : 'muted'}>
-          {agent.scope}
-        </Badge>
-        {agent.model && <MonoChip muted>{agent.model}</MonoChip>}
-      </div>
-
-      {/* Validation */}
-      <ValidationDot state={agent.validation_state} />
-
-      {/* Tools */}
-      {agent.tools.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {visibleTools.map((tool) => (
-            <MonoChip key={tool}>{tool}</MonoChip>
-          ))}
-          {extraTools > 0 && <MonoChip muted>+{extraTools} more</MonoChip>}
+    <Card as="article" padding="compact"
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Modified {formatDate(agent.last_modified)}</span>
+          <Button variant="ghost" size="sm" onClick={onView} aria-label={`View ${agent.name}`}>View</Button>
         </div>
-      )}
-
-      {/* Footer */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginTop: 'auto',
-          paddingTop: 10,
-          borderTop: '1px solid var(--color-border)',
-        }}
-      >
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          Modified {formatDate(agent.last_modified)}
-        </span>
-        <Button variant="ghost" size="sm" onClick={onView}>
-          View
-        </Button>
+      }>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', overflowWrap: 'anywhere' }}>
+        <h3 title={agent.name} className="truncate" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 'var(--text-sm)' }}>
+          <button type="button" onClick={onView} className="gtd-link-strong">{agent.name}</button>
+        </h3>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 'var(--leading-normal)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '3em' } as React.CSSProperties}>
+          {agent.description || 'No description provided.'}
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <Badge variant={agent.scope === 'workspace' ? 'accent-subtle' : 'muted'}>{agent.scope}</Badge>
+          {agent.model && <MonoChip muted>{agent.model}</MonoChip>}
+          <ValidationDot state={agent.validation_state} />
+        </div>
+        {agent.tools.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }} aria-label="Tools">
+            {visibleTools.map((tool) => <MonoChip key={tool}>{tool}</MonoChip>)}
+            {extraTools > 0 && <MonoChip muted>+{extraTools} more</MonoChip>}
+          </div>
+        )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -211,98 +160,29 @@ function AgentCard({
 
 function SkillRow({
   skill,
-  isLast,
   onView,
   onDelete,
 }: {
   skill: Skill;
-  isLast: boolean;
   onView: () => void;
   onDelete: () => void;
 }) {
-  const [hovered, setHovered] = useState(false);
-
   return (
-    <tr
-      style={{
-        borderBottom: isLast ? 'none' : '1px solid var(--color-border)',
-        backgroundColor: hovered ? 'var(--color-surface-hover)' : 'transparent',
-        transition: 'background-color 0.12s',
-      }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {/* Name */}
-      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontWeight: 700,
-            fontSize: 'var(--text-sm)',
-            color: 'var(--color-text)',
-          }}
-        >
-          {skill.name}
-        </span>
+    <tr>
+      <td style={{ whiteSpace: 'nowrap' }}>
+        <button type="button" onClick={onView} className="gtd-link-strong" style={{ fontFamily: 'var(--font-mono)' }}>{skill.name}</button>
       </td>
-
-      {/* Scope */}
-      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-        <Badge variant={skill.scope === 'workspace' ? 'accent-subtle' : 'muted'}>
-          {skill.scope}
-        </Badge>
+      <td style={{ whiteSpace: 'nowrap' }}>
+        <Badge variant={skill.scope === 'workspace' ? 'accent-subtle' : 'muted'}>{skill.scope}</Badge>
       </td>
-
-      {/* Version */}
-      <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 'var(--text-xs)',
-            backgroundColor: 'var(--color-surface-hover)',
-            color: 'var(--color-text-muted)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '2px 6px',
-            display: 'inline-block',
-          }}
-        >
-          {skill.version}
-        </span>
+      <td style={{ whiteSpace: 'nowrap' }}><MonoChip muted>{skill.version}</MonoChip></td>
+      <td title={skill.description} style={{ maxWidth: 320, color: 'var(--color-text-secondary)' }}>
+        <span className="truncate" style={{ display: 'block' }}>{skill.description}</span>
       </td>
-
-      {/* Description */}
-      <td
-        style={{
-          padding: '10px 12px',
-          fontSize: 'var(--text-sm)',
-          color: 'var(--color-text-secondary)',
-          maxWidth: 180,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={skill.description}
-      >
-        {skill.description}
-      </td>
-
-      {/* File count */}
-      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-        <Badge variant="muted">{skill.file_count}</Badge>
-      </td>
-
-      {/* State */}
-      <td style={{ padding: '10px 12px' }}>
-        <ValidationDot state={skill.validation_state} />
-      </td>
-
-      {/* Actions */}
-      <td style={{ padding: '10px 12px' }}>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <Button variant="ghost" size="sm" onClick={onView}>View</Button>
-          <Button variant="ghost" size="sm" onClick={onDelete}
-            style={{ color: 'var(--color-critical)' }}>Delete</Button>
-        </div>
+      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{skill.file_count}</td>
+      <td><ValidationDot state={skill.validation_state} /></td>
+      <td style={{ textAlign: 'right' }}>
+        <IconButton label={`Delete ${skill.name}`} icon={icons.trash} tone="danger" onClick={onDelete} />
       </td>
     </tr>
   );
@@ -353,31 +233,16 @@ function MarketplaceModal({
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Skill Marketplace" size="lg">
-      <div style={{ marginBottom: 12, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-        Skills from{' '}
-        <a href="https://github.com/anthropics/skills" target="_blank" rel="noreferrer"
-          style={{ color: 'var(--color-accent)', textDecoration: 'none' }}>
-          github.com/anthropics/skills
-        </a>
-      </div>
+    <Modal isOpen={isOpen} onClose={onClose} title="Skill marketplace" size="lg"
+      description={<>Skills from <a href="https://github.com/anthropics/skills" target="_blank" rel="noreferrer" className="gtd-link">github.com/anthropics/skills</a>. Installing copies a skill into your workspace.</>}>
+      {loading && <LoadingSpinner text="Loading the marketplace…" />}
 
-      {loading && (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 0' }}>
-          <LoadingSpinner />
-        </div>
-      )}
+      {loadError && <Notice tone="critical" title="Could not load the marketplace.">{loadError}</Notice>}
 
-      {loadError && (
-        <p role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{loadError}</p>
-      )}
-
-      {installError && (
-        <p role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)', marginBottom: 8 }}>{installError}</p>
-      )}
+      {installError && <Notice tone="critical" title="The skill was not installed." style={{ marginBottom: 'var(--space-2)' }}>{installError}</Notice>}
 
       {!loading && !loadError && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 520, overflowY: 'auto', paddingRight: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           {skills.map((skill) => (
             <div
               key={skill.slug}
@@ -396,15 +261,7 @@ function MarketplaceModal({
                   <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>
                     {skill.name}
                   </span>
-                  {skill.installed && (
-                    <span style={{
-                      fontSize: 'var(--text-xs)', fontWeight: 600, padding: '1px 6px',
-                      borderRadius: 9, background: 'var(--color-success-subtle, color-mix(in oklch, var(--color-success) 15%, transparent))',
-                      color: 'var(--color-success)',
-                    }}>
-                      Installed
-                    </span>
-                  )}
+                  {skill.installed && <Badge variant="success" size="sm">Installed</Badge>}
                 </div>
                 <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
                   {skill.description}
@@ -438,6 +295,8 @@ function MarketplaceModal({
 // ---------------------------------------------------------------------------
 
 export default function AgentsView() {
+  const confirm = useConfirm();
+  const notify = useNotify();
   const [agents, setAgents] = useState<ClaudeAgent[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -481,212 +340,84 @@ export default function AgentsView() {
   }, []);
 
   async function handleDeleteSkill(skill: Skill) {
-    const confirmed = window.confirm(`Delete skill "${skill.name}"? This removes the files from .claude/skills/`);
+    const confirmed = await confirm({ title: `Delete the skill "${skill.name}"?`, message: 'Its files are removed from .claude/skills/. Agents can no longer use it.', confirmLabel: 'Delete skill', tone: 'danger' });
     if (!confirmed) return;
     try {
       await apiDelete(`/api/skills/${encodeURIComponent(skill.name)}`);
       setSkills((prev) => prev.filter((s) => s.name !== skill.name));
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
+      notify.error(err, 'Could not delete the skill. Try again.');
     }
   }
 
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: 320,
-        }}
-      >
-        <LoadingSpinner />
-      </div>
-    );
-  }
+  if (loading) return <LoadingSpinner text="Loading agents and skills…" />;
 
   if (error) {
     return (
-      <div style={{ padding: 24 }}>
-        <EmptyState message={error} />
-      </div>
+      <Page>
+        <Notice tone="critical" title="Could not load agents and skills.">{error}</Notice>
+      </Page>
     );
   }
 
-  const TABLE_HEADERS = ['Name', 'Scope', 'Version', 'Description', 'Files', 'State', ''];
-
   return (
-    <div style={{ padding: 24 }}>
-      {/* Page title */}
-      <h1
-        style={{
-          fontSize: 'var(--text-xl)',
-          fontWeight: 700,
-          color: 'var(--color-text)',
-          margin: '0 0 24px 0',
-        }}
-      >
-        Agents &amp; Skills
-      </h1>
+    <Page>
+      <PageHeader description="Agents do the work on your tasks; skills are the frameworks they follow. Both live in your workspace's .claude folder." />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
+      <Section id="agents" title={<>Agents <CountBadge count={agents.length} /></>}>
+        {agents.length === 0 ? (
+          <Card><EmptyState size="compact" title="No agents yet" description="Agents are Markdown files in .claude/agents/ in your workspace." /></Card>
+        ) : (
+          <CardGrid>
+            {agents.map((agent) => <AgentCard key={agent.name} agent={agent} onView={() => setSelectedAgent(agent)} />)}
+          </CardGrid>
+        )}
+      </Section>
 
-        {/* Agents */}
-        <div>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              marginBottom: 16,
-            }}
-          >
-            <h2
-              style={{
-                fontSize: 'var(--text-lg)',
-                fontWeight: 600,
-                color: 'var(--color-text)',
-                margin: 0,
-              }}
-            >
-              Agents
-            </h2>
-            <Badge variant="muted">{agents.length}</Badge>
-          </div>
-
-          {agents.length === 0 ? (
-            <EmptyState message="No agents configured." />
-          ) : (
-            <div
-              style={{
-                display: 'grid',
-                // Three columns when there is room (as before); two, then one, as the content area narrows.
-                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, max(260px, calc((100% - 32px) / 3))), 1fr))',
-                gap: 16,
-              }}
-            >
-              {agents.map((agent) => (
-                <AgentCard
-                  key={agent.name}
-                  agent={agent}
-                  onView={() => setSelectedAgent(agent)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Skills */}
-        <div>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              marginBottom: 16,
-            }}
-          >
-            <h2
-              style={{
-                fontSize: 'var(--text-lg)',
-                fontWeight: 600,
-                color: 'var(--color-text)',
-                margin: 0,
-              }}
-            >
-              Skills
-            </h2>
-            <Badge variant="muted">{skills.length}</Badge>
-            <div style={{ marginLeft: 'auto' }}>
-              <Button variant="primary" size="sm" onClick={() => setMarketplaceOpen(true)}>
-                + Browse Marketplace
-              </Button>
-            </div>
-          </div>
-
-          {skills.length === 0 ? (
-            <EmptyState message="No skills configured." />
-          ) : (
-            <div
-              style={{
-                backgroundColor: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius-lg)',
-                overflow: 'hidden',
-              }}
-            >
-              {/* The table scrolls inside the card when the window is narrow, so every row's actions stay reachable. */}
-              <div role="region" aria-label="Skills table" tabIndex={0} style={{ overflowX: 'auto' }}>
-              <table
-                style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  fontSize: 'var(--text-sm)',
-                }}
-              >
+      <Section id="skills" title={<>Skills <CountBadge count={skills.length} /></>}
+        actions={<Button variant="secondary" onClick={() => setMarketplaceOpen(true)}>Browse marketplace</Button>}>
+        {skills.length === 0 ? (
+          <Card>
+            <EmptyState size="compact" title="No skills yet" description="Install a skill from the marketplace, or add one to .claude/skills/."
+              action={{ label: 'Browse marketplace', onClick: () => setMarketplaceOpen(true) }} />
+          </Card>
+        ) : (
+          <div className="gtd-card">
+            {/* The table scrolls inside the card when the window is narrow, so every row's actions stay reachable. */}
+            <div role="region" aria-label="Skills" tabIndex={0} className="gtd-table-wrap">
+              <table className="gtd-table">
                 <thead>
-                  <tr
-                    style={{
-                      borderBottom: '1px solid var(--color-border)',
-                      backgroundColor: 'var(--color-bg)',
-                    }}
-                  >
-                    {TABLE_HEADERS.map((col, i) => (
-                      <th
-                        key={i}
-                        style={{
-                          padding: '10px 12px',
-                          textAlign: 'left',
-                          fontWeight: 600,
-                          fontSize: 'var(--text-xs)',
-                          color: 'var(--color-text-muted)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {col}
-                      </th>
-                    ))}
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Scope</th>
+                    <th scope="col">Version</th>
+                    <th scope="col">Description</th>
+                    <th scope="col" style={{ textAlign: 'right' }}>Files</th>
+                    <th scope="col">State</th>
+                    <th scope="col"><span className="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {skills.map((skill, idx) => (
-                    <SkillRow
-                      key={skill.name}
-                      skill={skill}
-                      isLast={idx === skills.length - 1}
-                      onView={() => setSelectedSkill(skill)}
-                      onDelete={() => handleDeleteSkill(skill)}
-                    />
+                  {skills.map((skill) => (
+                    <SkillRow key={skill.name} skill={skill} onView={() => setSelectedSkill(skill)} onDelete={() => handleDeleteSkill(skill)} />
                   ))}
                 </tbody>
               </table>
-              </div>
             </div>
-          )}
-        </div>
-      </div>
+          </div>
+        )}
+      </Section>
 
       {/* Agent detail modal */}
       {selectedAgent && (
-        <Modal
-          isOpen
-          onClose={() => setSelectedAgent(null)}
-          title={selectedAgent.name}
-        >
+        <Modal isOpen size="xl" onClose={() => setSelectedAgent(null)} title={selectedAgent.name}>
           <RawContentBlock content={selectedAgent.raw_content} />
         </Modal>
       )}
 
       {/* Skill detail modal */}
       {selectedSkill && (
-        <Modal
-          isOpen
-          onClose={() => setSelectedSkill(null)}
-          title={selectedSkill.name}
-        >
+        <Modal isOpen size="xl" onClose={() => setSelectedSkill(null)} title={selectedSkill.name}>
           <RawContentBlock content={selectedSkill.raw_content} />
         </Modal>
       )}
@@ -697,6 +428,6 @@ export default function AgentsView() {
         onClose={() => setMarketplaceOpen(false)}
         onInstalled={fetchSkills}
       />
-    </div>
+    </Page>
   );
 }

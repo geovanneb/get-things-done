@@ -55,6 +55,34 @@ The maintainer **squash-merges**, so the original commits of a merged PR are not
 - Match the surrounding code: inline styles with the design tokens (`var(--color-…)`,
   `var(--text-…)`), small components, comments only where they explain why.
 
+## UI and the design system
+
+Any change under `ui/` follows [docs/design-system.md](docs/design-system.md): tokens in
+`ui/src/index.css`, shared components in `ui/src/components/common/`, the live showcase at
+`/design-system`. These rules are mandatory:
+
+1. Inspect the existing tokens and components (and the showcase) before creating UI.
+2. Reuse an established pattern when it serves the same purpose: `Page`, `PageHeader`, `Section`,
+   `Card`, `Button`, `IconButton`, `Input`/`Select`/`Textarea`, `Tabs`, `SegmentedControl`, `Modal`,
+   `useConfirm`, `useNotify`, `Notice`, `EmptyState`, `LoadingSpinner`.
+3. Use semantic tokens for colour, type, spacing, radius, shadow and layers. No unexplained literal values.
+4. Use the shared components for buttons, fields, dialogs, confirmations and repeated content. Do not
+   hand-build an overlay or call `alert`/`confirm`.
+5. Add a variant to a shared component only for a distinct, justified use, and document it.
+6. Handle the interaction, loading, empty, error and disabled states of what you build.
+7. Follow the content rules: the header is the only h1, sentence case, verb + object on buttons,
+   errors that say what to do.
+8. Check affected screens at 390, 768 and 1280px, in light and dark, and with the keyboard only.
+9. When you change a shared standard, update docs/design-system.md, the showcase, the tests and,
+   if the change is intended, the visual baselines (`npm run test:visual -- --update`).
+10. Record any exception with `// design-exception: <reason>` on the line, or in the lists at the
+    top of `scripts/check-design.mjs`, never silently.
+
+`npm test` runs `test:design` (static rules and the ratchet in `scripts/design-baseline.json`) and the
+primitive tests. `npm run test:visual` runs the browser checks (layout, names, labels, contrast,
+keyboard, screenshots); it needs a build and Playwright (see the design-system doc). Never raise a
+ratchet count to make room for new code: `npm run design:baseline` only records progress.
+
 ## Architecture and regression harness
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md#architecture-and-regression-rules) and

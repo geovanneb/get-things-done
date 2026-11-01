@@ -16,12 +16,17 @@ export function useDialogFocus(isOpen: boolean, onClose: () => void, keepWhileTy
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Read the opener while rendering, before a field with autoFocus inside the dialog takes focus.
+  const openerRef = useRef<HTMLElement | null>(null);
+  if (isOpen && openerRef.current === null && typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+    openerRef.current = document.activeElement;
+  }
 
   useEffect(() => {
     if (!isOpen) return;
     const me = Symbol('modal');
     openModals.push(me);
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const opener = openerRef.current;
     // Move focus into the dialog so keys no longer reach the page behind it.
     const panel = panelRef.current;
     if (panel && !panel.contains(document.activeElement)) panel.focus();
@@ -63,6 +68,7 @@ export function useDialogFocus(isOpen: boolean, onClose: () => void, keepWhileTy
       document.removeEventListener('keydown', onKey, true);
       openModals.splice(openModals.indexOf(me), 1);
       // Back to where the user was, if that element is still on the page.
+      openerRef.current = null;
       if (opener && document.contains(opener)) opener.focus();
     };
   }, [isOpen, keepWhileTyping]);

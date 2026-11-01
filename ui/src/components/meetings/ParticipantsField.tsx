@@ -16,7 +16,7 @@ export function ParticipantsField({ value, onChange }: { value: MeetingParticipa
         onAddName={(name) => onChange(addParticipant(value, { name }))}
         onRemove={(removed) => onChange(value.filter((p) => id(p) !== removed))}
       />
-      <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+      <p className="gtd-field__hint" style={{ marginTop: 'var(--space-1)' }}>
         Optional. Who you expect. The analysis treats them as expected, not as proof of who came.
       </p>
     </div>
