@@ -38,7 +38,8 @@ the steps as usual, and:
 - Read `materials/meetings.md` first: it lists each meeting with its date, title, files
   and roughly how much text they hold (`text_characters`; a full-day meeting is about
   250,000). Add one meeting record per listed meeting, with that meeting's date, even when
-  it changes nothing in the context.
+  it changes nothing in the context, and with `meeting` set to that meeting's `queued_as`
+  id (MQ-...), so the dashboard shows the record with its meeting.
 - Work one meeting at a time, in the order listed: read its files (Step 3), write down
   its candidate facts and its meeting record, then go to the next meeting. Decide the
   proposals (Step 5) only after the last one, so a long day does not crowd out the
@@ -218,6 +219,7 @@ meeting_records:              # only when the material is from meetings
         owner: { ref: me, name: me }
         due_date: '2026-10-27'
     source: transcript.txt
+    meeting: MQ-2026-0012     # a meeting digest only: the meeting's queued_as in meetings.md
 skipped:
   - topic: What you considered
     reason: Why it is not proposed

@@ -188,7 +188,8 @@ The executive imports material (transcripts, slides, photos, spreadsheets) under
   only the changes that matter. Writes proposals; never touches context files.
 - `/gtd-context-apply <CU-ID>`: apply only the proposals the executive accepted, then
   delete the drafts and keep the record. The materials go too, unless the executive set
-  `keep_materials: true` in the dashboard.
+  `keep_materials: true` in the dashboard, or the dashboard set `keep_meeting_text: true`
+  (it then keeps only the meetings' transcripts and notes).
 
 Follow the command files in `.claude/commands/` exactly. The rule behind both: never
 change just to change. Distil the material into the few edits that keep the context true.

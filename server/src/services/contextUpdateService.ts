@@ -7,13 +7,15 @@ import { reserveIds, reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
-import { moveToTrash } from './trash';
+import { moveFilesToTrash, moveToTrash, trashEntry } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
 import { hashFile } from '../utils/fileHash';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 import { TaskService } from './taskService';
 import { readManifest } from './scaffold';
+import { heldMeetings, meetingTextToKeep, ownFiles } from './meetingLibrary';
+import { meetingTextKept } from './meetingTextSetting';
 import type { Task } from '../types';
 
 const workspaceService = new WorkspaceService();
@@ -167,6 +169,8 @@ export interface MeetingRecord {
   action_items: MeetingActionItem[];
   /** Where it comes from, e.g. the material file. */
   source: string;
+  /** In a meeting digest: the queued meeting it is about (`queued_as` in materials/meetings.md). Null when not given. */
+  meeting: string | null;
   /**
    * Set by the user in the dashboard, never by an agent. `confirmed` only counts while the record still has
    * the content the user confirmed (`confirmed_hash` in the file); otherwise it reads as null.
@@ -200,6 +204,11 @@ export interface ContextUpdate {
   transcript_problems: { source: string; reason: string }[];
   /** The user's choice: materials/ stays after the update is done, until they release it. Never set by an agent. */
   keep_materials: boolean;
+  /**
+   * Set by the dashboard when the update is approved or closed while the user keeps meeting text: once done, only the
+   * text of its meetings stays in materials/ (see meetingLibrary). Never set by an agent.
+   */
+  keep_meeting_text: boolean;
   /** Who opened this update: 'system-cleanup' for the memory review, null for an import by the user. */
   origin: string | null;
   /** What the analysis is about: 'memory-review' reviews the existing memory; 'daily-digest' is meetings from the queue. */
@@ -212,7 +221,14 @@ export interface ContextUpdate {
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
   unread: { name: string; reason: string }[];
+  /** Meetings (queue id or record id) the user keeps: System cleanup never removes their text. Dashboard only. */
+  kept_meetings: string[];
+  /** Meetings whose text the user or System cleanup deleted: in the trash until restored or deleted for good. Dashboard only. */
+  deleted_meetings: DeletedMeeting[];
 }
+
+/** A meeting's text moved out of an update: `trash` is the trash entry holding `files`, null once deleted for good. */
+export interface DeletedMeeting { meeting: string; at: string; files: string[]; trash: string | null; by: 'user' | 'system-cleanup' }
 
 /** One meeting a digest was made from, as it was queued, and the files it brought. */
 export interface DigestMeeting {
@@ -424,6 +440,8 @@ function shownActionItems(list: unknown[], problems: string[]): { item: MeetingA
 function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' | 'revision' | 'problems' | 'changed_since_confirmed'>): string {
   const content = [r.id, r.title, r.meeting_date, r.attendees.map((p) => [p.ref, p.name]), r.decisions, r.open_questions,
     r.action_items.map((a) => [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date]), r.source,
+    // Only when given: records confirmed before meetings were named stay confirmed.
+    ...(r.meeting ? [['meeting', r.meeting]] : []),
     // Only when there are any: a record confirmed before speakers existed stays confirmed.
     ...(r.speakers.length ? [r.speakers.map((s) => [s.label, s.source, s.person ? [s.person.ref, s.person.name] : null, s.reason])] : [])];
   return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 16);
@@ -469,6 +487,7 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
       open_questions: texts(recordList(r['open_questions'], 'open_questions', problems), 'open question'),
       action_items: shownActionItems(recordList(r['action_items'], 'action_items', problems), problems).map((x) => x.item),
       source: recordText(r['source'], 'source', problems),
+      meeting: typeof r['meeting'] === 'string' && /^MQ-\d{4}-\d{4}$/.test(r['meeting'].trim()) ? r['meeting'].trim() : null,
     };
     const revision = recordRevision(content);
     const hash = typeof r['confirmed_hash'] === 'string' ? r['confirmed_hash'] : '';
@@ -542,6 +561,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     }) : [],
     transcript_problems: normalizePairs(data['transcript_problems'], 'source', 'reason'),
     keep_materials: data['keep_materials'] === true,
+    keep_meeting_text: data['keep_meeting_text'] === true,
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
     digest_meetings: normalizeDigestMeetings(data['digest_meetings']),
@@ -550,7 +570,24 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     meeting_records: normalizeRecords(data['meeting_records']),
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
+    kept_meetings: Array.isArray(data['kept_meetings']) ? (data['kept_meetings'] as unknown[]).filter((k): k is string => typeof k === 'string' && MEETING_KEY.test(k)).slice(0, 50) : [],
+    deleted_meetings: normalizeDeletedMeetings(data['deleted_meetings']),
   };
+}
+
+/** A meeting inside an update: its queue id in a digest, else its record id. */
+const MEETING_KEY = /^(MQ-\d{4}-\d{4}|M-\d{2,3})$/;
+
+function normalizeDeletedMeetings(value: unknown): DeletedMeeting[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).flatMap((entry) => {
+    const o = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    if (typeof o['meeting'] !== 'string' || !MEETING_KEY.test(o['meeting'])) return [];
+    const files = Array.isArray(o['files']) ? (o['files'] as unknown[]).filter((f): f is string => typeof f === 'string' && path.basename(f) === f && f !== '..' && f !== '.') : [];
+    // Only a trash entry's own name: a hand-edited value never points restore elsewhere.
+    const trash = typeof o['trash'] === 'string' && path.basename(o['trash']) === o['trash'] ? o['trash'] : null;
+    return [{ meeting: o['meeting'], at: str(o['at']), files, trash, by: o['by'] === 'system-cleanup' ? 'system-cleanup' as const : 'user' as const }];
+  });
 }
 
 function normalizeDigestMeetings(value: unknown): DigestMeeting[] {
@@ -595,6 +632,17 @@ function prepareTranscript(name: string, buffer: Buffer): PreparedTranscript | {
   if (!parsed) return ext === '.vtt' ? { problem: 'The file does not start with WEBVTT, so no readable copy was made.' } : null;
   if (parsed.cues.length === 0) return { problem: 'No cue could be read, so no readable copy was made.' };
   return { content: transcriptMarkdown(name, sha256(buffer), parsed), complete: parsed.problems.length === 0, kind: 'webvtt' };
+}
+
+/**
+ * A file as text to read on screen: a transcript or Word document as its readable copy, plain text as it is. Null for
+ * anything else (audio, images, decks) and for text that cannot be decoded or is too large to convert.
+ */
+export function readableText(name: string, buffer: Buffer): string | null {
+  const prepared = prepareTranscript(name, buffer);
+  if (prepared && 'content' in prepared) return prepared.content;
+  if (prepared || !['.txt', '.md'].includes(path.extname(name).toLowerCase()) || buffer.length > MAX_CONVERT_BYTES) return null;
+  return decodeText(buffer);
 }
 
 /**
@@ -755,7 +803,7 @@ export class ContextUpdateService {
       // The apply command deletes these itself, but an agent may lack permission to remove folders.
       // A done update never needs them again, so the dashboard finishes the cleanup.
       if (update.status === 'done') {
-        await this.cleanup(id, update.keep_materials);
+        await this.cleanup(update, update.keep_materials);
         await this.finishRemovals(id);
       }
       const { update: current } = await this.read(id);
@@ -1447,11 +1495,14 @@ export class ContextUpdateService {
       const onlyRemovals = update.proposals.every((p) => p.decision !== 'accepted' || p.action === 'remove');
       if (onlyRemovals) {
         const closed = proposals.map((raw, i) => normalizeProposal(raw, i).decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), outcome: 'skipped' });
-        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records });
-        await this.cleanup(id, update.keep_materials);
+        const keepText = await this.keepMeetingText(update);
+        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records, keep_meeting_text: keepText || undefined });
+        await this.cleanup({ ...update, keep_meeting_text: keepText }, update.keep_materials);
         await this.finishRemovals(id);
       } else {
-        await this.write(file, data, update.notes, { status: 'approved', approved_at: now, proposals: proposals, meeting_records: records });
+        // Said before the apply command runs: it then leaves materials/ for the dashboard to keep the meeting text.
+        const keepText = await this.keepMeetingText(update);
+        await this.write(file, data, update.notes, { status: 'approved', approved_at: now, proposals: proposals, meeting_records: records, keep_meeting_text: keepText || undefined });
       }
       return (await this.read(id)).update;
     });
@@ -1498,8 +1549,9 @@ export class ContextUpdateService {
       const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
       // Before anything is deleted: a record changed after confirmation stops the close.
       const records = this.frozenRecords(update, data);
-      await this.cleanup(id, update.keep_materials);
-      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records });
+      const keepText = await this.keepMeetingText(update);
+      await this.cleanup({ ...update, keep_meeting_text: keepText }, update.keep_materials);
+      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined });
       return (await this.read(id)).update;
     });
   }
@@ -1517,14 +1569,116 @@ export class ContextUpdateService {
       if (keep) this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved'], 'keep the materials');
       else this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'release the materials');
       await this.write(file, data, update.notes, { keep_materials: keep || undefined });
-      if (!keep && update.status === 'done') await this.cleanup(id, false);
+      if (!keep && update.status === 'done') await this.cleanup(update, false);
       return (await this.read(id)).update;
     });
   }
 
-  private async cleanup(id: string, keepMaterials: boolean): Promise<void> {
-    const dir = this.updateDir(id);
-    if (!keepMaterials) await fsp.rm(path.join(dir, 'materials'), { recursive: true, force: true });
+  // ---- one meeting of an update: keep it, delete its text, restore it --------------------------------------------
+
+  /** Keeps one meeting out of System cleanup's Meetings rule, or lets the rule remove it again. */
+  async keepMeeting(id: string, key: string, keep: unknown): Promise<ContextUpdate> {
+    if (typeof keep !== 'boolean') throw httpError(400, 'Invalid keep: use true or false');
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      if (!key || !heldMeetings(update).some((m) => m.key === key)) throw httpError(404, `No such meeting in ${updateId(id)}`);
+      const kept = new Set(update.kept_meetings);
+      if (keep) kept.add(key); else kept.delete(key);
+      await this.write(file, data, update.notes, { kept_meetings: kept.size ? [...kept] : undefined });
+      return (await this.read(id)).update;
+    });
+  }
+
+  /**
+   * Moves one meeting's text out of a finished update into the trash, where it can be restored. Its confirmed record
+   * stays in the update: the context was built from it. A file the meeting shares with another one stays.
+   */
+  async trashMeeting(id: string, key: string, by: DeletedMeeting['by'] = 'user', now = new Date()): Promise<ContextUpdate> {
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      // Before the review is done, the analysis and the apply command still read these files.
+      if (update.status !== 'done') throw httpError(409, 'This meeting is still being reviewed: finish its update first, or delete the whole update in Context > Updates');
+      if (!key || !heldMeetings(update).some((m) => m.key === key)) throw httpError(404, `No such meeting in ${updateId(id)}`);
+      if (update.deleted_meetings.some((d) => d.meeting === key)) throw httpError(409, 'This meeting was already deleted');
+      const ws = workspaceService.getWorkspacePath();
+      const materials = path.join(this.updateDir(id), 'materials');
+      const gone = new Set(update.deleted_meetings.map((d) => d.meeting));
+      const files: string[] = [];
+      for (const name of ownFiles(update, key, gone)) {
+        if (await fsp.lstat(path.join(materials, name)).then((st) => st.isFile(), () => false)) files.push(name);
+      }
+      if (!files.length) throw httpError(409, 'Nothing of this meeting is kept here, so there is nothing to delete');
+      const trash = await moveFilesToTrash(ws, materials, files, `${updateId(id)}-${key}`, now);
+      const kept = update.kept_meetings.filter((k) => k !== key);
+      await this.write(file, data, update.notes, {
+        deleted_meetings: [...update.deleted_meetings, { meeting: key, at: now.toISOString(), files, trash, by }],
+        kept_meetings: kept.length ? kept : undefined,
+      });
+      return (await this.read(id)).update;
+    });
+  }
+
+  /** Puts a deleted meeting's text back where it was. Refused when a file of the same name is there again. */
+  async restoreMeeting(id: string, key: string): Promise<ContextUpdate> {
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      const entry = update.deleted_meetings.find((d) => d.meeting === key);
+      if (!entry?.trash) throw httpError(404, 'This meeting is not in the trash');
+      const ws = workspaceService.getWorkspacePath();
+      const from = await trashEntry(ws, entry.trash);
+      if (!from || !(await fsp.lstat(from).then((st) => st.isDirectory(), () => false))) throw httpError(410, 'This meeting is no longer in the trash');
+      const materials = await workspaceEntry(ws, path.join(this.updateDir(id), 'materials'), true);
+      for (const name of entry.files) {
+        if (await fsp.lstat(path.join(materials, name)).then(() => true, () => false)) throw httpError(409, `${name} is there again, so nothing was restored`);
+        if (!(await fsp.lstat(path.join(from, name)).then((st) => st.isFile(), () => false))) throw httpError(410, `${name} is no longer in the trash, so nothing was restored`);
+      }
+      await fsp.mkdir(materials, { recursive: true });
+      for (const name of entry.files) await fsp.rename(path.join(from, name), path.join(materials, name));
+      await fsp.rm(from, { recursive: true, force: true });
+      const deleted = update.deleted_meetings.filter((d) => d.meeting !== key);
+      await this.write(file, data, update.notes, { deleted_meetings: deleted.length ? deleted : undefined });
+      return (await this.read(id)).update;
+    });
+  }
+
+  /** Deletes a meeting's text from the trash for good. The note that it was deleted stays. */
+  async purgeMeeting(id: string, key: string): Promise<ContextUpdate> {
+    return this.serialized(id, async () => {
+      const { update, data, file } = await this.read(id);
+      const entry = update.deleted_meetings.find((d) => d.meeting === key);
+      if (!entry?.trash) throw httpError(404, 'This meeting is not in the trash');
+      const from = await trashEntry(workspaceService.getWorkspacePath(), entry.trash);
+      if (from) await fsp.rm(from, { recursive: true, force: true });
+      const deleted = update.deleted_meetings.map((d) => (d.meeting === key ? { meeting: d.meeting, at: d.at, files: d.files, by: d.by } : d));
+      await this.write(file, data, update.notes, { deleted_meetings: deleted });
+      return (await this.read(id)).update;
+    });
+  }
+
+  /** Whether this update keeps its meeting text when done: the user keeps meeting text, and it holds meetings. */
+  private async keepMeetingText(update: ContextUpdate): Promise<boolean> {
+    if (update.keep_meeting_text) return true;
+    return heldMeetings(update).length > 0 && await meetingTextKept();
+  }
+
+  /**
+   * What a done update no longer needs: its drafts, and its materials unless they are kept. With meeting text kept,
+   * only the text of its meetings stays (not their audio, images or decks), until the user or System cleanup removes it.
+   */
+  private async cleanup(update: ContextUpdate, keepMaterials: boolean): Promise<void> {
+    const dir = this.updateDir(update.id);
+    if (!keepMaterials) {
+      const materials = path.join(dir, 'materials');
+      const keep = update.keep_meeting_text ? meetingTextToKeep(update, new Set(update.deleted_meetings.map((d) => d.meeting))) : new Set<string>();
+      if (keep.size === 0) await fsp.rm(materials, { recursive: true, force: true });
+      else {
+        for (const entry of await fsp.readdir(materials, { withFileTypes: true }).catch(() => [])) {
+          // A kept file is a plain file of a meeting; a folder or link with a kept name goes like everything else.
+          if (entry.isFile() && keep.has(entry.name)) continue;
+          await fsp.rm(path.join(materials, entry.name), { recursive: true, force: true });
+        }
+      }
+    }
     await fsp.rm(path.join(dir, 'proposals'), { recursive: true, force: true });
   }
 

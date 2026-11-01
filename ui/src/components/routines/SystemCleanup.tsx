@@ -6,6 +6,7 @@ import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
 import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
+import { Checkbox } from '@/components/common/Input';
 import { selectStyle, dateInputStyle, sectionLabelStyle, fieldLabelStyle } from '@/components/task-form/styles';
 import { apiPost, apiPut } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
@@ -17,7 +18,8 @@ import type {
 export const RULES: { type: CleanupRuleType; label: string; hint: string; actions: CleanupAction[]; clock: string }[] = [
   { type: 'completed_tasks', label: 'Finished tasks', hint: 'Done tasks still on the board.', actions: ['archive', 'trash', 'delete'], clock: 'since finished' },
   { type: 'archived_tasks', label: 'Archived tasks', hint: 'Insights stop counting removed tasks.', actions: ['trash', 'delete'], clock: 'since archived' },
-  { type: 'context_updates', label: 'Finished context updates', hint: 'Records of done updates. Updates whose materials you kept, or with a confirmed meeting record, are skipped.', actions: ['trash', 'delete'], clock: 'since finished' },
+  { type: 'context_updates', label: 'Finished context updates', hint: 'Records of done updates. Updates whose materials you kept, with a confirmed meeting record, or still holding kept meetings, are skipped.', actions: ['trash', 'delete'], clock: 'since finished' },
+  { type: 'meetings', label: 'Meetings', hint: 'Transcripts and notes kept after review, counted from the day the meeting took place or was imported. Meetings still waiting for a digest or a review, and meetings marked Keep this meeting, are skipped. Moved to the trash, a meeting is deleted for good 30 days later. Confirmed records stay with their update.', actions: ['trash', 'delete'], clock: 'since the meeting' },
   { type: 'kaizen', label: 'Finished Kaizen notes', hint: 'Notes already opened as a context update, and older ones applied or rejected. A note still waiting is never touched.', actions: ['trash', 'delete'], clock: 'since closed' },
   { type: 'trash', label: 'Empty the trash', hint: 'Removed and replaced files the app keeps in .situation-board/trash/.', actions: ['delete'], clock: 'in the trash' },
 ];
@@ -27,6 +29,7 @@ const NOUN: Record<CleanupRuleType, [string, string]> = {
   completed_tasks: ['finished task', 'finished tasks'],
   archived_tasks: ['archived task', 'archived tasks'],
   context_updates: ['context update record', 'context update records'],
+  meetings: ['meeting', 'meetings'],
   kaizen: ['Kaizen note', 'Kaizen notes'],
   trash: ['trash item', 'trash items'],
 };
@@ -239,8 +242,8 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
     <Modal isOpen={isOpen} onClose={onClose} title="System cleanup" size="lg">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          A built-in routine that keeps your workspace tidy. By default it only suggests: it reviews your memory and opens a
-          context update for you to approve. It archives or removes files only for the rules you turn on below.
+          A built-in routine that keeps your workspace tidy. It reviews your memory and opens a context update for you to approve.
+          It removes meeting text you chose to keep once it is old (the Meetings rule), and other files only for the rules you turn on below.
         </p>
 
         <section aria-labelledby="sc-schedule">
@@ -294,7 +297,7 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
         <section aria-labelledby="sc-files">
           <h3 id="sc-files" style={{ ...sectionLabelStyle, margin: 0 }}>File cleanup</h3>
           <p style={{ ...hintStyle, fontSize: 'var(--text-sm)', marginBottom: 8 }}>
-            Off unless you turn a rule on. Only finished items are touched, each counted from its own date. "Move to trash"
+            Off unless you turn a rule on, except Meetings, which is on from the start. Only finished items are touched, each counted from its own date. "Move to trash"
             keeps a way back; "Delete permanently" does not. Tasks tagged <code style={{ fontFamily: 'var(--font-mono)' }}>{draft.keep_tag || 'keep'}</code> are never touched.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -319,6 +322,14 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
                       <input aria-label={`${r.label}: days`} inputMode="numeric" style={numberStyle} value={days[r.type] ?? ''}
                         onChange={(e) => { setDays({ ...days, [r.type]: e.target.value }); setPreview(null); }} />
                       days {r.clock}
+                    </div>
+                  )}
+                  {r.type === 'meetings' && (
+                    <div style={{ gridColumn: 2 }}>
+                      <Checkbox checked={draft.meetings.keep_text === true}
+                        onChange={(on) => { setDraft({ ...draft, meetings: { keep_text: on } }); setPreview(null); }}
+                        label="Keep meeting transcripts and notes after review"
+                        description="Only the meeting text, not other materials, and not the audio (that follows Keep recordings in Settings > Transcription). Off: they are deleted when the review is done, as before." />
                     </div>
                   )}
                 </div>

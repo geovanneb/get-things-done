@@ -133,7 +133,7 @@ function SpeakerList({ speakers, title, reviewing, onSet }: {
   );
 }
 
-function MeetingRecordCard({ record, reviewing, confirmation, onChoose, onCreateTask, onSpeaker }: {
+export function MeetingRecordCard({ record, reviewing, confirmation, onChoose, onCreateTask, onSpeaker }: {
   record: MeetingRecord;
   reviewing: boolean;
   confirmation: MeetingRecord['confirmation'];

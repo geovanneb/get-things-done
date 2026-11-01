@@ -17,6 +17,7 @@ import mentionsRouter from './mentions';
 import orgChartsRouter from './orgCharts';
 import routinesRouter from './routines';
 import meetingQueueRouter from './meetingQueue';
+import meetingsRouter from './meetings';
 import transcriptionRouter from './transcription';
 import setupRouter from './setup';
 
@@ -46,5 +47,6 @@ export function registerRoutes(app: Express): void {
   app.use('/api/org-charts', orgChartsRouter);
   app.use('/api/routines', routinesRouter);
   app.use('/api/meeting-queue', meetingQueueRouter);
+  app.use('/api/meetings', meetingsRouter);
   app.use('/api/transcription', transcriptionRouter);
 }

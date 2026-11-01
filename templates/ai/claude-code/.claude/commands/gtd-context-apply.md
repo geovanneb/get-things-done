@@ -72,10 +72,12 @@ When every accepted proposal other than a `remove` has an outcome:
    happened.
 2. Delete `context-updates/$ARGUMENTS/proposals/`. Delete
    `context-updates/$ARGUMENTS/materials/` too, unless `update.md` has
-   `keep_materials: true`: then the executive chose to keep the original files, so
-   leave that folder alone. The record stays; the drafts (and usually the raw
+   `keep_materials: true` or `keep_meeting_text: true`: then leave that folder alone.
+   With `keep_materials` the executive chose to keep the original files; with
+   `keep_meeting_text` the dashboard keeps the meetings' transcripts and notes and
+   removes the rest itself. The record stays; the drafts (and usually the raw
    material) go, so the workspace does not grow over time. Delete nothing else, and
-   never change `keep_materials`. If you are not allowed to delete folders, leave
+   never change `keep_materials` or `keep_meeting_text`. If you are not allowed to delete folders, leave
    them: the dashboard removes them the next time it opens a finished update.
 3. Read `update.md` back and confirm the frontmatter parses.
 

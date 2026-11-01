@@ -192,7 +192,7 @@ derived from a name. Two ways to record one:
 Current exceptions: `components/agentic/` and `views/AgentFloorView.tsx` (pixel-art palette and font),
 `components/insights/` (chart colours and axis text), avatar and workspace colours, the accent
 swatch check mark, the 24px avatar's fixed font size, two focus targets that only receive focus
-from code, the Setup flow (outside the app shell), the Context split view and the two record dialogs.
+from code, the Setup flow (outside the app shell), the Context split view and the three record dialogs (task, new task, meeting).
 
 ## The harness
 

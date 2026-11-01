@@ -53,7 +53,9 @@ test('by default the job runs weekly, only opens a memory review tagged with its
   const view = await service.systemCleanup(local('2026-10-28T10:00'));
   assert.equal(view.summary, 'Every Monday at 09:00');
   assert.equal(view.settings.memory_review.enabled, true);
-  assert.ok(Object.values(view.settings.rules).every((r) => !r.enabled), 'every file rule is off by default');
+  // Every file rule is off, except Meetings: it only removes meeting text the user chose to keep, so it starts on.
+  assert.ok(Object.entries(view.settings.rules).every(([type, r]) => r.enabled === (type === 'meetings')), 'every other file rule is off by default');
+  assert.equal(view.settings.meetings.keep_text, null, 'no meeting text is kept until the user chose');
 
   // The first check only starts the clock: nothing is "missed" from before the job existed.
   assert.deepEqual(await service.runDue('timer', local('2026-10-28T10:00')), []);

@@ -10,6 +10,7 @@ import { Schedule, ScheduleError, describeSchedule, localDate, nextOccurrences, 
 import { isDone } from './taskStatus';
 import { moveToTrash, trashDir, trashedAt } from './trash';
 import { reserveIds } from './idReservations';
+import { heldMeetings, ownFiles, retentionStart } from './meetingLibrary';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -23,12 +24,14 @@ const contextUpdateService = new ContextUpdateService();
  *    and opens a context update tagged `origin: system-cleanup`, `kind: memory-review`. The analyze
  *    command turns it into proposals; nothing changes until the user approves them.
  * 2. File cleanup: per content type, finished items older than a threshold are archived, moved to the
- *    trash or deleted. Every rule is off until the user turns it on.
+ *    trash or deleted. Every rule is off until the user turns it on, except Meetings: kept meeting text is moved to
+ *    the trash 180 days after the meeting, and what it moved there is deleted for good 30 days later.
  *
  *   .situation-board/routines/system-cleanup.json         settings (missing: the defaults below)
  *   .situation-board/routines/system-cleanup-state.json   when it last checked and ran
  *
- * Defaults: weekly on Monday at 09:00, memory review on, no file is archived, trashed or deleted.
+ * Defaults: weekly on Monday at 09:00, memory review on, the Meetings rule on, no other file is archived, trashed or
+ * deleted. Meeting text is kept after review only once the user chose so (`meetings.keep_text`).
  */
 
 export const SYSTEM_CLEANUP_ID = 'SYSTEM-CLEANUP';
@@ -37,7 +40,7 @@ export const SYSTEM_CLEANUP_TITLE = 'System cleanup';
 export const CLEANUP_ORIGIN = 'system-cleanup';
 export const MEMORY_REVIEW_KIND = 'memory-review';
 
-export const RULE_TYPES = ['completed_tasks', 'archived_tasks', 'context_updates', 'kaizen', 'trash'] as const;
+export const RULE_TYPES = ['completed_tasks', 'archived_tasks', 'context_updates', 'meetings', 'kaizen', 'trash'] as const;
 export type RuleType = (typeof RULE_TYPES)[number];
 export type CleanupAction = 'archive' | 'trash' | 'delete';
 
@@ -46,6 +49,7 @@ export const RULE_ACTIONS: Record<RuleType, CleanupAction[]> = {
   completed_tasks: ['archive', 'trash', 'delete'],
   archived_tasks: ['trash', 'delete'],
   context_updates: ['trash', 'delete'],
+  meetings: ['trash', 'delete'],
   kaizen: ['trash', 'delete'],
   trash: ['delete'],
 };
@@ -61,8 +65,16 @@ export interface CleanupSettings {
   keep_tag: string;
   /** A safety cap: one run never touches more than this many items. The rest wait for the next run. */
   max_items_per_run: number;
+  /**
+   * `keep_text`: meeting transcripts and notes stay after their update is reviewed (true), or go with the rest of the
+   * materials as before (false). Null until the user chose, which counts as false: nothing is kept without asking.
+   */
+  meetings: { keep_text: boolean | null };
   updated_at: string | null;
 }
+
+/** How long the Meetings rule leaves a meeting it moved to the trash before deleting it for good. */
+export const MEETING_TRASH_DAYS = 30;
 
 export interface CleanupState {
   checked_at?: string;
@@ -145,11 +157,13 @@ export function defaultSettings(): CleanupSettings {
       completed_tasks: { enabled: false, older_than_days: 30, action: 'archive' },
       archived_tasks: { enabled: false, older_than_days: 365, action: 'trash' },
       context_updates: { enabled: false, older_than_days: 90, action: 'trash' },
+      meetings: { enabled: true, older_than_days: 180, action: 'trash' },
       kaizen: { enabled: false, older_than_days: 90, action: 'trash' },
       trash: { enabled: false, older_than_days: 30, action: 'delete' },
     },
     keep_tag: 'keep',
     max_items_per_run: 200,
+    meetings: { keep_text: null },
     updated_at: null,
   };
 }
@@ -173,6 +187,9 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
     }
   }
   const mr = obj(o['memory_review']);
+  const mt = obj(o['meetings']);
+  const keepText = mt['keep_text'] === undefined ? base.meetings.keep_text : mt['keep_text'];
+  if (keepText !== null && typeof keepText !== 'boolean') throw httpError(400, 'Invalid meetings.keep_text: use true, false or null');
   const rulesIn = obj(o['rules']);
   const rules = {} as Record<RuleType, CleanupRule>;
   for (const type of RULE_TYPES) {
@@ -202,6 +219,7 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
     rules,
     keep_tag: keepTag,
     max_items_per_run: o['max_items_per_run'] === undefined ? base.max_items_per_run : days(o['max_items_per_run'], 'max_items_per_run', 1, MAX_ITEMS_LIMIT),
+    meetings: { keep_text: keepText as boolean | null },
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
 }
@@ -474,7 +492,37 @@ export class SystemCleanupService {
         if (!CU_ID.test(u.id) || u.status !== 'done' || u.keep_materials) continue;
         if (u.meeting_records.some((r) => r.confirmation === 'confirmed')) continue;
         if (u.proposals.some((p) => p.action === 'remove' && p.decision === 'accepted' && !p.outcome)) continue;
+        // Meetings are removed one by one by their own rule; the update holding them waits until they are gone.
+        if (await holdsMeetingText(ws, u.id, u.keep_meeting_text, u.deleted_meetings)) continue;
         add('context_updates', u.id, u.title, path.join(ws, 'context-updates', u.id), ageDays(when(u.applied_at) ?? when(u.updated_at), now));
+      }
+    }
+    if (settings.rules.meetings.enabled) {
+      for (const u of await contextUpdateService.list().catch(() => [])) {
+        if (!CU_ID.test(u.id) || u.status !== 'done') continue;
+        const materials = path.join(ws, 'context-updates', u.id, 'materials');
+        const gone = new Set(u.deleted_meetings.map((d) => d.meeting));
+        for (const m of heldMeetings(u)) {
+          if (!m.key) continue;
+          const deleted = u.deleted_meetings.find((d) => d.meeting === m.key);
+          if (deleted) {
+            // Moved to the trash by this rule or by the user: deleted for good once it has been there long enough.
+            if (deleted.trash) {
+              const age = ageDays(trashedAt(deleted.trash), now);
+              if (age !== null && age >= MEETING_TRASH_DAYS) {
+                counts.meetings++;
+                found.push({ type: 'meetings', id: m.id, title: `${m.title} (in the trash)`, path: rel(ws, materials), age_days: age, action: 'delete' });
+              }
+            }
+            continue;
+          }
+          // Materials kept as a whole are the user's explicit choice, like a kept meeting.
+          if (u.kept_meetings.includes(m.key) || u.keep_materials) continue;
+          let present = false;
+          for (const f of ownFiles(u, m.key, gone)) if (await fsp.lstat(path.join(materials, f)).then((st) => st.isFile(), () => false)) present = true;
+          if (!present) continue;
+          add('meetings', m.id, m.title, materials, ageDays(when(`${retentionStart(m, u)}T00:00:00`), now));
+        }
       }
     }
     if (settings.rules.kaizen.enabled) {
@@ -502,6 +550,7 @@ export class SystemCleanupService {
    */
   private async execute(item: CleanupItem, settings: CleanupSettings, now: Date): Promise<boolean> {
     const ws = workspaceService.getWorkspacePath();
+    if (item.type === 'meetings') return this.executeMeeting(item, settings, now);
     const full = path.join(ws, ...item.path.split('/'));
     await workspaceEntry(ws, full, true);
     const st = await fsp.lstat(full).catch(() => null);
@@ -544,6 +593,7 @@ export class SystemCleanupService {
         return p['action'] === 'remove' && p['decision'] === 'accepted' && !p['outcome'];
       })) return false;
       if (hasConfirmedRecord(u['meeting_records'])) return false;
+      if (await holdsMeetingText(ws, item.id, u['keep_meeting_text'] === true, Array.isArray(u['deleted_meetings']) ? u['deleted_meetings'].map(obj) : [])) return false;
     }
 
     if (item.type === 'kaizen') {
@@ -561,6 +611,37 @@ export class SystemCleanupService {
     } else {
       await fsp.rm(full, { recursive: true, force: true });
     }
+    return true;
+  }
+
+  /**
+   * One meeting, checked again as it is now: its text moved to the trash (and deleted for good with the delete action),
+   * or deleted for good after MEETING_TRASH_DAYS in the trash. A meeting kept or restored meanwhile is left alone.
+   */
+  private async executeMeeting(item: CleanupItem, settings: CleanupSettings, now: Date): Promise<boolean> {
+    const updateId = item.path.split('/')[1] ?? '';
+    if (!CU_ID.test(updateId)) return false;
+    const u = (await contextUpdateService.list()).find((x) => x.id === updateId);
+    const m = u ? heldMeetings(u).find((x) => x.id === item.id) : undefined;
+    if (!u || !m || !m.key || u.status !== 'done') return false;
+    const deleted = u.deleted_meetings.find((d) => d.meeting === m.key);
+    if (deleted) {
+      const age = deleted.trash ? ageDays(trashedAt(deleted.trash), now) : null;
+      if (age === null || age < MEETING_TRASH_DAYS) return false;
+      await contextUpdateService.purgeMeeting(u.id, m.key);
+      return true;
+    }
+    if (u.kept_meetings.includes(m.key) || u.keep_materials) return false;
+    const age = ageDays(when(`${retentionStart(m, u)}T00:00:00`), now);
+    if (age === null || age < settings.rules.meetings.older_than_days) return false;
+    try {
+      await contextUpdateService.trashMeeting(u.id, m.key, 'system-cleanup', now);
+    } catch (err) {
+      // Nothing left to move (removed by hand meanwhile): not an error, just nothing done.
+      if ((err as { statusCode?: number }).statusCode === 409) return false;
+      throw err;
+    }
+    if (item.action === 'delete') await contextUpdateService.purgeMeeting(u.id, m.key);
     return true;
   }
 
@@ -673,6 +754,17 @@ export class SystemCleanupService {
     scan.stale.sort((a, b) => b.age_days - a.age_days);
     return scan;
   }
+}
+
+/**
+ * Whether a finished update still holds meeting text the Meetings rule looks after: kept text in its materials, or a
+ * deleted meeting still in the trash (restoring it needs the update).
+ */
+async function holdsMeetingText(ws: string, id: string, keepText: boolean, deleted: { trash?: unknown }[]): Promise<boolean> {
+  if (deleted.some((d) => typeof d.trash === 'string' && d.trash)) return true;
+  if (!keepText) return false;
+  const entries = await fsp.readdir(path.join(ws, 'context-updates', id, 'materials')).catch(() => [] as string[]);
+  return entries.length > 0;
 }
 
 function describeCleaned(cleaned: CleanupRunResult['cleaned']): string {
