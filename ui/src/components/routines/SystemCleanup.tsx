@@ -155,8 +155,13 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Seed the draft once per opening. The page refetches the job whenever routines or context
+  // updates change on disk, and reseeding on every new job object would drop unsaved edits.
+  const seeded = React.useRef(false);
   React.useEffect(() => {
-    if (!isOpen || !job) return;
+    if (!isOpen) { seeded.current = false; return; }
+    if (!job || seeded.current) return;
+    seeded.current = true;
     setDraft(structuredClone(job.settings));
     setDays(Object.fromEntries([
       ...RULES.map((r) => [r.type, String(job.settings.rules[r.type].older_than_days)]),
