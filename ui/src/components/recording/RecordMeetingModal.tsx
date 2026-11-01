@@ -55,7 +55,7 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
     setLanguageReady(false);
     void apiGet<Transcription>('/api/transcription').then((t) => {
       if (!current) return;
-      const model = t.models.find((m) => m.id === t.settings.model);
+      const model = t.models.find((m) => m.id === (t.effective_model ?? t.settings.model));
       setLanguage(t.settings.language);
       setLanguages(model?.language_options ?? []);
       setModelName(model?.name ?? '');

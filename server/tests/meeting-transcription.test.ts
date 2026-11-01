@@ -845,3 +845,89 @@ test('a recording in another workspace puts the running job back in line in its 
   release();
   void first;
 });
+
+test('a GPU model runs only while verified here; a GPU failure, or a result not made on the GPU, is made again on the CPU', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const GPU = 'whisper-large-v3-turbo-gpu';
+  // Offered (the app has the GPU engine) and verified (its speed test ran on Metal here).
+  const models = process.env.ESB_MODELS_PATH!;
+  const helper = path.join(models, 'gtd-whisper');
+  await fsp.mkdir(path.join(models, 'speed-test'), { recursive: true });
+  await fsp.writeFile(helper, '');
+  const previousHelper = process.env.GTD_WHISPER_HELPER;
+  process.env.GTD_WHISPER_HELPER = helper;
+  t.after(() => { if (previousHelper === undefined) delete process.env.GTD_WHISPER_HELPER; else process.env.GTD_WHISPER_HELPER = previousHelper; });
+  // A new test, measured after any revocation before it.
+  const verify = () => fsp.writeFile(path.join(models, 'speed-test', `${GPU}.json`), JSON.stringify({ realtime_x: 15, load_ms: 1, measured_at: new Date(Date.now() + 1000).toISOString(), cpu: `${os.cpus()[0]?.model ?? 'unknown'} × ${os.cpus().length}`, backend: 'MTL0' }));
+  let cpuInstalled = true;
+  const settings = {
+    readSettings: async () => ({ model: GPU, language: 'auto' }),
+    installedPath: async (id: string) => (id === 'whisper-large-v3-turbo' && !cpuInstalled ? null : '/fictional/model'),
+  } as unknown as TranscriptionModelService;
+  const used: string[] = [];
+  let gpuOutcome: 'fail' | 'cpu' | 'metal' | 'other' = 'fail';
+  const engine = {
+    transcribe: async (_wav: string, o: { model?: string; onSegment?: (s: Segment) => void }) => {
+      used.push(o.model!);
+      if (o.model === GPU && gpuOutcome === 'fail') {
+        o.onSegment?.({ start: 0, end: 1, text: 'Heard on the GPU before it failed' });
+        throw Object.assign(new Error('The GPU engine ended (9)'), { failure: 'gpu' });
+      }
+      if (o.model === GPU && gpuOutcome === 'other') throw new Error('The recording could not be read');
+      const s = { start: 0, end: 2, text: `Fictional words via ${o.model}` };
+      o.onSegment?.(s);
+      return { segments: [s], seconds: 10, load_ms: 1, ...(o.model === GPU ? { backend: gpuOutcome === 'cpu' ? 'CPU' : 'MTL0' } : {}) };
+    },
+  } as unknown as TranscriptionEngine;
+  const job = new MeetingTranscriptionService(queue, settings, engine);
+  const run = async (title: string) => {
+    used.length = 0;
+    const id = await queueRecording(queue, title);
+    await job.tick();
+    await MeetingTranscriptionService.settled();
+    return { id, r: await recording(queue, id) };
+  };
+  const folder = (id: string) => path.join(process.env.ESB_WORKSPACE_PATH!, 'context-updates', 'meeting-queue', id);
+
+  // Verified, then the GPU fails part way: made again, whole, on the CPU, and the transcript says so.
+  await verify();
+  const failed = await run('GPU fails');
+  assert.deepEqual(used, [GPU, 'whisper-large-v3-turbo']);
+  assert.deepEqual([failed.r.status, failed.r.model], ['done', 'whisper-large-v3-turbo']);
+  const text = await fsp.readFile(path.join(folder(failed.id), failed.r.transcript!), 'utf-8');
+  assert.match(text, /Made with Whisper large-v3-turbo on the CPU: the GPU engine failed/);
+  assert.doesNotMatch(text, /Heard on the GPU/, 'nothing of the failed attempt');
+
+  // Its verification went with the failure: the next recording goes to the CPU at once, not to the GPU again.
+  gpuOutcome = 'metal';
+  await run('After the failure');
+  assert.deepEqual(used, ['whisper-large-v3-turbo']);
+
+  // Verified again and working: it runs on the GPU.
+  await verify();
+  const works = await run('GPU works');
+  assert.deepEqual([used, works.r.model], [[GPU], GPU]);
+
+  // Done, but the engine ran on the CPU: a GPU failure like any other.
+  await verify();
+  gpuOutcome = 'cpu';
+  const silent = await run('GPU silently on the CPU');
+  assert.deepEqual(used, [GPU, 'whisper-large-v3-turbo']);
+  assert.equal(silent.r.model, 'whisper-large-v3-turbo');
+
+  // No CPU model: the recording fails, saying what to download, with nothing of the GPU's attempt.
+  await verify();
+  gpuOutcome = 'fail';
+  cpuInstalled = false;
+  const noCpu = await run('No CPU model');
+  assert.deepEqual([noCpu.r.status, noCpu.r.transcript], ['failed', undefined]);
+  assert.match(noCpu.r.error ?? '', /Download Whisper large-v3-turbo/);
+
+  // A failure that is not the GPU's is not made again on the CPU.
+  await verify();
+  cpuInstalled = true;
+  gpuOutcome = 'other';
+  const bad = await run('Bad audio');
+  assert.deepEqual([used, bad.r.status], [[GPU], 'failed']);
+});

@@ -209,7 +209,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       const opened = await apiPost<{ generation: string; offset: number; language: string }>(`/api/meeting-queue/${meeting.id}/recording`, { token, ...(spoken ? { language: spoken } : {}) });
       // Optional: without the list the recording goes on, with its language as it started.
       const overview = await apiGet<Transcription>('/api/transcription').catch(() => null);
-      const languages = overview?.models.find((m) => m.id === overview.settings.model)?.language_options ?? [];
+      const languages = overview?.models.find((m) => m.id === (overview.effective_model ?? overview.settings.model))?.language_options ?? [];
 
       const now = Date.now();
       const uploader = new RecordingUploader({ send: (offset, block) => sendBlock(meeting.id, token, offset, block) });

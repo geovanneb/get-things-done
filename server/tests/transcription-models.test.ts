@@ -80,7 +80,7 @@ test('the catalog: the accurate model is the default, every file is pinned, and 
     assert.ok(m.pros.length && m.cons.length, `${m.id} has pluses and minuses`);
     for (const f of m.files) {
       assert.match(f.sha256, /^[0-9a-f]{64}$/);
-      assert.match(f.url, /^https:\/\/huggingface\.co\/csukuangfj\/[^/]+\/resolve\/[0-9a-f]{40}\//, 'pinned to a commit');
+      assert.match(f.url, /^https:\/\/huggingface\.co\/(csukuangfj\/[^/]+|ggerganov\/whisper\.cpp)\/resolve\/[0-9a-f]{40}\//, 'pinned to a commit');
     }
   }
   assert.throws(() => parseTranscriptionSettings({ language: 'xx' }), /Invalid language/);
@@ -486,4 +486,42 @@ test('Settings keep Portuguese when SenseVoice is chosen after it, so the page c
   assert.equal(view.settings.language, 'pt');
   assert.equal((await service.readSettings()).language, 'pt');
   assert.equal(view.models.find((m) => m.id === 'sensevoice-2024-07-17')!.language_options!.some((l) => l.id === 'pt'), false, 'and the page sees SenseVoice has no Portuguese');
+});
+
+test('a GPU model is offered only with the GPU engine, chosen only once it ran on the GPU here, and never live', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-gpu-'));
+  const saved = { models: process.env.ESB_MODELS_PATH, helper: process.env.GTD_WHISPER_HELPER };
+  process.env.ESB_MODELS_PATH = dir;
+  delete process.env.GTD_WHISPER_HELPER;
+  t.after(async () => {
+    for (const [key, value] of [['ESB_MODELS_PATH', saved.models], ['GTD_WHISPER_HELPER', saved.helper]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+  const GPU = 'whisper-large-v3-turbo-gpu';
+  const service = new TranscriptionModelService();
+  assert.equal((await service.view()).models.some((m) => m.id === GPU), false, 'not offered without the GPU engine');
+  await assert.rejects(service.download(GPU), /Apple Silicon/);
+
+  const helper = path.join(dir, 'gtd-whisper');
+  await fsp.writeFile(helper, '');
+  process.env.GTD_WHISPER_HELPER = helper;
+  assert.equal((await service.view()).models.find((m) => m.id === GPU)?.gpu_ready, false);
+  await assert.rejects(service.updateSettings({ model: GPU }), /Test speed shows it runs/);
+  await assert.rejects(service.updateSettings({ live_model: GPU }), /not a GPU one/);
+
+  // Tested here, but it ran on the CPU: still not chosen. On Metal: chosen.
+  const computer = `${os.cpus()[0]?.model ?? 'unknown'} × ${os.cpus().length}`;
+  await fsp.mkdir(path.join(dir, 'speed-test'), { recursive: true });
+  const result = (backend: string) => fsp.writeFile(path.join(dir, 'speed-test', `${GPU}.json`), JSON.stringify({ realtime_x: 15, load_ms: 200, measured_at: new Date().toISOString(), cpu: computer, backend }));
+  await result('CPU');
+  await assert.rejects(service.updateSettings({ model: GPU }), /Test speed shows it runs/);
+  await result('MTL0');
+  assert.equal((await service.updateSettings({ model: GPU })).settings.model, GPU);
+  // Its verification lost later (a failure, another computer): the other settings can still be saved, and what runs
+  // is the CPU counterpart.
+  await fsp.rm(path.join(dir, 'speed-test', `${GPU}.json`));
+  assert.equal((await service.updateSettings({ language: 'ja' })).settings.language, 'ja');
+  assert.equal((await service.view()).effective_model, 'whisper-large-v3-turbo');
 });

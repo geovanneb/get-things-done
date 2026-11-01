@@ -6,7 +6,8 @@ import { createHash, Hash, randomUUID } from 'crypto';
 import { finished } from 'stream/promises';
 import { EventEmitter } from 'events';
 import { atomicWrite } from '../utils/atomicWrite';
-import { readSpeeds, type SpeedResult } from './transcription/speedTest';
+import { ranOnGpu, readSpeeds, type SpeedResult } from './transcription/speedTest';
+import { whisperHelperPath } from './transcription/whisperHelper';
 import { processAlive } from './runState';
 import { HeldLock, ownsToken, readLock, tryLock, unlock } from '../utils/fileLock';
 import { SENSEVOICE_LANGUAGES, WHISPER_LANGUAGES, type LanguageOption, withLanguageChange, type LanguageChange } from './transcription/languages';
@@ -46,7 +47,12 @@ export interface CatalogModel {
    * `noArena`: the engine takes its memory in small pieces instead of one growing block. Large-v3 needs it in the desktop
    * app, whose allocator ends the process on that block; it costs other models speed.
    */
-  engine?: { kind: 'whisper' | 'sensevoice'; files: Record<string, string>; noArena?: boolean };
+  engine?: { kind: 'whisper' | 'sensevoice' | 'whisper-cpp'; files: Record<string, string>; noArena?: boolean };
+  /**
+   * A model for the GPU engine (gtd-whisper): offered only where the app has that engine, chosen only once Test speed
+   * showed it runs on the GPU here, never live. `cpu`: the CPU model of the same family it falls back to.
+   */
+  gpu?: { cpu: string };
 }
 
 /** `auto`, or a language code of the model; see `languageFor`. */
@@ -85,6 +91,21 @@ export interface ModelState {
 export interface ModelView extends Omit<CatalogModel, 'files' | 'engine'>, ModelState {
   /** How fast it transcribed on this computer, when tested. */
   speed: SpeedResult | null;
+  /** A GPU model: whether Test speed showed it runs on the GPU here, which it needs before it can be chosen. */
+  gpu_ready?: boolean;
+}
+
+/** A GPU model is offered only where the app has the GPU engine (the Apple Silicon desktop app). */
+export const offered = (m: CatalogModel): boolean => !m.gpu || whisperHelperPath() !== null;
+
+/**
+ * The model a transcription really runs with: a GPU model only while it is offered here and its speed test showed it
+ * runs on the GPU (`ranOnGpu`), otherwise its CPU counterpart. One rule for Settings, the queue and a retry.
+ */
+export async function runnableModel(id: string, catalog: CatalogModel[] = CATALOG): Promise<string> {
+  const entry = catalog.find((m) => m.id === id);
+  if (!entry?.gpu) return id;
+  return offered(entry) && ranOnGpu((await readSpeeds())[id]) ? id : entry.gpu.cpu;
 }
 
 export interface TranscriptionView {
@@ -92,6 +113,8 @@ export interface TranscriptionView {
   /** The optional speaker model. It is not one of the transcription models to choose from. */
   speakers: Pick<CatalogModel, 'id' | 'name' | 'summary'> & ModelState;
   settings: TranscriptionSettings;
+  /** The model transcriptions run with now: the chosen one, or the CPU counterpart of a GPU model not verified here. */
+  effective_model: string;
   defaults: TranscriptionSettings;
   /** The voice-activity model every transcription needs; downloaded with the first model. */
   vad_installed: boolean;
@@ -111,6 +134,8 @@ const WHISPER_REPO = 'csukuangfj/sherpa-onnx-whisper-turbo';
 const WHISPER_COMMIT = '2ca6ff69fc878651b770880507669577ac41c2ff';
 const WHISPER_V3_REPO = 'csukuangfj/sherpa-onnx-whisper-large-v3';
 const WHISPER_V3_COMMIT = '2a6507094dd6020d939d78e3f1834a1d06267fca';
+const WHISPER_CPP_REPO = 'ggerganov/whisper.cpp';
+const WHISPER_CPP_COMMIT = '5359861c739e955e79d9a303bcbc70fb988958b1';
 
 /**
  * The models on offer. Speeds and memory were measured on an Apple Silicon Mac, CPU only, with fictional English
@@ -163,6 +188,21 @@ export const CATALOG: CatalogModel[] = [
     files: [
       { name: 'model.int8.onnx', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/model.int8.onnx`, size: 239233841, sha256: 'c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51' },
       { name: 'tokens.txt', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/tokens.txt`, size: 315894, sha256: 'f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc' },
+    ],
+  },
+  {
+    id: 'whisper-large-v3-turbo-gpu',
+    name: 'Whisper Turbo (GPU)',
+    summary: 'Whisper Turbo on this Mac\'s graphics chip: about 3 times quicker, and as accurate.',
+    languages: '100 languages, including English and Japanese',
+    language_options: WHISPER_LANGUAGES,
+    pros: ['About 3 times quicker than Whisper Turbo on the CPU: an hour of meeting takes about 5 minutes', 'As accurate, measured on English and Japanese', 'About 1 GB of memory'],
+    cons: ['Apple Silicon Macs only', 'Chosen once Test speed shows it runs on the graphics chip', 'Not for the live transcript', 'A 574 MB download'],
+    memory_gb: 1,
+    engine: { kind: 'whisper-cpp', files: { model: 'ggml-large-v3-turbo-q5_0.bin' } },
+    gpu: { cpu: 'whisper-large-v3-turbo' },
+    files: [
+      { name: 'ggml-large-v3-turbo-q5_0.bin', url: `${HF}/${WHISPER_CPP_REPO}/resolve/${WHISPER_CPP_COMMIT}/ggml-large-v3-turbo-q5_0.bin`, size: 574041195, sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2' },
     ],
   },
 ];
@@ -236,7 +276,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   if (o['language'] !== undefined && o['language'] !== 'auto' && !WHISPER_LANGUAGES.some((l) => l.id === o['language'])) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
   if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
   if (o['speakers'] !== undefined && typeof o['speakers'] !== 'boolean') throw httpError(400, 'Invalid speakers: use true or false');
-  if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'])) throw httpError(400, 'Invalid live_model: a catalog model, or null for no live transcript');
+  if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'] && !m.gpu)) throw httpError(400, 'Invalid live_model: a catalog model (not a GPU one), or null for no live transcript');
   const model = (o['model'] as string | undefined) ?? base.model;
   return {
     model,
@@ -336,6 +376,13 @@ export class TranscriptionModelService {
 
   async updateSettings(input: unknown, now = new Date()): Promise<TranscriptionView> {
     const next = parseTranscriptionSettings(input, await this.readSettings(), this.catalog);
+    // A GPU model is chosen once it showed, here, that it runs on the GPU; never for the live transcript. Only a new
+    // choice is checked: a verification lost later must not block saving the language or other settings.
+    const chosen = this.catalog.find((m) => m.id === next.model);
+    const choosing = typeof input === 'object' && input !== null && (input as { model?: unknown }).model !== undefined && (input as { model?: unknown }).model !== (await this.readSettings()).model;
+    if (choosing && chosen?.gpu && (!offered(chosen) || !ranOnGpu((await readSpeeds())[chosen.id]))) {
+      throw httpError(409, `${chosen.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
+    }
     next.updated_at = now.toISOString();
     await fsp.mkdir(this.dir(), { recursive: true });
     await atomicWrite(path.join(this.dir(), 'settings.json'), JSON.stringify(next, null, 2));
@@ -400,9 +447,11 @@ export class TranscriptionModelService {
     const vadInstalled = await this.installed(this.vad.id);
     const models: ModelView[] = [];
     for (const m of this.catalog) {
+      if (!offered(m)) continue;
       const { files: _files, engine: _engine, ...rest } = m;
       const state = await this.state(m);
-      models.push({ ...rest, ...state, speed: state.installed ? speeds[m.id] ?? null : null });
+      const speed = state.installed ? speeds[m.id] ?? null : null;
+      models.push({ ...rest, ...state, speed, ...(m.gpu ? { gpu_ready: ranOnGpu(speed) } : {}) });
     }
     const total = os.totalmem();
     const light = this.catalog.find((m) => m.memory_gb <= 1);
@@ -412,6 +461,7 @@ export class TranscriptionModelService {
       models,
       speakers: { id, name, summary, ...await this.state(this.speakers) },
       settings,
+      effective_model: await runnableModel(settings.model, this.catalog),
       defaults: { ...DEFAULTS },
       vad_installed: vadInstalled,
       vad_size: this.vad.files.reduce((sum, f) => sum + f.size, 0),
@@ -432,6 +482,7 @@ export class TranscriptionModelService {
   async download(id: string): Promise<TranscriptionView> {
     const model = this.find(id);
     if (model.id === this.vad.id) throw httpError(400, 'The voice-activity model is downloaded with a transcription model');
+    if (!offered(model)) throw httpError(409, `${model.name} needs the desktop app on an Apple Silicon Mac`);
     if (active?.progress.model === id) throw httpError(409, 'This model is already downloading');
     if (active) {
       if (!waiting.some((w) => w.id === id)) waiting.push({ id, service: this });

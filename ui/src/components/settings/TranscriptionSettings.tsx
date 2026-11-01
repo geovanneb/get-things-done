@@ -64,7 +64,8 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
       background: chosen ? 'var(--color-accent-subtle)' : 'transparent', display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
-        <input type="radio" name="transcription-model" checked={chosen} onChange={onChoose} disabled={saving} style={{ marginTop: 4 }} />
+        <input type="radio" name="transcription-model" checked={chosen} onChange={onChoose} disabled={saving || (Boolean(model.gpu) && !model.gpu_ready && !chosen)} style={{ marginTop: 4 }}
+          title={model.gpu && !model.gpu_ready ? 'Download it and press Test speed: it can be chosen once the test shows it runs on the graphics chip' : undefined} />
         <span style={{ flex: 1 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 'var(--text-sm)' }}>{model.name}</strong>
@@ -98,7 +99,21 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
         <p role="alert" style={{ ...hintStyle, color: d.status === 'failed' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{d.message}</p>
       )}
       {model.speed && !speedTest.running && (
-        <p role="status" style={hintStyle}>{describeSpeed(model.speed.realtime_x).line}</p>
+        <p role="status" style={hintStyle}>
+          {model.gpu
+            // After the meeting only: no advice about the live transcript.
+            ? `About ${model.speed.realtime_x}× real time here: an hour of meeting takes about ${Math.max(1, Math.round(60 / model.speed.realtime_x))} minutes after it.`
+            : describeSpeed(model.speed.realtime_x).line}
+        </p>
+      )}
+      {model.gpu && !speedTest.running && (
+        <p role="status" style={{ ...hintStyle, color: model.gpu_ready ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+          {model.gpu_ready
+            ? 'Runs on this Mac\'s graphics chip. If it ever fails there, the recording is transcribed with Whisper Turbo on the CPU instead.'
+            : model.installed
+              ? (model.speed ? 'The test ran, but not on the graphics chip: it cannot be chosen.' : 'Press Test speed: it can be chosen once the test shows it runs on the graphics chip.')
+              : 'Download it, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'}
+        </p>
       )}
       {speedTest.running && <p role="status" style={hintStyle}>Testing on a minute of speech… {model.memory_gb > 2 ? 'This one can take a minute or two.' : ''}</p>}
       {speedTest.error && <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{speedTest.error}</p>}
@@ -275,7 +290,7 @@ export default function TranscriptionSettings() {
           onChange={(e) => void save({ live_model: e.target.value || null })}
           style={{ maxWidth: 420, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' }}>
           <option value="">Off: transcribe after the meeting</option>
-          {data.models.filter((m) => m.installed).map((m) => (
+          {data.models.filter((m) => m.installed && !m.gpu).map((m) => (
             <option key={m.id} value={m.id}>{m.name}{m.speed ? ` (about ${m.speed.realtime_x}× real time here)` : ''}</option>
           ))}
         </select>

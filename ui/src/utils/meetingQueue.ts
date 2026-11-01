@@ -30,11 +30,12 @@ export function meetingPeriod(m: QueuedMeeting): string | null {
  * Something about this meeting waits for the user: it is always shown, however old. `installed` are the downloaded
  * models, when known: a recording waiting for one that is not waits for the user.
  */
-export function needsYou(m: QueuedMeeting, installed: string[] | null = null): boolean {
+export function needsYou(m: QueuedMeeting, installed: string[] | null = null, runnable: Record<string, string> = {}): boolean {
   return Boolean(m.live || m.held || m.files.some((f) => {
     const r = f.recording;
     if (!r) return false;
-    const missingModel = r.status === 'pending' && installed !== null && Boolean(r.target) && !installed.includes(r.target!.model);
+    const target = r.target ? runnable[r.target.model] ?? r.target.model : null;
+    const missingModel = r.status === 'pending' && installed !== null && target !== null && !installed.includes(target);
     return missingModel || r.status === 'failed' || r.status === 'stopped' || (r.status === 'partial' && !r.accepted);
   }));
 }
@@ -47,11 +48,11 @@ export function newestFirst(meetings: QueuedMeeting[]): QueuedMeeting[] {
 }
 
 /** What the list shows: what needs you first, then the newest others, at most `limit` of them unless searching. */
-export function visibleMeetings(meetings: QueuedMeeting[], query: string, all: boolean, installed: string[] | null = null, limit = SHOWN_MEETINGS): { shown: QueuedMeeting[]; hidden: number } {
+export function visibleMeetings(meetings: QueuedMeeting[], query: string, all: boolean, installed: string[] | null = null, limit = SHOWN_MEETINGS, runnable: Record<string, string> = {}): { shown: QueuedMeeting[]; hidden: number } {
   const found = matching(newestFirst(meetings), query);
   if (query.trim() || all) return { shown: found, hidden: 0 };
-  const urgent = found.filter((m) => needsYou(m, installed));
-  const others = found.filter((m) => !needsYou(m, installed));
+  const urgent = found.filter((m) => needsYou(m, installed, runnable));
+  const others = found.filter((m) => !needsYou(m, installed, runnable));
   return { shown: [...urgent, ...others.slice(0, limit)], hidden: Math.max(0, others.length - limit) };
 }
 

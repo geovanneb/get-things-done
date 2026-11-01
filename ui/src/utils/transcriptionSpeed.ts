@@ -30,7 +30,9 @@ export function describeSpeed(realtime: number): { line: string; live: 'yes' | '
  * The model to suggest for this computer: the first measured one in the catalog's order (most accurate first) that
  * gets an hour done in 15 minutes, else the fastest measured. Null until a model was measured.
  */
-export function recommendModel(models: { id: string; name: string; speed: { realtime_x: number } | null }[]): { id: string; name: string; reason: string } | null {
+export function recommendModel(models: { id: string; name: string; speed: { realtime_x: number } | null; gpu?: unknown }[]): { id: string; name: string; reason: string } | null {
+  // A GPU model is chosen by its own test, not recommended next to the CPU ones.
+  models = models.filter((m) => !m.gpu);
   const measured = models.filter((m) => m.speed);
   if (measured.length === 0) return null;
   const quick = measured.find((m) => m.speed!.realtime_x >= AFTER_X);

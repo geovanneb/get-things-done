@@ -39,6 +39,12 @@ const waiting = [...Array.from({ length: 6 }, (_, i) => meeting(`new${i}`, `2026
   meeting('blocked', '2026-01-01', { files: [{ name: 'a.wav', size: 1, sha256: 'a', recording: { status: 'pending', target: { model: 'whisper-large-v3', language: 'auto' } } }] as unknown as QueuedMeeting['files'] })];
 assert.ok(visibleMeetings(waiting, '', false, ['sensevoice-2024-07-17']).shown.some((m) => m.id === 'blocked'), 'waiting for a model that is not downloaded');
 assert.ok(!visibleMeetings(waiting, '', false, ['whisper-large-v3']).shown.some((m) => m.id === 'blocked'), 'just waiting its turn');
+// A GPU target not verified here runs as its CPU model: it waits for that one, whatever is installed of the GPU one.
+const gpuWaiting = [...Array.from({ length: 6 }, (_, i) => meeting(`n${i}`, `2026-10-2${i}`)),
+  meeting('gpu', '2026-01-01', { files: [{ name: 'a.wav', size: 1, sha256: 'a', recording: { status: 'pending', target: { model: 'whisper-large-v3-turbo-gpu', language: 'auto' } } }] as unknown as QueuedMeeting['files'] })];
+const asCpu = { 'whisper-large-v3-turbo-gpu': 'whisper-large-v3-turbo' };
+assert.ok(visibleMeetings(gpuWaiting, '', false, ['whisper-large-v3-turbo-gpu'], 5, asCpu).shown.some((m) => m.id === 'gpu'), 'the CPU model it needs is missing');
+assert.ok(!visibleMeetings(gpuWaiting, '', false, ['whisper-large-v3-turbo'], 5, asCpu).shown.some((m) => m.id === 'gpu'), 'its CPU model is there: it just waits its turn');
 assert.deepEqual(visibleMeetings(many, 'fictional ready1', false).shown.map((m) => m.id), ['ready1']);
 
 const people = [meeting('kim', '2026-10-30', { title: 'Budget review', participants: [{ name: 'Kim Park' }] }), meeting('x', '2026-10-30', { title: 'Standup' })];

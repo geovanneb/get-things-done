@@ -9,7 +9,7 @@ const globals = require('globals');
 
 module.exports = tseslint.config(
   {
-    ignores: ['**/node_modules/', '**/dist/', 'desktop/release/', 'desktop/stage/', 'templates/', 'executive-workspace/', 'coverage/'],
+    ignores: ['**/node_modules/', '**/dist/', 'desktop/release/', 'desktop/stage/', 'native/whisper-helper/build/', 'templates/', 'executive-workspace/', 'coverage/'],
   },
 
   js.configs.recommended,

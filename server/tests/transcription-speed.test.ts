@@ -117,3 +117,44 @@ test('a speed test says why the engine failed, and a busy engine stays busy', as
   const busy = Object.assign(new Error('A transcription is already running'), { statusCode: 409 });
   await assert.rejects(runSpeedTest(failing(busy), 'm', fetchImpl, list), (err: Error & { statusCode?: number }) => err.statusCode === 409);
 });
+
+test('a retest that fails on the model forgets its earlier result; a busy engine does not', async (t) => {
+  await modelsFolder(t);
+  const { fetchImpl } = fakeFetch();
+  let outcome: 'ok' | 'crash' | 'empty' | 'busy' = 'ok';
+  const engine = {
+    transcribe: async () => {
+      if (outcome === 'crash') throw Object.assign(new Error('The GPU engine ended (9)'), { failure: 'gpu' });
+      if (outcome === 'busy') throw Object.assign(new Error('A transcription is already running'), { statusCode: 409, engineBusy: true });
+      return { segments: outcome === 'empty' ? [] : [{ start: 0, end: 1, text: 'Fictional speech.' }], seconds: 0, load_ms: 0, backend: 'MTL0' };
+    },
+  } as unknown as TranscriptionEngine;
+  for (const failing of ['crash', 'empty'] as const) {
+    outcome = 'ok';
+    await runSpeedTest(engine, 'gpu-model', fetchImpl, list);
+    assert.equal((await readSpeeds())['gpu-model']?.backend, 'MTL0');
+    outcome = 'busy';
+    await assert.rejects(runSpeedTest(engine, 'gpu-model', fetchImpl, list));
+    assert.ok((await readSpeeds())['gpu-model'], 'busy: the result stays');
+    outcome = failing;
+    await assert.rejects(runSpeedTest(engine, 'gpu-model', fetchImpl, list));
+    assert.equal((await readSpeeds())['gpu-model'], undefined, `${failing}: the result goes`);
+  }
+});
+
+test('a result that cannot be removed when forgotten still counts for nothing until a new test passes', async (t) => {
+  const dir = await modelsFolder(t);
+  const { fetchImpl } = fakeFetch();
+  const engine = { transcribe: async () => ({ segments: [{ start: 0, end: 1, text: 'Fictional speech.' }], seconds: 0, load_ms: 0, backend: 'MTL0' }) } as unknown as TranscriptionEngine;
+  await runSpeedTest(engine, 'stuck-model', fetchImpl, list);
+  // The folder is read-only now: the file cannot be removed.
+  await fsp.chmod(path.join(dir, 'speed-test'), 0o500);
+  t.after(() => fsp.chmod(path.join(dir, 'speed-test'), 0o700).catch(() => {}));
+  const { forgetSpeed } = await import('../src/services/transcription/speedTest');
+  await forgetSpeed('stuck-model');
+  assert.ok(await fsp.stat(path.join(dir, 'speed-test', 'stuck-model.json')).catch(() => null), 'the file is still there');
+  assert.equal((await readSpeeds())['stuck-model'], undefined, 'but it counts for nothing');
+  await fsp.chmod(path.join(dir, 'speed-test'), 0o700);
+  await runSpeedTest(engine, 'stuck-model', fetchImpl, list);
+  assert.equal((await readSpeeds())['stuck-model']?.backend, 'MTL0', 'a new test counts again');
+});
