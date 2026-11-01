@@ -20,13 +20,19 @@ export interface DesktopBridge {
   recordingLanguage?(menu: SpokenLanguageMenu): void;
   /** Calls `listener` when the app's menu-bar menu asks the page for something about recording. Returns an unsubscribe. */
   onRecordingCommand?(listener: () => void): () => void;
-  /** Takes the menu's pending recording command, once: `open` the record dialog, `stop` the recording or `language:<code>`. */
+  /**
+   * Takes the menu's pending recording command, once: `open` the record dialog, `stop` the recording, `language:<code>`,
+   * or `suggestion:switch:<id>` / `suggestion:keep:<id>` for a suggested spoken language.
+   */
   takeRecordingCommand?(): Promise<string | null>;
 }
 
-export type RecordingCommand = 'open' | 'stop' | `language:${string}`;
+export type RecordingCommand = 'open' | 'stop' | `language:${string}` | `suggestion:${'switch' | 'keep'}:${string}`;
 
-export interface SpokenLanguageMenu { current: string; options: { id: string; label: string }[] }
+/** A spoken language that sounds more likely than the one set: the menu bar offers it and says so once. */
+export interface SuggestedLanguage { id: string; language: string; label: string; mode: 'mismatch' | 'auto' }
+
+export interface SpokenLanguageMenu { current: string; options: { id: string; label: string }[]; suggested?: SuggestedLanguage }
 
 export function desktopBridge(): DesktopBridge | undefined {
   const bridge = (globalThis as { gtdDesktop?: DesktopBridge }).gtdDesktop;
@@ -66,7 +72,7 @@ export function onRecordingCommand(handler: (command: RecordingCommand) => void)
   if (!bridge?.onRecordingCommand || !bridge.takeRecordingCommand) return () => undefined;
   const take = () => {
     void bridge.takeRecordingCommand!().then((command) => {
-      if (command === 'open' || command === 'stop' || command?.startsWith('language:')) handler(command as RecordingCommand);
+      if (command === 'open' || command === 'stop' || command?.startsWith('language:') || /^suggestion:(switch|keep):[\w-]{1,64}$/.test(command ?? '')) handler(command as RecordingCommand);
     }).catch(() => undefined);
   };
   const unsubscribe = bridge.onRecordingCommand(take);

@@ -496,3 +496,42 @@ test('words in any script count; punctuation and repeat marks alone do not', () 
   assert.equal(hasWords([',', '.', ' 。', '、', '[repeated 7 times]']), false);
   for (const text of ['Olá', '中学', 'ありがとう', '42', 'Привет']) assert.equal(hasWords([',', text]), true, text);
 });
+
+test('real model: with Whisper live and a language set, SenseVoice tells the language each part sounds like', { skip: !realModels || !realAudio || !fs.existsSync(path.join(realModels, 'whisper-large-v3-turbo')) || !fs.existsSync(path.join(realModels, 'sensevoice-2024-07-17')) ? 'set STT_TEST_MODELS, with Whisper and SenseVoice, and STT_TEST_AUDIO to run' : false }, async (t) => {
+  const previous = process.env.ESB_MODELS_PATH;
+  process.env.ESB_MODELS_PATH = realModels;
+  t.after(() => { if (previous === undefined) delete process.env.ESB_MODELS_PATH; else process.env.ESB_MODELS_PATH = previous; });
+  const wav = path.join(realAudio!, 'ja.wav');
+  const bytes = (fs.statSync(wav).size - 44) & ~1;
+  const detected = async (detector?: string) => {
+    const parts: (string | null)[] = [];
+    const session = await new TranscriptionEngine().follow(wav, { model: 'whisper-large-v3-turbo', language: 'en', ...(detector ? { detector } : {}), onSegment: () => {}, onPart: (p) => { if (p.end - p.start >= 2) parts.push(p.detected); } });
+    session.committed(bytes);
+    assert.equal((await session.end(bytes, 300_000)).ok, true);
+    return parts;
+  };
+  assert.ok((await detected()).every((d) => d === null), 'Whisper with English set tells nothing');
+  const heard = await detected('sensevoice-2024-07-17');
+  assert.ok(heard.length > 0 && heard.every((d) => d === 'ja'), JSON.stringify(heard));
+});
+
+test('real model: a language detector that does not load, or fails, leaves the live transcript as it is', { skip: !realModels || !realAudio || !fs.existsSync(path.join(realModels, 'sensevoice-2024-07-17')) ? 'set STT_TEST_MODELS, with SenseVoice, and STT_TEST_AUDIO to run' : false }, async () => {
+  const wav = path.join(realAudio!, 'en.wav');
+  const bytes = (fs.statSync(wav).size - 44) & ~1;
+  const sv = path.join(realModels!, 'sensevoice-2024-07-17');
+  const worker = launchWorker();
+  const replies: WorkerReply[] = [];
+  const done = new Promise<void>((resolve) => {
+    worker.on('message', (m: WorkerReply) => { replies.push(m); if (m.type === 'done' || m.type === 'error') resolve(); });
+    worker.once('exit', () => resolve());
+  });
+  worker.send({
+    type: 'follow', wav, language: 'en',
+    model: { kind: 'sensevoice', files: { model: path.join(sv, 'model.int8.onnx'), tokens: path.join(sv, 'tokens.txt') }, vad: path.join(realModels!, 'silero-vad', 'silero_vad.onnx'), threads: 2 },
+    detector: { kind: 'sensevoice', files: { model: path.join(sv, 'missing.onnx'), tokens: path.join(sv, 'missing.txt') }, vad: '', threads: 1 },
+  } satisfies WorkerRequest);
+  worker.send({ type: 'end', bytes });
+  await done;
+  assert.equal(replies.find((r) => r.type === 'error'), undefined, JSON.stringify(replies.find((r) => r.type === 'error')));
+  assert.match(replies.filter((r): r is Extract<WorkerReply, { type: 'segment' }> => r.type === 'segment').map((s) => s.text).join(' '), /tribal chieftain/i);
+});

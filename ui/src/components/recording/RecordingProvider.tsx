@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
-import { microphoneAccess, reportLanguageMenu, reportRecording } from '@/utils/desktop';
+import { desktopBridge, microphoneAccess, reportLanguageMenu, reportRecording, type SuggestedLanguage } from '@/utils/desktop';
+import { useDataVersion } from '@/store';
 import { mixSources } from '@/utils/recordingMix';
 import { BYTES_PER_SECOND, RecordingUploader, type SendResult } from '@/utils/recordingUpload';
 import type { MeetingParticipant, QueuedMeeting, SpokenLanguage, Transcription } from '@/types';
@@ -42,6 +43,8 @@ export interface RecorderState {
   languages: SpokenLanguage[];
   /** A change of language did not reach the server. */
   languageError: string | null;
+  /** A spoken language that sounds more likely than the one set, from the live transcript; null when there is none. */
+  suggestion: SuggestedLanguage | null;
   error: string | null;
   /** The last recording that was saved, to say so. */
   notice: string | null;
@@ -54,11 +57,13 @@ interface RecorderContextValue extends RecorderState {
   start: (options: RecordingOptions) => Promise<void>;
   stop: () => Promise<void>;
   setLanguage: (language: string) => Promise<void>;
+  /** Switch to the suggested language (`id` of the suggestion shown), or keep the one set. */
+  answerSuggestion: (answer: 'switch' | 'keep', id: string) => Promise<void>;
   discard: () => Promise<void>;
   dismiss: () => void;
 }
 
-const idle: RecorderState = { status: 'idle', meetingId: null, title: '', elapsed: 0, captured: 0, saved: 0, gap: 0, level: 0, systemLevel: null, warning: null, lost: [], language: 'auto', languages: [], languageError: null, error: null, notice: null, lastMeetingId: null };
+const idle: RecorderState = { status: 'idle', meetingId: null, title: '', elapsed: 0, captured: 0, saved: 0, gap: 0, level: 0, systemLevel: null, warning: null, lost: [], language: 'auto', languages: [], languageError: null, suggestion: null, error: null, notice: null, lastMeetingId: null };
 const RecorderContext = createContext<RecorderContextValue | null>(null);
 
 /** No sound above this for this long: the microphone is probably the wrong one, or muted. */
@@ -131,6 +136,13 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<RecorderState>(idle);
   const session = useRef<Session | null>(null);
   const phase = useRef<Phase>('idle');
+  /**
+   * Answers to a suggestion and changes of language: how many were made (a read begun before one is not used), and
+   * how many are still on their way (no read is used meanwhile; the suggestion is read again when they are done).
+   */
+  const answered = useRef(0);
+  const pendingAnswers = useRef(0);
+  const [answersDone, setAnswersDone] = useState(0);
   const stopping = useRef<Promise<void> | null>(null);
   const update = useCallback((patch: Partial<RecorderState>) => setState((s) => ({ ...s, ...patch })), []);
 
@@ -278,22 +290,32 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     }
   }, [ended, release, update]);
 
+  /** A change of language or an answer is done: reads made meanwhile are not used, and the suggestion is read again. */
+  const settled = useCallback(() => {
+    pendingAnswers.current = Math.max(0, pendingAnswers.current - 1);
+    answered.current++;
+    setAnswersDone((n) => n + 1);
+  }, []);
+
   const setLanguage = useCallback((language: string): Promise<void> => {
     // Of the recording it was asked for: it never reaches the next one.
     const s = session.current;
     if (!s || phase.current !== 'running') return Promise.resolve();
+    answered.current++;
+    pendingAnswers.current++;
     const change = async () => {
       if (session.current !== s || phase.current !== 'running') return;
       try {
         const changed = await apiPut<{ language: string }>(`/api/meeting-queue/${s.meetingId}/recording/language`, { token: s.token, language });
-        if (session.current === s) update({ language: changed.language, languageError: null });
+        // What was heard before says nothing about the language set now: the server dropped the suggestion too.
+        if (session.current === s) update({ language: changed.language, languageError: null, suggestion: null });
       } catch (err) {
         if (session.current === s) update({ languageError: `The language was not changed: ${(err as Error).message}` });
       }
     };
-    s.languageChange = s.languageChange.then(change);
+    s.languageChange = s.languageChange.then(change).finally(settled);
     return s.languageChange;
-  }, [update]);
+  }, [update, settled]);
 
   const stop = useCallback((): Promise<void> => {
     if (stopping.current) return stopping.current;
@@ -359,15 +381,80 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('beforeunload', warn);
   }, [active]);
 
-  // The menu bar shows the usual languages and the current one, so a meeting can be switched without opening the window.
-  const { status, language, languages } = state;
+  // The suggested spoken language, from the live transcript in this dashboard: read when it changes, and every few
+  // seconds in case a notice was missed.
+  const { status, language, languages, meetingId, suggestion } = state;
+  const liveVersion = useDataVersion('live-transcript');
+  useEffect(() => {
+    if (status !== 'recording' || !meetingId) { if (suggestion) update({ suggestion: null }); return undefined; }
+    let cancelled = false;
+    let latest = 0;
+    const read = async () => {
+      // Only the newest read counts, and none that began before an answer or a change of language: an older one
+      // would bring back a suggestion that was just answered.
+      const asked = ++latest;
+      const revision = answered.current;
+      const live = await apiGet<{ suggestion?: { id: string; language: string; mode: 'mismatch' | 'auto' } | null }>(`/api/meeting-queue/${meetingId}/recording/transcript?from=999999999`).catch(() => null);
+      if (cancelled || !live || asked !== latest || revision !== answered.current || pendingAnswers.current > 0 || session.current?.meetingId !== meetingId) return;
+      const s = live.suggestion ?? null;
+      const label = s ? languages.find((l) => l.id === s.language)?.label ?? s.language : '';
+      const next = s ? { id: s.id, language: s.language, label, mode: s.mode } : null;
+      setState((st) => (st.suggestion?.id === next?.id && st.suggestion?.label === next?.label ? st : { ...st, suggestion: next }));
+    };
+    void read();
+    const timer = setInterval(() => { void read(); }, 10_000);
+    return () => { cancelled = true; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `suggestion` is what this sets
+  }, [status, meetingId, liveVersion, languages, answersDone]);
+
+  const answerSuggestion = useCallback((answer: 'switch' | 'keep', id: string): Promise<void> => {
+    const s = session.current;
+    if (!s || phase.current !== 'running') return Promise.resolve();
+    answered.current++;
+    pendingAnswers.current++;
+    // In the same line as changes made by hand, so they reach the server in the order they were made.
+    const send = async () => {
+      if (session.current !== s || phase.current !== 'running') return;
+      try {
+        if (answer === 'switch') {
+          const changed = await apiPut<{ language: string }>(`/api/meeting-queue/${s.meetingId}/recording/language`, { token: s.token, suggestion: id });
+          if (session.current === s) update({ language: changed.language, languageError: null, suggestion: null });
+        } else {
+          await apiPost(`/api/meeting-queue/${s.meetingId}/recording/language/keep`, { token: s.token, suggestion: id });
+          if (session.current === s) update({ suggestion: null });
+        }
+      } catch (err) {
+        // Refused: it is no longer the current suggestion (the language was changed meanwhile); read it again.
+        if (session.current === s) update({ suggestion: null, languageError: answer === 'switch' ? `The language was not changed: ${(err as Error).message}` : null });
+      }
+    };
+    s.languageChange = s.languageChange.then(send).finally(settled);
+    return s.languageChange;
+  }, [update, settled]);
+
+  // In a browser, a suggestion made while the tab is in the background is said once by the system, if allowed. The
+  // desktop app says it from the menu bar instead.
+  const notified = useRef<string | null>(null);
+  useEffect(() => {
+    if (!suggestion || notified.current === suggestion.id || desktopBridge() || typeof Notification === 'undefined') return;
+    notified.current = suggestion.id;
+    if (!document.hidden || Notification.permission !== 'granted') return;
+    const current = languages.find((l) => l.id === language)?.label ?? language;
+    new Notification(suggestion.mode === 'auto' ? `Most speech sounds like ${suggestion.label}` : `This sounds like ${suggestion.label}`, {
+      body: suggestion.mode === 'auto' ? `Set ${suggestion.label} for a more accurate transcript.` : `The recording is set to ${current}. Open the dashboard to switch.`,
+      tag: `gtd-language-${suggestion.id}`,
+    });
+  }, [suggestion, language, languages]);
+
+  // The menu bar shows the usual languages and the current one, so a meeting can be switched without opening the window,
+  // and a suggestion, which it also says once.
   useEffect(() => {
     if (status !== 'recording' || languages.length === 0) return;
     const shown = languages.filter((l) => l.common || l.id === language).map(({ id, label }) => ({ id, label }));
-    reportLanguageMenu({ current: language, options: [{ id: 'auto', label: 'Auto' }, ...shown] });
-  }, [status, language, languages]);
+    reportLanguageMenu({ current: language, options: [{ id: 'auto', label: 'Auto' }, ...shown], ...(suggestion ? { suggested: suggestion } : {}) });
+  }, [status, language, languages, suggestion]);
 
-  const value = useMemo(() => ({ ...state, active, start, stop, setLanguage, discard, dismiss }), [state, active, start, stop, setLanguage, discard, dismiss]);
+  const value = useMemo(() => ({ ...state, active, start, stop, setLanguage, answerSuggestion, discard, dismiss }), [state, active, start, stop, setLanguage, answerSuggestion, discard, dismiss]);
   return <RecorderContext.Provider value={value}>{children}</RecorderContext.Provider>;
 }
 

@@ -20,6 +20,29 @@ function Meter({ label, level }: { label: string; level: number }) {
   );
 }
 
+/**
+ * The live transcript heard another language than the one set (or, in Auto, nearly only one language): switch to it,
+ * or keep what is set. Switching from a set language applies from where that language started.
+ */
+function LanguageSuggestion() {
+  const r = useRecorder();
+  const s = r.suggestion!;
+  const current = r.language === 'auto' ? 'Auto' : r.languages.find((l) => l.id === r.language)?.label ?? r.language;
+  return (
+    <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--color-warning-subtle)', border: '1px solid color-mix(in oklch, var(--color-warning) 40%, transparent)' }}>
+      <span style={{ fontSize: 'var(--text-sm)' }}>
+        {s.mode === 'auto'
+          ? <>Most speech sounds like <strong>{s.label}</strong>. Set it for a more accurate transcript?</>
+          : <>This sounds like <strong>{s.label}</strong>, but the language is set to {current}.</>}
+      </span>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button size="sm" variant="primary" onClick={() => void r.answerSuggestion('switch', s.id)}>{s.mode === 'auto' ? `Set ${s.label}` : `Switch to ${s.label}`}</Button>
+        <Button size="sm" variant="ghost" onClick={() => void r.answerSuggestion('keep', s.id)}>Keep {current}</Button>
+      </div>
+    </div>
+  );
+}
+
 /** Shows on every view while a recording runs: what is captured, what is really saved, and how to stop. */
 export function RecordingBanner() {
   const r = useRecorder();
@@ -68,6 +91,7 @@ export function RecordingBanner() {
               </select>
             </label>
           )}
+          {r.status === 'recording' && r.suggestion && <LanguageSuggestion />}
           {r.languageError && <p role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{r.languageError}</p>}
           <Link to="/meetings" style={{ ...line, color: 'var(--color-accent)' }}>Open Meetings for the transcript</Link>
           {r.lost.map((text) => <p key={text} role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{text}</p>)}

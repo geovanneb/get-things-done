@@ -3,8 +3,10 @@
 // was closed, or still loading) is taken when it is, unless it is old by then: a click from minutes ago must not open
 // the record dialog out of nowhere.
 
-/** `language:ja`: the language being spoken from now on. */
-export type RecordingCommand = 'open' | 'stop' | `language:${string}`;
+/** `language:ja`: the language being spoken from now on. `suggestion:switch:<id>` or `:keep:`: an answer to a suggestion. */
+export type RecordingCommand = 'open' | 'stop' | `language:${string}` | `suggestion:${'switch' | 'keep'}:${string}`;
+
+const aboutLanguage = (command: string) => command.startsWith('language:') || command.startsWith('suggestion:');
 
 /** How long a command waits for the page. */
 export const COMMAND_TTL_MS = 30_000;
@@ -16,13 +18,13 @@ export class RecordingCommands {
 
   /** Leaves `command` for the page; a newer one replaces one not taken yet, but a language never replaces a Stop. */
   leave(command: RecordingCommand): void {
-    if (command.startsWith('language:') && this.pending?.command === 'stop' && this.now() - this.pending.at <= COMMAND_TTL_MS) return;
+    if (aboutLanguage(command) && this.pending?.command === 'stop' && this.now() - this.pending.at <= COMMAND_TTL_MS) return;
     this.pending = { command, at: this.now() };
   }
 
   /** The recording ended: a language left for it must not reach the next one. */
   dropLanguage(): void {
-    if (this.pending?.command.startsWith('language:')) this.pending = null;
+    if (this.pending && aboutLanguage(this.pending.command)) this.pending = null;
   }
 
   /** The waiting command, once, or null when there is none or it is too old. */
