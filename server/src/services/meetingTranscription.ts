@@ -8,6 +8,7 @@ import { TranscriptionModelService, CATALOG, languagesFor, runnableModel, SPEAKE
 import type { LanguageChange } from './transcription/languages';
 import { hasWords } from './transcription/repeats';
 import { forgetSpeed, ranOnGpu } from './transcription/speedTest';
+import { GPU_FAILURES } from './transcription/whisperHelper';
 import { TranscriptionEngine, Segment, engineEvents, setLiveRoomMaker, type TranscribeOptions } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
 import { HeldLock, tryLock, unlock } from '../utils/fileLock';
@@ -73,9 +74,6 @@ interface Job { meeting: string; file: string; generation: string; token: string
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
 let ticking = 0;
-/** Failures of the GPU engine itself, after which a recording is made again on the CPU (see whisperHelper.ts). */
-const GPU_FAILURES = ['gpu', 'load', 'missing', 'timeout', 'protocol'];
-
 /** Recordings whose live transcript is about to start: no transcription starts meanwhile. */
 let heldForLive = 0;
 /** Checks choosing a recording to transcribe, past the first look: a recording waits for them. */

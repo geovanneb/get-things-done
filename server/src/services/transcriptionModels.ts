@@ -141,6 +141,7 @@ const WHISPER_CPP_COMMIT = '5359861c739e955e79d9a303bcbc70fb988958b1';
  * The models on offer. Speeds and memory were measured on an Apple Silicon Mac, CPU only, with fictional English
  * and Japanese meetings; other computers may be slower. The 2024-07-17 SenseVoice is pinned on purpose: the
  * 2025-09-09 release drops kana from Japanese. Most accurate first: Settings recommends the first that is quick enough.
+ * A GPU model sits next to its CPU counterpart and is never recommended: it is chosen by its own speed test.
  */
 export const CATALOG: CatalogModel[] = [
   {
@@ -176,6 +177,21 @@ export const CATALOG: CatalogModel[] = [
     ],
   },
   {
+    id: 'whisper-large-v3-turbo-gpu',
+    name: 'Whisper Turbo (GPU)',
+    summary: 'Whisper Turbo on this Mac\'s graphics chip: about 3 times quicker, and as accurate.',
+    languages: '100 languages, including English and Japanese',
+    language_options: WHISPER_LANGUAGES,
+    pros: ['About 3 times quicker than Whisper Turbo on the CPU: an hour of meeting takes about 5 minutes', 'As accurate, measured on English and Japanese', 'About 1 GB of memory'],
+    cons: ['Apple Silicon Macs only', 'Chosen once Test speed shows it runs on the graphics chip', 'As the live model it uses the graphics chip during your call', 'A 574 MB download'],
+    memory_gb: 1,
+    engine: { kind: 'whisper-cpp', files: { model: 'ggml-large-v3-turbo-q5_0.bin' } },
+    gpu: { cpu: 'whisper-large-v3-turbo' },
+    files: [
+      { name: 'ggml-large-v3-turbo-q5_0.bin', url: `${HF}/${WHISPER_CPP_REPO}/resolve/${WHISPER_CPP_COMMIT}/ggml-large-v3-turbo-q5_0.bin`, size: 574041195, sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2' },
+    ],
+  },
+  {
     id: 'sensevoice-2024-07-17',
     name: 'SenseVoice',
     summary: 'Very fast and light. A little less accurate.',
@@ -188,21 +204,6 @@ export const CATALOG: CatalogModel[] = [
     files: [
       { name: 'model.int8.onnx', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/model.int8.onnx`, size: 239233841, sha256: 'c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51' },
       { name: 'tokens.txt', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/tokens.txt`, size: 315894, sha256: 'f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc' },
-    ],
-  },
-  {
-    id: 'whisper-large-v3-turbo-gpu',
-    name: 'Whisper Turbo (GPU)',
-    summary: 'Whisper Turbo on this Mac\'s graphics chip: about 3 times quicker, and as accurate.',
-    languages: '100 languages, including English and Japanese',
-    language_options: WHISPER_LANGUAGES,
-    pros: ['About 3 times quicker than Whisper Turbo on the CPU: an hour of meeting takes about 5 minutes', 'As accurate, measured on English and Japanese', 'About 1 GB of memory'],
-    cons: ['Apple Silicon Macs only', 'Chosen once Test speed shows it runs on the graphics chip', 'Not for the live transcript', 'A 574 MB download'],
-    memory_gb: 1,
-    engine: { kind: 'whisper-cpp', files: { model: 'ggml-large-v3-turbo-q5_0.bin' } },
-    gpu: { cpu: 'whisper-large-v3-turbo' },
-    files: [
-      { name: 'ggml-large-v3-turbo-q5_0.bin', url: `${HF}/${WHISPER_CPP_REPO}/resolve/${WHISPER_CPP_COMMIT}/ggml-large-v3-turbo-q5_0.bin`, size: 574041195, sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2' },
     ],
   },
 ];
@@ -276,7 +277,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   if (o['language'] !== undefined && o['language'] !== 'auto' && !WHISPER_LANGUAGES.some((l) => l.id === o['language'])) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
   if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
   if (o['speakers'] !== undefined && typeof o['speakers'] !== 'boolean') throw httpError(400, 'Invalid speakers: use true or false');
-  if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'] && !m.gpu)) throw httpError(400, 'Invalid live_model: a catalog model (not a GPU one), or null for no live transcript');
+  if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'])) throw httpError(400, 'Invalid live_model: a catalog model, or null for no live transcript');
   const model = (o['model'] as string | undefined) ?? base.model;
   return {
     model,
@@ -382,6 +383,12 @@ export class TranscriptionModelService {
     const choosing = typeof input === 'object' && input !== null && (input as { model?: unknown }).model !== undefined && (input as { model?: unknown }).model !== (await this.readSettings()).model;
     if (choosing && chosen?.gpu && (!offered(chosen) || !ranOnGpu((await readSpeeds())[chosen.id]))) {
       throw httpError(409, `${chosen.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
+    }
+    // The same for the live model: chosen anew, a GPU model must be verified here.
+    const liveInput = typeof input === 'object' && input !== null ? (input as { live_model?: unknown }).live_model : undefined;
+    const live = this.catalog.find((m) => m.id === next.live_model);
+    if (liveInput !== undefined && liveInput !== (await this.readSettings()).live_model && live?.gpu && (!offered(live) || !ranOnGpu((await readSpeeds())[live.id]))) {
+      throw httpError(409, `${live.name} can be chosen once Test speed shows it runs on this computer's graphics chip`);
     }
     next.updated_at = now.toISOString();
     await fsp.mkdir(this.dir(), { recursive: true });

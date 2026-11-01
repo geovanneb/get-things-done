@@ -201,7 +201,8 @@ async function decodeAll(recognizer: Recognizer, vad: SherpaVad, job: Job): Prom
       const decoded = await recognizer.decode(input.samples, language);
       const text = markRepeats(decoded.text.trim());
       // A live model that cannot tell the language with one set (Whisper): the detector listens to parts long enough.
-      if (job.live && job.detector && decoded.detected === null && part.samples.length >= DETECT_MIN_SAMPLES) {
+      // Only while a language is set: in Auto there is no suggestion to make, so no second model runs.
+      if (job.live && job.detector && language !== 'auto' && decoded.detected === null && part.samples.length >= DETECT_MIN_SAMPLES) {
         try {
           const stream = job.detector.createStream();
           stream.acceptWaveform({ samples: input.samples, sampleRate: SAMPLE_RATE });
@@ -246,7 +247,7 @@ function onControl(message: WorkerControl): void {
 async function follow(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'follow' }>): Promise<void> {
   const recognizer = await load(sherpa, request.model, request.language);
   const vad = newVad(sherpa, request.model, SILENCE_SECONDS.live);
-  // In Auto the detector hears nothing the live model does not, but a language can be set during the recording.
+  // Loaded in Auto too, as a language can be set during the recording; it decodes only parts with one set.
   // Optional: a detector that does not load leaves the live transcript as it is, only without a suggested language.
   const detector = request.detector
     ? await sherpa.OfflineRecognizer.createAsync(recognizerConfig({ ...request.detector, threads: 1 }, 'auto')).catch(() => undefined)

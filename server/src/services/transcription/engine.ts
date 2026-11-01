@@ -33,11 +33,13 @@ export interface FollowSession {
   /** From `at` seconds of audio on, this language. Sent before the audio it applies to. */
   language(at: number, language: string): void;
   /** The recording is sealed at `bytes`: reads to there, and resolves once the worker has exited. */
-  end(bytes: number, deadlineMs: number): Promise<{ ok: true; bytes: number; seconds: number; segments: number; lateLanguage: boolean } | { ok: false; message: string }>;
-  /** Ends the job without a result; resolves once the worker has exited. */
+  end(bytes: number, deadlineMs: number): Promise<{ ok: true; bytes: number; seconds: number; segments: number; lateLanguage: boolean } | { ok: false; message: string; failure?: string }>;
+  /** Ends the job without a result; resolves once the worker, and a GPU engine it started, have exited. */
   cancel(): Promise<void>;
   /** Why the job stopped early, while the recording goes on; null while it runs. */
   readonly failed: string | null;
+  /** For the GPU engine: what kind of failure it was (see HelperFailure), or `gpu` when it did not run on Metal. */
+  readonly failure: string | null;
 }
 
 /** Starts the worker as a Node process: the built worker.js next to this file, or worker.ts when run from source. */
@@ -278,8 +280,8 @@ export class TranscriptionEngine {
     detector?: string;
   }): Promise<FollowSession> {
     if (closing) throw httpError(503, 'The dashboard is shutting down');
-    // The GPU engine transcribes after a meeting only.
-    if (CATALOG.find((m) => m.id === options.model)?.gpu) throw httpError(400, 'A GPU model is not for the live transcript');
+    // A GPU model must run on Metal: the live job checks it is verified here; this checks the device at load.
+    const gpu = Boolean(CATALOG.find((m) => m.id === options.model)?.gpu);
     if (busy) throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true });
     const releaseModel = await this.models.lease(options.model);
     let model: EngineModel;
@@ -319,21 +321,55 @@ export class TranscriptionEngine {
       child.once('exit', () => resolve());
       child.once('close', () => { if (neverStarted.has(child)) resolve(); });
     });
-    void exited.then(async () => { running.delete(child); free(); await release().catch(() => {}); });
+    // The GPU engine the worker started, until the worker says it is closed: the slot waits for it too.
+    let helper: number | null = null;
+    // One cleanup for every ending: the worker exits, its GPU engine is gone (or its wait ran out), then the slot and
+    // the leases are given back. End and cancel resolve only after it.
+    const cleanup = exited.then(async () => {
+      await helperGone(helper);
+      running.delete(child);
+      free();
+      await release().catch(() => {});
+    });
 
-    let outcome: { ok: true; bytes: number; seconds: number; segments: number; lateLanguage: boolean } | { ok: false; message: string } | null = null;
+    let outcome: { ok: true; bytes: number; seconds: number; segments: number; lateLanguage: boolean } | { ok: false; message: string; failure?: string } | null = null;
     const settle = (value: NonNullable<typeof outcome>) => { if (!outcome) { outcome = value; for (const w of waiting) w(); } };
     const waiting: (() => void)[] = [];
     const ended = () => new Promise<void>((resolve) => { if (outcome) resolve(); else waiting.push(resolve); });
     let loaded = false;
+    // Set once a GPU model's load report says Metal.
+    let onGpu = false;
     const loadTimer = setTimeout(() => { if (!loaded) { settle({ ok: false, message: 'The model took too long to load.' }); void stop(child); } }, CHECK_TIMEOUT_MS);
     child.on('message', (reply: WorkerReply) => {
+      // Kept up after the job settled too: a GPU engine announced late must still be known, and confirmed so it loads
+      // nothing (the worker is ending anyway), and the slot must wait for it.
+      if (reply.type === 'helper') {
+        helper = reply.pid;
+        if (child.connected) { try { child.send({ type: 'helper-known' } satisfies WorkerControl, () => {}); } catch { /* the worker went */ } }
+      }
+      if (reply.type === 'done' || reply.type === 'error') helper = null;
       if (outcome) return;
-      if (reply.type === 'loaded') { loaded = true; clearTimeout(loadTimer); }
+      if (reply.type === 'loaded') {
+        loaded = true;
+        clearTimeout(loadTimer);
+        // A GPU model that loaded on anything but Metal is a GPU failure, not a slower success.
+        if (gpu && !reply.backend?.startsWith('MTL')) {
+          settle({ ok: false, message: `The GPU engine ran on ${reply.backend ?? 'an unknown device'}, not the graphics chip`, failure: 'gpu' });
+          void stop(child);
+          return;
+        }
+        onGpu = gpu;
+      }
+      // No text, and no success, from a GPU model before it said it runs on Metal.
+      if (gpu && !onGpu && (reply.type === 'segment' || reply.type === 'part' || reply.type === 'done')) {
+        settle({ ok: false, message: 'The GPU engine did not say which device it runs on', failure: 'protocol' });
+        void stop(child);
+        return;
+      }
       if (reply.type === 'segment') options.onSegment({ start: reply.start, end: reply.end, text: reply.text });
       if (reply.type === 'part') options.onPart?.({ start: reply.start, end: reply.end, detected: reply.detected });
       if (reply.type === 'progress') options.onProgress?.(reply.done, reply.total);
-      if (reply.type === 'error') settle({ ok: false, message: reply.message });
+      if (reply.type === 'error') settle({ ok: false, message: reply.message, ...(reply.failure ? { failure: reply.failure } : {}) });
       if (reply.type === 'done') settle({ ok: true, bytes: reply.bytes ?? -1, seconds: reply.seconds, segments: reply.segments, lateLanguage: reply.late_language === true });
     });
     child.on('error', (err) => settle({ ok: false, message: `The transcription engine could not start: ${err.message}` }));
@@ -356,15 +392,16 @@ export class TranscriptionEngine {
         clearTimeout(deadline);
         if (result === 'late') settle({ ok: false, message: 'The live transcript did not finish in time.' });
         await stop(child);
-        await exited;
+        await cleanup;
         return outcome!;
       },
       cancel: async () => {
         settle({ ok: false, message: 'Stopped.' });
         await stop(child);
-        await exited;
+        await cleanup;
       },
       get failed() { return outcome && !outcome.ok ? outcome.message : null; },
+      get failure() { return outcome && !outcome.ok ? outcome.failure ?? null : null; },
     };
   }
 

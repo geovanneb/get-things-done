@@ -11,6 +11,9 @@ import * as fs from 'fs';
 /** Why the helper could not do its work. Only `gpu` means the GPU itself failed; the others are not about the GPU. */
 export type HelperFailure = 'missing' | 'load' | 'gpu' | 'timeout' | 'protocol';
 
+/** Failures of the GPU engine itself: after one, a GPU model must pass a new speed test, and a recording goes to the CPU. */
+export const GPU_FAILURES: readonly string[] = ['gpu', 'load', 'missing', 'timeout', 'protocol'];
+
 export class HelperError extends Error {
   constructor(readonly failure: HelperFailure, message: string) {
     super(message);

@@ -2,7 +2,7 @@ import React from 'react';
 import { useDataVersion } from '@/store';
 import { clockOf, emptyLive, mergeLive, type LivePiece, type LiveState } from '@/utils/liveTranscript';
 
-interface LiveAnswer { generation: string | null; status: string; reason: string | null; next: number; segments: LivePiece[] }
+interface LiveAnswer { generation: string | null; status: string; reason: string | null; next: number; segments: LivePiece[]; note?: string }
 
 /** How often it looks anyway: a notice can be missed, and the server only says there is more. */
 const POLL_MS = 5000;
@@ -13,7 +13,7 @@ const POLL_MS = 5000;
  */
 export function LiveTranscript({ meetingId }: { meetingId: string }) {
   const [live, setLive] = React.useState<LiveState>(emptyLive);
-  const [status, setStatus] = React.useState<{ status: string; reason: string | null } | null>(null);
+  const [status, setStatus] = React.useState<{ status: string; reason: string | null; standIn?: string } | null>(null);
   const [following, setFollowing] = React.useState(true);
   const box = React.useRef<HTMLDivElement>(null);
   const cursor = React.useRef(0);
@@ -40,7 +40,7 @@ export function LiveTranscript({ meetingId }: { meetingId: string }) {
             .then((res) => (res.ok ? res.json() as Promise<LiveAnswer> : null))
             .catch(() => null);
           if (!answer || stopped) return;
-          setStatus({ status: answer.status, reason: answer.reason });
+          setStatus({ status: answer.status, reason: answer.reason, ...(answer.note ? { standIn: answer.note } : {}) });
           setLive((s) => mergeLive(s, answer.generation, answer.segments, answer.next));
           cursor.current = Math.max(cursor.current, answer.next);
           if (answer.segments.length === 0) return;
@@ -73,7 +73,9 @@ export function LiveTranscript({ meetingId }: { meetingId: string }) {
 
   const note = status?.status === 'loading' ? 'Loading the model…'
     : status?.status === 'unavailable' || status?.status === 'stopped' ? (status.reason ?? 'No live transcript for this recording; it is transcribed after the meeting.')
-      : status?.status === 'finishing' ? 'Finishing the transcript…' : null;
+      : status?.status === 'finishing' ? 'Finishing the transcript…'
+        // Running, but not with the live model in Settings: say why.
+        : status?.standIn ?? null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
