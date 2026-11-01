@@ -1,4 +1,4 @@
-import { describeSpeed, recommendModel } from '@/utils/transcriptionSpeed';
+import { describeSpeed, GPU_LIVE_X, gpuLiveOffer, recommendModel } from '@/utils/transcriptionSpeed';
 import React from 'react';
 import Button from '@/components/common/Button';
 import Badge from '@/components/common/Badge';
@@ -299,6 +299,26 @@ export default function TranscriptionSettings() {
           the chosen model transcribes the recording again after the meeting, and its text replaces the live one.
         </span>
       </label>
+      {(() => {
+        const offer = gpuLiveOffer(data.models, data.settings.live_model);
+        if (!offer) return null;
+        const sameAfter = data.settings.model === offer.id;
+        return (
+          <div role="note" aria-label="Live transcript on the graphics chip" style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', borderLeft: '3px solid var(--color-accent)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontSize: 'var(--text-sm)' }}>
+            <strong>Live transcript on the graphics chip</strong>
+            <span>
+              The speed test showed {offer.name} runs on this Mac&apos;s graphics chip, at about {offer.realtime_x}× real time.
+              {offer.realtime_x >= GPU_LIVE_X
+                ? ' You can try it for the live transcript, with Whisper quality as people speak. Whether it keeps up during a video call depends on this computer: it shares the graphics chip with the call. SenseVoice stays the lighter choice.'
+                : ' That is too slow to follow a meeting as people speak: SenseVoice is the better live model here.'}
+              {sameAfter
+                ? ' It is also the model above: with speaker detection off, a complete live transcript can be used when you stop (catching up can take a moment).'
+                : ` ${chosen?.name ?? 'The model above'} still transcribes the recording after the meeting.`}
+            </span>
+            {offer.realtime_x >= GPU_LIVE_X && <span><Button size="sm" variant="secondary" disabled={saving} onClick={() => void save({ live_model: offer.id })}>Use it for the live transcript</Button></span>}
+          </div>
+        );
+      })()}
       <SpeakerDetection speakers={data.speakers} enabled={data.settings.speakers} saving={saving} downloading={downloading}
         onToggle={(on) => void save({ speakers: on })} onAction={(action) => void act(data.speakers, action)} />
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
