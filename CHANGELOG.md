@@ -8,7 +8,7 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-11-01
+## [0.8.0] - 2026-11-02
 
 Get Things Done now **records your meetings and turns them into memory**. Click **Record**, follow
 the live transcript, and the app transcribes the meeting on your computer, tells the speakers apart
