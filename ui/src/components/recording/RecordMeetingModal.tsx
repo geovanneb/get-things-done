@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import Modal, { FormActions } from '@/components/common/Modal';
 import Button from '@/components/common/Button';
 import Input, { Checkbox, Field, FormSection, Select } from '@/components/common/Input';
@@ -23,6 +23,9 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
   const [title, setTitle] = useState('');
   // When Record was clicked: the title this meeting starts with, and the one it keeps if the field is cleared.
   const [defaultTitle, setDefaultTitle] = useState(() => defaultRecordingTitle(new Date()));
+  const titleId = useId();
+  // Set when a title was just filled in: selected once it is on screen, so typing replaces it and Enter keeps it.
+  const [selectTitle, setSelectTitle] = useState(false);
   const [date, setDate] = useState(today);
   const [participants, setParticipants] = useState<MeetingParticipant[]>([]);
   const [deviceId, setDeviceId] = useState('');
@@ -46,6 +49,7 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
     const named = defaultRecordingTitle(new Date());
     setDefaultTitle(named);
     setTitle(prefill?.title || named);
+    setSelectTitle(true);
     setDate(today());
     setParticipants(prefill?.participants ?? []);
     void systemAudioSupport().then(setSystemSupport);
@@ -68,6 +72,14 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
       .catch(() => { if (current) setDevices([]); });
     return () => { current = false; };
   }, [isOpen, prefill]);
+
+  // After the render that shows the new title: the field already has focus (autoFocus) from before it was filled in.
+  useEffect(() => {
+    if (!selectTitle) return;
+    setSelectTitle(false);
+    const field = document.getElementById(titleId);
+    if (field instanceof HTMLInputElement && document.activeElement === field) field.select();
+  }, [selectTitle, titleId]);
 
   const startRecording = () => {
     void start({ title: title.trim() || defaultTitle, date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio, ...(languageReady && languages.length > 0 ? { language } : {}) });
@@ -94,8 +106,8 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
       <div className="gtd-stack" style={{ gap: 'var(--space-5)' }}>
         <FormSection title="Meeting">
           <div className="gtd-form-grid">
-            <Input label="Title" value={title} maxLength={200} onChange={setTitle} placeholder={defaultTitle} autoFocus
-              hint="Named after when you clicked Record. Keep it to start quickly, or change it." />
+            <Input id={titleId} label="Title" value={title} maxLength={200} onChange={setTitle} placeholder={defaultTitle} autoFocus
+              hint={prefill?.title ? undefined : 'Named after when you clicked Record. Keep it to start quickly, or change it.'} />
             <Input label="Date" type="date" required value={date} onChange={setDate} error={!date ? 'Choose the date of the meeting.' : undefined} />
           </div>
           <ParticipantsField value={participants} onChange={(next) => { setParticipants(next); setTold(false); }} />
