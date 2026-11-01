@@ -7,7 +7,8 @@ import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Card from '@/components/common/Card';
 import Notice from '@/components/common/Notice';
-import Page from '@/components/common/Page';
+import Page, { PageHeader } from '@/components/common/Page';
+import { CountBadge } from '@/components/common/Tabs';
 import { LiveTranscript } from '@/components/meetings/LiveTranscript';
 import { TranscriptReader } from '@/components/meetings/TranscriptReader';
 import { MeetingQueueList, recordingElsewhere } from '@/components/meetings/MeetingQueueList';
@@ -53,7 +54,7 @@ function DigestNow({ job, onDone }: { job: MeetingDigest; onDone: () => void }) 
         onClick={() => void run()}>
         Make digest now
       </Button>
-      {notice && <span role={notice.error ? 'alert' : 'status'} style={{ ...line, flexBasis: '100%', color: notice.error ? 'var(--color-critical)' : line.color }}>{notice.text}</span>}
+      {notice && <span role={notice.error ? 'alert' : 'status'} style={{ ...line, flexBasis: '100%', textAlign: 'right', color: notice.error ? 'var(--color-critical)' : line.color }}>{notice.text}</span>}
     </>
   );
 }
@@ -92,27 +93,29 @@ export default function MeetingsView() {
 
   return (
     <Page width="narrow">
+      <PageHeader description="Record a meeting, read its transcript, and follow it into the next digest. The digest's schedule is in Routines." />
       <Card
         title={own ? recorder.title : elsewhere ? `${elsewhere.title}, recording in another page` : 'Recording'}
-        description={following ? undefined : 'The recording is transcribed on this computer. With a live model in Settings > Transcription, the text appears here as people speak.'}
+        description={following ? undefined : 'Transcribed on this computer. With a live model in Settings > Transcription, the text appears here as people speak.'}
         actions={!recorder.active && !elsewhere && <Button variant="primary" onClick={openRecordDialog}>Record a meeting</Button>}
       >
         {following ? <LiveTranscript meetingId={following} /> : null}
       </Card>
-      {shown && (transcript || waiting) && (
-        <Card aria-label="Transcript of the meeting">
-          {transcript
-            ? <TranscriptReader key={`${shown.id}/${transcript.file}/${transcript.name}/${transcript.sha256}`} meetingId={shown.id} title={shown.title} transcript={transcript}
-              canName={transcript.final && !shown.in_digest} onNamed={refetch} participants={shown.participants ?? []}
-              onClose={() => { if (pickedMeeting) setPicked(null); else setClosed(shown.id); }} />
-            : <p role="status" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{shown.title}: the transcript appears here when it is ready.</p>}
+      {shown && transcript && (
+        <TranscriptReader key={`${shown.id}/${transcript.file}/${transcript.name}/${transcript.sha256}`} meetingId={shown.id} title={shown.title} transcript={transcript}
+          canName={transcript.final && !shown.in_digest} onNamed={refetch} participants={shown.participants ?? []}
+          onClose={() => { if (pickedMeeting) setPicked(null); else setClosed(shown.id); }} />
+      )}
+      {shown && !transcript && waiting && (
+        <Card title={shown.title}>
+          <LoadingSpinner inline text="The transcript appears here when it is ready." />
         </Card>
       )}
-      <Card title="Queue" description="Meetings on their way into the next digest. The digest's schedule is in Routines."
+      <Card title="Queue" padding="none" badge={data && data.queue.length > 0 ? <CountBadge count={data.queue.length} /> : undefined}
         actions={data && <DigestNow job={data} onDone={refetch} />}>
-        {error && <Notice tone="critical" title="Could not load the queue.">{error}</Notice>}
+        {error && <div style={{ padding: 'var(--space-4) var(--space-5)' }}><Notice tone="critical" title="Could not load the queue.">{error}</Notice></div>}
         {!data && !error && <LoadingSpinner text="Loading meetings…" />}
-        {data && <MeetingQueueList job={data} onChanged={refetch} onRead={(meeting, file) => setPicked({ meeting, file })} />}
+        {data && <MeetingQueueList job={data} onChanged={refetch} onRecord={recorder.active ? undefined : openRecordDialog} onRead={(meeting, file) => setPicked({ meeting, file })} />}
       </Card>
     </Page>
   );

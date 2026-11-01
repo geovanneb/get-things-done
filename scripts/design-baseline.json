@@ -20,7 +20,7 @@
     "components/layout/NavRail.tsx": 3,
     "components/layout/WorkspaceSwitcher.tsx": 1,
     "components/recording/RecordButton.tsx": 1,
-    "components/recording/RecordingBanner.tsx": 2,
+    "components/recording/RecordingBanner.tsx": 1,
     "components/settings/TranscriptionSettings.tsx": 1,
     "components/stakeholders/OrgChartDialogs.tsx": 2,
     "views/AgentsView.tsx": 1,
@@ -53,8 +53,7 @@
     "components/context-updates/UpdatesList.tsx": 2,
     "components/context-updates/shared.tsx": 1,
     "components/insights/calendar/DayPanel.tsx": 1,
-    "components/meetings/LiveTranscript.tsx": 1,
-    "components/meetings/TranscriptReader.tsx": 4,
+    "components/meetings/TranscriptReader.tsx": 2,
     "components/routines/RoutineEditor.tsx": 2,
     "components/stakeholders/OrgChartDialogs.tsx": 5,
     "components/stakeholders/OrgChartTree.tsx": 2,
@@ -73,7 +72,6 @@
     "components/context-updates/UpdateDetail.tsx": 3,
     "components/context-updates/UpdatesList.tsx": 1,
     "components/insights/StatTile.tsx": 1,
-    "components/layout/WorkspaceSwitcher.tsx": 1,
-    "components/recording/RecordingBanner.tsx": 1
+    "components/layout/WorkspaceSwitcher.tsx": 1
   }
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import Button from '@/components/common/Button';
 import IconButton, { icons } from '@/components/common/IconButton';
-import Input, { Field, FieldRow, SearchInput, Select, Textarea } from '@/components/common/Input';
+import Input, { Checkbox, Field, FieldRow, FormSection, SearchInput, Select, Textarea } from '@/components/common/Input';
 import Notice from '@/components/common/Notice';
 import Card, { CardGrid } from '@/components/common/Card';
 import Page, { PageHeader, Section } from '@/components/common/Page';
@@ -129,6 +129,12 @@ export default function DesignSystemView() {
             </Field>
             <Textarea label="Notes" hint="Markdown is supported." value="" onChange={() => {}} style={{ gridColumn: '1 / -1' }} />
           </div>
+          <div className="gtd-stack" style={{ marginTop: 'var(--space-5)' }}>
+            <FormSection title="A group of fields" description="FormSection: a heading for part of a longer form, ruled off from the group before it.">
+              <Checkbox checked={toggle} onChange={setToggle} label="Clean up the voice" description="A checkbox with a line of explanation. The whole row is the target." />
+              <div className="gtd-consent"><Checkbox checked={!toggle} onChange={(v) => setToggle(!v)} label="I have told everyone in the meeting that it is being recorded." /></div>
+            </FormSection>
+          </div>
           <div style={{ marginTop: 'var(--space-4)' }}>
             <FieldRow label="Field row"><span>Label beside the value; stacked on a phone.</span></FieldRow>
             <FieldRow label="Toggle"><Toggle label="Example toggle" checked={toggle} onChange={setToggle} /></FieldRow>
@@ -173,6 +179,28 @@ export default function DesignSystemView() {
             Long titles wrap.
           </Card>
         </CardGrid>
+        <Card title="List" padding="none" badge={<CountBadge count={2} />} description="Rows with dividers inside a card (gtd-list)">
+          <ul className="gtd-list">
+            <li className="gtd-list__row" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>2026-10-31</span>
+              <span style={{ flex: 1, fontWeight: 500 }}>Q4 board prep</span>
+              <Badge size="sm" variant="muted">1 file</Badge>
+              <IconButton label="Remove Q4 board prep" icon={icons.close} tone="danger" />
+            </li>
+            <li className="gtd-list__row" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>2026-10-30</span>
+              <span style={{ flex: 1, fontWeight: 500 }}>Weekly logistics sync</span>
+              {/* design-exception: shows the gtd-chip__action pattern itself, which is a styled native button */}
+              <span className="gtd-chip">Speaker 1: Daniel Okafor<button type="button" className="gtd-chip__action">Change</button></span>
+            </li>
+          </ul>
+        </Card>
+        <Card title="Reading box" description="Running text read in place, such as a transcript (gtd-reading-box)">
+          <div className="gtd-reading-box" tabIndex={0} aria-label="Example transcript">
+            <p><span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>00:01</span>Carrier volumes are up nine percent.</p>
+            <p><span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>00:05</span>Agreed, let us write it down.</p>
+          </div>
+        </Card>
         <Card title="Table" padding="none" badge={<CountBadge count={2} />}>
           <div className="gtd-table-wrap">
             <table className="gtd-table">

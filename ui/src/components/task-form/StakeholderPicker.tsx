@@ -1,7 +1,7 @@
 import React from 'react';
 import { apiGet } from '@/utils/api';
 import type { Stakeholder } from '@/types';
-import { chipStyle, chipRemoveStyle, dateInputStyle, dropdownStyle, dropdownItemStyle, sectionLabelStyle } from './styles';
+import { chipStyle, chipRemoveStyle, dropdownStyle, dropdownItemStyle } from './styles';
 
 interface StakeholderPickerProps {
   selected: Pick<Stakeholder, 'id' | 'name'>[];
@@ -67,7 +67,7 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
 
   return (
     <div>
-      <label style={sectionLabelStyle} id={labelId} htmlFor={`${labelId}-input`}>
+      <label className="gtd-field__label" style={{ display: 'block', marginBottom: 'var(--space-1)' }} id={labelId} htmlFor={`${labelId}-input`}>
         {label}
       </label>
 
@@ -110,7 +110,7 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
           placeholder={placeholder}
           aria-autocomplete="list"
           aria-controls={`${labelId}-listbox`}
-          style={dateInputStyle}
+          className="gtd-control"
         />
         {dropdownOpen && (
           <ul id={`${labelId}-listbox`} role="listbox" aria-label="Stakeholder suggestions" style={dropdownStyle}>

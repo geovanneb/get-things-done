@@ -1,4 +1,8 @@
 import React from 'react';
+import Badge from '@/components/common/Badge';
+import EmptyState from '@/components/common/EmptyState';
+import Notice from '@/components/common/Notice';
+import { SearchInput } from '@/components/common/Input';
 import IconButton, { icons } from '@/components/common/IconButton';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import Button from '@/components/common/Button';
@@ -65,9 +69,9 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
     text = `Live transcript ready. The more accurate one${target ? ` (${name(target)})` : ''}: ${accurate}${estimate}`;
   }
   return (
-    <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
-      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '40%' }}>{file}</span>
-      <span role="status" style={{ flex: 1, minWidth: 0, color: tone }}>{text}</span>
+    <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)' }}>
+      <span className="mono truncate" style={{ color: 'var(--color-text-muted)', maxWidth: '40%' }}>{file}</span>
+      <span role="status" style={{ flex: '1 1 200px', minWidth: 0, color: tone }}>{text}</span>
       {(state.status === 'running' || state.status === 'pending') && (
         <Button size="sm" variant="ghost" disabled={disabled}
           onClick={async () => {
@@ -109,7 +113,7 @@ export function recordingElsewhere(m: QueuedMeeting | MeetingDigest['queue'][num
 }
 
 /** The meetings on their way into a digest: their recordings, transcripts and what can be done about them. */
-export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDigest; onChanged: () => void; onRead: (meeting: string, file: string) => void }) {
+export function MeetingQueueList({ job, onChanged, onRead, onRecord }: { job: MeetingDigest; onChanged: () => void; onRead: (meeting: string, file: string) => void; onRecord?: () => void }) {
   const recorder = useRecorder();
   const confirm = useConfirm();
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -141,29 +145,35 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
 
   return (
     <>
-      {job.queue_problems.length > 0 && (
-        <div role="alert" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-critical)', marginBottom: 8 }}>
-          {job.queue_problems.map((p) => `${p.id}: ${p.reason}`).join(' ')}
+      {(job.queue_problems.length > 0 || job.queue.length > SHOWN_MEETINGS || query) && (
+        <div className="gtd-stack" style={{ gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderBottom: '1px solid var(--color-border)' }}>
+          {job.queue_problems.length > 0 && (
+            <Notice tone="critical" title="Some meetings in the queue cannot be read.">
+              {job.queue_problems.map((p) => `${p.id}: ${p.reason}`).join(' ')}
+            </Notice>
+          )}
+          {(job.queue.length > SHOWN_MEETINGS || query) && (
+            <SearchInput value={query} onChange={setQuery} placeholder="Search meetings by title, date or person" width={360} size="sm" />
+          )}
         </div>
       )}
-      {(job.queue.length > SHOWN_MEETINGS || query) && (
-        <input type="search" aria-label="Search meetings" placeholder="Search by title, date or person" value={query} onChange={(e) => setQuery(e.target.value)}
-          style={{ width: '100%', maxWidth: 360, marginTop: 4, padding: '4px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: 'var(--text-sm)' }} />
-      )}
       {job.queue.length > 0 && found.length === 0 && (
-        <p style={{ margin: '8px 0 0', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No meeting matches “{query}”.</p>
+        <EmptyState size="compact" title={`No meeting matches "${query}"`} description="Try a title, a date or a name." action={{ label: 'Clear search', onClick: () => setQuery('') }} />
       )}
       {found.length > 0 ? (
-        <ul aria-label="Meeting queue" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <ul aria-label="Meeting queue" className="gtd-list">
           {shown.map((m) => (
-            <li key={m.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}{meetingPeriod(m) ? ` ${meetingPeriod(m)}` : ''}</span>
-              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
+            <li key={m.id} className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
+              <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{m.meeting_date}{meetingPeriod(m) ? ` ${meetingPeriod(m)}` : ''}</span>
+              <span className="truncate" style={{ flex: 1, minWidth: 0, fontWeight: 500 }}>{m.title}</span>
               {m.participants?.length ? <span style={{ flexBasis: '100%', order: 1, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Expected: {joinNames(m.participants)}</span> : null}
-              <span title={m.held ?? undefined} style={{ fontSize: 'var(--text-xs)', color: m.held ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
-                {m.live ? (recorder.active && recorder.meetingId === m.id ? 'recording' : recordingElsewhere(m) ? 'recording in another page' : 'recording interrupted') : m.status === 'draft' ? 'not queued yet: its files are uploading, or the upload stopped' : m.in_digest ? 'going into a digest' : m.held ? 'on hold'
-                  : m.files.some((f) => f.recording && !transcribed(f.recording)) ? 'waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
+              <span title={m.held ?? undefined}>
+                <Badge size="sm" variant={m.live && !(recorder.active && recorder.meetingId === m.id) && !recordingElsewhere(m) ? 'warning' : m.held || m.status === 'draft' ? 'warning' : m.live ? 'error' : m.in_digest ? 'info' : 'muted'}>
+                  {m.live ? (recorder.active && recorder.meetingId === m.id ? 'Recording' : recordingElsewhere(m) ? 'Recording in another page' : 'Recording interrupted') : m.status === 'draft' ? 'Not queued yet' : m.in_digest ? 'Going into a digest' : m.held ? 'On hold'
+                    : m.files.some((f) => f.recording && !transcribed(f.recording)) ? 'Waiting for transcription' : `${m.files.length} file${m.files.length === 1 ? '' : 's'}`}
+                </Badge>
               </span>
+              {m.status === 'draft' && <span style={{ flexBasis: '100%', order: 1, fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>Its files are uploading, or the upload stopped.</span>}
               {m.held && !m.in_digest && (
                 <Button size="sm" variant="ghost" disabled={busy !== null}
                   onClick={() => act(`queue-${m.id}`, async () => { await apiPost(`/api/meeting-queue/${m.id}/queue`); return `${m.title} is queued again.`; })}>
@@ -177,8 +187,8 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
                   void act(`remove-${m.id}`, async () => { await apiDelete(`/api/meeting-queue/${m.id}`); });
                 }} />
               {m.live && !(recorder.active && recorder.meetingId === m.id) && (
-                <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
-                  <span role="status" style={{ flex: 1, minWidth: 0, color: 'var(--color-warning)' }}>
+                <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)' }}>
+                  <span role="status" style={{ flex: '1 1 200px', minWidth: 0, color: 'var(--color-warning)' }}>
                     {m.live.state === 'damaged' ? 'Its record cannot be read; the audio is kept. Removing the meeting discards it.'
                       : recordingElsewhere(m) ? 'Being recorded in another page or dashboard.'
                       : `${minutes(m.live.saved_bytes / 32_000)} saved${m.live.last_block_at ? `, last audio ${formatRelativeTime(m.live.last_block_at)}` : ''}. It stays until you finish or discard it.`}
@@ -196,7 +206,7 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
                 </div>
               )}
               {m.files.filter((f) => f.recording?.status === 'done' && f.recording.transcript).map((f) => (
-                <div key={`read-${f.name}`} style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                <div key={`read-${f.name}`} style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
                   Transcript of {f.name} ready{f.recording!.accepted_live ? ' (the live one)' : ''}.
                   <Button size="sm" variant="ghost" onClick={() => onRead(m.id, f.name)}>Read it</Button>
                 </div>
@@ -218,15 +228,17 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
           ))}
         </ul>
       ) : job.queue.length === 0 && (
-        <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No meetings in the queue. Record one, or add one under Context &gt; Updates.</p>
+        <EmptyState size="compact" title="No meetings in the queue"
+          description="Record a meeting, or add a recording or transcript under Context > Updates. Queued meetings go into the next digest."
+          action={onRecord ? { label: 'Record a meeting', onClick: onRecord } : undefined} />
       )}
-      {hidden > 0 && (
-        <Button size="sm" variant="ghost" onClick={() => setAll(true)}>Show {hidden} older</Button>
+      {(hidden > 0 || (all && !query.trim() && found.length > SHOWN_MEETINGS) || notice) && (
+        <div className="gtd-stack" style={{ gap: 'var(--space-2)', padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)' }}>
+          {hidden > 0 && <div><Button size="sm" variant="ghost" onClick={() => setAll(true)}>Show {hidden} older</Button></div>}
+          {all && !query.trim() && found.length > SHOWN_MEETINGS && <div><Button size="sm" variant="ghost" onClick={() => setAll(false)}>Show fewer</Button></div>}
+          {notice && <Notice tone={notice.error ? 'critical' : 'success'}>{notice.text}</Notice>}
+        </div>
       )}
-      {all && !query.trim() && found.length > SHOWN_MEETINGS && (
-        <Button size="sm" variant="ghost" onClick={() => setAll(false)}>Show fewer</Button>
-      )}
-      {notice && <p role={notice.error ? 'alert' : 'status'} style={{ margin: '8px 0 0', fontSize: 'var(--text-sm)', color: notice.error ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{notice.text}</p>}
     </>
   );
 }

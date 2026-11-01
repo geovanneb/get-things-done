@@ -1,7 +1,7 @@
 ---
 name: context-researcher
 description: Updates and enriches context notes with current market, competitive, or industry information. Use when context notes are stale, when new research is needed before a deliverable, or when raw documents need to be converted into structured context notes. Do not use for drafting deliverables — this agent writes and updates context only.
-model: claude-sonnet-5
+model: opus
 tools:
   - Read
   - Write

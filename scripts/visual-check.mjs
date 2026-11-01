@@ -99,8 +99,19 @@ try {
   }
   if (!healthy) throw new Error('the server did not start');
   execFileSync(process.execPath, [path.join(root, 'scripts/seed-demo.mjs'), base], { env, stdio: 'pipe' });
+  // Two fictional meetings in the queue, so the Meetings page shows its list.
+  for (const [title, date] of [['Weekly logistics sync', '2026-10-30'], ['Q4 board prep', '2026-10-31']]) {
+    const post = (url, body) => fetch(base + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const meeting = await (await post('/api/meeting-queue', { title, meeting_date: date, participants: [{ name: 'Kim Park' }] })).json();
+    const form = new FormData();
+    form.append('file', new Blob(['WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<v Speaker 1>Fictional words.</v>\n']), 'notes.vtt');
+    await fetch(`${base}/api/meeting-queue/${meeting.id}/files`, { method: 'POST', body: form });
+    await post(`/api/meeting-queue/${meeting.id}/queue`);
+  }
 
-  browser = await chromium.launch(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {});
+  // Same text rendering on every run: no sub-pixel anti-aliasing or hinting, one colour profile.
+  const args = ['--font-render-hinting=none', '--disable-lcd-text', '--disable-font-subpixel-positioning', '--force-color-profile=srgb'];
+  browser = await chromium.launch({ args, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
   fs.mkdirSync(outDir, { recursive: true });
   if (update) fs.mkdirSync(baselineDir, { recursive: true });
 
@@ -116,7 +127,12 @@ try {
     // The live-events stream keeps the network busy, so wait for the page itself instead.
     await page.waitForLoadState('load');
     await page.waitForFunction(() => !document.querySelector('[role="status"] .gtd-spin'), null, { timeout: 8000 }).catch(() => {});
-    await page.evaluate(() => document.fonts?.ready);
+    // Load every weight the UI uses before measuring or taking a picture, so a late font swap cannot change it.
+    await page.evaluate(async () => {
+      const faces = ['400', '500', '600', '700'].map((w) => `${w} 14px "IBM Plex Sans"`).concat(['400 14px "IBM Plex Mono"', '600 14px "IBM Plex Mono"']);
+      await Promise.all(faces.map((f) => document.fonts.load(f).catch(() => [])));
+      await document.fonts.ready;
+    });
     await page.waitForTimeout(300);
   };
 
@@ -205,6 +221,22 @@ try {
     await page.waitForSelector('[role="alertdialog"]', { state: 'detached' });
     check('keyboard: Escape closes the dialog and focus goes back to its button',
       (await page.evaluate(() => document.activeElement?.textContent)) === 'Destructive confirmation');
+
+    // The Record a meeting dialog is a long form: the large size, and Start waits for consent.
+    await page.goto(`${base}/meetings`);
+    await settle(page);
+    await page.getByRole('button', { name: 'Record a meeting' }).first().click();
+    const recordPanel = page.locator('.gtd-modal__panel');
+    await recordPanel.waitFor();
+    const panelWidth = (await recordPanel.boundingBox())?.width ?? 0;
+    check('dialogs: Record a meeting opens at the large form size', panelWidth >= 700, `${Math.round(panelWidth)}px wide`);
+    const startButton = page.getByRole('button', { name: 'Start recording' });
+    check('dialogs: Start recording waits until everyone was told', await startButton.isDisabled());
+    await page.getByLabel(/told everyone/i).check();
+    check('dialogs: Start recording is enabled once consent is given', await startButton.isEnabled());
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.goto(`${base}/design-system`);
+    await settle(page);
 
     const firstTab = page.getByRole('tab', { name: 'Kanban' });
     await firstTab.focus();

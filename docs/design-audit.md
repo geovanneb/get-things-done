@@ -44,6 +44,11 @@ dark, and in the source. Status: **Fixed** (changed and verified in the browser)
 | Layers | z-index 50, 500, 900, 1000, 1100, 2000 chosen ad hoc | Overlays could stack wrongly | `--z-*` scale | Guarded (`z-index`) |
 | Dialog focus | Focus did not return to the opener when a field inside had `autoFocus` | Keyboard users lost their place | Opener captured before autofocus | Fixed, browser check |
 | Writing | Title case in buttons and dialog titles ("Create Template", "Re-initialize Workspace"), "+ New" labels, "Failed to …" errors | Inconsistent voice | Sentence case, verb + object, errors say what to do | Fixed |
+| Meetings: Record a meeting dialog | Opened at the confirmation size (420px) for a ten-field form; its own smaller inputs and borders; raw checkboxes; actions scrolled away with the body; no grouping | Cramped, unlike every other form dialog; Start could be off screen | `lg` dialog, `FormSection` (Meeting, Audio), shared fields, `Checkbox`, highlighted consent, footer with the reason Start is disabled | Fixed, browser check |
+| Meetings: queue | Grey rounded boxes per meeting, its own search box, problems and results as plain coloured text, state as coloured words | Looked unlike every other list | Card list with divider rows (`gtd-list`), `SearchInput`, `Notice`, a `Badge` per state, empty state with "Record a meeting" | Fixed |
+| Meetings: transcript reader and live transcript | Title in a small grey line, raw Save/Cancel text links, a hand-styled input, errors as plain text, a hover-grey text box | Hard to scan; inconsistent controls | A `Card` with title and actions, `gtd-reading-box`, `gtd-chip` for speakers, shared buttons and `Notice` | Fixed |
+| Recording panel (bottom right) | Hand-made surface and select, inline link colours | Inconsistent with cards and fields | `gtd-card`, `gtd-control`, `gtd-link`, `Notice` for a failure | Fixed |
+| Stakeholder picker | Labelled like a section heading, larger than the fields around it | Broke the label hierarchy in the task sidebar and the Record dialog | Field label and `gtd-control` | Fixed |
 | Agent Floor | Pixel-art palette and fonts | Intentional | Documented exception | Exception |
 | Setup | Centred wizard card outside the app shell | Intentional (first run) | Documented exception; uses `Notice` | Exception |
 

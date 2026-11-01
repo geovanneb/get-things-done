@@ -80,6 +80,12 @@ the list stacks above the content on a phone.
 | A text field, select, textarea | `Input`, `Select`, `Textarea` | `label`, `required`, `optional`, `hint`, `error`, `size` |
 | Any other control with a label | `Field` + `className="gtd-control"` | |
 | A setting or record field, label beside value | `FieldRow` | stacks on a phone |
+| A checkbox with a label (and a line of explanation) | `Checkbox` | for a choice that applies on submit; a setting that applies at once is a `Toggle` |
+| Part of a longer form or dialog | `FormSection` | a heading and an optional description; groups are ruled off |
+| A consent or confirmation the user must give before an action | `gtd-consent` around a `Checkbox` | the primary action stays disabled until it is checked; say so in the footer |
+| Rows inside a card | `Card padding="none"` + `<ul className="gtd-list">` with `gtd-list__row` | divider lines; extra controls (search, notices) sit in a padded band above or below |
+| Running text read in place (a transcript, a preview) | `gtd-reading-box` | scrolls inside itself |
+| A small value with inline actions (a speaker and its name) | `gtd-chip` + `gtd-chip__action` | |
 | Search a list | `SearchInput` | the placeholder names what is searched and is the accessible name |
 | Switch views of a page | `Tabs` | arrow keys move between tabs |
 | Pick one option that filters or formats | `SegmentedControl` | |
@@ -118,6 +124,8 @@ The record's name is the link or button that opens it; row actions are icon butt
   gets `aria-invalid`. A save that fails shows a `Notice tone="critical"` at the top of the form.
 - Dialogs with typing pass `keepWhileTyping`, so Escape in a field does not throw away the input.
 - Two-column forms use `gtd-form-grid`; it becomes one column on a phone.
+- A form with more than about six fields, or two kinds of fields, is split with `FormSection`s
+  and opens in an `lg` dialog. `sm` is for confirmations only.
 
 ## Dialogs
 

@@ -301,3 +301,50 @@ export function SearchInput({
     </div>
   );
 }
+
+/**
+ * A checkbox with its label and an optional line of explanation under it. The whole row is the click target.
+ * For an on/off setting that takes effect at once, use Toggle instead.
+ */
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled,
+  id: idProp,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  disabled?: boolean;
+  id?: string;
+}) {
+  const generated = useId();
+  const id = idProp ?? generated;
+  return (
+    <div className="gtd-checkbox">
+      <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)}
+        aria-describedby={description ? `${id}-description` : undefined} />
+      <label htmlFor={id} className="gtd-checkbox__text">
+        <span className="gtd-checkbox__label">{label}</span>
+        {description && <span id={`${id}-description`} className="gtd-field__hint">{description}</span>}
+      </label>
+    </div>
+  );
+}
+
+/** A titled group of fields inside a longer form or dialog ("Meeting", "Audio"). A labelled group, ruled off from the one before. */
+export function FormSection({ title, description, children }: { title: string; description?: React.ReactNode; children: React.ReactNode }) {
+  const id = useId();
+  return (
+    <div role="group" aria-labelledby={id} className="gtd-fieldset">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+        <h3 id={id} className="gtd-fieldset__legend">{title}</h3>
+        {description && <p className="gtd-field__hint">{description}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}

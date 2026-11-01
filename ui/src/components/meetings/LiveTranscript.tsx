@@ -1,4 +1,6 @@
 import React from 'react';
+import Button from '@/components/common/Button';
+import Notice from '@/components/common/Notice';
 import { useDataVersion } from '@/store';
 import { clockOf, emptyLive, mergeLive, type LivePiece, type LiveState } from '@/utils/liveTranscript';
 
@@ -78,22 +80,22 @@ export function LiveTranscript({ meetingId }: { meetingId: string }) {
         : status?.standIn ?? null;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {note && <p role="status" style={{ margin: 0, fontSize: 'var(--text-xs)', color: status?.status === 'stopped' ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>{note}</p>}
-      <div ref={box} onScroll={onScroll} aria-label="Live transcript" aria-live="off" tabIndex={0}
-        style={{ maxHeight: 360, minHeight: 120, overflowY: 'auto', padding: 12, borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontSize: 'var(--text-sm)', lineHeight: 1.5 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      {note && (status?.status === 'stopped'
+        ? <Notice tone="warning">{note}</Notice>
+        : <p role="status" className="gtd-field__hint">{note}</p>)}
+      <div ref={box} onScroll={onScroll} aria-label="Live transcript" aria-live="off" tabIndex={0} className="gtd-reading-box" style={{ maxHeight: 360 }}>
         {live.pieces.length === 0
           ? <span style={{ color: 'var(--color-text-muted)' }}>The text appears here as people speak.</span>
           : live.pieces.map((p) => (
-            <p key={p.i} style={{ margin: '0 0 6px' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 8 }}>{clockOf(p.start)}</span>
+            <p key={p.i}>
+              <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>{clockOf(p.start)}</span>
               {p.text}
             </p>
           ))}
       </div>
       {!following && (
-        <button type="button" onClick={() => setFollowing(true)}
-          style={{ alignSelf: 'flex-start', border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', padding: 0, fontSize: 'var(--text-xs)' }}>Jump to the latest</button>
+        <div><Button size="sm" variant="ghost" onClick={() => setFollowing(true)}>Jump to the latest</Button></div>
       )}
     </div>
   );
