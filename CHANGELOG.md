@@ -8,16 +8,116 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-01
+
+Get Things Done now **records your meetings and turns them into memory**. Click **Record**, follow
+the live transcript, and the app transcribes the meeting on your computer, tells the speakers apart
+and collects the day's meetings into one digest. Claude Code can then analyze that digest and apply
+what you approved, right from the dashboard, on your own Claude plan. Audio and transcripts stay on
+your computer: only an analysis you start (or switch on) uses Claude Code.
+
+The dashboard also has a new, consistent look that works on a phone, and a sidebar you can arrange
+yourself.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.8.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.8.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.8.0-unsigned-preview.exe` (see the note at the end)
+
+The Mac apps installed from 0.7.0 update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.8.0`.
+
 ### Added
 
+#### Record and transcribe meetings
+
+- **Record a meeting** from the microphone, in the browser and in the desktop app. Start it with
+  one click: **Record** in the top bar of every page, ⌘K, the desktop menu-bar menu, or **Record
+  this meeting** on a meeting-prep task. The dialog is named after when you clicked (for example
+  `Meeting 2026-11-01 14:30`), takes who is expected and the spoken language for that meeting, and
+  asks you to confirm everyone was told. Audio is saved to disk as it arrives, so a closed page or a
+  crash keeps what was saved, and an interrupted recording can be finished later. A banner on every
+  page shows what is saved and warns about gaps, silence or a microphone that went away. On macOS,
+  **REC** shows in the menu bar while recording. (#176, #177, #178, #181, #186, #232, #238)
+- **The computer's sound too, in the desktop app.** A recording can also take the sound of the
+  computer, so the other people in a video call are recorded even when you wear headphones. Works
+  on Windows and on macOS 14.2 or later (it asks once for *System Audio Recording*), with no extra
+  driver. In a browser only the microphone is recorded. (#179)
+- **A Meetings page** with the recording, its live transcript and the meeting queue in one place.
+  The queue shows newest first, with times, five at a time and a search. **Read it** opens any
+  meeting's transcript, and **Make digest now** sits beside the queue with the time of the next
+  digest. (#184, #195, #197, #218)
+- **Offline transcription.** Download a model in **Settings > Transcription** and recordings are
+  transcribed on this computer, nothing sent anywhere:
+  - **Whisper large-v3-turbo** (default): accurate, full punctuation, 100 languages.
+  - **Whisper large-v3**: the most accurate, also of short remarks, but slow.
+  - **SenseVoice**: very fast and light, five languages (English, Japanese, Chinese, Korean,
+    Cantonese).
+
+  Each model lists every language it has. Downloads show progress, can be cancelled, continue where
+  they stopped, and a second one waits its turn. Besides recordings made in the app you can queue
+  WAV files, and on a Mac also M4A, MP3, AAC, FLAC, AIFF and CAF. A transcription can be stopped and
+  tried again, and a partial transcript can still be used. (#164, #165, #167, #168, #188, #189,
+  #190, #192)
+- **Test speed** on each downloaded model says how long an hour of meeting takes on this computer,
+  and recommends a model for it. (#180)
+- **A live transcript while you record.** Choose a live model in Settings. At Stop, when the live
+  text covered the whole meeting it becomes the transcript; otherwise the chosen model transcribes
+  the recording again and the live text stays as a draft you can use meanwhile. Transcripts keep
+  more context around each part, and text a model repeated in a loop is marked. (#182, #183, #194)
+- **The spoken language, during the meeting.** Change it from the recording banner or the desktop
+  menu-bar menu, and both transcripts follow from that moment. When the meeting sounds like another
+  language, the app suggests it ("This sounds like Japanese, but the language is set to English"),
+  with **Switch** and **Keep**. (#193, #231)
+- **Who spoke when.** An optional speaker model (41 MB) marks Speaker 1, Speaker 2 and so on in a
+  transcript. Name them on the Meetings page with a stakeholder or any name; the meeting's expected
+  participants are offered first, and the digest passes your names on. (#196, #217, #229)
+- **Whisper Turbo on the GPU, in the Apple Silicon app.** A built-in engine on
+  [whisper.cpp](https://github.com/ggml-org/whisper.cpp) runs Whisper on the graphics chip. It can
+  be chosen once **Test speed** shows it really runs there, also as the live model. If the GPU fails,
+  the recording is transcribed again on the CPU and the transcript says so. (#219, #234, #235, #236)
+- **A recording comes first.** Starting a recording pauses the transcription of an earlier meeting,
+  so the live transcript starts at once; the earlier one goes back in line. (#233)
+
+#### Meeting digest and context updates
+
+- **A meeting digest.** Import gets **Add to the meeting digest**, and a built-in **Meeting digest**
+  routine (working days at 18:00 by default) turns the queued meetings into one context update.
+  There is one open digest at a time, with a limit on meetings and on text per digest, so long
+  meetings are analyzed one by one instead of all at once. A meeting leaves the queue only once the
+  digest is checked to hold it. Opt-in: a digest right after each meeting, and analyzing each new
+  digest automatically. A recording goes with the queue once its transcript is in a digest, unless
+  **Keep recordings after transcription** is on. (#155, #157, #160, #161, #162, #173)
+- **Meeting records in context updates.** The analysis can add one record per meeting (attendees,
+  decisions, open questions, action items), which you confirm or reject on its own. Confirmed
+  records are kept by System cleanup. **Create task** on an action item opens the New task form
+  filled in from it. (#145, #147)
+- **Readable transcripts from meeting exports.** A WebVTT file (Teams, Zoom, Meet) or a Word document,
+  such as a Teams transcript, added to a context update gets a readable text copy next to it, with
+  every word and speaker label kept as written. (#149, #153)
+- **Run analysis and Apply from the dashboard with Claude Code.** A ready context update gets **Run
+  analysis with Claude Code**, an approved one **Apply with Claude Code**. They run the workspace's
+  own `/gtd-context-analyze` and `/gtd-context-apply` with the installed Claude Code and your Claude
+  plan, never an API key. Apply can write only the files you accepted. You see progress, can stop a
+  run, and can continue an apply that stopped half way. (#151, #152)
+- **Context updates are easier to find.** Filter by type, search by title or ID, and page through
+  the history. Updates waiting for your review are shown at the top. (#171, #204)
+- **A Kaizen is a context update.** After a rework, the note the agent writes opens as a context
+  update, shows its root cause first, and is reviewed and applied like any other update. (#174)
+
+#### Dashboard
+
 - **Customize the sidebar.** Right click the sidebar, use **Customize sidebar** (shown at its
-  bottom edge when you point at the sidebar), or go to **Settings → Appearance → Sidebar**. Drag items, or use the arrow buttons, to
-  change their order inside a group, and hide the ones you never use. Hidden items stay one click
-  away under **More**, which also shows their dots, so a broken routine is never hidden with its
-  item. Situation and Settings are always shown. **Reset to default** brings the standard sidebar
-  back. The order is saved in the workspace (`.situation-board/ui-preferences.json`), so it follows
-  you between the browser, the desktop app and other computers, and items from future releases
-  show up in their default place. (#191)
+  bottom edge when you point at the sidebar), or go to **Settings → Appearance → Sidebar**. Drag
+  items, or use the arrow buttons, to change their order inside a group, and hide the ones you never
+  use. Hidden items stay one click away under **More**, which also shows their dots, so a broken
+  routine is never hidden with its item. Situation and Settings are always shown. **Reset to
+  default** brings the standard sidebar back. The order is saved in the workspace
+  (`.situation-board/ui-preferences.json`), so it follows you between the browser, the desktop app
+  and other computers, and items from future releases show up in their default place. (#200)
+- **A picture for each workspace**, so you can tell them apart in the sidebar and the workspace
+  switcher. Pick an image in Settings and crop it; it stays on this computer, outside the workspace
+  folder. (#156)
 
 ### Changed
 
@@ -26,26 +126,61 @@ minor versions may include breaking changes.
   no longer squeeze or run off the screen. Deleting something asks in the app instead of a browser
   pop-up, and errors say what to do next. Muted, warning, success and info text and the edges of
   fields have more contrast, to meet WCAG AA in light and dark. The Meetings page and the
-  **Record a meeting** dialog follow the same layout as the rest: a wider dialog with its fields in
-  groups, and a queue that reads like the other lists.
-
-- **The Claude Code agents use the latest Opus.** The four agents in a workspace now use `opus`,
-  which Claude Code resolves to the newest Opus model (Opus 5.5 today). Workspaces pick this up when
-  they open, unless you edited an agent file yourself.
-
+  **Record a meeting** dialog follow the same layout as the rest. (#237, #240)
 - **The sidebar is grouped by job and ordered by how often you use it.** Your daily work comes
   first (Situation, Board, Meetings, Insights), then **Memory**, what the agents read before
   they write (Context, Stakeholders, Output templates), then **Automation**, what you set up
   once (Agents & Skills, Routines, Agent Floor when it is on). Profile and Settings stay at
   the bottom. In the collapsed sidebar the group headings become thin dividers. "Outputs" is
-  now called "Output templates", like its page. (#191)
+  now called "Output templates", like its page. (#199)
+- **Workspaces keep their agent files up to date.** Each time a workspace opens in the dashboard or
+  the desktop app, it gets this version's agent instructions and commands, as `gtd upgrade` does.
+  Files you edited yourself are kept. (#198)
+- **The Claude Code agents use the latest Opus.** The four agents in a workspace now use `opus`,
+  which Claude Code resolves to the newest Opus model (Opus 5.5 today). (#237)
+- **Deleting a context update moves it to the trash** (`.situation-board/trash/`) instead of erasing
+  it, so a digest's recordings, transcripts and speaker names can still be got back. The confirmation
+  says when a digest holds the only copy. (#220)
+
+### Removed
+
+- **The separate Kaizen screen, its API and `/gtd-kaizen`.** Kaizen notes now open as context
+  updates (see above), and `/kaizen` redirects to Context updates. Notes finished before this release
+  stay in `kaizen/` and still count in Insights. `gtd upgrade` now removes files the app no longer
+  ships, but only when they are still exactly as installed; a copy you changed is kept and listed.
+  (#175)
 
 ### Fixed
 
+- **Mac automatic updates.** Release files are uploaded under the names the update manifests use,
+  and a release now fails if a manifest points to a file that is missing, so installed apps can
+  always download the next version. (#148)
+- **Uploaded files keep Japanese, Portuguese and other non-English names**, instead of turning them
+  into underscores. (#223)
+- **Errors show the server's message** instead of a bare "Error" or "Bad Request". (#221)
+- **Settings > About shows the app's real version**, not "1.0.0". (#225)
+- **A deleted context update's ID is never given out again**, so receipts and run history never
+  describe a different update. (#226)
+- **The meeting queue never stalls:** a live transcript that gets no audio for a minute lets go of
+  the engine, a recording waiting for a missing model offers the model chosen now, and the next
+  recording starts as soon as the engine is free. (#227)
+- **A transcript without words is partial**, not "Complete", and Settings says when the chosen model
+  lacks the chosen language. (#228)
+- **Clearer wording** across Meetings, Transcription and Import, for example model names instead of
+  IDs, seconds for short recordings, and a disabled **Delete** that says why. (#159, #222, #230)
 - **The Context dot no longer stays after you delete an update.** Deleting, closing, approving or
   reopening a context update now refreshes the sidebar dot and "Waiting on you" at once, instead of
   waiting for the file watcher. When the live connection to the server drops and comes back, the
-  dashboard reads everything again, so nothing that changed meanwhile stays out of date. (#201)
+  dashboard reads everything again, so nothing that changed meanwhile stays out of date. (#202)
+- **Stage and commit wait for a git lock that goes away** instead of failing with a 500. (#185)
+- **System cleanup keeps your unsaved changes** when the Routines page refreshes, so a new schedule
+  chosen before Preview is the one saved. (#241)
+- For contributors: steadier timing in tests (#158, #163, #166, #172), the git lock test passes with
+  commit signing on (#224), the packaged smoke test prints the server log when a check fails (#170),
+  unsigned Mac builds on `main` pass again (#154), and the real-model CI job records a meeting
+  offline all the way to one digest (#187). New checks: `npm run test:design` (in `npm test`) and
+  `npm run test:visual`, see `docs/design-system.md` (#237). New dependency:
+  `sherpa-onnx-node` 2.0.1 for offline transcription (#165).
 
 ## [0.7.0] - 2026-10-29
 
@@ -501,7 +636,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/geovanneb/get-things-done/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/geovanneb/get-things-done/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/geovanneb/get-things-done/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/geovanneb/get-things-done/compare/v0.4.0...v0.5.0
