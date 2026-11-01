@@ -7,7 +7,7 @@ import { useRecorder } from './RecordingProvider';
 import { ParticipantsField } from '@/components/meetings/ParticipantsField';
 import { systemAudioSupport } from '@/utils/desktop';
 import { apiGet } from '@/utils/api';
-import { consentSentence, type RecordPrefill } from '@/utils/meetingParticipants';
+import { consentSentence, defaultRecordingTitle, type RecordPrefill } from '@/utils/meetingParticipants';
 import type { MeetingParticipant, SpokenLanguage, Transcription } from '@/types';
 
 
@@ -21,6 +21,8 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
   const { start } = useRecorder();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
+  // When Record was clicked: the title this meeting starts with, and the one it keeps if the field is cleared.
+  const [defaultTitle, setDefaultTitle] = useState(() => defaultRecordingTitle(new Date()));
   const [date, setDate] = useState(today);
   const [participants, setParticipants] = useState<MeetingParticipant[]>([]);
   const [deviceId, setDeviceId] = useState('');
@@ -41,7 +43,9 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
     if (!isOpen) return;
     // A new meeting each time: the last one's people must not reach this reminder.
     setTold(false);
-    setTitle(prefill?.title ?? '');
+    const named = defaultRecordingTitle(new Date());
+    setDefaultTitle(named);
+    setTitle(prefill?.title || named);
     setDate(today());
     setParticipants(prefill?.participants ?? []);
     void systemAudioSupport().then(setSystemSupport);
@@ -66,7 +70,7 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
   }, [isOpen, prefill]);
 
   const startRecording = () => {
-    void start({ title: title.trim() || 'Recorded meeting', date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio, ...(languageReady && languages.length > 0 ? { language } : {}) });
+    void start({ title: title.trim() || defaultTitle, date, participants, deviceId, voiceCleanup, systemAudio: systemSupport === 'yes' && systemAudio, ...(languageReady && languages.length > 0 ? { language } : {}) });
     onClose();
     navigate('/meetings');
   };
@@ -90,8 +94,8 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
       <div className="gtd-stack" style={{ gap: 'var(--space-5)' }}>
         <FormSection title="Meeting">
           <div className="gtd-form-grid">
-            <Input label="Title" value={title} maxLength={200} onChange={setTitle} placeholder="Recorded meeting" autoFocus
-              hint="Optional. Without one, the meeting is called Recorded meeting." />
+            <Input label="Title" value={title} maxLength={200} onChange={setTitle} placeholder={defaultTitle} autoFocus
+              hint="Named after when you clicked Record. Keep it to start quickly, or change it." />
             <Input label="Date" type="date" required value={date} onChange={setDate} error={!date ? 'Choose the date of the meeting.' : undefined} />
           </div>
           <ParticipantsField value={participants} onChange={(next) => { setParticipants(next); setTold(false); }} />

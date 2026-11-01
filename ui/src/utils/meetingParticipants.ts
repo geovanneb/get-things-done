@@ -22,6 +22,13 @@ export function consentSentence(list: MeetingParticipant[]): string {
     : 'I have told everyone in the meeting that it is being recorded.';
 }
 
+/** The title a new recording starts with, "Meeting 2026-11-01 14:30": when Record was clicked, in local time, so a quick
+ * recording can start without typing one. */
+export function defaultRecordingTitle(now: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `Meeting ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 /** What the record dialog starts from. */
 export interface RecordPrefill { title: string; participants: MeetingParticipant[] }
 
