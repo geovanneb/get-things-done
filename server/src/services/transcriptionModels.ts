@@ -141,6 +141,7 @@ const WHISPER_CPP_COMMIT = '5359861c739e955e79d9a303bcbc70fb988958b1';
  * The models on offer. Speeds and memory were measured on an Apple Silicon Mac, CPU only, with fictional English
  * and Japanese meetings; other computers may be slower. The 2024-07-17 SenseVoice is pinned on purpose: the
  * 2025-09-09 release drops kana from Japanese. Most accurate first: Settings recommends the first that is quick enough.
+ * A GPU model sits next to its CPU counterpart and is never recommended: it is chosen by its own speed test.
  */
 export const CATALOG: CatalogModel[] = [
   {
@@ -176,21 +177,6 @@ export const CATALOG: CatalogModel[] = [
     ],
   },
   {
-    id: 'sensevoice-2024-07-17',
-    name: 'SenseVoice',
-    summary: 'Very fast and light. A little less accurate.',
-    languages: 'English, Japanese, Chinese, Korean and Cantonese',
-    language_options: SENSEVOICE_LANGUAGES,
-    pros: ['Very fast: about 80 times faster than real time, so an 8-hour meeting takes about 6 minutes', 'Light: under 1 GB of memory', 'A 240 MB download'],
-    cons: ['A little less accurate: small slips and less punctuation', 'Five languages only: English, Japanese, Korean, Chinese and Cantonese'],
-    memory_gb: 1,
-    engine: { kind: 'sensevoice', files: { model: 'model.int8.onnx', tokens: 'tokens.txt' } },
-    files: [
-      { name: 'model.int8.onnx', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/model.int8.onnx`, size: 239233841, sha256: 'c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51' },
-      { name: 'tokens.txt', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/tokens.txt`, size: 315894, sha256: 'f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc' },
-    ],
-  },
-  {
     id: 'whisper-large-v3-turbo-gpu',
     name: 'Whisper Turbo (GPU)',
     summary: 'Whisper Turbo on this Mac\'s graphics chip: about 3 times quicker, and as accurate.',
@@ -203,6 +189,21 @@ export const CATALOG: CatalogModel[] = [
     gpu: { cpu: 'whisper-large-v3-turbo' },
     files: [
       { name: 'ggml-large-v3-turbo-q5_0.bin', url: `${HF}/${WHISPER_CPP_REPO}/resolve/${WHISPER_CPP_COMMIT}/ggml-large-v3-turbo-q5_0.bin`, size: 574041195, sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2' },
+    ],
+  },
+  {
+    id: 'sensevoice-2024-07-17',
+    name: 'SenseVoice',
+    summary: 'Very fast and light. A little less accurate.',
+    languages: 'English, Japanese, Chinese, Korean and Cantonese',
+    language_options: SENSEVOICE_LANGUAGES,
+    pros: ['Very fast: about 80 times faster than real time, so an 8-hour meeting takes about 6 minutes', 'Light: under 1 GB of memory', 'A 240 MB download'],
+    cons: ['A little less accurate: small slips and less punctuation', 'Five languages only: English, Japanese, Korean, Chinese and Cantonese'],
+    memory_gb: 1,
+    engine: { kind: 'sensevoice', files: { model: 'model.int8.onnx', tokens: 'tokens.txt' } },
+    files: [
+      { name: 'model.int8.onnx', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/model.int8.onnx`, size: 239233841, sha256: 'c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51' },
+      { name: 'tokens.txt', url: `${HF}/${SENSEVOICE_REPO}/resolve/${SENSEVOICE_COMMIT}/tokens.txt`, size: 315894, sha256: 'f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc' },
     ],
   },
 ];
