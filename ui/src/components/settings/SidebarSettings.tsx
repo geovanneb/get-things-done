@@ -18,8 +18,8 @@ export default function SidebarSettings() {
         <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>
           Reset the sidebar to the default order and show every item?
         </span>
-        <Button size="sm" variant="primary" onClick={() => { save(DEFAULT_SIDEBAR); setConfirming(false); }}>Reset</Button>
         <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
+        <Button size="sm" variant="primary" onClick={() => { save(DEFAULT_SIDEBAR); setConfirming(false); }}>Reset</Button>
       </div>
     );
   }

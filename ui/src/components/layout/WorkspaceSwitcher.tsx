@@ -174,7 +174,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
           role="menu"
           aria-label="Switch workspace"
           style={{
-            position: 'fixed', top: anchor.top, left: anchor.left, zIndex: 1100, width: 300, maxWidth: 'calc(100vw - 24px)',
+            position: 'fixed', top: anchor.top, left: anchor.left, zIndex: 'var(--z-popover)', width: 300, maxWidth: 'calc(100vw - 24px)',
             maxHeight: 'min(70vh, 480px)', overflowY: 'auto', padding: 6,
             background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)',
           }}

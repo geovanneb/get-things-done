@@ -85,12 +85,12 @@ export default function GitIndicator() {
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-lg)',
             boxShadow: 'var(--shadow-md)',
-            zIndex: 500,
+            zIndex: 'var(--z-popover)',
             overflow: 'hidden',
           }}
         >
           <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--color-border)' }}>
-            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Git Status</div>
+            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Git status</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
               {git.branch}
               {git.ahead > 0 && ` ↑${git.ahead}`}

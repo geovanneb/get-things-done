@@ -1,10 +1,10 @@
 import React from 'react';
 
 /**
- * Shared style tokens for task creation/edit fields (New Task modal and the
- * Edit Task overlay's Work tab). Keeping these in one place is what keeps the
- * two screens visually consistent — don't redefine these locally in either
- * screen; import from here instead.
+ * Inline styles for task, routine and cleanup forms that predate the shared fields.
+ * The values follow the design system (docs/design-system.md): the same control height,
+ * radius and text size as `.gtd-control`. New forms use Input, Select and Textarea from
+ * components/common/Input instead, which also bring labels, hints and errors.
  */
 
 export const fieldLabelStyle: React.CSSProperties = {
@@ -16,39 +16,36 @@ export const fieldLabelStyle: React.CSSProperties = {
   marginBottom: '4px',
 };
 
-/** Uppercase, letter-spaced section header (e.g. "Deliverables", "Stakeholders", "Objective"). */
+/** Heading of a group of fields (e.g. "Deliverables", "Stakeholders", "Objective"). Sentence case, like card titles. */
 export const sectionLabelStyle: React.CSSProperties = {
-  fontSize: 'var(--text-sm)',
+  fontSize: 'var(--text-base)',
   fontWeight: 600,
-  color: 'var(--color-text-secondary)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
+  color: 'var(--color-text)',
 };
 
 export const selectStyle: React.CSSProperties = {
   width: '100%',
-  padding: '8px 10px',
+  height: 'var(--control-height-md)',
+  padding: '0 10px',
   fontFamily: 'var(--font-sans)',
-  fontSize: 'var(--text-sm)',
+  fontSize: 'var(--text-base)',
   color: 'var(--color-text)',
   background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-strong)',
+  border: '1px solid var(--color-border-control)',
   borderRadius: 'var(--radius-md)',
-  appearance: 'none',
-  outline: 'none',
   cursor: 'pointer',
 };
 
 export const dateInputStyle: React.CSSProperties = {
   width: '100%',
-  padding: '8px 10px',
+  height: 'var(--control-height-md)',
+  padding: '0 10px',
   fontFamily: 'var(--font-sans)',
-  fontSize: 'var(--text-sm)',
+  fontSize: 'var(--text-base)',
   color: 'var(--color-text)',
   background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-strong)',
+  border: '1px solid var(--color-border-control)',
   borderRadius: 'var(--radius-md)',
-  outline: 'none',
   boxSizing: 'border-box',
 };
 
@@ -56,13 +53,12 @@ export const textareaStyle: React.CSSProperties = {
   width: '100%',
   padding: '8px 10px',
   fontFamily: 'var(--font-sans)',
-  fontSize: 'var(--text-sm)',
+  fontSize: 'var(--text-base)',
   color: 'var(--color-text)',
   background: 'var(--color-surface)',
-  border: '1px solid var(--color-border-strong)',
+  border: '1px solid var(--color-border-control)',
   borderRadius: 'var(--radius-md)',
   resize: 'vertical',
-  outline: 'none',
   lineHeight: '1.5',
   boxSizing: 'border-box',
   minHeight: '72px',
@@ -88,7 +84,7 @@ export const chipRemoveStyle: React.CSSProperties = {
   padding: '0 0 0 2px',
   cursor: 'pointer',
   color: 'var(--color-accent)',
-  fontSize: '12px',
+  fontSize: 'var(--text-xs)',
   lineHeight: 1,
   display: 'flex',
   alignItems: 'center',
@@ -99,11 +95,11 @@ export const dropdownStyle: React.CSSProperties = {
   top: 'calc(100% + 4px)',
   left: 0,
   right: 0,
-  zIndex: 100,
+  zIndex: 'var(--z-dropdown)',
   background: 'var(--color-surface)',
   border: '1px solid var(--color-border)',
   borderRadius: 'var(--radius-md)',
-  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+  boxShadow: 'var(--shadow-md)',
   maxHeight: '180px',
   overflowY: 'auto',
 };

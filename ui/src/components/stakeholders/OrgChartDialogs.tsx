@@ -34,7 +34,7 @@ export function TitleModal({ isOpen, name, profileRole, current, onClose, onSave
         onKeyDown={(e) => { if (e.key === 'Enter') onSave(value); }} />
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
         {current && <Button variant="ghost" onClick={() => onSave('')}>Use profile role</Button>}
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button variant="primary" onClick={() => onSave(value)}>Save</Button>
       </div>
     </Modal>
@@ -82,7 +82,7 @@ export function PlaceholderModal({ isOpen, current, managerName, onClose, onSave
           onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button variant="primary" onClick={submit}>{current ? 'Save' : 'Add placeholder'}</Button>
       </div>
     </Modal>
@@ -135,7 +135,7 @@ export function MakeStakeholderModal({ isOpen, initial, onClose, onSubmit }: Mak
       </div>
       {error && values.name.trim() && <p role="alert" style={{ marginTop: 12, fontSize: 'var(--text-sm)', color: 'var(--color-critical)' }}>{error}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button variant="primary" loading={saving} onClick={submit}>Create stakeholder</Button>
       </div>
     </Modal>
@@ -227,7 +227,7 @@ export function UnitFormModal({ isOpen, editing, defaultParent, units, members, 
         </label>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button variant="primary" onClick={submit}>{editing ? 'Save' : 'Create unit'}</Button>
       </div>
     </Modal>

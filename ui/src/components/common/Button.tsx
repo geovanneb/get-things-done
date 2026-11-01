@@ -1,69 +1,30 @@
 import React from 'react';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
-type ButtonSize = 'sm' | 'md' | 'lg';
+/**
+ * The one button for text actions. See docs/design-system.md, "Buttons".
+ *
+ *  primary    the main action of a page, card or dialog: one per group
+ *  secondary  every other action (the default)
+ *  ghost      low-emphasis actions in toolbars, rows and "Cancel"
+ *  danger     an action that deletes or cannot be undone
+ *
+ * Icon-only actions use IconButton, which requires an accessible name.
+ */
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type ButtonSize = 'sm' | 'md' | 'lg';
 
-interface ButtonProps {
+interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> {
   children?: React.ReactNode;
   variant?: ButtonVariant;
   size?: ButtonSize;
-  disabled?: boolean;
+  /** Shows a spinner, disables the button and sets aria-busy, which also stops a second submit. */
   loading?: boolean;
-  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   type?: 'button' | 'submit' | 'reset';
   icon?: React.ReactNode;
   iconPosition?: 'left' | 'right';
-  title?: string;
-  'aria-label'?: string;
-  /** For toggle buttons. */
-  'aria-pressed'?: boolean;
-  'aria-controls'?: string;
-  style?: React.CSSProperties;
+  /** Stretch to the width of the container (dialog footers on a phone, setup steps). */
+  block?: boolean;
 }
-
-const baseStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 6,
-  fontWeight: 500,
-  borderRadius: 'var(--radius-md)',
-  border: '1px solid transparent',
-  cursor: 'pointer',
-  transition: 'background 0.1s, border-color 0.1s, color 0.1s',
-  whiteSpace: 'nowrap',
-  flexShrink: 0,
-  fontFamily: 'var(--font-sans)',
-};
-
-const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
-  primary: {
-    background: 'var(--color-accent)',
-    color: 'var(--color-text-on-accent)',
-    borderColor: 'var(--color-accent)',
-  },
-  secondary: {
-    background: 'var(--color-surface)',
-    color: 'var(--color-text)',
-    borderColor: 'var(--color-border-strong)',
-  },
-  ghost: {
-    background: 'transparent',
-    color: 'var(--color-text-secondary)',
-    borderColor: 'transparent',
-  },
-  danger: {
-    background: 'var(--color-critical-subtle)',
-    color: 'var(--color-critical)',
-    borderColor: 'color-mix(in oklch, var(--color-critical) 25%, transparent)',
-  },
-};
-
-const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
-  sm: { height: 28, padding: '0 10px', fontSize: 'var(--text-sm)' },
-  md: { height: 34, padding: '0 14px', fontSize: 'var(--text-base)' },
-  lg: { height: 40, padding: '0 18px', fontSize: 'var(--text-md)' },
-};
 
 export default function Button({
   children,
@@ -71,46 +32,29 @@ export default function Button({
   size = 'md',
   disabled,
   loading,
-  onClick,
   type = 'button',
   icon,
   iconPosition = 'left',
-  title,
-  'aria-label': ariaLabel,
-  'aria-pressed': ariaPressed,
-  'aria-controls': ariaControls,
-  style,
+  block,
+  className,
+  ...rest
 }: ButtonProps) {
   const isDisabled = disabled || loading;
+  const classes = ['gtd-btn', `gtd-btn--${variant}`, `gtd-btn--${size}`, block && 'gtd-btn--block', className]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={isDisabled}
-      title={title}
-      aria-label={ariaLabel}
-      aria-pressed={ariaPressed}
-      aria-controls={ariaControls}
-      aria-disabled={isDisabled}
-      style={{
-        ...baseStyle,
-        ...variantStyles[variant],
-        ...sizeStyles[size],
-        opacity: isDisabled ? 0.5 : 1,
-        cursor: isDisabled ? 'not-allowed' : 'pointer',
-        ...style,
-      }}
-    >
+    <button {...rest} type={type} disabled={isDisabled} aria-busy={loading || undefined} className={classes}>
       {loading ? (
         <span
+          className="gtd-spin"
           style={{
             width: 14,
             height: 14,
             border: '2px solid currentColor',
             borderTopColor: 'transparent',
-            borderRadius: '50%',
-            animation: 'spin 0.7s linear infinite',
+            borderRadius: 'var(--radius-full)',
             display: 'inline-block',
           }}
           aria-hidden="true"
@@ -122,7 +66,6 @@ export default function Button({
       {!loading && icon && iconPosition === 'right' && (
         <span aria-hidden="true" style={{ display: 'flex' }}>{icon}</span>
       )}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </button>
   );
 }

@@ -197,6 +197,20 @@ and shared parsing, file access and writes in the existing utilities.
 built-package smoke tests. CI runs them on Node 20, 22 and 24 and rejects high or
 critical production dependency advisories. Run `npm run build` before `npm test`.
 
+## UI changes and the design system
+
+The dashboard has a small design system: tokens, shared components and a showcase at
+`/design-system`. Read [docs/design-system.md](docs/design-system.md) before changing UI. In short:
+reuse the shared components, use tokens rather than literal values, cover loading, empty, error and
+disabled states, and check your screens at phone, tablet and desktop widths, in both themes and
+with the keyboard.
+
+- `npm test` includes `test:design`, a static check of the rules. A justified exception takes a
+  `// design-exception: <reason>` comment.
+- `npm run test:visual` checks every page in a browser (no sideways scroll, labelled fields, named
+  buttons, colour contrast, dialog keyboard behaviour) and compares screenshots of stable screens.
+  It needs `npm run build` and Playwright (`npm i --no-save playwright && npx playwright install chromium`).
+
 ## Changes to workspace templates
 
 Files under `templates/` end up in users' workspaces. If you change them:

@@ -1,4 +1,5 @@
 import React from 'react';
+import Card from '@/components/common/Card';
 import { Link } from 'react-router-dom';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
@@ -18,9 +19,6 @@ const WEEKDAYS: { id: RoutineWeekday; short: string }[] = [
 const CHARACTERS_PER_HOUR = 30_000;
 const TEXT_SIZES = [100_000, 200_000, 400_000, 800_000, 1_600_000];
 
-const cardStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', background: 'var(--color-surface)', padding: 16,
-};
 const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '2px 0 0' };
 
 function formatWhen(iso: string): string {
@@ -54,7 +52,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
   };
 
   return (
-    <article id="meeting-digest" style={{ ...cardStyle, opacity: settings.enabled ? 1 : 0.75 }} aria-label="Meeting digest">
+    <Card as="article" padding="compact" id="meeting-digest" aria-label="Meeting digest">
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -112,7 +110,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
           </span>
         )}
       </div>
-    </article>
+    </Card>
   );
 }
 

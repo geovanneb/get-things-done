@@ -14,6 +14,15 @@ See "Keeping pull requests independent" in CONTRIBUTING.md. -->
 - [ ] `npm test` passes
 - [ ] UI changes: screenshots attached, made with fictional data only
 
+### UI changes (delete if none)
+
+- [ ] Reuses the shared components and tokens ([docs/design-system.md](../docs/design-system.md)); any exception is commented with its reason
+- [ ] Checked at 390, 768 and 1280px wide, in light and dark
+- [ ] Works with the keyboard only: visible focus, dialogs trap and return focus, Escape closes
+- [ ] Loading, empty, error and disabled states are handled
+- [ ] Labels and messages follow the writing rules (sentence case, verb + object, errors say what to do)
+- [ ] `npm run test:visual` passes; intended screenshot changes are explained
+
 ## Checklist
 
 - [ ] The PR title follows Conventional Commits (`fix: ...`, `feat: ...`)

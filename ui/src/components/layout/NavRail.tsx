@@ -396,7 +396,7 @@ function CustomizeMenu({ at, onCustomize, onClose }: { at: { x: number; y: numbe
       onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
       style={{
         position: 'fixed', left: Math.min(at.x, window.innerWidth - 200), top: Math.min(at.y, window.innerHeight - 50),
-        zIndex: 1000, padding: 4, minWidth: 180, background: 'var(--nav-bg)', border: '1px solid var(--nav-border)',
+        zIndex: 'var(--z-popover)', padding: 4, minWidth: 180, background: 'var(--nav-bg)', border: '1px solid var(--nav-border)',
         borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-md)',
       }}
     >

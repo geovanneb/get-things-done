@@ -4,7 +4,9 @@ import { RecordLauncherProvider } from '@/components/recording/RecordLauncher';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useAppDispatch } from './store';
+import { ConfirmProvider } from './components/common/ConfirmDialog';
 import AppLayout from './components/layout/AppLayout';
+import LoadingSpinner from './components/common/LoadingSpinner';
 import { useLoadSidebar } from './hooks/useSidebar';
 import { useLiveEvents } from './hooks/useLiveEvents';
 import { apiGet } from './utils/api';
@@ -26,6 +28,7 @@ const RoutinesView = lazy(() => import('./views/RoutinesView'));
 const MeetingsView = lazy(() => import('./views/MeetingsView'));
 const AgentFloorView = lazy(() => import('./views/AgentFloorView'));
 const SetupView = lazy(() => import('./views/SetupView'));
+const DesignSystemView = lazy(() => import('./views/DesignSystemView'));
 
 function AppInitializer() {
   const dispatch = useAppDispatch();
@@ -55,7 +58,7 @@ function AppInitializer() {
   return null;
 }
 
-const loading = <div role="status" style={{ padding: 24 }}>Loading…</div>;
+const loading = <LoadingSpinner text="Loading…" />;
 
 function AppRoutes() {
   // Without an open workspace the dashboard has nothing to show: first-run setup takes its place at any address.
@@ -102,6 +105,8 @@ function AppRoutes() {
           <Route path="agent-floor" element={<AgentFloorView />} />
           <Route path="profile" element={<ProfileView />} />
           <Route path="settings" element={<SettingsView />} />
+          {/* The component showcase (docs/design-system.md). Not in the sidebar. */}
+          <Route path="design-system" element={<DesignSystemView />} />
           <Route path="*" element={<Navigate to="/situation" replace />} />
         </Route>
       </Routes>
@@ -114,10 +119,12 @@ export default function App() {
   return (
     <AppProvider>
       <BrowserRouter>
-        <RecordingProvider>
-          <AppRoutes />
-          <RecordingBanner />
-        </RecordingProvider>
+        <ConfirmProvider>
+          <RecordingProvider>
+            <AppRoutes />
+            <RecordingBanner />
+          </RecordingProvider>
+        </ConfirmProvider>
       </BrowserRouter>
     </AppProvider>
   );

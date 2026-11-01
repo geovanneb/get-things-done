@@ -32,6 +32,8 @@ interface MentionTextareaProps {
   autoFocus?: boolean;
   placeholder?: string;
   style?: CSSProperties;
+  id?: string;
+  className?: string;
 }
 
 /**
@@ -41,7 +43,7 @@ interface MentionTextareaProps {
  * While an IME is composing (Japanese, Chinese, Korean input) the picker neither opens nor reacts
  * to keys, so Enter confirms the conversion instead of picking an item.
  */
-export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, placeholder, style }: MentionTextareaProps) {
+export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, placeholder, style, id, className }: MentionTextareaProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
@@ -122,6 +124,8 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
         autoFocus={autoFocus}
         placeholder={placeholder}
         style={style}
+        id={id}
+        className={className}
         onChange={(e) => {
           onChange(e.target.value);
           detect(e.target.value, e.target.selectionStart ?? e.target.value.length);

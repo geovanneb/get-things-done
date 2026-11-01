@@ -1,7 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Button from '@/components/common/Button';
-import Input from '@/components/common/Input';
-import Modal from '@/components/common/Modal';
+import Input, { FieldRow } from '@/components/common/Input';
+import Card from '@/components/common/Card';
+import Notice from '@/components/common/Notice';
+import Page from '@/components/common/Page';
+import { SegmentedControl } from '@/components/common/Tabs';
+import Modal, { FormActions } from '@/components/common/Modal';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
@@ -48,98 +52,17 @@ const LEVEL_VISUALS: Record<'error' | 'warning' | 'info', LevelVisuals> = {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '24px',
-      }}
-    >
-      <h2
-        style={{
-          margin: '0 0 20px 0',
-          fontSize: 'var(--text-md)',
-          fontFamily: 'var(--font-sans)',
-          fontWeight: 600,
-          color: 'var(--color-text)',
-        }}
-      >
-        {title}
-      </h2>
-      {children}
-    </div>
-  );
-}
-
-function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '10px 0',
-        borderBottom: '1px solid var(--color-border)',
-      }}
-    >
-      <span
-        style={{
-          width: '140px',
-          flexShrink: 0,
-          fontSize: 'var(--text-sm)',
-          fontFamily: 'var(--font-sans)',
-          fontWeight: 500,
-          color: 'var(--color-text-secondary)',
-        }}
-      >
-        {label}
-      </span>
-      {/* minWidth 0: lets long values (e.g. a workspace path) shrink and truncate instead of pushing past the card */}
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {children}
-      </div>
-    </div>
-  );
+function SectionCard({ title, description, children }: { title: string; description?: React.ReactNode; children: React.ReactNode }) {
+  return <Card title={title} description={description}>{children}</Card>;
 }
 
 function AboutRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        gap: '12px',
-        padding: '10px 0',
-        borderBottom: '1px solid var(--color-border)',
-      }}
-    >
-      <span
-        style={{
-          width: '140px',
-          flexShrink: 0,
-          fontSize: 'var(--text-sm)',
-          fontFamily: 'var(--font-sans)',
-          fontWeight: 500,
-          color: 'var(--color-text-secondary)',
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 'var(--text-sm)',
-          fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
-          color: 'var(--color-text)',
-          minWidth: 0,
-          overflowWrap: 'anywhere',
-        }}
-      >
+    <FieldRow label={label}>
+      <span style={{ fontSize: 'var(--text-sm)', fontFamily: mono ? 'var(--font-mono)' : undefined, color: 'var(--color-text)', minWidth: 0, overflowWrap: 'anywhere' }}>
         {value}
       </span>
-    </div>
+    </FieldRow>
   );
 }
 
@@ -147,64 +70,6 @@ interface SegmentOption<T extends string> {
   value: T;
   label: string;
   icon?: React.ReactNode;
-}
-
-function SegmentedControl<T extends string>({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: T;
-  options: Array<SegmentOption<T>>;
-  onChange: (next: T) => void;
-  ariaLabel: string;
-}) {
-  return (
-    <div
-      role="radiogroup"
-      aria-label={ariaLabel}
-      style={{
-        display: 'inline-flex',
-        gap: '2px',
-        padding: '2px',
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-md)',
-      }}
-    >
-      {options.map(option => {
-        const selected = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            onClick={() => onChange(option.value)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              height: '28px',
-              padding: '0 12px',
-              borderRadius: 'var(--radius-sm)',
-              background: selected ? 'var(--color-surface)' : 'transparent',
-              color: selected ? 'var(--color-text)' : 'var(--color-text-secondary)',
-              boxShadow: selected ? 'var(--shadow-sm)' : 'none',
-              fontSize: 'var(--text-sm)',
-              fontFamily: 'var(--font-sans)',
-              fontWeight: selected ? 600 : 500,
-              transition: 'background 0.12s, color 0.12s',
-            }}
-          >
-            {option.icon}
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 const ICON_SUN = (
@@ -283,6 +148,7 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (next: typ
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                 <path
                   d="M2.5 6.3L4.8 8.6L9.5 3.9"
+                  // design-exception: the swatches keep one mid lightness in both themes, so the check is always white
                   stroke="oklch(1 0 0)"
                   strokeWidth="1.9"
                   strokeLinecap="round"
@@ -369,7 +235,7 @@ function ValidationResultsList({ results }: { results: ValidationResult[] }) {
                   borderRadius: '50%',
                   background: v.color,
                   color: 'var(--color-text-on-accent)',
-                  fontSize: '11px',
+                  fontSize: 'var(--text-xs)',
                   fontFamily: 'var(--font-sans)',
                   fontWeight: 700,
                   display: 'flex',
@@ -806,51 +672,26 @@ export default function SettingsView() {
 
   // ---- Render: loading ----
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '320px' }}>
-        <LoadingSpinner />
-      </div>
-    );
-  }
+  if (loading) return <LoadingSpinner text="Loading settings…" />;
 
   // ---- Render: error ----
 
   if (error) {
     return (
-      <div style={{ padding: '24px' }}>
-        <div
-          style={{
-            background: 'var(--color-critical-subtle)',
-            border: '1px solid var(--color-critical)',
-            borderRadius: 'var(--radius-md)',
-            padding: '16px 20px',
-            color: 'var(--color-critical)',
-            fontSize: 'var(--text-sm)',
-            fontFamily: 'var(--font-sans)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-          }}
-        >
-          <span style={{ fontWeight: 700 }}>Error:</span>
-          <span>{error}</span>
-          <Button variant="ghost" onClick={fetchConfig} style={{ marginLeft: 'auto' }}>
-            Retry
-          </Button>
-        </div>
-      </div>
+      <Page width="narrow">
+        <Notice tone="critical" title="Could not load the settings." action={<Button size="sm" onClick={fetchConfig}>Try again</Button>}>{error}</Notice>
+      </Page>
     );
   }
 
   // ---- Render: main ----
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <Page width="narrow">
 
       {/* Section 1: Workspace */}
       <SectionCard title="Workspace">
-        <FieldRow label="Workspace Path">
+        <FieldRow label="Workspace path">
           <div
             title={config?.path ?? ''}
             style={{
@@ -875,8 +716,9 @@ export default function SettingsView() {
           </Button>
         </FieldRow>
 
-        <FieldRow label="Workspace Name">
+        <FieldRow label="Workspace name" htmlFor="settings-workspace-name">
           <Input
+            id="settings-workspace-name"
             value={workspaceName}
             onChange={v => setWorkspaceName(v)}
             onBlur={handleWorkspaceNameBlur}
@@ -885,7 +727,7 @@ export default function SettingsView() {
           />
           {nameSaving && (
             <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
-              Saving...
+              Saving…
             </span>
           )}
           {nameSaved && (
@@ -895,7 +737,7 @@ export default function SettingsView() {
           )}
         </FieldRow>
 
-        <FieldRow label="Workspace Picture">
+        <FieldRow label="Workspace picture">
           <WorkspaceAvatar name={workspaceName || config?.name || ''} path={config?.path ?? ''} iconVersion={config?.icon_version} size={36} />
           <input
             ref={iconInputRef}
@@ -905,7 +747,7 @@ export default function SettingsView() {
             style={{ display: 'none' }}
           />
           <Button variant="ghost" onClick={() => iconInputRef.current?.click()}>
-            {config?.icon_version ? 'Change...' : 'Choose Picture...'}
+            {config?.icon_version ? 'Change…' : 'Choose picture…'}
           </Button>
           {config?.icon_version && (
             <Button variant="ghost" onClick={handleRemoveIcon}>
@@ -922,28 +764,15 @@ export default function SettingsView() {
             Open in Finder
           </Button>
           <Button variant="secondary" onClick={handleValidate} disabled={loadingValidation}>
-            {loadingValidation ? 'Validating...' : 'Validate Workspace'}
+            {loadingValidation ? 'Validating…' : 'Validate workspace'}
           </Button>
           <Button variant="danger" onClick={() => { setReinitError(null); setShowReinitModal(true); }}>
-            Re-initialize Workspace
+            Re-initialize workspace
           </Button>
         </div>
 
         {validationError && (
-          <div
-            style={{
-              marginTop: '16px',
-              padding: '12px 16px',
-              background: 'var(--color-critical-subtle)',
-              border: '1px solid var(--color-critical)',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 'var(--text-sm)',
-              fontFamily: 'var(--font-sans)',
-              color: 'var(--color-critical)',
-            }}
-          >
-            {validationError}
-          </div>
+          <Notice tone="critical" style={{ marginTop: 'var(--space-4)' }}>{validationError}</Notice>
         )}
 
         {validationResults !== null && (
@@ -968,26 +797,13 @@ export default function SettingsView() {
               <Badge variant="success">Active</Badge>
               <div style={{ marginLeft: 'auto' }}>
                 <Button variant="secondary" onClick={handleViewGitStatus} disabled={loadingGit}>
-                  {loadingGit ? 'Loading...' : gitStatus ? 'Hide Git Status' : 'View Git Status'}
+                  {loadingGit ? 'Loading…' : gitStatus ? 'Hide git status' : 'View git status'}
                 </Button>
               </div>
             </div>
 
             {gitError && (
-              <div
-                style={{
-                  marginTop: '12px',
-                  padding: '12px 16px',
-                  background: 'var(--color-critical-subtle)',
-                  border: '1px solid var(--color-critical)',
-                  borderRadius: 'var(--radius-md)',
-                  fontSize: 'var(--text-sm)',
-                  fontFamily: 'var(--font-sans)',
-                  color: 'var(--color-critical)',
-                }}
-              >
-                {gitError}
-              </div>
+              <Notice tone="critical" style={{ marginTop: 'var(--space-4)' }}>{gitError}</Notice>
             )}
 
             {gitStatus && <GitStatusPanel status={gitStatus} />}
@@ -1007,7 +823,7 @@ export default function SettingsView() {
       <SectionCard title="Appearance">
         <FieldRow label="Theme">
           <SegmentedControl
-            ariaLabel="Theme"
+            label="Theme"
             value={theme}
             options={THEME_OPTIONS}
             onChange={next => dispatch({ type: 'SET_THEME', payload: next })}
@@ -1019,16 +835,16 @@ export default function SettingsView() {
           )}
         </FieldRow>
 
-        <FieldRow label="Accent Color">
+        <FieldRow label="Accent color">
           <AccentPicker
             value={accent}
             onChange={next => dispatch({ type: 'SET_ACCENT', payload: next })}
           />
         </FieldRow>
 
-        <FieldRow label="Text Size">
+        <FieldRow label="Text size">
           <SegmentedControl
-            ariaLabel="Text size"
+            label="Text size"
             value={textSize}
             options={TEXT_SIZE_OPTIONS}
             onChange={next => dispatch({ type: 'SET_TEXT_SIZE', payload: next })}
@@ -1039,7 +855,7 @@ export default function SettingsView() {
           <SidebarSettings />
         </FieldRow>
 
-        <FieldRow label="Task IDs on Board">
+        <FieldRow label="Task IDs on the board">
           <Toggle
             id="show-task-ids"
             label="Show task IDs on board cards and in the list view"
@@ -1116,9 +932,9 @@ export default function SettingsView() {
       <SectionCard title="About">
         <AboutRow label="Version"        value={config?.app_version ?? ''} />
         <AboutRow label="API"            value={window.location.host} mono />
-        <AboutRow label="Workspace Path" value={config?.path ?? ''} mono />
+        <AboutRow label="Workspace path" value={config?.path ?? ''} mono />
         <AboutRow
-          label="Last Validated"
+          label="Last validated"
           value={lastValidated ? formatDate(lastValidated.toISOString()) : 'Never'}
         />
       </SectionCard>
@@ -1127,84 +943,41 @@ export default function SettingsView() {
       <Modal
         isOpen={showChangeModal}
         onClose={() => { if (!switching) setShowChangeModal(false); }}
-        title="Change Workspace"
+        title="Change workspace"
+        description="Point Get Things Done at another folder. Your current workspace stays on disk, untouched."
+        footer={
+          <FormActions>
+            <Button variant="ghost" onClick={() => setShowChangeModal(false)} disabled={switching}>Cancel</Button>
+            <Button variant="primary" onClick={handleSwitchWorkspace} loading={switching}
+              disabled={!newPath.trim() || newPath.trim() === config?.path}>
+              {needsInit ? 'Initialize and switch' : 'Switch workspace'}
+            </Button>
+          </FormActions>
+        }
       >
-        <p
-          style={{
-            margin: '0 0 16px 0',
-            fontSize: 'var(--text-sm)',
-            fontFamily: 'var(--font-sans)',
-            color: 'var(--color-text-secondary)',
-            lineHeight: 1.6,
-          }}
-        >
-          Point Get Things Done at another folder. Your current workspace stays on disk, untouched.
-        </p>
-
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
-          <Input
-            value={newPath}
-            onChange={v => { setNewPath(v); setNeedsInit(false); }}
-            onKeyDown={e => { if (e.key === 'Enter' && newPath.trim() && !switching) handleSwitchWorkspace(); }}
-            placeholder="/Users/you/Documents/my-workspace"
-            aria-label="Workspace folder path"
-            autoFocus
-            disabled={switching}
-            style={{ flex: 1 }}
-            inputStyle={{ fontFamily: 'var(--font-mono)' }}
-          />
-          <Button variant="secondary" onClick={handleBrowse} disabled={switching || picking}>
-            {picking ? 'Waiting...' : 'Browse...'}
-          </Button>
-        </div>
-
-        {needsInit && (
-          <div
-            style={{
-              marginBottom: '16px',
-              padding: '10px 14px',
-              background: 'var(--color-warning-subtle)',
-              border: '1px solid var(--color-warning)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: 'var(--text-sm)',
-              fontFamily: 'var(--font-sans)',
-              color: 'var(--color-text)',
-              lineHeight: 1.6,
-            }}
-          >
-            This folder is not a Get Things Done workspace yet. Initialize it to create the
-            workspace structure (tasks, stakeholders, context and so on). Existing files are kept.
+        <div className="gtd-stack">
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <Input
+              label="Workspace folder"
+              value={newPath}
+              onChange={v => { setNewPath(v); setNeedsInit(false); }}
+              onKeyDown={e => { if (e.key === 'Enter' && newPath.trim() && !switching) handleSwitchWorkspace(); }}
+              placeholder="/Users/you/Documents/my-workspace"
+              autoFocus
+              disabled={switching}
+              style={{ flex: '1 1 260px' }}
+              inputStyle={{ fontFamily: 'var(--font-mono)' }}
+            />
+            <Button variant="secondary" onClick={handleBrowse} loading={picking} disabled={switching}>Browse…</Button>
           </div>
-        )}
 
-        {changeError && (
-          <div
-            style={{
-              marginBottom: '16px',
-              padding: '10px 14px',
-              background: 'var(--color-critical-subtle)',
-              border: '1px solid var(--color-critical)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: 'var(--text-sm)',
-              fontFamily: 'var(--font-sans)',
-              color: 'var(--color-critical)',
-            }}
-          >
-            {changeError}
-          </div>
-        )}
+          {needsInit && (
+            <Notice tone="warning" title="This folder is not a workspace yet.">
+              Initialize it to create the workspace structure (tasks, stakeholders, context and so on). Existing files are kept.
+            </Notice>
+          )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button variant="ghost" onClick={() => setShowChangeModal(false)} disabled={switching}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleSwitchWorkspace}
-            disabled={switching || !newPath.trim() || newPath.trim() === config?.path}
-          >
-            {switching ? 'Switching...' : needsInit ? 'Initialize and Switch' : 'Switch Workspace'}
-          </Button>
+          {changeError && <Notice tone="critical">{changeError}</Notice>}
         </div>
       </Modal>
 
@@ -1218,58 +991,24 @@ export default function SettingsView() {
       <Modal
         isOpen={showReinitModal}
         onClose={() => { if (!reinitializing) setShowReinitModal(false); }}
-        title="Re-initialize Workspace"
+        title="Re-initialize this workspace?"
+        size="sm"
+        role="alertdialog"
+        footer={
+          <FormActions>
+            <Button variant="ghost" onClick={() => setShowReinitModal(false)} disabled={reinitializing} autoFocus>Cancel</Button>
+            <Button variant="danger" onClick={handleReinitialize} loading={reinitializing}>Re-initialize</Button>
+          </FormActions>
+        }
       >
-        <p
-          style={{
-            margin: '0 0 8px 0',
-            fontSize: 'var(--text-sm)',
-            fontFamily: 'var(--font-sans)',
-            color: 'var(--color-text)',
-            lineHeight: 1.6,
-          }}
-        >
-          This will reset the workspace configuration to its initial state. Any custom settings
-          may be overwritten.
-        </p>
-        <p
-          style={{
-            margin: '0 0 20px 0',
-            fontSize: 'var(--text-sm)',
-            fontFamily: 'var(--font-sans)',
-            color: 'var(--color-text-secondary)',
-            lineHeight: 1.6,
-          }}
-        >
-          Are you sure you want to continue?
-        </p>
-
-        {reinitError && (
-          <div
-            style={{
-              marginBottom: '16px',
-              padding: '10px 14px',
-              background: 'var(--color-critical-subtle)',
-              border: '1px solid var(--color-critical)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: 'var(--text-sm)',
-              fontFamily: 'var(--font-sans)',
-              color: 'var(--color-critical)',
-            }}
-          >
-            {reinitError}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-          <Button variant="ghost" onClick={() => setShowReinitModal(false)} disabled={reinitializing}>
-            Cancel
-          </Button>
-          <Button variant="danger" onClick={handleReinitialize} disabled={reinitializing}>
-            {reinitializing ? 'Re-initializing...' : 'Re-initialize'}
-          </Button>
+        <div className="gtd-stack">
+          <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 'var(--leading-normal)' }}>
+            The workspace configuration goes back to its initial state, and custom settings may be overwritten.
+            Tasks, stakeholders and context notes are kept.
+          </p>
+          {reinitError && <Notice tone="critical">{reinitError}</Notice>}
         </div>
       </Modal>
-    </div>
+    </Page>
   );
 }

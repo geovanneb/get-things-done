@@ -79,7 +79,7 @@ export default function Toaster() {
         position: 'fixed',
         bottom: 20,
         right: 20,
-        zIndex: 2000,
+        zIndex: 'var(--z-toast)',
         display: 'flex',
         flexDirection: 'column',
         gap: 8,

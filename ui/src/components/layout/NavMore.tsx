@@ -103,7 +103,7 @@ export default function NavMore({ items, collapsed, currentPath }: { items: More
           aria-label="Hidden sidebar items"
           onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}
           style={{
-            position: 'fixed', left: position.left, top: position.top, zIndex: 1000, minWidth: 200, margin: 0,
+            position: 'fixed', left: position.left, top: position.top, zIndex: 'var(--z-popover)', minWidth: 200, margin: 0,
             padding: 6, listStyle: 'none', background: 'var(--nav-bg)', border: '1px solid var(--nav-border)',
             borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-md)',
           }}

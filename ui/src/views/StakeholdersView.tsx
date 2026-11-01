@@ -2,12 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import Avatar from '@/components/common/Avatar';
-// Badge removed — counts shown inside TabBar directly
 import Button from '@/components/common/Button';
+import IconButton, { icons } from '@/components/common/IconButton';
+import Notice from '@/components/common/Notice';
+import Page, { PageHeader } from '@/components/common/Page';
+import { Tabs } from '@/components/common/Tabs';
+import { useConfirm } from '@/components/common/ConfirmDialog';
+import { useNotify } from '@/hooks/useNotify';
 import EmptyState from '@/components/common/EmptyState';
-import Input, { Textarea } from '@/components/common/Input';
+import Input, { SearchInput, Textarea } from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
-import Modal from '@/components/common/Modal';
+import Modal, { FormActions } from '@/components/common/Modal';
 import OrgChartsPanel from '@/components/stakeholders/OrgChartsPanel';
 import { apiDelete, apiPost, apiPut } from '@/utils/api';
 import type { Stakeholder } from '@/types';
@@ -74,31 +79,6 @@ function SortArrow({ active, dir }: { active: boolean; dir: SortDir }) {
   );
 }
 
-function PencilIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
-      <path d="M11.5 1.5l2 2-9 9H2.5v-2l9-9z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
-      <path d="M2 4h11M5 4V2.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 .5.5V4M6 7v4M9 7v4M3 4l.8 8.5a.5.5 0 0 0 .5.5h6.4a.5.5 0 0 0 .5-.5L12 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
-      <circle cx="6.5" cy="6.5" r="4" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M9.5 9.5 L13 13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Sortable column header
 // ---------------------------------------------------------------------------
@@ -115,26 +95,12 @@ interface SortHeaderProps {
 function SortHeader({ label, sortKey, currentKey, currentDir, onSort, align = 'left' }: SortHeaderProps) {
   const active = currentKey === sortKey;
   return (
-    <th
-      scope="col"
-      onClick={() => onSort(sortKey)}
-      style={{
-        padding: '10px 16px',
-        textAlign: align,
-        fontSize: 'var(--text-xs)',
-        fontWeight: 600,
-        color: active ? 'var(--color-text)' : 'var(--color-text-muted)',
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        cursor: 'pointer',
-        userSelect: 'none',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+    <th scope="col" aria-sort={active ? (currentDir === 'asc' ? 'ascending' : 'descending') : undefined}
+      style={{ textAlign: align, color: active ? 'var(--color-text)' : undefined }}>
+      <button type="button" className="gtd-sort-btn" onClick={() => onSort(sortKey)}>
         {label}
         <SortArrow active={active} dir={currentDir} />
-      </span>
+      </button>
     </th>
   );
 }
@@ -180,7 +146,7 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) {
-      setFormError('Name is required.');
+      setFormError('Enter a name.');
       return;
     }
     setSaving(true);
@@ -202,49 +168,35 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
       onSaved();
       onClose();
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : 'An error occurred.');
+      setFormError(err instanceof Error ? err.message : 'Could not save. Try again.');
     } finally {
       setSaving(false);
     }
   }
 
+  const noun = type === 'groups' ? 'group' : 'individual';
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editing ? `Edit ${type === 'groups' ? 'Group' : 'Individual'}` : `Add ${type === 'groups' ? 'Group' : 'Individual'}`} size="lg">
-      <form onSubmit={handleSubmit} noValidate>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <Input label="Name *" value={form.name} onChange={(v) => setField('name', v)} placeholder="Jane Smith" autoFocus
-              error={formError && !form.name.trim() ? 'Required' : undefined} />
-          </div>
-
+    <Modal isOpen={isOpen} onClose={onClose} title={editing ? `Edit ${editing.name}` : `Add ${noun}`} size="lg" keepWhileTyping
+      footer={
+        <FormActions>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="primary" type="submit" form="stakeholder-form" loading={saving}>
+            {editing ? 'Save changes' : `Add ${noun}`}
+          </Button>
+        </FormActions>
+      }>
+      <form id="stakeholder-form" onSubmit={handleSubmit} noValidate className="gtd-stack">
+        {formError && form.name.trim() && <Notice tone="critical">{formError}</Notice>}
+        <div className="gtd-form-grid">
+          <Input label="Name" required value={form.name} onChange={(v) => setField('name', v)} placeholder="Jane Smith" autoFocus
+            error={formError && !form.name.trim() ? 'Enter a name.' : undefined} style={{ gridColumn: '1 / -1' }} />
           <Input label="Role" value={form.role} onChange={(v) => setField('role', v)} placeholder="VP of Engineering" />
           <Input label="Organization" value={form.organization} onChange={(v) => setField('organization', v)} placeholder="Acme Corp" />
-          <div style={{ gridColumn: '1 / -1' }}>
-            <Input label="Email" type="email" value={form.email} onChange={(v) => setField('email', v)} placeholder="jane@acme.com" />
-          </div>
-
-          <div style={{ gridColumn: '1 / -1' }}>
-            <Textarea label="What matters" value={form.what_matters} onChange={(v) => setField('what_matters', v)}
-              placeholder="What this person cares about most..." rows={3} />
-          </div>
-
-          <div style={{ gridColumn: '1 / -1' }}>
-            <Textarea label="Notes (markdown)" value={form.notes} onChange={(v) => setField('notes', v)}
-              placeholder="Additional context, history, relationship notes..." rows={4} />
-          </div>
-        </div>
-
-        {formError && (
-          <p role="alert" style={{ marginTop: 12, fontSize: 'var(--text-sm)', color: 'var(--color-critical)' }}>
-            {formError}
-          </p>
-        )}
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
-          <Button variant="ghost" onClick={onClose} type="button">Cancel</Button>
-          <Button variant="primary" type="submit" loading={saving}>
-            {editing ? 'Save changes' : `Add ${type === 'groups' ? 'group' : 'individual'}`}
-          </Button>
+          <Input label="Email" type="email" autoComplete="off" value={form.email} onChange={(v) => setField('email', v)} placeholder="jane@acme.com" style={{ gridColumn: '1 / -1' }} />
+          <Textarea label="What matters" value={form.what_matters} onChange={(v) => setField('what_matters', v)}
+            placeholder="What this person cares about most" rows={3} style={{ gridColumn: '1 / -1' }} />
+          <Textarea label="Notes" hint="Markdown is supported." value={form.notes} onChange={(v) => setField('notes', v)}
+            placeholder="Context, history, how the relationship works" rows={4} style={{ gridColumn: '1 / -1' }} />
         </div>
       </form>
     </Modal>
@@ -257,59 +209,31 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
 
 interface RowProps {
   stakeholder: Stakeholder;
-  isLast: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function StakeholderRow({ stakeholder: s, isLast, onEdit, onDelete }: RowProps) {
-  const [hovered, setHovered] = useState(false);
-
-  const tdStyle: React.CSSProperties = {
-    padding: '12px 16px',
-    verticalAlign: 'middle',
-    borderBottom: isLast ? 'none' : '1px solid var(--color-border)',
-    background: hovered ? 'var(--color-surface-hover)' : 'transparent',
-    transition: 'background 0.1s',
-  };
-
+function StakeholderRow({ stakeholder: s, onEdit, onDelete }: RowProps) {
+  const missing = <span style={{ color: 'var(--color-text-muted)' }} aria-label="Not set">—</span>;
   return (
-    <tr onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-      <td style={tdStyle}>
+    <tr>
+      <td>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Avatar name={s.name} size="md" />
-          <Link to={`/stakeholders/${s.id}`}
-            style={{ fontWeight: 600, color: 'var(--color-text)', textDecoration: 'none' }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'underline'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.textDecoration = 'none'; }}>
-            {s.name}
-          </Link>
+          <Link to={`/stakeholders/${s.id}`} className="gtd-link-strong">{s.name}</Link>
         </div>
       </td>
-
-      <td style={tdStyle}>
-        <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-          {s.role || <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
+      <td style={{ color: 'var(--color-text-secondary)' }}>{s.role || missing}</td>
+      <td style={{ color: 'var(--color-text-secondary)' }}>{s.organization || missing}</td>
+      <td style={{ maxWidth: 260 }}>
+        <span title={s.what_matters} className="truncate" style={{ display: 'block', color: 'var(--color-text-secondary)' }}>
+          {s.what_matters || missing}
         </span>
       </td>
-
-      <td style={tdStyle}>
-        <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
-          {s.organization || <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
-        </span>
-      </td>
-
-      <td style={{ ...tdStyle, maxWidth: 220 }}>
-        <span title={s.what_matters} style={{ display: 'block', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          {s.what_matters || <span style={{ color: 'var(--color-text-muted)' }}>—</span>}
-        </span>
-      </td>
-
-      <td style={{ ...tdStyle, textAlign: 'right' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
-          <Button variant="ghost" size="sm" onClick={onEdit} aria-label={`Edit ${s.name}`} icon={<PencilIcon />} />
-          <Button variant="ghost" size="sm" onClick={onDelete} aria-label={`Delete ${s.name}`} icon={<TrashIcon />}
-            style={{ color: 'var(--color-critical)' }} />
+      <td style={{ textAlign: 'right' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+          <IconButton label={`Edit ${s.name}`} icon={icons.edit} onClick={onEdit} />
+          <IconButton label={`Delete ${s.name}`} icon={icons.trash} tone="danger" onClick={onDelete} />
         </div>
       </td>
     </tr>
@@ -322,79 +246,6 @@ function StakeholderRow({ stakeholder: s, isLast, onEdit, onDelete }: RowProps) 
 
 type ListTab = 'people' | 'groups';
 type TabType = ListTab | 'charts';
-
-interface TabBarProps {
-  active: TabType;
-  peopleCt: number;
-  groupsCt: number;
-  onChange: (t: TabType) => void;
-}
-
-function TabBar({ active, peopleCt, groupsCt, onChange }: TabBarProps) {
-  const tabs: { key: TabType; label: string; count?: number }[] = [
-    { key: 'people', label: 'Individuals', count: peopleCt },
-    { key: 'groups', label: 'Groups', count: groupsCt },
-    { key: 'charts', label: 'Org charts' },
-  ];
-  return (
-    <div
-      role="tablist"
-      aria-label="Stakeholder type"
-      style={{
-        display: 'inline-flex',
-        gap: 2,
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-md)',
-        padding: 3,
-      }}
-    >
-      {tabs.map(({ key, label, count }) => {
-        const isActive = active === key;
-        return (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={isActive}
-            onClick={() => onChange(key)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '5px 14px',
-              border: 'none',
-              borderRadius: 'var(--radius-sm)',
-              background: isActive ? 'var(--color-surface)' : 'transparent',
-              boxShadow: isActive ? '0 1px 3px color-mix(in oklch, var(--color-text) 12%, transparent)' : 'none',
-              color: isActive ? 'var(--color-text)' : 'var(--color-text-muted)',
-              fontWeight: isActive ? 600 : 400,
-              fontSize: 'var(--text-sm)',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {label}
-            {count !== undefined && <span
-              style={{
-                fontSize: 'var(--text-xs)',
-                fontWeight: 600,
-                padding: '0 5px',
-                borderRadius: 9,
-                background: isActive ? 'var(--color-accent-subtle)' : 'var(--color-surface-hover)',
-                color: isActive ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                minWidth: 18,
-                textAlign: 'center',
-              }}
-            >
-              {count}
-            </span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Main view
@@ -436,16 +287,24 @@ export default function StakeholdersView() {
     else { setSortKey(key); setSortDir('asc'); }
   }
 
+  const confirm = useConfirm();
+  const notify = useNotify();
+
   async function handleDelete(s: Stakeholder) {
-    const label = tab === 'groups' ? 'group' : 'stakeholder';
-    const confirmed = window.confirm(`Delete "${s.name}"? This cannot be undone.`);
+    const label = tab === 'groups' ? 'group' : 'individual';
+    const confirmed = await confirm({
+      title: `Delete ${s.name}?`,
+      message: `The ${label} is removed from your stakeholders. Tasks that mention them keep the reference. This cannot be undone.`,
+      confirmLabel: `Delete ${label}`,
+      tone: 'danger',
+    });
     if (!confirmed) return;
     try {
       await apiDelete(`/api/stakeholders/${s.id}`);
       if (tab === 'groups') setGroups((prev) => prev.filter((x) => x.id !== s.id));
       else setPeople((prev) => prev.filter((x) => x.id !== s.id));
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : `Delete ${label} failed.`);
+      notify.error(err, `Could not delete the ${label}. Try again.`);
     }
   }
 
@@ -458,82 +317,76 @@ export default function StakeholdersView() {
 
   const sorted = sortStakeholders(filtered, sortKey, sortDir);
 
-  const thPlain: React.CSSProperties = {
-    padding: '10px 16px', textAlign: 'left', fontSize: 'var(--text-xs)', fontWeight: 600,
-    color: 'var(--color-text-muted)', letterSpacing: '0.04em', textTransform: 'uppercase', whiteSpace: 'nowrap',
+  const setTab = (t: TabType) => {
+    setParams((previous) => { const next = new URLSearchParams(previous); next.set('tab', t); return next; });
+    setSearch('');
   };
+  const noun = tab === 'groups' ? 'group' : 'individual';
 
   return (
-    <div style={{ padding: 16, maxWidth: 1200, margin: '0 auto', boxSizing: 'border-box' }}>
-      {/* Header row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-        <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
-          Stakeholders
-        </h1>
-        {!loading && (
-          <TabBar
-            active={tab}
-            peopleCt={people.length}
-            groupsCt={groups.length}
-            onChange={(t) => { setParams((previous) => { const next = new URLSearchParams(previous); next.set('tab', t); return next; }); setSearch(''); }}
-          />
-        )}
-        {tab === 'charts' ? <div style={{ flex: 1 }} /> : <>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <Input
-            value={search}
-            onChange={setSearch}
-            placeholder={`Search ${tab === 'groups' ? 'groups' : 'individuals'}…`}
-            icon={<SearchIcon />}
-            aria-label={`Search ${tab}`}
-          />
-        </div>
-        <Button variant="primary" onClick={() => { setEditing(null); setModalOpen(true); }}>
-          + Add {tab === 'groups' ? 'Group' : 'Individual'}
-        </Button>
-        </>}
+    <Page width={tab === 'charts' ? 'full' : 'default'}>
+      <div>
+        <Tabs label="Stakeholder views" value={tab} onChange={setTab} idPrefix="stakeholders"
+          items={[
+            { id: 'people', label: 'Individuals', count: loading ? undefined : people.length },
+            { id: 'groups', label: 'Groups', count: loading ? undefined : groups.length },
+            { id: 'charts', label: 'Org charts' },
+          ]} />
       </div>
 
-      {fetchError && (
-        <p role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)', marginBottom: 16 }}>{fetchError}</p>
-      )}
+      <div id="stakeholders-panel" role="tabpanel" aria-labelledby={`stakeholders-tab-${tab}`} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        {tab !== 'charts' && (
+          <PageHeader
+            description={tab === 'groups'
+              ? 'Teams, boards and committees you work with, so agents can address them as a group.'
+              : 'The people your work is for. Agents read what matters to each one before they write.'}
+            actions={<>
+              <SearchInput value={search} onChange={setSearch} placeholder={`Search ${tab === 'groups' ? 'groups' : 'individuals'}`} />
+              <Button variant="primary" icon={icons.plus} onClick={() => { setEditing(null); setModalOpen(true); }}>Add {noun}</Button>
+            </>}
+          />
+        )}
 
-      {loading && <div style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}><LoadingSpinner /></div>}
+        {fetchError && <Notice tone="critical" title="Could not load stakeholders." action={<Button size="sm" onClick={fetchStakeholders}>Try again</Button>}>{fetchError}</Notice>}
 
-      {!loading && tab === 'charts' && <OrgChartsPanel stakeholders={[...people, ...groups]} initialChartId={params.get('chart')}
-        onStakeholderCreated={(s) => setPeople((prev) => [...prev, s])} />}
+        {loading && <LoadingSpinner text="Loading stakeholders…" />}
 
-      {!loading && tab !== 'charts' && (
-        <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-          {sorted.length === 0 ? (
-            <EmptyState
-              title={search ? `No ${tab} match your search` : `No ${tab} yet`}
-              description={search ? 'Try a different search term.' : `Add your first ${tab === 'groups' ? 'group' : 'individual'} to get started.`}
-            />
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-base)' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                    <SortHeader label="Name" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                    <SortHeader label="Role" sortKey="role" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                    <SortHeader label="Organization" sortKey="organization" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                    <th scope="col" style={thPlain}>What matters</th>
-                    <th scope="col" style={{ ...thPlain, textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorted.map((s, i) => (
-                    <StakeholderRow key={s.id} stakeholder={s} isLast={i === sorted.length - 1}
-                      onEdit={() => { setEditing(s); setModalOpen(true); }}
-                      onDelete={() => handleDelete(s)} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+        {!loading && tab === 'charts' && <OrgChartsPanel stakeholders={[...people, ...groups]} initialChartId={params.get('chart')}
+          onStakeholderCreated={(s) => setPeople((prev) => [...prev, s])} />}
+
+        {!loading && tab !== 'charts' && !fetchError && (
+          <div className="gtd-card">
+            {sorted.length === 0 ? (
+              <EmptyState
+                title={search ? `No ${noun}s match "${search}"` : `No ${noun}s yet`}
+                description={search ? 'Try another name, role or organization.' : `Add the ${noun}s your work is for. Agents use what matters to them.`}
+                action={search ? { label: 'Clear search', onClick: () => setSearch('') } : { label: `Add ${noun}`, onClick: () => { setEditing(null); setModalOpen(true); } }}
+              />
+            ) : (
+              <div className="gtd-table-wrap">
+                <table className="gtd-table">
+                  <thead>
+                    <tr>
+                      <SortHeader label="Name" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Role" sortKey="role" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                      <SortHeader label="Organization" sortKey="organization" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                      <th scope="col">What matters</th>
+                      <th scope="col" style={{ textAlign: 'right' }}><span className="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sorted.map((s) => (
+                      <StakeholderRow key={s.id} stakeholder={s}
+                        onEdit={() => { setEditing(s); setModalOpen(true); }}
+                        onDelete={() => handleDelete(s)} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <StakeholderModal
         isOpen={modalOpen}
@@ -542,6 +395,6 @@ export default function StakeholdersView() {
         onSaved={fetchStakeholders}
         type={tab === 'groups' ? 'groups' : 'people'}
       />
-    </div>
+    </Page>
   );
 }

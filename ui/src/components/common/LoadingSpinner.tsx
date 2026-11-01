@@ -1,10 +1,13 @@
-
 interface LoadingSpinnerProps {
+  /** What is loading, as "Loading tasks…". Announced to screen readers. */
   text?: string;
   size?: number;
+  /** inline: no padding, for a spinner inside a row or a button-sized slot. */
+  inline?: boolean;
 }
 
-export default function LoadingSpinner({ text, size = 20 }: LoadingSpinnerProps) {
+/** The loading state of a page, card or list. See docs/design-system.md, "States". */
+export default function LoadingSpinner({ text, size = 20, inline }: LoadingSpinnerProps) {
   return (
     <div
       role="status"
@@ -14,35 +17,16 @@ export default function LoadingSpinner({ text, size = 20 }: LoadingSpinnerProps)
         alignItems: 'center',
         justifyContent: 'center',
         gap: 10,
-        padding: 24,
+        padding: inline ? 0 : 'var(--space-6)',
         color: 'var(--color-text-muted)',
         fontSize: 'var(--text-sm)',
       }}
     >
-      <svg
-        aria-hidden="true"
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        style={{ animation: 'spin 0.7s linear infinite', flexShrink: 0 }}
-      >
-        <circle
-          cx="12"
-          cy="12"
-          r="10"
-          stroke="var(--color-border-strong)"
-          strokeWidth="3"
-        />
-        <path
-          d="M12 2a10 10 0 0 1 10 10"
-          stroke="var(--color-accent)"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
+      <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" className="gtd-spin" style={{ flexShrink: 0 }}>
+        <circle cx="12" cy="12" r="10" stroke="var(--color-border-strong)" strokeWidth="3" />
+        <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      {text && <span>{text}</span>}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      {text ? <span>{text}</span> : <span className="sr-only">Loading…</span>}
     </div>
   );
 }

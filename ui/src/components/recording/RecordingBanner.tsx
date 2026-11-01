@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link, useLocation } from 'react-router-dom';
 import { useRecorder } from './RecordingProvider';
 import Button from '@/components/common/Button';
@@ -45,14 +46,15 @@ function LanguageSuggestion() {
 
 /** Shows on every view while a recording runs: what is captured, what is really saved, and how to stop. */
 export function RecordingBanner() {
+  const confirm = useConfirm();
   const r = useRecorder();
   const onMeetings = useLocation().pathname === '/meetings';
   if (r.status === 'idle' && !r.notice) return null;
   const line: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
   return (
     <div role="region" aria-label="Recording" style={{
-      position: 'fixed', right: 16, bottom: 16, zIndex: 900, width: 320, maxWidth: 'calc(100vw - 32px)', padding: 12,
-      background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', boxShadow: '0 4px 16px rgba(0,0,0,.2)',
+      position: 'fixed', right: 16, bottom: 16, zIndex: 'var(--z-floating)', width: 320, maxWidth: 'calc(100vw - 32px)', padding: 12,
+      background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md)',
       display: 'flex', flexDirection: 'column', gap: 6, fontSize: 'var(--text-sm)',
     }}>
       {r.notice && r.status === 'idle' && (
@@ -99,7 +101,7 @@ export function RecordingBanner() {
           <div style={{ display: 'flex', gap: 8 }}>
             <Button size="sm" variant="primary" disabled={r.status === 'saving'} onClick={() => void r.stop()}>Stop and save</Button>
             <Button size="sm" variant="ghost" disabled={r.status === 'saving'}
-              onClick={() => { if (window.confirm(`Discard "${r.title}"? Everything recorded so far is deleted.`)) void r.discard(); }}>Discard</Button>
+              onClick={async () => { if (await confirm({ title: `Discard "${r.title}"?`, message: 'Everything recorded so far is deleted. This cannot be undone.', confirmLabel: 'Discard recording', tone: 'danger' })) void r.discard(); }}>Discard</Button>
           </div>
         </>
       )}

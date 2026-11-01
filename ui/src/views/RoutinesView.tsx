@@ -5,6 +5,11 @@ import { useDataVersion } from '@/store';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import EmptyState from '@/components/common/EmptyState';
 import Button from '@/components/common/Button';
+import Card from '@/components/common/Card';
+import Notice from '@/components/common/Notice';
+import Page, { PageHeader, Section } from '@/components/common/Page';
+import { icons } from '@/components/common/IconButton';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import Badge from '@/components/common/Badge';
 import Toggle from '@/components/common/Toggle';
 import RoutineEditor from '@/components/routines/RoutineEditor';
@@ -32,14 +37,8 @@ function dueText(r: Routine): string {
   return d === 0 ? ', due the same day' : `, due ${d} day${d === 1 ? '' : 's'} later`;
 }
 
-const cardStyle: React.CSSProperties = {
-  border: '1px solid var(--color-border)',
-  borderRadius: 'var(--radius-lg)',
-  background: 'var(--color-surface)',
-  padding: 16,
-};
-
 function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit: () => void; onChanged: () => void }) {
+  const confirm = useConfirm();
   const [busy, setBusy] = React.useState<'toggle' | 'run' | 'delete' | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
 
@@ -59,28 +58,24 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
 
   if (routine.problem) {
     return (
-      <div style={{ ...cardStyle, borderColor: 'var(--color-critical)' }}>
-        <div style={{ fontWeight: 600 }}>{routine.id}</div>
-        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-critical)', marginTop: 4 }}>
-          This routine file cannot be read, so it does not run: {routine.problem}
-        </div>
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
-          Fix routines/{routine.id}.md in the workspace folder, or delete it.
-        </div>
-        {notice && <div role="alert" style={{ color: 'var(--color-critical)', marginTop: 4 }}>{notice.text}</div>}
-        <div style={{ marginTop: 10 }}>
+      <Notice tone="critical" title={`${routine.id} does not run: its file cannot be read.`}
+        action={
           <Button size="sm" variant="danger" loading={busy === 'delete'}
-            onClick={() => act('delete', async () => { if (window.confirm(`Delete ${routine.id}?`)) await apiDelete(`/api/routines/${routine.id}`); })}>
+            onClick={() => act('delete', async () => {
+              if (await confirm({ title: `Delete ${routine.id}?`, message: `routines/${routine.id}.md is deleted from the workspace.`, confirmLabel: 'Delete routine', tone: 'danger' })) await apiDelete(`/api/routines/${routine.id}`);
+            })}>
             Delete
           </Button>
-        </div>
-      </div>
+        }>
+        {routine.problem} Fix routines/{routine.id}.md in the workspace folder, or delete it.
+        {notice && <div>{notice.text}</div>}
+      </Notice>
     );
   }
 
   const failed = routine.state.last_status === 'error';
   return (
-    <article style={{ ...cardStyle, opacity: routine.enabled ? 1 : 0.75 }} aria-label={routine.title}>
+    <Card as="article" padding="compact" aria-label={routine.title}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -100,7 +95,7 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
               <span title={routine.state.last_message}>
                 Last: {formatRelativeTime(routine.state.last_run_at)}
                 {routine.state.last_task_id && (
-                  <> · <Link to={`/board/task/${routine.state.last_task_id}`} style={{ color: 'var(--color-accent)' }}>{routine.state.last_task_id}</Link></>
+                  <> · <Link to={`/board/task/${routine.state.last_task_id}`} className="gtd-link">{routine.state.last_task_id}</Link></>
                 )}
               </span>
             )}
@@ -127,7 +122,8 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
         <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>Edit</Button>
         <Button size="sm" variant="ghost" loading={busy === 'delete'} disabled={busy !== null}
           onClick={() => act('delete', async () => {
-            if (window.confirm(`Delete "${routine.title}"? Tasks it already created stay on the board.`)) await apiDelete(`/api/routines/${routine.id}`);
+            const ok = await confirm({ title: `Delete "${routine.title}"?`, message: 'The routine stops. Tasks it already created stay on the board.', confirmLabel: 'Delete routine', tone: 'danger' });
+            if (ok) await apiDelete(`/api/routines/${routine.id}`);
           })}>
           Delete
         </Button>
@@ -137,7 +133,7 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
           </span>
         )}
       </div>
-    </article>
+    </Card>
   );
 }
 
@@ -155,9 +151,9 @@ function RunHistory({ runs }: { runs: RoutineRun[] }) {
             <strong style={{ fontWeight: 600 }}>{run.routine_title}</strong>{' '}
             <span style={{ color: run.status === 'ok' ? 'var(--color-text-secondary)' : 'var(--color-critical)' }}>
               {run.routine_id === 'SYSTEM-CLEANUP'
-                ? <>{run.message}{run.context_update && <> <Link to={`/context/updates/${run.context_update}`} style={{ color: 'var(--color-accent)' }}>Open {run.context_update}</Link></>}</>
+                ? <>{run.message}{run.context_update && <> <Link to={`/context/updates/${run.context_update}`} className="gtd-link">Open {run.context_update}</Link></>}</>
                 : run.created.length > 0
-                ? <>created {run.created.map((id, j) => <React.Fragment key={id}>{j > 0 && ', '}<Link to={`/board/task/${id}`} style={{ color: 'var(--color-accent)' }}>{id}</Link></React.Fragment>)}</>
+                ? <>created {run.created.map((id, j) => <React.Fragment key={id}>{j > 0 && ', '}<Link to={`/board/task/${id}`} className="gtd-link">{id}</Link></React.Fragment>)}</>
                 : run.message}
               {run.created.length > 0 && run.skipped.length > 0 && ` (${run.skipped.length} missed run${run.skipped.length === 1 ? '' : 's'} skipped)`}
               {run.caught_up && run.caught_up.length > 0 && (
@@ -189,62 +185,50 @@ export default function RoutinesView() {
   const refresh = React.useCallback(() => { refetch(); refetchRuns(); refetchCleanup(); refetchDigest(); }, [refetch, refetchRuns, refetchCleanup, refetchDigest]);
   const openEditor = (routine: Routine | null) => { setEditing(routine); setEditorOpen(true); };
 
-  if (loading && !routines) return <LoadingSpinner text="Loading routines..." />;
+  if (loading && !routines) return <LoadingSpinner text="Loading routines…" />;
 
   return (
-    <div style={{ padding: 24, maxWidth: 900, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 28 }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 16 }}>
-        <div style={{ flex: '1 1 220px' }}>
-          <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, margin: 0 }}>Routines</h1>
-          <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginTop: 4, marginBottom: 0, maxWidth: 640 }}>
-            Recurring tasks that land on your backlog by themselves. Routines run while the dashboard is open, and catch up
-            when it starts again after the computer was off. To run them without the dashboard, use{' '}
-            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>gtd routines run</code>.
-          </p>
-        </div>
-        <Button variant="primary" onClick={() => openEditor(null)}>+ New routine</Button>
-      </div>
+    <Page width="narrow">
+      <PageHeader
+        description={<>
+          Recurring tasks that land on your backlog by themselves. Routines run while the dashboard is open, and catch up
+          when it starts again after the computer was off. To run them without the dashboard, use{' '}
+          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>gtd routines run</code>.
+        </>}
+        actions={<Button variant="primary" icon={icons.plus} onClick={() => openEditor(null)}>New routine</Button>}
+      />
 
-      {error && <div role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</div>}
+      {error && <Notice tone="critical" title="Could not load your routines.">{error}</Notice>}
 
-      <section aria-labelledby="built-in">
-        <h2 id="built-in" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 12px' }}>Built-in</h2>
-        {cleanupError && <div role="alert" style={{ ...cardStyle, borderColor: 'var(--color-critical)', color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>System cleanup does not run: {cleanupError}</div>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {cleanup && <SystemCleanupCard job={cleanup} onEdit={() => setCleanupOpen(true)} onChanged={refresh} />}
-          {digestError && <div role="alert" style={{ ...cardStyle, borderColor: 'var(--color-critical)', color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>Meeting digest does not run: {digestError}</div>}
-          {digest && <MeetingDigestCard job={digest} onEdit={() => setDigestOpen(true)} onChanged={refresh} />}
-        </div>
-      </section>
+      <Section id="built-in" title="Built-in">
+        {cleanupError && <Notice tone="critical" title="System cleanup does not run.">{cleanupError}</Notice>}
+        {cleanup && <SystemCleanupCard job={cleanup} onEdit={() => setCleanupOpen(true)} onChanged={refresh} />}
+        {digestError && <Notice tone="critical" title="Meeting digest does not run.">{digestError}</Notice>}
+        {digest && <MeetingDigestCard job={digest} onEdit={() => setDigestOpen(true)} onChanged={refresh} />}
+      </Section>
 
-      <section aria-labelledby="your-routines">
-        <h2 id="your-routines" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 12px' }}>Your routines</h2>
+      <Section id="your-routines" title="Your routines">
         {routines && routines.length === 0 ? (
-          <div style={cardStyle}>
+          <Card>
             <EmptyState
+              size="compact"
               title="No routines yet"
               description="Set up a task once and let it come back on schedule: meeting prep every other Monday, a weekly report every Friday, a monthly review on the first Monday."
-              action={{ label: 'Create your first routine', onClick: () => openEditor(null) }}
+              action={{ label: 'New routine', onClick: () => openEditor(null) }}
             />
-          </div>
+          </Card>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {(routines ?? []).map((r) => <RoutineCard key={r.id} routine={r} onEdit={() => openEditor(r)} onChanged={refresh} />)}
-          </div>
+          (routines ?? []).map((r) => <RoutineCard key={r.id} routine={r} onEdit={() => openEditor(r)} onChanged={refresh} />)
         )}
-      </section>
+      </Section>
 
-      <section aria-labelledby="run-history">
-        <h2 id="run-history" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 4px' }}>Run history</h2>
-        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '0 0 8px' }}>
-          Every task a routine created, and every run that failed. Checks with nothing to do are not listed.
-        </p>
+      <Section id="run-history" title="Run history" description="Every task a routine created, and every run that failed. Checks with nothing to do are not listed.">
         <RunHistory runs={runs ?? []} />
-      </section>
+      </Section>
 
       <MeetingDigestEditor isOpen={digestOpen} job={digest ?? null} onClose={() => setDigestOpen(false)} onSaved={refresh} />
       <SystemCleanupEditor isOpen={cleanupOpen} job={cleanup ?? null} onClose={() => setCleanupOpen(false)} onSaved={refresh} />
       <RoutineEditor isOpen={editorOpen} routine={editing} onClose={() => setEditorOpen(false)} onSaved={refresh} />
-    </div>
+    </Page>
   );
 }

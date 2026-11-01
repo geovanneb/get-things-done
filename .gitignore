@@ -56,3 +56,6 @@ node-compile-cache/
 # Personal notes for AI coding agents (see AGENTS.md); never commit them
 /AGENTS.local.md
 /CLAUDE.local.md
+
+# Screenshots from `npm run test:visual` (baselines live in ui/visual-baselines/)
+.visual-output/

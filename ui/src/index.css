@@ -44,9 +44,12 @@
   --color-surface-active: oklch(0.93 0.01 258);
   --color-border: oklch(0.88 0.008 258);
   --color-border-strong: oklch(0.80 0.012 258);
+  /* The edge of a field: 3:1 against its surroundings (WCAG 1.4.11). */
+  --color-border-control: oklch(0.645 0.012 258);
   --color-text: oklch(0.26 0.012 258);
-  --color-text-secondary: oklch(0.50 0.015 258);
-  --color-text-muted: oklch(0.68 0.010 258);
+  /* Secondary and muted text meet WCAG AA (4.5:1) on bg, surface and surface-hover. */
+  --color-text-secondary: oklch(0.44 0.015 258);
+  --color-text-muted: oklch(0.53 0.010 258);
   --color-text-on-accent: oklch(1 0 0);
 
   /* Accent */
@@ -58,11 +61,11 @@
   /* Status colors */
   --color-critical: oklch(0.52 0.18 25);
   --color-critical-subtle: oklch(0.96 0.04 25);
-  --color-warning: oklch(0.62 0.16 75);
+  --color-warning: oklch(0.545 0.16 75);
   --color-warning-subtle: oklch(0.97 0.04 75);
-  --color-success: oklch(0.55 0.14 155);
+  --color-success: oklch(0.52 0.14 155);
   --color-success-subtle: oklch(0.96 0.035 155);
-  --color-info: oklch(0.55 0.12 240);
+  --color-info: oklch(0.53 0.12 240);
   --color-info-subtle: oklch(0.95 0.03 240);
 
   /* Nav */
@@ -112,15 +115,62 @@
 
   /* Priority colors */
   --priority-critical: oklch(0.52 0.18 25);
-  --priority-high: oklch(0.62 0.16 75);
-  --priority-medium: oklch(0.55 0.12 240);
-  --priority-low: oklch(0.68 0.010 258);
+  --priority-high: oklch(0.545 0.16 75);
+  --priority-medium: oklch(0.53 0.12 240);
+  --priority-low: oklch(0.53 0.010 258);
 
-  /* Radii */
+  /* Radii: sm for chips and inner controls, md for buttons and fields, lg for cards,
+     xl for dialogs, full for pills, avatars and counts. */
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
+  --radius-full: 999px;
+
+  /* Design system: see docs/design-system.md. Theme-independent, so they live here only. */
+
+  /* Spacing: a 4px scale. Gaps, padding and margins use these steps. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Page frame (components/common/Page.tsx). Narrow: forms and reading.
+     Default: lists and card grids. Wide: dashboards. Full: boards and split views. */
+  --page-gutter: var(--space-6);
+  --page-width-narrow: 800px;
+  --page-width-default: 1120px;
+  --page-width-wide: 1320px;
+  --measure: 68ch;
+
+  /* Controls: buttons, inputs and selects share these heights so they line up in a row. */
+  --control-height-sm: 28px;
+  --control-height-md: 34px;
+  --control-height-lg: 40px;
+
+  /* Layers, lowest to highest. */
+  --z-raised: 1;          /* a control over its own card */
+  --z-dropdown: 50;       /* pickers and tooltips inside the page or a dialog */
+  --z-sticky: 100;        /* sticky headers */
+  --z-floating: 900;      /* the recording panel, a full-screen editor */
+  --z-modal: 1000;        /* dialogs */
+  --z-popover: 1050;      /* menus opened from the app chrome (nav, workspace switcher) */
+  --z-command: 2000;      /* the search palette */
+  --z-toast: 2100;        /* toasts stay above everything */
+
+  /* Line heights */
+  --leading-tight: 1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.7;
+}
+
+@media (max-width: 640px) {
+  :root { --page-gutter: var(--space-4); }
 }
 
 :root[data-theme="dark"] {
@@ -133,9 +183,10 @@
   --color-surface-active: oklch(0.29 0.018 258);
   --color-border: oklch(0.31 0.014 258);
   --color-border-strong: oklch(0.43 0.018 258);
+  --color-border-control: oklch(0.505 0.018 258);
   --color-text: oklch(0.94 0.006 258);
   --color-text-secondary: oklch(0.76 0.012 258);
-  --color-text-muted: oklch(0.60 0.012 258);
+  --color-text-muted: oklch(0.63 0.012 258);
   /* Dark themes use light accents, so text sitting on one must be dark. */
   --color-text-on-accent: oklch(0.17 0.012 258);
 
@@ -192,7 +243,7 @@
   --priority-critical: oklch(0.71 0.17 25);
   --priority-high: oklch(0.79 0.14 75);
   --priority-medium: oklch(0.74 0.11 240);
-  --priority-low: oklch(0.60 0.012 258);
+  --priority-low: oklch(0.63 0.012 258);
 }
 
 body {
@@ -397,7 +448,7 @@ input, textarea, select {
   left: 0;
   right: 0;
   top: calc(100% + 4px);
-  z-index: 50;
+  z-index: var(--z-dropdown);
   max-height: 280px;
   overflow-y: auto;
   background: var(--color-surface);
@@ -575,12 +626,6 @@ input, textarea, select {
   max-height: 70vh;
   overflow-y: auto;
 }
-/* Stack context navigation when a second sidebar would leave no room for the content. */
-@media (max-width: 600px) {
-  .context-layout { flex-direction: column; }
-  .context-navigation { width: 100% !important; height: auto !important; max-height: 180px; }
-}
-
 @media (max-width: 900px) {
   .org-layout { grid-template-columns: minmax(0, 1fr); }
   .org-layout__body { grid-template-columns: minmax(0, 1fr); }
@@ -644,7 +689,7 @@ input, textarea, select {
 .org-layout__editor--fullscreen {
   position: fixed;
   inset: 0;
-  z-index: 900;
+  z-index: var(--z-floating);
   display: flex;
   flex-direction: column;
   border: none;

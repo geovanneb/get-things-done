@@ -1,4 +1,8 @@
 import React from 'react';
+import Button from '@/components/common/Button';
+import IconButton from '@/components/common/IconButton';
+import Notice from '@/components/common/Notice';
+import Page from '@/components/common/Page';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { SituationData } from '../types';
@@ -7,7 +11,6 @@ import { useStakeholderNames } from '../hooks/useStakeholderNames';
 import { usePendingActions, TONE_COLOR, type PendingAction } from '../hooks/usePendingActions';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
-import EmptyState from '../components/common/EmptyState';
 import { formatDate, formatDueStatus, formatRelativeTime, formatStatusLabel } from '../utils/format';
 
 /* ---- Metric Card -------------------------------------------------- */
@@ -24,13 +27,12 @@ function MetricCard({
 }) {
   return (
     <div
+      className="gtd-card"
       style={{
+        flexDirection: 'row',
         flex: '1 1 0',
         minWidth: 0,
-        padding: '18px 20px',
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
+        padding: 'var(--space-4) var(--space-5)',
         display: 'flex',
         alignItems: 'center',
         gap: 14,
@@ -64,31 +66,15 @@ function MetricCard({
 // Steps only the user can take (review, run a command, fix a routine): the same ones the nav marks with a dot.
 function WaitingOnYou({ items }: { items: PendingAction[] }) {
   return (
-    <section
-      aria-labelledby="waiting-heading"
-      style={{
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '14px 16px',
-      }}
-    >
-      <h2 id="waiting-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600, margin: '0 0 10px' }}>
-        Waiting on you
-      </h2>
+    <section aria-labelledby="waiting-heading" className="gtd-card" style={{ padding: 'var(--space-4) var(--space-5)', gap: 'var(--space-3)' }}>
+      <h2 id="waiting-heading" className="gtd-card__title">Waiting on you</h2>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8 }}>
         {items.map((item) => (
           <li key={item.navPath}>
             <Link
               to={item.to}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', height: '100%',
-                border: '1px solid var(--color-border)', borderLeft: `3px solid ${TONE_COLOR[item.tone]}`,
-                borderRadius: 'var(--radius-md)', background: 'var(--color-bg)',
-                color: 'var(--color-text)', textDecoration: 'none', fontSize: 'var(--text-sm)',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-hover)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--color-bg)'; }}
+              className="gtd-action-tile"
+              style={{ borderLeftColor: TONE_COLOR[item.tone] }}
             >
               <span style={{ flex: 1, minWidth: 0 }}>{item.label}</span>
               <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>→</span>
@@ -265,13 +251,14 @@ export default function SituationView() {
   const navigate = useNavigate();
   const pending = usePendingActions();
 
-  if (loading) return <LoadingSpinner text="Loading situation..." />;
+  if (loading) return <LoadingSpinner text="Loading your situation…" />;
   if (!data) {
     return (
-      <EmptyState
-        title="No situation data"
-        description="Could not load the situation board. Check that the backend is running."
-      />
+      <Page width="wide">
+        <Notice tone="critical" title="Could not load your situation." action={<Button size="sm" onClick={() => window.location.reload()}>Reload</Button>}>
+          The dashboard did not get an answer from its server. Check that Get Things Done is still running, then reload.
+        </Notice>
+      </Page>
     );
   }
 
@@ -280,7 +267,7 @@ export default function SituationView() {
   in14.setDate(today.getDate() + 14);
 
   return (
-    <div className="situation" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1280, margin: '0 auto' }}>
+    <Page width="wide" className="situation">
       {/* Metric cards */}
       <div className="situation__metrics" role="region" aria-label="Key metrics">
         <MetricCard
@@ -309,7 +296,7 @@ export default function SituationView() {
         <MetricCard
           label="Blocked"
           count={data.blocked_count}
-          color="oklch(0.62 0.16 35)"
+          color="var(--color-critical)"
           icon={
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
               <circle cx="10" cy="10" r="8.5" stroke="currentColor" strokeWidth="1.5" />
@@ -338,20 +325,15 @@ export default function SituationView() {
           {/* Attention Queue */}
           <section
             aria-labelledby="attention-heading"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
-            }}
+            className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
-            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 id="attention-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Needs attention</h2>
+            <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
+              <h2 id="attention-heading" className="gtd-card__title">Needs attention</h2>
               <Badge variant="error" size="sm">{data.attention_queue.length}</Badge>
             </div>
 
             {data.attention_queue.length === 0 ? (
-              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+              <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
                 Nothing needs attention right now.
               </div>
             ) : (
@@ -361,7 +343,7 @@ export default function SituationView() {
                     key={item.id}
                     className="situation__attention-row"
                     style={{
-                      padding: '11px 18px',
+                      padding: '12px 20px',
                       borderBottom: idx < data.attention_queue.length - 1 ? '1px solid var(--color-border)' : 'none',
                     }}
                   >
@@ -388,27 +370,8 @@ export default function SituationView() {
                     <div className="situation__attention-meta">
                     <DueDateChip dueDate={item.due_date} />
                     <StakeholderAvatars names={item.stakeholders} />
-                    <button
-                      aria-label="Open task"
-                      onClick={() => navigate(`/board/task/${item.id}`)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 26,
-                        height: 26,
-                        borderRadius: 'var(--radius-sm)',
-                        border: '1px solid var(--color-border)',
-                        background: 'transparent',
-                        cursor: 'pointer',
-                        color: 'var(--color-text-muted)',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                        <path d="M2.5 6H9.5M6.5 3L9.5 6L6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
+                    <IconButton label={`Open ${item.title}`} outline onClick={() => navigate(`/board/task/${item.id}`)}
+                      icon={<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6H9.5M6.5 3L9.5 6L6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
                     </div>
                   </li>
                 ))}
@@ -419,22 +382,17 @@ export default function SituationView() {
           {/* Upcoming commitments */}
           <section
             aria-labelledby="upcoming-heading"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
-            }}
+            className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
-            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 id="upcoming-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Upcoming commitments</h2>
+            <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
+              <h2 id="upcoming-heading" className="gtd-card__title">Upcoming commitments</h2>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                 next 14 days
               </span>
             </div>
 
             {data.upcoming_commitments.length === 0 ? (
-              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+              <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
                 No upcoming commitments.
               </div>
             ) : (
@@ -450,7 +408,7 @@ export default function SituationView() {
                           key={h}
                           scope="col"
                           style={{
-                            padding: '8px 18px 8px',
+                            padding: '8px 20px',
                             textAlign: 'left',
                             fontSize: 'var(--text-xs)',
                             fontWeight: 600,
@@ -475,18 +433,18 @@ export default function SituationView() {
                         }}
                         onClick={() => navigate(`/board/task/${c.id}`)}
                       >
-                        <td style={{ padding: '10px 18px', whiteSpace: 'nowrap' }}>
+                        <td style={{ padding: '10px 20px', whiteSpace: 'nowrap' }}>
                           <DueDateChip dueDate={c.due_date} />
                         </td>
-                        <td style={{ padding: '10px 18px', maxWidth: 280 }}>
+                        <td style={{ padding: '10px 20px', maxWidth: 280 }}>
                           <Link to={`/board/task/${c.id}`} className="truncate situation__task-link" title={c.title}
                             onClick={(e) => e.stopPropagation()}
                             style={{ display: 'block', fontWeight: 500, color: 'inherit', textDecoration: 'none' }}>{c.title}</Link>
                         </td>
-                        <td style={{ padding: '10px 18px' }}>
+                        <td style={{ padding: '10px 20px' }}>
                           <StakeholderAvatars names={c.stakeholders} />
                         </td>
-                        <td style={{ padding: '10px 18px' }}>
+                        <td style={{ padding: '10px 20px' }}>
                           <Badge size="sm">{c.task_type}</Badge>
                         </td>
                       </tr>
@@ -500,15 +458,10 @@ export default function SituationView() {
           {/* Workflow snapshot */}
           <section
             aria-labelledby="workflow-heading"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
-            }}
+            className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
-            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)' }}>
-              <h2 id="workflow-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Workflow snapshot</h2>
+            <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
+              <h2 id="workflow-heading" className="gtd-card__title">Workflow snapshot</h2>
             </div>
             <div className="situation__snapshot">
               <div>
@@ -536,20 +489,15 @@ export default function SituationView() {
           {/* Current focus */}
           <section
             aria-labelledby="focus-heading"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
-            }}
+            className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
-            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <h2 id="focus-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Current focus</h2>
+            <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
+              <h2 id="focus-heading" className="gtd-card__title">Current focus</h2>
               <Badge variant="accent" size="sm">{data.current_focus.length}</Badge>
             </div>
 
             {data.current_focus.length === 0 ? (
-              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+              <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
                 No tasks in progress.
               </div>
             ) : (
@@ -560,7 +508,7 @@ export default function SituationView() {
                     <div
                       key={task.id}
                       style={{
-                        padding: '14px 18px',
+                        padding: '14px 20px',
                         borderBottom: idx < data.current_focus.length - 1 ? '1px solid var(--color-border)' : 'none',
                       }}
                     >
@@ -614,18 +562,13 @@ export default function SituationView() {
           {/* Recent activity */}
           <section
             aria-labelledby="activity-heading"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-lg)',
-              overflow: 'hidden',
-            }}
+            className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
-            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--color-border)' }}>
-              <h2 id="activity-heading" style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>Recent activity</h2>
+            <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
+              <h2 id="activity-heading" className="gtd-card__title">Recent activity</h2>
             </div>
             {data.recent_activity.length === 0 ? (
-              <div style={{ padding: '24px 18px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
+              <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
                 No recent activity.
               </div>
             ) : (
@@ -637,7 +580,7 @@ export default function SituationView() {
                       display: 'flex',
                       alignItems: 'flex-start',
                       gap: 10,
-                      padding: '10px 18px',
+                      padding: '10px 20px',
                       borderBottom: i < data.recent_activity.length - 1 ? '1px solid var(--color-border)' : 'none',
                     }}
                   >
@@ -682,6 +625,6 @@ export default function SituationView() {
           </section>
         </div>
       </div>
-    </div>
+    </Page>
   );
 }

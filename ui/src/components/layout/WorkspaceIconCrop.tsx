@@ -104,7 +104,7 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
   } : undefined;
 
   return (
-    <Modal isOpen={file !== null} onClose={() => { if (!saving) onClose(); }} title="Workspace Picture" size="sm">
+    <Modal isOpen={file !== null} onClose={() => { if (!saving) onClose(); }} title="Workspace picture" size="sm">
       <p style={{ margin: '0 0 16px 0', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
         Drag to move the picture, and zoom to choose what shows. It stays on this computer.
       </p>

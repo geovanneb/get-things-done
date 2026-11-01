@@ -67,7 +67,7 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
 
   return (
     <div>
-      <label style={sectionLabelStyle} id={labelId}>
+      <label style={sectionLabelStyle} id={labelId} htmlFor={`${labelId}-input`}>
         {label}
       </label>
 
@@ -101,6 +101,7 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
         aria-labelledby={labelId}
       >
         <input
+          id={`${labelId}-input`}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

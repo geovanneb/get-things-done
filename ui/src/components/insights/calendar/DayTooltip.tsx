@@ -25,7 +25,7 @@ function Frame({ rect, children }: { rect: DOMRect; children: React.ReactNode })
         borderRadius: 'var(--radius-md)',
         boxShadow: 'var(--shadow-md)',
         pointerEvents: 'none',
-        zIndex: 50,
+        zIndex: 'var(--z-dropdown)',
         fontSize: 'var(--text-xs)',
         color: 'var(--color-text-secondary)',
       }}

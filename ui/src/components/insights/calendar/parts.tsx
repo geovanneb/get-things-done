@@ -1,3 +1,4 @@
+import { SegmentedControl } from '@/components/common/Tabs';
 import React from 'react';
 import { RAMP } from '../palette';
 import { STEPS } from './calendarModel';
@@ -46,45 +47,7 @@ export function Segmented<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
-  return (
-    <div
-      role="group"
-      aria-label={label}
-      style={{
-        display: 'inline-flex',
-        flexWrap: 'wrap',
-        border: '1px solid var(--color-border)',
-        borderRadius: 'var(--radius-md)',
-        overflow: 'hidden',
-        backgroundColor: 'var(--color-surface)',
-      }}
-    >
-      {options.map((option, i) => {
-        const active = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(option.value)}
-            style={{
-              padding: '5px 12px',
-              fontSize: 'var(--text-sm)',
-              fontWeight: active ? 600 : 400,
-              fontFamily: 'inherit',
-              color: active ? 'var(--color-text-on-accent)' : 'var(--color-text-secondary)',
-              backgroundColor: active ? 'var(--color-accent)' : 'transparent',
-              border: 'none',
-              borderLeft: i === 0 ? 'none' : '1px solid var(--color-border)',
-              cursor: 'pointer',
-            }}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
+  return <SegmentedControl label={label} value={value} onChange={onChange} options={options} />;
 }
 
 /** "Less [] [] [] More", with the value each step covers under its swatch. */

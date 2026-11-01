@@ -1,0 +1,564 @@
+/* ---------------------------------------------------------------------------
+   Shared primitives (components/common). See docs/design-system.md.
+
+   The app styles components inline with tokens. The primitives below use classes
+   instead, because they need what inline styles cannot express: hover, active,
+   focus and disabled states, and responsive rules. Pages should not add classes
+   here; they compose the components.
+   --------------------------------------------------------------------------- */
+
+@keyframes gtd-spin { to { transform: rotate(360deg); } }
+.gtd-spin { animation: gtd-spin 0.7s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .gtd-spin { animation-duration: 2s; }
+}
+
+/* ---- Page frame ------------------------------------------------------- */
+.gtd-page {
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--page-gutter);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+.gtd-page--narrow { max-width: calc(var(--page-width-narrow) + 2 * var(--page-gutter)); }
+.gtd-page--default { max-width: calc(var(--page-width-default) + 2 * var(--page-gutter)); }
+.gtd-page--wide { max-width: calc(var(--page-width-wide) + 2 * var(--page-gutter)); }
+.gtd-page--full { max-width: none; }
+/* Full-bleed views (board, split panes) own their padding. */
+.gtd-page--flush { padding: 0; gap: 0; height: 100%; }
+
+.gtd-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+}
+.gtd-page-header__text { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.gtd-page-header__description {
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--color-text-secondary);
+  max-width: var(--measure);
+}
+.gtd-page-header__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+.gtd-page-header__toolbar {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+@media (max-width: 640px) {
+  .gtd-page-header__actions { margin-left: 0; width: 100%; }
+  .gtd-page-header__actions > .gtd-search { flex: 1 1 100%; }
+}
+
+/* ---- Card ------------------------------------------------------------- */
+.gtd-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gtd-card--interactive { cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s; }
+.gtd-card--interactive:hover { border-color: var(--color-border-strong); box-shadow: var(--shadow-sm); }
+.gtd-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-5) 0;
+}
+.gtd-card--flush > .gtd-card__header {
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.gtd-card__heading { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gtd-card__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+  color: var(--color-text);
+}
+.gtd-card__description { font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--color-text-muted); }
+.gtd-card__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.gtd-card__body { flex: 1; padding: var(--space-4) var(--space-5) var(--space-5); min-width: 0; }
+.gtd-card--compact .gtd-card__header { padding: var(--space-3) var(--space-4) 0; }
+.gtd-card--compact .gtd-card__body { padding: var(--space-3) var(--space-4) var(--space-4); }
+.gtd-card--compact .gtd-card__footer { padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4); }
+.gtd-card--flush > .gtd-card__body { padding: 0; }
+.gtd-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Equivalent cards in a responsive grid: one column on a phone, more as the page widens. */
+.gtd-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: var(--space-4);
+}
+
+/* ---- Buttons ---------------------------------------------------------- */
+.gtd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s, color 0.1s, filter 0.1s;
+  text-decoration: none;
+}
+.gtd-btn--sm { height: var(--control-height-sm); padding: 0 10px; font-size: var(--text-sm); }
+.gtd-btn--md { height: var(--control-height-md); padding: 0 14px; font-size: var(--text-base); }
+.gtd-btn--lg { height: var(--control-height-lg); padding: 0 18px; font-size: var(--text-md); }
+.gtd-btn--block { width: 100%; }
+
+.gtd-btn--primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-text-on-accent); }
+.gtd-btn--primary:hover:not(:disabled) { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+.gtd-btn--secondary { background: var(--color-surface); border-color: var(--color-border-strong); color: var(--color-text); }
+.gtd-btn--secondary:hover:not(:disabled) { background: var(--color-surface-hover); }
+.gtd-btn--ghost { background: transparent; color: var(--color-text-secondary); }
+.gtd-btn--ghost:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.gtd-btn--danger {
+  background: var(--color-critical-subtle);
+  border-color: color-mix(in oklch, var(--color-critical) 25%, transparent);
+  color: var(--color-critical);
+}
+.gtd-btn--danger:hover:not(:disabled) { border-color: var(--color-critical); }
+.gtd-btn:active:not(:disabled) { filter: brightness(0.95); }
+.gtd-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.gtd-btn[aria-busy="true"] { cursor: progress; }
+
+/* Square icon-only button. 28px minimum keeps it above the WCAG 2.2 24px target size. */
+.gtd-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.gtd-icon-btn--sm { width: var(--control-height-sm); height: var(--control-height-sm); }
+.gtd-icon-btn--md { width: var(--control-height-md); height: var(--control-height-md); }
+.gtd-icon-btn--outline { border-color: var(--color-border-strong); background: var(--color-surface); }
+.gtd-icon-btn:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.gtd-icon-btn--danger:hover:not(:disabled) { background: var(--color-critical-subtle); color: var(--color-critical); }
+.gtd-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Form controls ---------------------------------------------------- */
+.gtd-control {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.gtd-control:not(textarea) { height: var(--control-height-md); padding: 0 10px; }
+.gtd-control--sm:not(textarea) { height: var(--control-height-sm); font-size: var(--text-sm); padding: 0 8px; }
+textarea.gtd-control { padding: 8px 10px; line-height: var(--leading-normal); resize: vertical; }
+select.gtd-control { padding-right: 6px; cursor: pointer; }
+.gtd-control::placeholder { color: var(--color-text-muted); }
+.gtd-control:hover:not(:disabled) { border-color: var(--color-text-secondary); }
+.gtd-control:focus-visible,
+.gtd-control:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-subtle);
+  outline: none;
+}
+.gtd-control[aria-invalid="true"] { border-color: var(--color-critical); }
+.gtd-control[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px var(--color-critical-subtle); }
+.gtd-control:disabled { opacity: 0.6; cursor: not-allowed; background: var(--color-bg); }
+.gtd-control--with-icon:not(textarea) { padding-left: 32px; }
+
+.gtd-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.gtd-field__label { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-secondary); }
+.gtd-field__required { color: var(--color-critical); margin-left: 2px; }
+.gtd-field__optional { color: var(--color-text-muted); font-weight: 400; margin-left: 4px; }
+.gtd-field__hint { font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--color-text-muted); }
+.gtd-field__error { font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--color-critical); }
+
+/* Label beside value on wide screens (settings), stacked on a phone. */
+.gtd-field-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.gtd-field-row:last-child { border-bottom: none; }
+.gtd-field-row__label { font-size: var(--text-sm); font-weight: 500; color: var(--color-text-secondary); }
+.gtd-field-row__value { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+@media (max-width: 640px) {
+  .gtd-field-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Dialog action row: secondary actions first, the primary action last, on the right. */
+.gtd-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.gtd-form-actions__start { margin-right: auto; display: flex; gap: var(--space-2); }
+
+/* ---- Tabs and segmented controls -------------------------------------- */
+.gtd-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.gtd-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.gtd-tab:hover { color: var(--color-text); }
+.gtd-tab[aria-selected="true"] { color: var(--color-text); font-weight: 600; border-bottom-color: var(--color-accent); }
+
+.gtd-segmented {
+  display: inline-flex;
+  max-width: 100%;
+  gap: 2px;
+  padding: 3px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.gtd-segmented__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: calc(var(--control-height-sm) - 4px);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+.gtd-segmented__option:hover { color: var(--color-text); }
+.gtd-segmented__option[aria-pressed="true"],
+.gtd-segmented__option[aria-checked="true"] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---- Modal ------------------------------------------------------------ */
+.gtd-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+}
+.gtd-modal__scrim { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); }
+.gtd-modal__panel {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  outline: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+}
+.gtd-modal__panel--sm { max-width: 420px; }
+.gtd-modal__panel--md { max-width: 560px; }
+.gtd-modal__panel--lg { max-width: 720px; }
+.gtd-modal__panel--xl { max-width: 960px; }
+.gtd-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.gtd-modal__title { font-size: var(--text-md); font-weight: 600; line-height: var(--leading-tight); color: var(--color-text); }
+.gtd-modal__description { margin-top: var(--space-1); font-size: var(--text-sm); color: var(--color-text-secondary); line-height: var(--leading-normal); }
+.gtd-modal__body { flex: 1; overflow-y: auto; padding: var(--space-5); }
+.gtd-modal__footer {
+  flex-shrink: 0;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+@media (max-width: 640px) {
+  .gtd-modal { padding: var(--space-3) var(--space-2); align-items: flex-end; }
+  .gtd-modal__header, .gtd-modal__body, .gtd-modal__footer { padding-left: var(--space-4); padding-right: var(--space-4); }
+}
+
+/* ---- Notice ----------------------------------------------------------- */
+.gtd-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: 10px 14px;
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+}
+.gtd-notice__icon { flex-shrink: 0; display: flex; margin-top: 2px; }
+.gtd-notice__body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.gtd-notice__title { font-weight: 600; }
+.gtd-notice__action { flex-shrink: 0; display: flex; gap: var(--space-2); align-self: center; }
+.gtd-notice--info { background: var(--color-info-subtle); border-color: color-mix(in oklch, var(--color-info) 30%, transparent); }
+.gtd-notice--info .gtd-notice__icon { color: var(--color-info); }
+.gtd-notice--success { background: var(--color-success-subtle); border-color: color-mix(in oklch, var(--color-success) 30%, transparent); }
+.gtd-notice--success .gtd-notice__icon { color: var(--color-success); }
+.gtd-notice--warning { background: var(--color-warning-subtle); border-color: color-mix(in oklch, var(--color-warning) 35%, transparent); }
+.gtd-notice--warning .gtd-notice__icon { color: var(--color-warning); }
+.gtd-notice--critical { background: var(--color-critical-subtle); border-color: color-mix(in oklch, var(--color-critical) 30%, transparent); }
+.gtd-notice--critical .gtd-notice__icon { color: var(--color-critical); }
+
+/* ---- Tables ----------------------------------------------------------- */
+/* A table scrolls sideways inside its card instead of widening the page. Relative, so visually hidden
+   (.sr-only, absolutely positioned) header text stays inside the scroll box instead of widening the window. */
+.gtd-table-wrap { position: relative; overflow-x: auto; }
+.gtd-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.gtd-table th {
+  padding: 10px var(--space-4);
+  text-align: left;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.gtd-table td { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border); vertical-align: middle; color: var(--color-text); }
+.gtd-table tr:last-child td { border-bottom: none; }
+.gtd-table tbody tr:hover { background: var(--color-surface-hover); }
+
+/* ---- Form layout ------------------------------------------------------ */
+/* Two columns in a dialog or card; one on a phone. `.gtd-span-2` takes a full row. */
+.gtd-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.gtd-form-grid > .gtd-span-2 { grid-column: 1 / -1; }
+@media (max-width: 640px) {
+  .gtd-form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.gtd-stack { display: flex; flex-direction: column; gap: var(--space-4); }
+
+/* Sortable column header: the button is the keyboard target, the th carries aria-sort. */
+.gtd-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+}
+.gtd-sort-btn:hover { color: var(--color-text); }
+/* The name link of a row: the record's main way in. */
+.gtd-link-strong { font-weight: 600; color: var(--color-text); }
+.gtd-link-strong:hover { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.gtd-link { color: var(--color-accent); font-weight: 500; }
+.gtd-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---- Split view ------------------------------------------------------- */
+/* A section list beside the content (Context). The list stacks above the content on a phone. */
+.gtd-split { display: flex; height: 100%; min-height: 0; overflow: hidden; }
+.gtd-split__nav {
+  width: 220px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+}
+.gtd-split__main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.gtd-split__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--page-gutter);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.gtd-split__title { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-lg); font-weight: 600; color: var(--color-text); }
+.gtd-split__body { flex: 1; overflow-y: auto; padding: var(--space-5) var(--page-gutter); }
+@media (max-width: 640px) {
+  .gtd-split { flex-direction: column; overflow-y: auto; }
+  .gtd-split__nav { width: 100%; max-height: 200px; border-right: none; border-bottom: 1px solid var(--color-border); }
+  .gtd-split__main { overflow: visible; }
+  .gtd-split__body { overflow: visible; }
+  .gtd-split__header .gtd-page-header__actions { width: 100%; }
+}
+
+.gtd-subnav__label {
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.gtd-subnav__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  text-align: left;
+  color: var(--color-text);
+}
+.gtd-subnav__item:hover { background: var(--color-surface-hover); }
+.gtd-subnav__item[aria-current="page"], .gtd-subnav__item[aria-current="true"] {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+/* A link to a step only the user can take ("1 task waiting for your review"). The left border carries the tone. */
+.gtd-action-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+.gtd-action-tile:hover { background: var(--color-surface-hover); }
+
+/* ---- Record detail dialog (task) -------------------------------------- */
+/* A large dialog with content beside a field sidebar. Full screen on a phone, sidebar under the content. */
+.gtd-modal__panel--detail { max-width: 1200px; height: min(92vh, 860px); }
+.gtd-detail { display: flex; gap: var(--space-6); flex: 1; min-height: 0; }
+.gtd-detail__main { flex: 1; min-width: 0; overflow-y: auto; padding-right: var(--space-1); }
+.gtd-detail__aside {
+  width: 316px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding-left: var(--space-5);
+  border-left: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+@media (max-width: 760px) {
+  .gtd-modal:has(.gtd-modal__panel--detail) { padding: 0; }
+  .gtd-modal__panel--detail { height: 100%; max-height: none; border-radius: 0; border: none; }
+  .gtd-detail { flex-direction: column; overflow-y: auto; }
+  .gtd-detail__main, .gtd-detail__aside { overflow: visible; }
+  .gtd-detail__aside { width: 100%; padding-left: 0; border-left: none; padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+}
+/* An input that looks like a heading until it is focused (an editable title). */
+.gtd-title-input {
+  display: block;
+  width: 100%;
+  padding: 2px 4px;
+  margin-left: -4px;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  color: var(--color-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.gtd-title-input:hover { border-color: var(--color-border); }
+.gtd-title-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 3px var(--color-accent-subtle); }
+
+/* A bar of filters above a full-width view (Board). Wraps on a narrow screen. */
+.gtd-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--page-gutter);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+
+/* A large option button: a heading and a line of text (Setup). The recommended one is tinted. */
+.gtd-choice {
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  text-align: left;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.12s, background 0.12s;
+}
+.gtd-choice:hover { border-color: var(--color-accent); }
+.gtd-choice--primary { border-color: var(--color-accent); background: var(--color-accent-subtle); }
+.gtd-choice--primary:hover { background: var(--color-accent-subtle-hover); }

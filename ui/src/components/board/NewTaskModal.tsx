@@ -5,7 +5,10 @@ import Button from '@/components/common/Button';
 import StakeholderPicker from '@/components/task-form/StakeholderPicker';
 import DeliverableList from '@/components/task-form/DeliverableList';
 import { DeliverableItem } from '@/components/task-form/DeliverableRow';
-import { selectStyle, dateInputStyle, textareaStyle, sectionLabelStyle } from '@/components/task-form/styles';
+import { sectionLabelStyle } from '@/components/task-form/styles';
+import Input, { Field, Select } from '@/components/common/Input';
+import IconButton, { icons } from '@/components/common/IconButton';
+import Notice from '@/components/common/Notice';
 import { apiPost } from '@/utils/api';
 import { useApi } from '@/hooks/useApi';
 import { formatStatusLabel, formatPriorityLabel } from '@/utils/format';
@@ -62,24 +65,6 @@ const defaultForm = (defaultStatus?: Task['status'], draft?: NewTaskDraft): Form
   deliverables: (draft?.deliverables ?? []).map((d, i) => ({ ...d, id: `DEL-${String(i + 1).padStart(2, '0')}` })),
   preferred_agent: draft?.preferred_agent ?? '',
 });
-
-function SidebarField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{
-        fontSize: 'var(--text-xs)',
-        fontWeight: 600,
-        color: 'var(--color-text-muted)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        marginBottom: 6,
-      }}>
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
 
 export default function NewTaskModal({
   isOpen,
@@ -199,7 +184,7 @@ export default function NewTaskModal({
       onCreated?.(created, uploadErrors, existing);
       onClose();
     } catch (err: any) {
-      setSaveError(err?.message ?? 'Failed to create task. Please try again.');
+      setSaveError(err?.message ?? 'Could not create the task. Try again.');
     } finally {
       setSaving(false);
       setProgress('');
@@ -208,231 +193,103 @@ export default function NewTaskModal({
 
   if (!isOpen) return null;
 
-  const overlayStyle: React.CSSProperties = {
-    position: 'fixed',
-    inset: 0,
-    zIndex: 1000,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  };
-
-  const panelStyle: React.CSSProperties = {
-    position: 'relative',
-    zIndex: 1,
-    width: 'min(92vw, 1200px)',
-    height: 'min(92vh, 860px)',
-    background: 'var(--color-surface)',
-    borderRadius: 'var(--radius-xl)',
-    border: '1px solid var(--color-border)',
-    boxShadow: 'var(--shadow-lg)',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  };
+  const statuses = ['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'] as Task['status'][];
+  const agentOptions = [
+    { value: '', label: 'No preference' },
+    ...(form.preferred_agent && !(agents ?? []).some((a) => a.name === form.preferred_agent) ? [{ value: form.preferred_agent, label: form.preferred_agent }] : []),
+    ...(agents ?? []).map((a) => ({ value: a.name, label: a.name })),
+  ];
 
   return ReactDOM.createPortal(
-    <div role="dialog" aria-modal="true" aria-label="New Task" style={overlayStyle}>
-      <div
-        aria-hidden="true"
-        onClick={onClose}
-        style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }}
-      />
+    <div className="gtd-modal" role="dialog" aria-modal="true" aria-labelledby="new-task-heading">
+      <div className="gtd-modal__scrim" aria-hidden="true" onClick={onClose} />
 
-      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
+      <div ref={panelRef} tabIndex={-1} className="gtd-modal__panel gtd-modal__panel--detail">
         {/* Header */}
-        <div style={{
-          padding: '12px 20px',
-          borderBottom: '1px solid var(--color-border)',
-          background: 'var(--color-surface)',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <span style={{
-              fontSize: 'var(--text-xs)',
-              fontFamily: 'var(--font-mono)',
-              color: 'var(--color-text-muted)',
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '1px 6px',
-              flexShrink: 0,
-            }}>
-              New Task
-            </span>
-            <span style={{ flex: 1 }} />
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 28, height: 28, borderRadius: 'var(--radius-md)',
-                border: 'none', background: 'transparent', cursor: 'pointer',
-                color: 'var(--color-text-muted)', flexShrink: 0,
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-surface-hover)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </button>
+        <div className="gtd-modal__header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-2)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <h2 id="new-task-heading" className="gtd-modal__title" style={{ flex: 1 }}>New task</h2>
+            {progress && <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{progress}</span>}
+            <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>Create task</Button>
+            <IconButton label="Close dialog" icon={icons.close} onClick={onClose} disabled={saving} />
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <input
-                type="text"
-                value={form.title}
-                onChange={(e) => {
-                  setField('title', e.target.value);
-                  if (titleError) setTitleError('');
-                }}
-                placeholder="What needs to get done?"
-                style={{
-                  display: 'block', width: '100%', marginBottom: titleError ? 4 : 8,
-                  fontSize: 'var(--text-lg)', fontWeight: 700, lineHeight: 1.3,
-                  background: 'transparent', border: 'none', outline: 'none',
-                  color: 'var(--color-text)', padding: 0,
-                  borderBottom: `1px solid ${titleError ? 'var(--color-critical)' : 'transparent'}`,
-                }}
-                onFocus={(e) => {
-                  if (!titleError) (e.currentTarget as HTMLInputElement).style.borderBottomColor = 'var(--color-border-strong)';
-                }}
-                onBlur={(e) => {
-                  if (!titleError) (e.currentTarget as HTMLInputElement).style.borderBottomColor = 'transparent';
-                }}
-              />
-              {titleError && (
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-critical)', marginBottom: 4 }}>
-                  {titleError}
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-              {saveError && (
-                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-critical)' }}>
-                  {saveError}
-                </span>
-              )}
-              {progress && (
-                <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  {progress}
-                </span>
-              )}
-              <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>
-                Cancel
-              </Button>
-              <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>
-                Create Task
-              </Button>
-            </div>
-          </div>
+          <input
+            type="text"
+            aria-label="Task title"
+            aria-required="true"
+            aria-invalid={titleError ? true : undefined}
+            aria-describedby={titleError ? 'new-task-title-error' : undefined}
+            className="gtd-title-input"
+            value={form.title}
+            onChange={(e) => {
+              setField('title', e.target.value);
+              if (titleError) setTitleError('');
+            }}
+            placeholder="What needs to get done?"
+            style={titleError ? { borderColor: 'var(--color-critical)' } : undefined}
+          />
+          {titleError && <span id="new-task-title-error" className="gtd-field__error">{titleError}</span>}
         </div>
 
         {/* Body: main + sidebar */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', padding: '20px', gap: 24, minHeight: 0 }}>
-          {/* Main content */}
-          <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 4 }}>
-            {/* Objective */}
-            <div style={{ marginBottom: 24 }}>
-              <h3 style={{ ...sectionLabelStyle, marginBottom: 8 }}>Objective</h3>
-              <MentionTextarea
-                rows={6}
-                value={form.objective}
-                onChange={(v) => setField('objective', v)}
-                placeholder="Describe the goal or context for this task... Type @ to mention a stakeholder, template, context note or task."
-                style={textareaStyle}
-              />
-            </div>
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)', gap: 'var(--space-4)', minHeight: 0 }}>
+          {saveError && <Notice tone="critical" title="The task was not created.">{saveError}</Notice>}
+          <div className="gtd-detail">
+            <div className="gtd-detail__main">
+              <Field label="Objective" htmlFor="new-task-objective" hint="Type @ to mention a stakeholder, template, context note or task." style={{ marginBottom: 'var(--space-6)' }}>
+                <MentionTextarea
+                  id="new-task-objective"
+                  className="gtd-control"
+                  rows={6}
+                  value={form.objective}
+                  onChange={(v) => setField('objective', v)}
+                  placeholder="Describe the goal or context for this task"
+                />
+              </Field>
 
-            {/* Deliverables */}
-            <div style={{ marginBottom: 24 }}>
-              <DeliverableList
-                items={form.deliverables}
-                onChange={updateDeliverable}
-                onRemove={removeDeliverable}
-                onAdd={addDeliverable}
-                label="Output type"
-                emptyText="No outputs defined yet."
-              />
-            </div>
+              <div style={{ marginBottom: 'var(--space-6)' }}>
+                <DeliverableList
+                  items={form.deliverables}
+                  onChange={updateDeliverable}
+                  onRemove={removeDeliverable}
+                  onAdd={addDeliverable}
+                  label="Output type"
+                  emptyText="No outputs defined yet."
+                />
+              </div>
 
-            {/* Files: attached right after the task is created */}
-            <div style={{ marginBottom: 24 }}>
-              <h3 style={{ ...sectionLabelStyle, marginBottom: 8 }}>Files</h3>
-              <DropZone onFiles={addFiles} compact />
-              {files.length > 0 && (
-                <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {files.map((f) => (
-                    <li key={`${f.name}-${f.size}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
-                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
-                      <span style={{ fontSize: 'var(--text-xs)', color: f.size > MAX_FILE ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
-                      <button type="button" aria-label={`Remove ${f.name}`} disabled={saving} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))}
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 4px', fontSize: 'var(--text-base)' }}>×</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          {/* Sidebar */}
-          <div style={{ width: 316, flexShrink: 0, overflowY: 'auto', paddingLeft: 4, borderLeft: '1px solid var(--color-border)' }}>
-            <SidebarField label="Status">
-              <select
-                value={form.status}
-                onChange={(e) => setField('status', e.target.value as Task['status'])}
-                style={{ ...selectStyle, width: '100%', padding: '6px 10px', fontSize: 'var(--text-sm)', borderRadius: 'var(--radius-md)' }}
-              >
-                {(['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'] as Task['status'][]).map((s) => (
-                  <option key={s} value={s}>{formatStatusLabel(s)}</option>
-                ))}
-              </select>
-            </SidebarField>
-
-            <SidebarField label="Priority">
-              <select
-                value={form.priority}
-                onChange={(e) => setField('priority', e.target.value as Task['priority'])}
-                style={{ ...selectStyle, width: '100%', padding: '6px 10px', fontSize: 'var(--text-sm)', borderRadius: 'var(--radius-md)' }}
-              >
-                {(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => (
-                  <option key={p} value={p}>{formatPriorityLabel(p)}</option>
-                ))}
-              </select>
-            </SidebarField>
-
-            <SidebarField label="Due date">
-              <input
-                type="date"
-                value={form.due_date}
-                onChange={(e) => setField('due_date', e.target.value)}
-                style={{ ...dateInputStyle, width: '100%' }}
-              />
-            </SidebarField>
-
-            <SidebarField label="Preferred agent">
-              <select
-                aria-label="Preferred agent"
-                value={form.preferred_agent}
-                onChange={(e) => setField('preferred_agent', e.target.value)}
-                style={{ ...selectStyle, width: '100%', padding: '6px 10px', fontSize: 'var(--text-sm)', borderRadius: 'var(--radius-md)' }}
-              >
-                <option value="">No preference</option>
-                {form.preferred_agent && !(agents ?? []).some((a) => a.name === form.preferred_agent) && (
-                  <option value={form.preferred_agent}>{form.preferred_agent}</option>
+              {/* Files: attached right after the task is created */}
+              <div style={{ marginBottom: 'var(--space-6)' }}>
+                <h3 style={{ ...sectionLabelStyle, marginBottom: 'var(--space-2)' }}>Files</h3>
+                <DropZone onFiles={addFiles} compact />
+                {files.length > 0 && (
+                  <ul style={{ listStyle: 'none', margin: 'var(--space-2) 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                    {files.map((f) => (
+                      <li key={`${f.name}-${f.size}`} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)', padding: '2px 4px 2px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
+                        <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{f.name}</span>
+                        <span style={{ fontSize: 'var(--text-xs)', color: f.size > MAX_FILE ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
+                        <IconButton label={`Remove ${f.name}`} icon={icons.close} tone="danger" disabled={saving} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))} />
+                      </li>
+                    ))}
+                  </ul>
                 )}
-                {(agents ?? []).map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
-              </select>
-            </SidebarField>
+              </div>
+            </div>
 
-            <StakeholderPicker
-              selected={selectedStakeholders}
-              onAdd={(s) => setSelectedStakeholders((prev) => [...prev, s])}
-              onRemove={(id) => setSelectedStakeholders((prev) => prev.filter((s) => s.id !== id))}
-            />
+            <aside className="gtd-detail__aside" aria-label="Task fields">
+              <Select label="Status" size="sm" value={form.status} onChange={(v) => setField('status', v as Task['status'])}
+                options={statuses.map((s) => ({ value: s, label: formatStatusLabel(s) }))} />
+              <Select label="Priority" size="sm" value={form.priority} onChange={(v) => setField('priority', v as Task['priority'])}
+                options={(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => ({ value: p, label: formatPriorityLabel(p) }))} />
+              <Input label="Due date" type="date" size="sm" value={form.due_date} onChange={(v) => setField('due_date', v)} />
+              <Select label="Preferred agent" size="sm" value={form.preferred_agent} onChange={(v) => setField('preferred_agent', v)} options={agentOptions} />
+              <StakeholderPicker
+                selected={selectedStakeholders}
+                onAdd={(s) => setSelectedStakeholders((prev) => [...prev, s])}
+                onRemove={(id) => setSelectedStakeholders((prev) => prev.filter((s) => s.id !== id))}
+              />
+            </aside>
           </div>
         </div>
       </div>

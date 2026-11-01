@@ -1,4 +1,11 @@
 import { useDialogFocus } from '@/hooks/useDialogFocus';
+import { sectionLabelStyle } from '@/components/task-form/styles';
+import Input, { Select } from '@/components/common/Input';
+import IconButton, { icons } from '@/components/common/IconButton';
+import EmptyState from '@/components/common/EmptyState';
+import { Tabs } from '@/components/common/Tabs';
+import { useNotify } from '@/hooks/useNotify';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
@@ -13,7 +20,6 @@ import OfficeCheckBadge from '../components/common/OfficeCheckBadge';
 import MarkdownEditor from '../components/common/MarkdownEditor';
 import StakeholderPicker from '../components/task-form/StakeholderPicker';
 import DeliverableList from '../components/task-form/DeliverableList';
-import { selectStyle, dateInputStyle } from '../components/task-form/styles';
 import { useRecordLauncher } from '../components/recording/RecordLauncher';
 import { useRecorder } from '../components/recording/RecordingProvider';
 import { apiPut, apiDelete } from '../utils/api';
@@ -26,17 +32,8 @@ type TaskTab = 'work' | 'files';
 /* ---- Sidebar field ------------------------------------------------- */
 function SidebarField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{
-        fontSize: 'var(--text-xs)',
-        fontWeight: 600,
-        color: 'var(--color-text-muted)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        marginBottom: 6,
-      }}>
-        {label}
-      </div>
+    <div className="gtd-field" role="group" aria-label={label}>
+      <span className="gtd-field__label">{label}</span>
       {children}
     </div>
   );
@@ -59,7 +56,7 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { 
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <h3 style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <h3 style={sectionLabelStyle}>
           {label}
         </h3>
         {editing ? (
@@ -173,13 +170,10 @@ function WorkTab({ task, onFieldChange, savedCount }: { task: Task; onFieldChang
     .filter((p): p is Stakeholder => !!p);
 
   return (
-    <div style={{ display: 'flex', gap: 24, flex: 1, minHeight: 0 }}>
-      {/* Main */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 4 }}>
+    <div className="gtd-detail">
+      <div className="gtd-detail__main">
         <MarkdownSection label="Objective" content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
-
-        {/* Deliverables */}
-        <div style={{ marginBottom: 24 }}>
+        <div style={{ marginBottom: 'var(--space-6)' }}>
           <DeliverableList
             items={task.deliverables}
             onChange={updateDeliverable}
@@ -187,56 +181,24 @@ function WorkTab({ task, onFieldChange, savedCount }: { task: Task; onFieldChang
             onAdd={addDeliverable}
           />
         </div>
-
       </div>
 
-      {/* Sidebar */}
-      <div style={{ width: 316, flexShrink: 0, overflowY: 'auto', paddingLeft: 4, borderLeft: '1px solid var(--color-border)' }}>
-        <SidebarField label="Status">
-          <select
-            value={task.status}
-            onChange={(e) => onFieldChange('status', e.target.value)}
-            style={{ ...selectStyle, width: '100%', padding: '6px 10px', fontSize: 'var(--text-sm)', borderRadius: 'var(--radius-md)' }}
-          >
-            {(['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'] as Task['status'][]).map((s) => (
-              <option key={s} value={s}>{formatStatusLabel(s)}</option>
-            ))}
-          </select>
-        </SidebarField>
-
-        <SidebarField label="Priority">
-          <select
-            value={task.priority}
-            onChange={(e) => onFieldChange('priority', e.target.value)}
-            style={{ ...selectStyle, width: '100%', padding: '6px 10px', fontSize: 'var(--text-sm)', borderRadius: 'var(--radius-md)' }}
-          >
-            {(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => (
-              <option key={p} value={p}>{formatPriorityLabel(p)}</option>
-            ))}
-          </select>
-        </SidebarField>
-
-        <SidebarField label="Due date">
-          <input
-            type="date"
-            value={task.due_date ? task.due_date.slice(0, 10) : ''}
-            onChange={(e) => onFieldChange('due_date', e.target.value || null)}
-            style={{ ...dateInputStyle, width: '100%' }}
-          />
-        </SidebarField>
-
-        <SidebarField label="Slash Command">
+      <aside className="gtd-detail__aside" aria-label="Task fields">
+        <Select label="Status" size="sm" value={task.status} onChange={(v) => onFieldChange('status', v)}
+          options={(['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'] as Task['status'][]).map((s) => ({ value: s, label: formatStatusLabel(s) }))} />
+        <Select label="Priority" size="sm" value={task.priority} onChange={(v) => onFieldChange('priority', v)}
+          options={(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => ({ value: p, label: formatPriorityLabel(p) }))} />
+        <Input label="Due date" type="date" size="sm" value={task.due_date ? task.due_date.slice(0, 10) : ''}
+          onChange={(v) => onFieldChange('due_date', v || null)} />
+        <SidebarField label="Slash command">
           <SlashCommandField taskId={task.id} />
         </SidebarField>
-
         <StakeholderPicker
           selected={resolvedStakeholders}
           onAdd={(s) => onFieldChange('stakeholders', [...(task.stakeholders ?? []), { ref: s.id, role: 'reviewer', key: false }])}
           onRemove={(id) => onFieldChange('stakeholders', (task.stakeholders ?? []).filter((x) => x.ref !== id))}
         />
-
-
-      </div>
+      </aside>
     </div>
   );
 }
@@ -244,6 +206,8 @@ function WorkTab({ task, onFieldChange, savedCount }: { task: Task; onFieldChang
 /* ---- Context package tab ------------------------------------------ */
 /* ---- Files tab ----------------------------------------------------- */
 function FilesTab({ taskId }: { taskId: string }) {
+  const confirm = useConfirm();
+  const notify = useNotify();
   const { data: files, loading, refetch } = useApi<Array<{ name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }>>(`/api/tasks/${taskId}/files`);
   const [uploading, setUploading] = useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -259,7 +223,7 @@ function FilesTab({ taskId }: { taskId: string }) {
       if (!res.ok) throw new Error(await res.text());
       refetch();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Upload failed');
+      notify.error(err, 'Could not upload the file. Try again.');
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -267,13 +231,13 @@ function FilesTab({ taskId }: { taskId: string }) {
   };
 
   const handleDelete = async (name: string) => {
-    if (!window.confirm(`Remove "${name}" from this task?`)) return;
+    if (!(await confirm({ title: `Remove "${name}" from this task?`, message: 'The file is deleted from the task folder.', confirmLabel: 'Remove file', tone: 'danger' }))) return;
     try {
       const res = await fetch(`/api/tasks/${taskId}/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await res.text());
       refetch();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
+      notify.error(err, 'Could not remove the file. Try again.');
     }
   };
 
@@ -335,6 +299,7 @@ function FilesTab({ taskId }: { taskId: string }) {
 
 /* ---- Main view ----------------------------------------------------- */
 export default function TaskDetailView() {
+  const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { refetchTasks } = useOutletContext<{ refetchTasks: () => void }>();
@@ -391,7 +356,7 @@ export default function TaskDetailView() {
 
   const handleDelete = useCallback(async () => {
     if (!id || !localTask) return;
-    if (!window.confirm(`Delete task "${localTask.title}"? This cannot be undone.`)) return;
+    if (!(await confirm({ title: `Delete "${localTask.title}"?`, message: 'The task and its files are deleted. This cannot be undone.', confirmLabel: 'Delete task', tone: 'danger' }))) return;
     setDeleting(true);
     try {
       await apiDelete(`/api/tasks/${id}`);
@@ -409,205 +374,74 @@ export default function TaskDetailView() {
     { key: 'files', label: 'Files' },
   ];
 
-  const overlayStyle: React.CSSProperties = {
-    position: 'fixed',
-    inset: 0,
-    zIndex: 1000,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  };
-
-  const panelStyle: React.CSSProperties = {
-    position: 'relative',
-    zIndex: 1,
-    width: 'min(92vw, 1200px)',
-    height: 'min(92vh, 860px)',
-    background: 'var(--color-surface)',
-    borderRadius: 'var(--radius-xl)',
-    border: '1px solid var(--color-border)',
-    boxShadow: 'var(--shadow-lg)',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  };
-
-  if (loading) return ReactDOM.createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Task details" style={overlayStyle}>
-      <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }} />
-      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
-        <LoadingSpinner text="Loading task..." />
-      </div>
+  const frame = (body: React.ReactNode, label = 'Task details') => ReactDOM.createPortal(
+    <div className="gtd-modal" role="dialog" aria-modal="true" aria-label={label}>
+      <div className="gtd-modal__scrim" aria-hidden="true" onClick={close} />
+      <div ref={panelRef} tabIndex={-1} className="gtd-modal__panel gtd-modal__panel--detail">{body}</div>
     </div>,
     document.body
   );
 
-  if (!localTask) return ReactDOM.createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Task details" style={overlayStyle}>
-      <div onClick={close} style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }} />
-      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
-        <div style={{ padding: 24, color: 'var(--color-text-muted)' }}>Task not found.</div>
-      </div>
-    </div>,
-    document.body
+  if (loading) return frame(<LoadingSpinner text="Loading task…" />);
+
+  if (!localTask) return frame(
+    <div style={{ padding: 'var(--space-6)' }}>
+      <EmptyState title="Task not found" description="It may have been deleted or archived. Check the board or the archive."
+        action={{ label: 'Back to the board', onClick: close }} />
+    </div>
   );
 
-  return ReactDOM.createPortal(
-    <div role="dialog" aria-modal="true" aria-label="Task details" style={overlayStyle}>
-      {/* Backdrop */}
-      <div
-        aria-hidden="true"
-        onClick={close}
-        style={{ position: 'absolute', inset: 0, background: 'var(--scrim)', backdropFilter: 'blur(2px)' }}
-      />
-
-      {/* Panel */}
-      <div ref={panelRef} tabIndex={-1} style={{ ...panelStyle, outline: 'none' }}>
-        {/* Header */}
-        <div style={{
-          padding: '12px 20px',
-          borderBottom: '1px solid var(--color-border)',
-          background: 'var(--color-surface)',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '1px 6px', flexShrink: 0 }}>
-              {localTask.id}
-            </span>
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-              {localTask.title}
-            </span>
-            {/* Close button */}
-            <button
-              onClick={close}
-              aria-label="Close"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 28, height: 28, borderRadius: 'var(--radius-md)',
-                border: 'none', background: 'transparent', cursor: 'pointer',
-                color: 'var(--color-text-muted)', flexShrink: 0,
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-surface-hover)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+  return frame(
+    <>
+      {/* Header */}
+      <div className="gtd-modal__header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+          <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '1px 6px', flexShrink: 0 }}>
+            {localTask.id}
+          </span>
+          <span style={{ flex: 1 }} />
+          {isMeetingPrepTask(localTask) && (
+            <Button
+              variant="secondary" size="sm" disabled={recorder.active || !people || peopleLoading || !!peopleError}
+              title={recorder.active ? 'A recording is running' : peopleError ? 'Could not load the stakeholders. Reload the page to try again.' : undefined}
+              onClick={() => { if (people) openRecordDialogFor(recordPrefillFromTask(localTask, people)); }}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <input
-                type="text"
-                value={localTask.title}
-                onChange={(e) => handleFieldChange('title', e.target.value)}
-                style={{
-                  display: 'block', width: '100%', marginBottom: 8,
-                  fontSize: 'var(--text-lg)', fontWeight: 700, lineHeight: 1.3,
-                  background: 'transparent', border: 'none', outline: 'none',
-                  color: 'var(--color-text)', padding: 0,
-                  borderBottom: '1px solid transparent',
-                }}
-                onFocus={(e) => { (e.currentTarget as HTMLInputElement).style.borderBottomColor = 'var(--color-border-strong)'; }}
-                onBlur={(e) => { (e.currentTarget as HTMLInputElement).style.borderBottomColor = 'transparent'; }}
-              />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <Badge variant={`priority-${localTask.priority}` as 'priority-critical'} size="md">
-                  {formatPriorityLabel(localTask.priority)}
-                </Badge>
-                <Badge variant={`status-${localTask.status}` as 'status-done'} size="md">
-                  {formatStatusLabel(localTask.status)}
-                </Badge>
-                {localTask.due_date && (
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                    Due {formatDate(localTask.due_date)}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-              {isMeetingPrepTask(localTask) && (
-                <Button
-                  variant="secondary" size="sm" disabled={recorder.active || !people || peopleLoading || !!peopleError}
-                  title={recorder.active ? 'A recording is running' : peopleError ? 'Could not load the stakeholders. Reload the page to try again.' : undefined}
-                  onClick={() => { if (people) openRecordDialogFor(recordPrefillFromTask(localTask, people)); }}
-                >
-                  Record this meeting
-                </Button>
-              )}
-              {isDirty && (
-                <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>
-                  Save changes
-                </Button>
-              )}
-              <button
-                aria-label="Delete task"
-                onClick={handleDelete}
-                disabled={deleting}
-                title="Delete task"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 32, height: 32, borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--color-border)', background: 'transparent', cursor: 'pointer',
-                  color: 'var(--color-text-muted)', opacity: deleting ? 0.5 : 1,
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-critical)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-critical)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-muted)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--color-border)'; }}
-              >
-                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
-                  <path d="M5 2h5M2 4h11M4.5 4l.5 8h5l.5-8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          padding: '0 20px',
-          borderBottom: '1px solid var(--color-border)',
-          background: 'var(--color-surface)',
-          flexShrink: 0,
-        }}>
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              role="tab"
-              aria-selected={tab === t.key}
-              style={{
-                padding: '10px 12px',
-                fontSize: 'var(--text-sm)',
-                fontWeight: tab === t.key ? 600 : 400,
-                color: tab === t.key ? 'var(--color-text)' : 'var(--color-text-muted)',
-                border: 'none',
-                background: 'transparent',
-                cursor: 'pointer',
-                borderBottom: tab === t.key ? '2px solid var(--color-accent)' : '2px solid transparent',
-                transition: 'color 0.1s',
-              }}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '20px' }}>
-          {tab === 'work' && (
-            <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} />
+              Record this meeting
+            </Button>
           )}
-          {tab === 'files' && id && (
-            <FilesTab taskId={id} />
+          {isDirty && <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>Save changes</Button>}
+          <IconButton label="Delete task" icon={icons.trash} tone="danger" outline onClick={handleDelete} disabled={deleting} />
+          <IconButton label="Close task" icon={icons.close} onClick={close} />
+        </div>
+        <input
+          type="text"
+          aria-label="Task title"
+          className="gtd-title-input"
+          value={localTask.title}
+          onChange={(e) => handleFieldChange('title', e.target.value)}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <Badge variant={`priority-${localTask.priority}` as 'priority-critical'} size="md">
+            {formatPriorityLabel(localTask.priority)}
+          </Badge>
+          <Badge variant={`status-${localTask.status}` as 'status-done'} size="md">
+            {formatStatusLabel(localTask.status)}
+          </Badge>
+          {localTask.due_date && (
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Due {formatDate(localTask.due_date)}</span>
           )}
         </div>
       </div>
-    </div>,
-    document.body
+
+      <Tabs label="Task sections" value={tab} onChange={setTab} idPrefix="task" items={tabs.map((t) => ({ id: t.key, label: t.label }))}
+        style={{ padding: '0 var(--space-5)', flexShrink: 0 }} />
+
+      <div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${tab}`}
+        style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)' }}>
+        {tab === 'work' && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} />}
+        {tab === 'files' && id && <FilesTab taskId={id} />}
+      </div>
+    </>,
+    localTask.title
   );
 }

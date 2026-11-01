@@ -1,4 +1,6 @@
 import React from 'react';
+import IconButton, { icons } from '@/components/common/IconButton';
+import { useConfirm } from '@/components/common/ConfirmDialog';
 import Button from '@/components/common/Button';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { apiDelete, apiPost } from '@/utils/api';
@@ -28,6 +30,7 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   onAction: (action: 'stop' | 'retry' | 'accept' | 'use-live', message: string, body?: Record<string, string>, stopFirst?: boolean) => void;
   onRead: () => void;
 }) {
+  const confirm = useConfirm();
   let text: string;
   let tone = 'var(--color-text-muted)';
   const name = (id: string) => names[id] ?? id;
@@ -67,8 +70,8 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
       <span role="status" style={{ flex: 1, minWidth: 0, color: tone }}>{text}</span>
       {(state.status === 'running' || state.status === 'pending') && (
         <Button size="sm" variant="ghost" disabled={disabled}
-          onClick={() => {
-            if (state.status === 'running' && !window.confirm(`Stop transcribing ${file}? What was transcribed so far is not kept.`)) return;
+          onClick={async () => {
+            if (state.status === 'running' && !(await confirm({ title: `Stop transcribing ${file}?`, message: 'What was transcribed so far is not kept. You can start again later.', confirmLabel: 'Stop transcribing', tone: 'danger' }))) return;
             onAction('stop', `${file} will not be transcribed until you try again.`, state.generation ? { generation: state.generation } : undefined);
           }}>Stop</Button>
       )}
@@ -81,9 +84,9 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
       )}
       {draft && (
         <Button size="sm" variant="ghost" disabled={disabled}
-          onClick={() => {
+          onClick={async () => {
             const running = state.status === 'running';
-            if (running && !window.confirm('Stop the more accurate transcript and use the live one instead?')) return;
+            if (running && !(await confirm({ title: 'Use the live transcript instead?', message: 'The more accurate transcript that is running now is stopped.', confirmLabel: 'Use the live transcript' }))) return;
             onAction('use-live', `${meeting.title} uses its live transcript and can go into a digest.`, { draft_sha256: draft.transcript_sha256, ...(state.generation ? { generation: state.generation } : {}) }, running);
           }}>Use the live transcript</Button>
       )}
@@ -108,6 +111,7 @@ export function recordingElsewhere(m: QueuedMeeting | MeetingDigest['queue'][num
 /** The meetings on their way into a digest: their recordings, transcripts and what can be done about them. */
 export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDigest; onChanged: () => void; onRead: (meeting: string, file: string) => void }) {
   const recorder = useRecorder();
+  const confirm = useConfirm();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean; meeting?: string } | null>(null);
   // A notice about a meeting that has left the queue (digested or removed) no longer holds.
@@ -166,12 +170,12 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
                   Queue again
                 </Button>
               )}
-              <button type="button" aria-label={`Remove ${m.title} from the queue`} disabled={busy !== null || m.in_digest}
-                onClick={() => {
-                  if (!window.confirm(`Remove "${m.title}" (${m.meeting_date}) and its files from the queue?`)) return;
+              <IconButton label={`Remove ${m.title} from the queue`} icon={icons.close} tone="danger" disabled={busy !== null || m.in_digest}
+                onClick={async () => {
+                  const ok = await confirm({ title: `Remove "${m.title}" from the queue?`, message: `The meeting of ${m.meeting_date} and its files are deleted. This cannot be undone.`, confirmLabel: 'Remove meeting', tone: 'danger' });
+                  if (!ok) return;
                   void act(`remove-${m.id}`, async () => { await apiDelete(`/api/meeting-queue/${m.id}`); });
-                }}
-                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 4px', fontSize: 'var(--text-base)' }}>×</button>
+                }} />
               {m.live && !(recorder.active && recorder.meetingId === m.id) && (
                 <div style={{ flexBasis: '100%', display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 12, fontSize: 'var(--text-xs)' }}>
                   <span role="status" style={{ flex: 1, minWidth: 0, color: 'var(--color-warning)' }}>
@@ -181,8 +185,8 @@ export function MeetingQueueList({ job, onChanged, onRead }: { job: MeetingDiges
                   </span>
                   {m.live.state !== 'damaged' && (
                     <Button size="sm" variant="ghost" disabled={busy !== null}
-                      onClick={() => {
-                        if (!window.confirm(`Finish "${m.title}" with what was saved? A page still recording it is stopped.`)) return;
+                      onClick={async () => {
+                        if (!(await confirm({ title: `Finish "${m.title}" with what was saved?`, message: 'A page still recording it is stopped.', confirmLabel: 'Finish recording' }))) return;
                         void act(`finish-${m.id}`, async () => {
                           await apiPost(`/api/meeting-queue/${m.id}/recording/finish`, { recover: true, generation: m.live!.generation, queue: true });
                           return `${m.title} is saved and waits for its transcript.`;

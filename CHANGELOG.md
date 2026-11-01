@@ -21,6 +21,12 @@ minor versions may include breaking changes.
 
 ### Changed
 
+- **One look across the dashboard.** Every page now uses the same width, spacing, cards, buttons,
+  fields, dialogs and messages, and works on a phone: task details, templates, settings and Context
+  no longer squeeze or run off the screen. Deleting something asks in the app instead of a browser
+  pop-up, and errors say what to do next. Muted, warning, success and info text and the edges of
+  fields have more contrast, to meet WCAG AA in light and dark.
+
 - **The sidebar is grouped by job and ordered by how often you use it.** Your daily work comes
   first (Situation, Board, Meetings, Insights), then **Memory**, what the agents read before
   they write (Context, Stakeholders, Output templates), then **Automation**, what you set up
