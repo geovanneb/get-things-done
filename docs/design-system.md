@@ -74,7 +74,7 @@ the list stacks above the content on a phone.
 | --- | --- | --- |
 | A text action | `Button` | `primary` (one per group), `secondary` (default), `ghost` (low emphasis, Cancel), `danger` (destructive); sizes `sm` `md` `lg`; `loading`, `icon`, `block` |
 | An icon-only action | `IconButton` | `label` is required (name and tooltip); `tone="danger"`; `outline`; sizes `sm` 28px, `md` 34px |
-| A group of content | `Card` | `padding="md"` content, `"compact"` repeated cards, `"none"` lists and tables (header gets a divider); `title`, `description`, `actions`, `badge`, `footer` |
+| A group of content | `Card` | `padding="md"` content, `"compact"` repeated cards, `"none"` lists and tables (header gets a divider); `title`, `description`, `actions`, `badge`, `footer`. A card with only a header keeps the same space below it |
 | Equivalent cards | `CardGrid` | one column on a phone, more as the page widens |
 | A titled group without a surface | `Section` | |
 | A text field, select, textarea | `Input`, `Select`, `Textarea` | `label`, `required`, `optional`, `hint`, `error`, `size` |
