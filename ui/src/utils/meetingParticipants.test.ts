@@ -1,7 +1,7 @@
 /**
  * Unit tests for who is expected at a meeting. Run with `npm run test:meeting-participants --workspace=ui`.
  */
-import { addParticipant, consentSentence, isMeetingPrepTask, joinNames, recordPrefillFromTask } from './meetingParticipants';
+import { addParticipant, consentSentence, defaultRecordingTitle, isMeetingPrepTask, joinNames, recordPrefillFromTask } from './meetingParticipants';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail?: unknown): void {
@@ -17,6 +17,9 @@ check('a name is added, tidied', addParticipant([], { name: '  Bob   Lee ' })[0]
 check('nothing to add', addParticipant([bob], { name: '   ' }).length === 1);
 check('the same stakeholder once', addParticipant([jane], { name: 'J. Doe', ref: 'STK-0001' }).length === 1);
 check('a stakeholder typed as a name once', addParticipant([jane], { name: 'jane doe' }).length === 1);
+check('a new recording is named after when Record was clicked',
+  defaultRecordingTitle(new Date(2026, 10, 1, 14, 30)) === 'Meeting 2026-11-01 14:30');
+check('the title pads single digits', defaultRecordingTitle(new Date(2026, 0, 5, 9, 4)) === 'Meeting 2026-01-05 09:04');
 check('one name', joinNames([bob]) === 'Bob Lee');
 check('two names', joinNames([jane, bob]) === 'Jane Doe and Bob Lee');
 check('three names', joinNames([jane, bob, kim]) === 'Jane Doe, Bob Lee and Kim Park');
