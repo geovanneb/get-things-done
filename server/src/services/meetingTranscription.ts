@@ -7,10 +7,11 @@ import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, wit
 import { TranscriptionModelService, CATALOG, languagesFor, SPEAKER_MODEL } from './transcriptionModels';
 import type { LanguageChange } from './transcription/languages';
 import { hasWords } from './transcription/repeats';
-import { TranscriptionEngine, Segment, engineEvents, type TranscribeOptions } from './transcription/engine';
+import { TranscriptionEngine, Segment, engineEvents, setLiveRoomMaker, type TranscribeOptions } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
 import { HeldLock, tryLock, unlock } from '../utils/fileLock';
 import { processAlive } from './runState';
+import { WorkspaceService, withWorkspacePath } from './workspace';
 import { atomicWrite } from '../utils/atomicWrite';
 import { clock } from '../utils/transcript';
 import { fileInside } from '../utils/files';
@@ -62,11 +63,20 @@ interface Job { meeting: string; file: string; generation: string; token: string
   /** How many times the engine had come free when this job started (see `frees`). */
   frees: number;
   /** Its result could not be saved. */
-  unsaved?: boolean }
+  unsaved?: boolean;
+  /** The workspace it belongs to: a recording may start in another one, after a switch. */
+  workspace: string }
 /** The job this dashboard runs; null when none. */
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
 let ticking = 0;
+/** Recordings whose live transcript is about to start: no transcription starts meanwhile. */
+let heldForLive = 0;
+/** Checks choosing a recording to transcribe, past the first look: a recording waits for them. */
+let claiming = 0;
+/** How long a recording waits for a stopped transcription's worker to end before it goes without a live transcript. */
+const YIELD_WAIT_MS = 20_000;
+
 /** Times the engine came free: a job that found it busy can tell whether that happened while it was ending. */
 let frees = 0;
 /**
@@ -139,22 +149,34 @@ export class MeetingTranscriptionService {
   }
 
   private async next(): Promise<void> {
-    // The engine is busy (a live transcript during a meeting, a speed test): waiting costs nothing, claiming would.
-    if (active || TranscriptionEngine.isBusy()) return;
-    await this.recover().catch((err: Error) => console.error(`[transcription] Recovery: ${err.message}`));
-    const settings = await this.models.readSettings();
-    const routines = await this.queue.routinesFolder();
-    const held = await tryLock(path.join(routines, 'transcription.lock'));
-    if (typeof held === 'string') return;
+    // The engine is busy (a live transcript during a meeting, a speed test), or a recording is about to take it:
+    // waiting costs nothing, claiming would.
+    if (active || heldForLive > 0 || TranscriptionEngine.isBusy()) return;
+    // A recording asking for the engine waits for checks under way, and a check that finds one asked gives its
+    // recording back: a claim never slips in between.
+    claiming++;
     let job: Job | null = null;
     try {
-      const speakers = settings.speakers === true && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
-      job = await this.claim(settings.model, settings.language, speakers, held);
+      await this.recover().catch((err: Error) => console.error(`[transcription] Recovery: ${err.message}`));
+      const settings = await this.models.readSettings();
+      const routines = await this.queue.routinesFolder();
+      const held = await tryLock(path.join(routines, 'transcription.lock'));
+      if (typeof held === 'string') return;
+      try {
+        const speakers = settings.speakers === true && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
+        job = await this.claim(settings.model, settings.language, speakers, held);
+        if (job && heldForLive > 0) {
+          await this.giveBack(job).catch((err: Error) => console.error(`[transcription] ${job!.meeting}/${job!.file}: ${err.message}`));
+          job = null;
+        }
+      } finally {
+        if (!job) await unlock(held);
+      }
+      if (!job) return;
+      active = job;
     } finally {
-      if (!job) await unlock(held);
+      claiming--;
     }
-    if (!job) return;
-    active = job;
     meetingTranscriptionEvents.emit('change');
     const claimed = job;
     // The job runs on its own: whatever happens in it is caught here, and it always gives back its lock.
@@ -187,6 +209,22 @@ export class MeetingTranscriptionService {
   /** Starts the next job without waiting; a failure is logged, never thrown at nobody. */
   private kick(): void {
     this.tick().catch((err: Error) => console.error(`[transcription] ${err.message}`));
+  }
+
+  /** Stops `job` for a recording that needs the engine: its recording goes back in line, as it was before it started. */
+  async yieldTo(job: Job): Promise<void> {
+    await this.giveBack(job);
+    if (active === job) job.abort.abort();
+  }
+
+  /** Puts `job`'s recording back in line, in its own workspace, if it is still this job's. */
+  private async giveBack(job: Job): Promise<void> {
+    await withWorkspacePath(job.workspace, () => this.change(job.meeting, job.file, (r) => {
+      // Already done, stopped or taken by another job: nothing to give back.
+      if (r.status !== 'running' || r.generation !== job.generation || r.owner?.token !== job.token) return r;
+      const { owner: _owner, generation: _generation, started_at: _started, ...rest } = r;
+      return { ...rest, status: 'pending' };
+    }));
   }
 
   /** Stops a recording's transcription: it is never published, and the recording waits for "Try again". */
@@ -374,7 +412,8 @@ export class MeetingTranscriptionService {
         let entry: QueuedMeeting['files'][number] | undefined;
         let use: { model: string; language: string; changes: LanguageChange[] } = { model, language, changes: [] };
         let wantSpeakers = speakers;
-        for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending' && (setAside.get(`${meeting.id}/${f.name}`) ?? 0) <= Date.now())) {
+        // Keyed by the meeting's folder, so the same meeting id in another workspace is another recording.
+        for (const candidate of meeting.files.filter((f) => f.recording?.status === 'pending' && (setAside.get(path.join(folder, f.name)) ?? 0) <= Date.now())) {
           // Its own target, fixed when it was finished; a model that is not downloaded keeps it waiting, and the others go on.
           const wanted = candidate.recording?.target ?? { model, language };
           if (!await this.models.installedPath(wanted.model)) continue;
@@ -394,6 +433,7 @@ export class MeetingTranscriptionService {
         await this.queue.saveMeeting(meeting);
         return {
           meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes, speakers: wantSpeakers, frees,
+          workspace: new WorkspaceService().getWorkspacePath(),
           progress: { meeting: meeting.id, file: entry.name, done: 0, total: 0, started_at: new Date().toISOString() },
         };
       }
@@ -447,7 +487,8 @@ export class MeetingTranscriptionService {
     } catch (err) {
       // Left running on disk: recovery puts it back in line, and it waits a while so the others go first.
       job.unsaved = true;
-      setAside.set(`${job.meeting}/${job.file}`, Date.now() + SET_ASIDE_MS);
+      const folder = await this.queue.meetingFolder(job.meeting).catch(() => null);
+      if (folder) setAside.set(path.join(folder, job.file), Date.now() + SET_ASIDE_MS);
       console.error(`[transcription] ${job.meeting}/${job.file}: ${(err as Error).message}`);
     }
   }
@@ -566,4 +607,30 @@ function convert(source: string, target: string, signal: AbortSignal): Promise<v
 engineEvents.on('free', () => {
   frees++;
   new MeetingTranscriptionService().tick().catch((err: Error) => console.error(`[transcription] ${err.message}`));
+});
+
+/**
+ * A recording comes first: a meeting that starts while the transcription of an earlier one runs here gets its live
+ * transcript. That transcription stops and goes back in line, keeping its live draft; it starts over from the
+ * beginning once the recording's live transcript is done. A speed test, or another recording, is never stopped.
+ */
+setLiveRoomMaker(async () => {
+  heldForLive++;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    heldForLive--;
+    // The live transcript did not take the engine after all: the queue goes on now.
+    if (!TranscriptionEngine.isBusy()) new MeetingTranscriptionService().tick().catch((err: Error) => console.error(`[transcription] ${err.message}`));
+  };
+  // A check already choosing a recording either gives it back or makes it the running job: wait for it to say which.
+  const deadline = Date.now() + YIELD_WAIT_MS;
+  while (claiming > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  const job = active;
+  if (job) {
+    await new MeetingTranscriptionService().yieldTo(job).catch((err: Error) => console.error(`[transcription] ${job.meeting}/${job.file}: ${err.message}`));
+    while (TranscriptionEngine.isBusy() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+  }
+  return release;
 });

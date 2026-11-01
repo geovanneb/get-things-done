@@ -747,3 +747,101 @@ test('a result that cannot be saved is not transcribed again and again, and the 
   assert.equal((await recording(queue, second)).status, 'done', 'the next meeting was not held up');
   assert.equal(transcribed.filter((d) => d === first).length, 1, 'the unsaved one waits before it is tried again');
 });
+
+test('a recording comes first: a transcription running here goes back in line, waits, and starts over after', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const { TranscriptionEngine: Engine } = await import('../src/services/transcription/engine');
+  let started!: () => void;
+  let running = new Promise<void>((r) => { started = r; });
+  let runs = 0;
+  const { engine } = fakeEngine((wav, o) => new Promise((resolve, reject) => {
+    runs++;
+    started();
+    o.signal!.addEventListener('abort', () => reject(new Error('Cancelled.')));
+    if (runs > 1) void speaks(['Fictional words, the second time'])(wav, o).then(resolve);
+  }));
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const id = await queueRecording(queue, 'Earlier meeting');
+  await job.tick();
+  await running;
+  assert.equal((await recording(queue, id)).status, 'running');
+
+  // A new meeting starts recording: the transcription gives way.
+  const release = await Engine.roomForLive();
+  for (let i = 0; i < 50 && job.progress(); i++) await new Promise((r) => setTimeout(r, 20));
+  const back = await recording(queue, id);
+  assert.equal(back.status, 'pending', 'back in line, not stopped');
+  assert.equal(back.generation, undefined);
+  running = new Promise<void>((r) => { started = r; });
+  await job.tick();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(runs, 1, 'nothing starts while the recording takes the engine');
+
+  // The live transcript has the engine (or could not start): the queue goes on, from the beginning. (In the app the
+  // engine's own service starts it; here the test's service with its stand-in engine does.)
+  release();
+  await MeetingTranscriptionService.settled();
+  await job.tick();
+  await running;
+  await MeetingTranscriptionService.settled();
+  assert.equal(runs, 2);
+  assert.equal((await recording(queue, id)).status, 'done');
+});
+
+test('a check already choosing a recording when one starts gives it back instead of starting it', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const { TranscriptionEngine: Engine } = await import('../src/services/transcription/engine');
+  // The check pauses on the model lookup, after its first look at the engine.
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  let reached!: () => void;
+  const atGate = new Promise<void>((r) => { reached = r; });
+  const models = {
+    readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'auto' }),
+    installedPath: async () => { reached(); await gate; return '/fictional/model'; },
+  } as unknown as TranscriptionModelService;
+  const { engine, calls } = fakeEngine(speaks(['Fictional words']));
+  const job = new MeetingTranscriptionService(queue, models, engine);
+  const id = await queueRecording(queue, 'Earlier meeting');
+  const checking = job.tick();
+  await atGate;
+  setTimeout(open, 100);
+  const release = await Engine.roomForLive();
+  await checking;
+  assert.equal(calls.length, 0, 'the claim did not slip in');
+  assert.equal((await recording(queue, id)).status, 'pending');
+  release();
+  await MeetingTranscriptionService.settled();
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  assert.equal((await recording(queue, id)).status, 'done');
+});
+
+test('a recording in another workspace puts the running job back in line in its own workspace', async (t) => {
+  const first = await workspace(t);
+  const queueA = new MeetingDigestService();
+  const { TranscriptionEngine: Engine } = await import('../src/services/transcription/engine');
+  const { withWorkspacePath } = await import('../src/services/workspace');
+  let started!: () => void;
+  const running = new Promise<void>((r) => { started = r; });
+  const { engine } = fakeEngine((_wav, o) => new Promise((_resolve, reject) => { started(); o.signal!.addEventListener('abort', () => reject(new Error('Cancelled.'))); }));
+  const job = new MeetingTranscriptionService(queueA, fakeModels(), engine);
+  const idA = await queueRecording(queueA, 'Meeting in A');
+  await job.tick();
+  await running;
+  // Workspace B has a meeting with the same id.
+  const second = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-transcribe-b-'));
+  t.after(() => fsp.rm(second, { recursive: true, force: true }));
+  for (const d of ['tasks/active', 'context-updates', '.situation-board/routines']) await fsp.mkdir(path.join(second, d), { recursive: true });
+  const idB = await withWorkspacePath(second, () => queueRecording(new MeetingDigestService(), 'Meeting in B'));
+  assert.equal(idB, idA, 'the same id in both');
+  const release = await withWorkspacePath(second, () => Engine.roomForLive());
+  for (let i = 0; i < 50 && job.progress(); i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal((await recording(queueA, idA)).status, 'pending', 'A goes back in line, in A');
+  assert.equal((await withWorkspacePath(second, () => recording(new MeetingDigestService(), idB))).status, 'pending', 'B untouched');
+  assert.equal((await withWorkspacePath(second, () => new MeetingDigestService().loadMeeting(idB))).files[0]!.recording!.generation, undefined);
+  release();
+  void first;
+});

@@ -85,6 +85,16 @@ function free(): void {
   busy = false;
   engineEvents.emit('free');
 }
+
+/**
+ * How a recording's live transcript gets the engine when a transcription after a meeting holds it: the queue sets
+ * this (meetingTranscription.ts), so the engine needs to know nothing of meetings. It returns a release, called once
+ * the live job has started or failed to.
+ */
+let roomMaker: (() => Promise<() => void>) | null = null;
+export function setLiveRoomMaker(maker: () => Promise<() => void>): void {
+  roomMaker = maker;
+}
 /** Workers still running, so the dashboard can end them when it shuts down. */
 const running = new Set<ChildProcess>();
 /** After asking a worker to stop, how long it gets before it is killed outright. */
@@ -133,6 +143,11 @@ export class TranscriptionEngine {
   /** True while a job holds the one-job slot in this dashboard, such as a live transcript during a meeting. */
   static isBusy(): boolean {
     return busy;
+  }
+
+  /** A recording comes first: makes room for its live transcript (see `setLiveRoomMaker`), and returns the release. */
+  static async roomForLive(): Promise<() => void> {
+    return roomMaker ? roomMaker().catch(() => () => {}) : () => {};
   }
 
   /** For tests: opens the door again after stopAll(). */

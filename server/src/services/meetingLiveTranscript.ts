@@ -176,6 +176,7 @@ export class MeetingLiveTranscriptService {
     // Offered only in a language of the model that transcribes after the meeting: the one in Settings now (see `watch`).
     job.evidence = new LanguageEvidence((language) => modelHas(job.mainModel, language), () => randomUUID());
     await withWorkspacePath(workspace, async () => {
+      let releaseRoom: () => void = () => {};
       try {
         const folder = await this.queue.meetingFolder(meetingId);
         job.file = path.join(folder, liveTranscriptFile(generation));
@@ -184,6 +185,8 @@ export class MeetingLiveTranscriptService {
         if (before) { stopJob(job, 'The dashboard restarted during the recording; it is transcribed after the meeting.'); return; }
         const handle = await fsp.open(job.file, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o600);
         await handle.close();
+        // A recording comes first: a transcription of an earlier meeting running here gives way (it goes back in line).
+        releaseRoom = await TranscriptionEngine.roomForLive();
         // Whisper cannot tell the language of a part while one is set: SenseVoice, when downloaded, tells it instead.
         const live = CATALOG.find((m) => m.id === job.model);
         const detector = live?.engine?.kind === 'whisper' && await this.models.installedPath(SENSEVOICE_ID).catch(() => null) ? SENSEVOICE_ID : undefined;
@@ -200,12 +203,16 @@ export class MeetingLiveTranscriptService {
         for (const change of job.changes) session.language(change.at, languageFor(job.model, change.language));
         session.committed(job.committed);
         job.status = 'live';
+        releaseRoom();
         job.watch = setInterval(() => { void this.watch(job); }, WATCH_MS);
         job.watch.unref();
         emit(job);
       } catch (err) {
         const busy = (err as { engineBusy?: boolean }).engineBusy;
         stopJob(job, busy ? 'Another transcription was running, so this recording is transcribed after the meeting.' : `The live transcript could not start: ${(err as Error).message}`);
+      } finally {
+        // However it went (started, failed, or the recording ended while the model loaded), the queue is not held.
+        releaseRoom();
       }
     }).catch(() => {});
   }

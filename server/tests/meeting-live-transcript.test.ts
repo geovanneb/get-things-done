@@ -501,4 +501,8 @@ test('a recording takes the language chosen for the meeting; an unknown one is r
   assert.equal(opened.language, 'ja');
   assert.equal((await s.queue.loadMeeting(a.id)).live?.language, 'ja');
   // Without a choice, Settings decide: every other test here starts that way and gets Auto.
+  // The live job starts in the background: let it, then end it, before the workspace goes.
+  await settle();
+  s.live.forget(a.id);
+  await settle();
 });
