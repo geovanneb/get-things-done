@@ -63,6 +63,12 @@
         "source": {"type": "string", "maxLength": 1000, "description": "Where the record comes from, e.g. the material file."},
         "meeting_id": {"type": "string", "description": "Set by the dashboard when the update is done, never by an agent: the meeting this record is about (MQ-... in a digest, else CU-...-M-nn). Not part of what the executive confirms."},
         "meeting": {"type": "string", "pattern": "^MQ-\\d{4}-\\d{4}$", "description": "A meeting digest only: the queued meeting this record is about, its queued_as id in materials/meetings.md."},
+        "unsure": {"type": "array", "maxItems": 30, "description": "What the analysis is not sure of, for the executive to check before confirming. Never changes the record by itself.", "items": {"type": "object", "required": ["field", "value", "reason"], "properties": {
+          "field": {"type": "string", "enum": ["title", "meeting_date", "attendees", "speakers", "decisions", "open_questions", "action_items"]},
+          "value": {"type": "string", "maxLength": 1000, "description": "The exact text in the record it is about."},
+          "reason": {"type": "string", "maxLength": 1000},
+          "suggestion": {"type": "string", "maxLength": 1000, "description": "What it may be instead, from the stakeholders or the glossary."}
+        }}},
         "confirmation": {"anyOf": [{"type": "string", "enum": ["confirmed", "rejected"]}, {"type": "null"}], "description": "Set by the executive in the dashboard, never by the analysis."},
         "confirmed_at": {"type": "string", "format": "date-time", "description": "Set by the dashboard."},
         "confirmed_hash": {"type": "string", "description": "Set by the dashboard: the record content the executive confirmed. If the record changes, the confirmation no longer counts."}

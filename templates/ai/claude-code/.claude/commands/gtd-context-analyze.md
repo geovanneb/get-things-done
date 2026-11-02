@@ -238,6 +238,14 @@ decisions, open questions and action items that were stated, not a summary of th
   name as written and leave out `ref`. Never translate or romanize names.
 - Never invent an owner, a date or a source: leave a field out when the material does
   not say it.
+- `unsure`: list what you are not sure of, so the executive checks it before confirming:
+  `field` (title, meeting_date, attendees, speakers, decisions, open_questions or
+  action_items), `value` (the exact text in the record it is about), `reason` (what makes
+  you unsure, for example a name that sounds like a stakeholder's but is spelled
+  differently, or a term that may be a glossary term), and `suggestion` when the
+  stakeholder files or `context/glossary/` point to another spelling. Keep the record as
+  the material says it; the suggestion never replaces it. Leave out `unsure` when you are
+  sure of everything.
 - `speakers`: when a transcript marks `Speaker 1`, `Speaker 2`, propose who each one is,
   once per recording, with `source` the transcript and `reason` what points to that person:
   someone says their name, is addressed by name, or answers to their role. Participants

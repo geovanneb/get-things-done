@@ -93,7 +93,11 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    = a stakeholder id or `me`, only when sure, and always `name` as written; unknown
    people stay listed), `decisions`, `open_questions`, `action_items` (`description`,
    `owner`, `due_date`) and `source`. Never invent an owner, date or source; leave it
-   out. Never translate or romanize names. Texts under 1,000 characters, lists under 30
+   out. Never translate or romanize names. List what you are not sure of in `unsure`:
+   `field` (title, meeting_date, attendees, speakers, decisions, open_questions or
+   action_items), `value` (the exact words in the record it is about, as written), `reason`,
+   and `suggestion` when the stakeholders or `context/glossary/` point to another spelling.
+   Keep the record as the material says it; the suggestion never replaces it. Texts under 1,000 characters, lists under 30
    entries. No records for a memory review. Never set a record's `confirmation`,
    `confirmed_at` or `confirmed_hash`, or an action item's `task_ref`, and never create
    tasks from action items: the executive does that from the confirmed record.

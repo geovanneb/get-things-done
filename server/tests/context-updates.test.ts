@@ -747,3 +747,67 @@ test('a record with odd speakers cannot be confirmed; a record without any is as
   assert.deepEqual(plain!.problems, []);
   assert.deepEqual(plain!.speakers, []);
 });
+
+test('doubts on a meeting record: shown as written, part of what is confirmed only when there are any, and a malformed one blocks confirming', async (t) => {
+  const doubt = { field: 'attendees', value: 'Jane Doe', reason: 'Sounds like a stakeholder spelled differently.', suggestion: 'Jane Dough' };
+  const { service, id, edit, choose } = await withMeetings(t);
+  const before = (await service.get(id)).meeting_records.map((r) => r.revision);
+  // No doubts: the same version as before doubts existed, so earlier confirmations stay.
+  assert.deepEqual((await service.get(id)).meeting_records.map((r) => r.unsure), [[], []]);
+
+  await edit((records) => [{ ...records[0], unsure: [doubt] }, records[1]]);
+  const withDoubt = (await service.get(id)).meeting_records;
+  assert.deepEqual(withDoubt[0]!.unsure, [doubt], 'kept as written');
+  assert.notEqual(withDoubt[0]!.revision, before[0], 'confirming covers the doubts shown');
+  assert.equal(withDoubt[1]!.revision, before[1]);
+  assert.equal((await choose({ 'M-01': 'confirmed' })).meeting_records[0]!.confirmation, 'confirmed');
+
+  for (const bad of [{ ...doubt, field: 'mood' }, { ...doubt, value: '' }, { ...doubt, reason: '' }, 'not sure']) {
+    await edit((records) => [{ ...records[0], unsure: [bad] }, records[1]]);
+    const r = (await service.get(id)).meeting_records[0]!;
+    assert.ok(r.problems.some((p) => p.startsWith('doubt 1')), JSON.stringify(bad));
+  }
+  // Without a suggestion it is still a doubt.
+  await edit((records) => [{ ...records[0], unsure: [{ field: 'decisions', value: 'pilot', reason: 'Unclear which pilot.' }] }, records[1]]);
+  const plain = (await service.get(id)).meeting_records[0]!;
+  assert.deepEqual([plain.problems, plain.unsure[0]!.suggestion], [[], '']);
+});
+
+test('a record confirmed before doubts existed keeps its version: the same hash as the code before', async (t) => {
+  // Computed with the code on main before doubts were added (the same record, speakers included).
+  const before = { id: 'M-01', title: 'Steering committee', meeting_date: '2026-10-20', source: 'transcript.txt', attendees: [{ ref: 'STK-0004', name: 'Jane Doe' }], decisions: ['The pilot moves to Q1.'], open_questions: ['Who owns the budget?'], action_items: [{ description: 'Send the revised plan', owner: { ref: 'me', name: 'me' }, due_date: '2026-10-27' }], speakers: [{ label: 'Speaker 2', source: 'transcript.txt', person: { name: 'Jane Doe', ref: 'STK-0004' }, reason: 'Addressed by name.' }] };
+  const { service, id, edit } = await withMeetings(t, [before]);
+  assert.equal((await service.get(id)).meeting_records[0]!.revision, 'e48c99ed07e79a2b');
+  await edit((records) => [{ ...records[0], unsure: [] }]);
+  assert.equal((await service.get(id)).meeting_records[0]!.revision, 'e48c99ed07e79a2b', 'an empty list is no doubt');
+});
+
+test('a malformed doubt added after confirming takes the confirmation away: approve and close refuse until reviewed again', async (t) => {
+  const { service, id, edit, choose } = await withMeetings(t, [MEETINGS[0]]);
+  await choose({ 'M-01': 'confirmed' });
+  for (const bad of ['Name unclear', { field: 'attendees', value: 'Jane Doe', reason: 'x', suggestion: 42 }]) {
+    await edit((records) => [{ ...records[0], unsure: typeof bad === 'string' ? bad : [bad] }]);
+    const r = (await service.get(id)).meeting_records[0]!;
+    assert.deepEqual([r.confirmation, r.changed_since_confirmed, r.problems.length > 0], [null, true, true], JSON.stringify(bad));
+    await assert.rejects(service.approve(id), /changed after you confirmed it/);
+    await assert.rejects(service.close(id), /changed after you confirmed it/);
+  }
+});
+
+test('a confirmed record copied under the same id is no longer confirmed, and a doubt that turns malformed with the same content is caught', async (t) => {
+  const doubt = { field: 'attendees', value: 'Jane Doe', reason: 'Spelled differently.' };
+  const { service, id, edit, choose } = await withMeetings(t, [{ ...MEETINGS[0], unsure: [doubt] }]);
+  await choose({ 'M-01': 'confirmed' });
+  // The suggestion was absent (read as empty); a number reads as empty too, so the content is the same.
+  await edit((records) => [{ ...records[0], unsure: [{ ...doubt, suggestion: 42 }] }]);
+  let r = (await service.get(id)).meeting_records[0]!;
+  assert.deepEqual([r.confirmation, r.changed_since_confirmed], [null, true]);
+  await edit((records) => [{ ...records[0], unsure: [doubt] }]);
+  assert.equal((await service.get(id)).meeting_records[0]!.confirmation, 'confirmed', 'fixed again: the confirmation holds');
+  await edit((records) => [records[0], records[0]]);
+  const both = (await service.get(id)).meeting_records;
+  assert.deepEqual(both.map((x) => [x.confirmation, x.changed_since_confirmed]), [[null, true], [null, true]]);
+  await assert.rejects(service.approve(id), /changed after you confirmed it/);
+  r = both[0]!;
+  assert.ok(r.problems.some((p) => p.includes('same id')));
+});

@@ -13,8 +13,9 @@ import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { diffLines, diffStats } from '@/utils/lineDiff';
 import { formatRelativeDate } from '@/utils/format';
 import { meetingActionDraft } from '@/utils/meetingAction';
+import { doubtLine, doubtsAbout } from '@/utils/recordDoubts';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
-import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord, MeetingSpeaker, Stakeholder } from '@/types';
+import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord, MeetingSpeaker, RecordDoubt, Stakeholder } from '@/types';
 import AnalysisRun from './AnalysisRun';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
@@ -44,6 +45,12 @@ type Confirmations = Record<string, MeetingRecord['confirmation']>;
 function personLabel(p: MeetingPerson): string {
   if (p.ref === 'me') return p.name && p.name !== 'me' ? `${p.name} (you)` : 'You';
   return p.name || p.ref || '';
+}
+
+/** Marks a piece of a record the analysis is not sure of; the reason is in the record's "Not sure" list and the tooltip. */
+function NotSure({ doubts }: { doubts: RecordDoubt[] }) {
+  if (doubts.length === 0) return null;
+  return <> <span title={doubts.map(doubtLine).join(' ')}><Badge size="sm" variant="warning">Not sure</Badge></span></>;
 }
 
 function RecordList({ label, items }: { label: string; items: React.ReactNode[] }) {
@@ -161,17 +168,18 @@ export function MeetingRecordCard({ record, reviewing, confirmation, onChoose, o
       {record.attendees.length > 0 && (
         <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
           <span style={{ fontWeight: 600 }}>Attendees: </span>
-          {record.attendees.map((p, i) => <span key={i}>{i > 0 && ', '}<PersonName person={p} /></span>)}
+          {record.attendees.map((p, i) => <span key={i}>{i > 0 && ', '}<PersonName person={p} /><NotSure doubts={doubtsAbout(record.unsure, 'attendees', p.name)} /></span>)}
         </div>
       )}
       {record.speakers.length > 0 && (
         <SpeakerList speakers={record.speakers} title={`Speakers${confirmed ? '' : ' (proposed, until you confirm this record)'}`} reviewing={reviewing} onSet={onSpeaker} />
       )}
-      <RecordList label="Decisions" items={record.decisions} />
-      <RecordList label="Open questions" items={record.open_questions} />
+      <RecordList label="Decisions" items={record.decisions.map((d) => <>{d}<NotSure doubts={doubtsAbout(record.unsure, 'decisions', d)} /></>)} />
+      <RecordList label="Open questions" items={record.open_questions.map((q) => <>{q}<NotSure doubts={doubtsAbout(record.unsure, 'open_questions', q)} /></>)} />
       <RecordList label="Action items" items={record.action_items.map((a, i) => (
         <>
           {a.description}{a.owner && <span style={{ color: 'var(--color-text-secondary)' }}> · <PersonName person={a.owner} /></span>}{a.due_date && <span style={{ color: 'var(--color-text-secondary)' }}> · by {a.due_date}</span>}
+          <NotSure doubts={doubtsAbout(record.unsure, 'action_items', [a.description, a.owner?.name ?? '', a.due_date].join(' '))} />
           {a.task_ref && (a.task_found === false
             ? <span style={{ color: 'var(--color-text-muted)' }}> · task {a.task_ref} (no longer exists)</span>
             : <> · <Link to={`/board/task/${a.task_ref}`} style={{ color: 'var(--color-accent)' }}>{a.task_ref}</Link></>)}
@@ -183,6 +191,12 @@ export function MeetingRecordCard({ record, reviewing, confirmation, onChoose, o
           )}
         </>
       ))} />
+      {(record.unsure?.length ?? 0) > 0 && (
+        <HelpBox tone="warning" title="Not sure: check these before you confirm">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>{record.unsure!.map((d, i) => <li key={i}>{doubtLine(d)}</li>)}</ul>
+          The record says what the material says; a suggestion changes nothing until you correct it.
+        </HelpBox>
+      )}
       {record.source && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Source: {record.source}</div>}
       {record.changed_since_confirmed && (
         <HelpBox tone="warning" title="Changed after you confirmed it">
