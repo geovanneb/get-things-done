@@ -388,3 +388,28 @@ test('an analysis never starts from a correction that pins another meeting\'s fi
   });
   await assert.rejects(service.analysisPreflight(c.id), /not one of this meeting's files/);
 });
+
+test('a task records the version it was made from, keeps it when found again, and no update can change it', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const { TaskService } = await import('../src/services/taskService');
+  const tasks = new TaskService();
+  const root = (await service.get('CU-2026-0001')).meeting_records[0]!;
+  const made = await service.createActionItemTask('CU-2026-0001', 'M-01', { item: 0, revision: root.revision, task: { title: 'Call', priority: 'medium' } });
+  const source = { update_id: 'CU-2026-0001', record_id: 'M-01', revision: root.revision, root_index: 0 };
+  assert.deepEqual((made.task as unknown as Record<string, unknown>)['meeting_action_source'], source);
+
+  const c = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c.id);
+  await confirm(c.id);
+  await service.approve(c.id);
+  const head = (await service.get(c.id)).meeting_records[0]!;
+  const again = await service.createActionItemTask(c.id, 'M-01', { item: 0, revision: head.revision, task: { title: 'Call', priority: 'medium' } });
+  assert.equal(again.task.id, made.task.id, 'the same task');
+  const saved = (await tasks.getTask(made.task.id)) as unknown as Record<string, unknown>;
+  assert.deepEqual(saved['meeting_action_source'], source, 'found again: what it recorded first stays');
+
+  await tasks.updateTask(made.task.id, { title: 'Call them', meeting_action: 'x/y/z', meeting_action_source: null } as never);
+  const after = (await tasks.getTask(made.task.id)) as unknown as Record<string, unknown>;
+  assert.deepEqual([after['title'], after['meeting_action'], after['meeting_action_source']], ['Call them', saved['meeting_action'], source]);
+});

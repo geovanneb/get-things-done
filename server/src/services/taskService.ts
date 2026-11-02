@@ -14,6 +14,11 @@ const fileService = new FileService();
  * field by field, so a field not handled there or listed here is dropped on create (update keeps it).
  */
 const OPTIONAL_CREATE_FIELDS = ['slug', 'task_type', 'contexts', 'preferred_agent', 'confidentiality', 'review_date', 'estimated_hours'] as const;
+/** Written by the server when a task is made from a meeting action item; never taken from a request. */
+const SERVER_FIELDS = ['meeting_action', 'meeting_action_source'] as const;
+
+/** Which version of a meeting record a task was made from, and which original action item it stands for. */
+export interface MeetingActionSource { update_id: string; record_id: string; revision: string; root_index: number }
 const workspaceService = new WorkspaceService();
 
 interface TaskFilters {
@@ -223,10 +228,11 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   /**
-   * `origin.meeting_action` is for the server only, never a request body: it names the meeting action item
-   * the task was made from, so a retry finds this task instead of creating a second one.
+   * `origin` is for the server only, never a request body. `meeting_action` names the meeting action item the task
+   * was made from, so a retry finds this task instead of creating a second one; `source` is the version of the record
+   * it was made from and the original item's place, so a later correction can be compared with what the task saw.
    */
-  async createTask(data: Partial<Task>, origin?: { meeting_action: string }): Promise<Task> {
+  async createTask(data: Partial<Task>, origin?: { meeting_action: string; source?: MeetingActionSource }): Promise<Task> {
     const rawData = data as Record<string, unknown>;
     // Set by routines, so a scheduled occurrence never produces a second task. Request bodies are not
     // typed at runtime: only well-formed pairs are kept, as the task schema requires.
@@ -281,6 +287,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
       task['routine_occurrence'] = occurrence;
     }
     if (origin) task['meeting_action'] = origin.meeting_action;
+    if (origin?.source) task['meeting_action_source'] = origin.source;
 
     const { path: _path, body: _body, ...fields } = task;
     // .schemas/task.schema.json requires schema_version and type; write them like every other
@@ -307,6 +314,11 @@ If the executive comes back with feedback on a task that is already \`in_review\
     };
 
     stampStatusDates(existing.status, updated, now);
+    // What the server recorded about the task's origin stays as it was, whatever the request says.
+    for (const key of SERVER_FIELDS) {
+      if (key in existing) (updated as Record<string, unknown>)[key] = (existing as Record<string, unknown>)[key];
+      else delete (updated as Record<string, unknown>)[key];
+    }
 
     // body is the markdown content — keep it out of frontmatter
     const { path: _path, body: newBody, ...frontmatter } = updated;

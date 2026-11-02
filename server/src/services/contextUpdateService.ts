@@ -1213,7 +1213,7 @@ export class ContextUpdateService {
       const action = record.action_items[item]!;
       // Recorded on the task, so a crash between writing the task and the link cannot lead to a second task. A corrected
       // item is its original: the same identity, found through its slot in a chain that holds, never its own.
-      const identity = await this.actionIdentity(update, record, action);
+      const { identity, root_index } = await this.actionIdentity(update, record, action, item);
       if (action.task_ref) {
         if (!(await taskExists(tasksDir, action.task_ref))) throw httpError(409, `This action item had a task, ${action.task_ref}, which no longer exists`);
         const linked = await taskService.getTask(action.task_ref).catch(() => ({ id: action.task_ref } as Task));
@@ -1231,7 +1231,10 @@ export class ContextUpdateService {
 
       return withActionLock(identity, async () => {
         const found = await taskService.findByMeetingAction(identity);
-        const task = found ?? await taskService.createTask(fields as Partial<Task>, { meeting_action: identity });
+        // A new task records the exact version it was made from; one found again keeps what it recorded first.
+        const task = found ?? await taskService.createTask(fields as Partial<Task>, {
+          meeting_action: identity, source: { update_id: update.id, record_id: record.id, revision: record.revision, root_index },
+        });
         const entry = rawItems[rawIndex];
         // A plain-text item becomes an object with the same text, so it can hold the link; what it says is unchanged.
         rawItems[rawIndex] = { ...(entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : { description: entry }), task_ref: task.id };
@@ -1246,14 +1249,14 @@ export class ContextUpdateService {
    * The identity a task made from this action item carries. For a correction, the original item's: only while the chain
    * of versions holds and this record is its current one, so a task never rests on a version that does not count.
    */
-  private async actionIdentity(update: ContextUpdate, record: MeetingRecord, action: MeetingActionItem): Promise<string> {
+  private async actionIdentity(update: ContextUpdate, record: MeetingRecord, action: MeetingActionItem, item: number): Promise<{ identity: string; root_index: number }> {
     if (update.kind !== CORRECTION_KIND) {
       // An original with corrections: only while its versions hold, never from a disputed one.
       const all = await this.list();
       const claim = all.find((u) => u.kind === CORRECTION_KIND && u.correction?.root.update_id === update.id && u.correction.root.record_id === record.id);
       const state = claim?.correction ? correctionChain(claim.correction.meeting, claim.correction.root, all).state : 'original';
       if (state !== 'original' && state !== 'corrected') throw httpError(409, `The versions of this meeting's record are ${state}, so its action items cannot become tasks`);
-      return `${update.id}/${record.id}/${actionItemKey(action)}`;
+      return { identity: `${update.id}/${record.id}/${actionItemKey(action)}`, root_index: item };
     }
     const env = update.correction;
     if (!env) throw httpError(409, `${update.id} does not say what it corrects, so its action items cannot become tasks`);
@@ -1262,8 +1265,9 @@ export class ContextUpdateService {
       throw httpError(409, `This record is not the current version of the meeting's record (${chain.state}), so its action items cannot become tasks`);
     }
     const identity = action.slot ? rootActionIdentity(env, action.slot) : null;
-    if (!identity) throw httpError(409, 'This action item does not say which original item it is');
-    return identity;
+    const slot = env.slots.find((s) => s.slot === action.slot);
+    if (!identity || !slot) throw httpError(409, 'This action item does not say which original item it is');
+    return { identity, root_index: slot.root_index };
   }
 
   /**

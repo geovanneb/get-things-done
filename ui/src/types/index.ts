@@ -42,6 +42,8 @@ export interface Task {
   routine_occurrence?: string;
   /** The meeting action item this task was made from (set by the dashboard). */
   meeting_action?: string;
+  /** The version of the meeting record it was made from, and the original item's place (set by the dashboard). */
+  meeting_action_source?: { update_id: string; record_id: string; revision: string; root_index: number };
   skills: string[];
   estimated_hours?: number;
   body?: string;
