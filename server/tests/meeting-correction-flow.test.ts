@@ -380,13 +380,139 @@ test('an analysis never starts from a correction that pins another meeting\'s fi
   const ws = await workspace(t);
   await reviewedMeeting(ws);
   const c = await startCorrection('MQ-2026-0001');
-  await service.analysisPreflight(c.id);
+  await service.runPreflight(c.id);
   await fsp.writeFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials', 'MQ-2026-0002-b.vtt'), 'WEBVTT\n');
   await change(ws, c.id, (d) => {
     const pin = ((d['correction'] as Record<string, unknown>)['sources'] as Record<string, unknown>[])[0]!;
     pin['path'] = 'context-updates/CU-2026-0001/materials/MQ-2026-0002-b.vtt';
   });
-  await assert.rejects(service.analysisPreflight(c.id), /not one of this meeting's files/);
+  await assert.rejects(service.runPreflight(c.id), /not one of this meeting's files/);
+});
+
+test('a follow-up starts from the meeting\'s current correction, lists what the dashboard found changed, and is never a meeting', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const { startFollowUp } = await import('../src/services/meetingCorrectionService');
+  const c = await startCorrection('MQ-2026-0001');
+  await assert.rejects(startFollowUp(c.id), /Only a finished correction/);
+  await analyzed(ws, c.id);
+  await confirm(c.id);
+  await service.approve(c.id);
+
+  const [a, b] = await Promise.allSettled([startFollowUp(c.id), startFollowUp(c.id)]);
+  assert.deepEqual([a.status, b.status].sort(), ['fulfilled', 'rejected'], 'two at once: one');
+  const f = (a.status === 'fulfilled' ? a.value : (b as PromiseFulfilledResult<Awaited<ReturnType<typeof startFollowUp>>>).value);
+  assert.deepEqual([f.kind, f.origin, f.follows, f.status], ['correction-follow-up', 'meetings', c.id, 'ready']);
+  const material = await fsp.readFile(path.join(ws, 'context-updates', f.id, 'materials', 'corrections.md'), 'utf-8');
+  assert.match(material, /### decisions\n\n- before:\n {2}- Ask Dual Line for a quote\n- after:\n {2}- Ask Dual Lane for a quote/);
+  assert.match(material, /not verified; the changes above are what counts/);
+  assert.equal((await history.list()).length, 1, 'never listed as a meeting');
+  // Both kinds, as the dashboard writes them, validate against the workspace's schema.
+  const { default: Ajv } = await import('ajv');
+  const schema = JSON.parse(await fsp.readFile(path.join(__dirname, '..', '..', 'templates', 'workspace', '.schemas', 'context-update.schema.json'), 'utf-8'));
+  const validate = new Ajv({ strict: false, allErrors: true }).compile(schema);
+  for (const id of [c.id, f.id]) {
+    const data = JSON.parse(JSON.stringify(parseMarkdown(await fsp.readFile(path.join(ws, 'context-updates', id, 'update.md'), 'utf-8')).data));
+    // The fixture's records copy normalized people (`ref: null`), which an agent never writes: the kind is what is checked.
+    delete data['meeting_records'];
+    assert.ok(validate(data), `${id}: ${JSON.stringify(validate.errors)}`);
+  }
+
+  // One open at a time per meeting, named in the refusal; once done, another may start.
+  await assert.rejects(startFollowUp(c.id), (err: Error & { details?: { open?: string } }) => err.details?.open === f.id);
+  await change(ws, f.id, (d) => { d['status'] = 'done'; });
+  const again = await startFollowUp(c.id);
+  assert.notEqual(again.id, f.id);
+
+  // A meeting record in a follow-up is never confirmable.
+  await change(ws, again.id, (d) => { d['status'] = 'in_review'; d['meeting_records'] = [{ id: 'M-01', title: 'x', action_items: [] }]; d['proposals'] = []; });
+  assert.ok((await service.get(again.id)).meeting_records[0]!.problems.some((p) => p.includes('holds no meeting records')));
+  // Nothing found: it is closed, not approved.
+  await change(ws, again.id, (d) => { d['meeting_records'] = []; });
+  await assert.rejects(service.approve(again.id), /close the update without changes/);
+  assert.equal((await service.close(again.id)).status, 'done');
+});
+
+test('a follow-up needs the current version, an intact chain, and a real change', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const { startFollowUp } = await import('../src/services/meetingCorrectionService');
+  const c1 = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c1.id);
+  await confirm(c1.id);
+  await service.approve(c1.id);
+  const h1 = (await service.get(c1.id)).meeting_records[0]!;
+
+  // A second correction that changes nothing: current, but nothing to follow up; and the first is no longer current.
+  const c2 = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c2.id, (r) => {
+    r['decisions'] = h1.decisions;
+    r['action_items'] = h1.action_items.map((x, i) => ({ description: x.description, owner: x.owner, due_date: x.due_date, slot: c2.correction!.slots[i]!.slot }));
+    r['corrections'] = [];
+  });
+  await confirm(c2.id);
+  await service.approve(c2.id);
+  await assert.rejects(startFollowUp(c1.id), /current version/);
+  await assert.rejects(startFollowUp(c2.id), /changed nothing/);
+  assert.equal((await history.list())[0]!.correction?.head_changed, false, 'the meeting page offers no follow-up for it');
+  await assert.rejects(startFollowUp('CU-2026-0001'), (err: Error & { statusCode?: number }) => err.statusCode === 404);
+});
+
+test('a follow-up is approved only while its correction is the meeting\'s current version, and goes through the usual apply', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const { startFollowUp } = await import('../src/services/meetingCorrectionService');
+  const c1 = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c1.id);
+  await confirm(c1.id);
+  await service.approve(c1.id);
+  assert.equal((await history.list())[0]!.correction?.head_changed, true);
+
+  // What an analysis writes when it finds an old value: a proposal with its draft, accepted by the executive.
+  const withProposal = async (id: string) => {
+    await fsp.mkdir(path.join(ws, 'context-updates', id, 'proposals'), { recursive: true });
+    await fsp.writeFile(path.join(ws, 'context-updates', id, 'proposals', 'P-01.md'), '---\nid: CTX-carriers\n---\nDual Lane quotes the Rotterdam lane.\n');
+    await change(ws, id, (d) => {
+      d['status'] = 'in_review';
+      d['proposals'] = [{ id: 'P-01', action: 'update', target: 'context/company/carriers/note.md', title: 'Dual Lane, not Dual Line', rationale: 'The correction', decision: 'accepted' }];
+    });
+  };
+  const f1 = await startFollowUp(c1.id);
+  await withProposal(f1.id);
+  // A meeting record written into it, even marked confirmed, never counts.
+  await change(ws, f1.id, (d) => { d['meeting_records'] = [{ id: 'M-01', title: 'x', action_items: [], confirmation: 'confirmed' }]; });
+  assert.equal((await service.get(f1.id)).meeting_records[0]!.confirmation, null);
+  await change(ws, f1.id, (d) => { d['proposals'] = []; });
+  await assert.rejects(service.approve(f1.id), /close the update without changes/, 'a forged record never makes it approvable');
+  await withProposal(f1.id);
+  await change(ws, f1.id, (d) => { delete d['meeting_records']; });
+  assert.equal((await service.get(f1.id)).follow_up_problem, null);
+  await service.runPreflight(f1.id);
+
+  // A newer correction finishes: the follow-up says so, and neither analysis nor approval goes ahead.
+  const c2 = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c2.id, (r) => { r['title'] = 'Weekly logistics sync'; r['corrections'] = [{ field: 'title', before: 'Weekly sync', after: 'Weekly logistics sync', reason: 'As in the invite.', sure: true }]; });
+  await confirm(c2.id);
+  await service.approve(c2.id);
+  assert.match((await service.get(f1.id)).follow_up_problem ?? '', /no longer the meeting's current version/);
+  await assert.rejects(service.runPreflight(f1.id), /no longer the meeting's current version/);
+  await assert.rejects(service.approve(f1.id), /no longer the meeting's current version/);
+  // Approved before the newer correction finished: the apply the dashboard would start is refused too.
+  await change(ws, f1.id, (d) => { d['status'] = 'approved'; });
+  await assert.rejects(service.runPreflight(f1.id, 'apply'), /no longer the meeting's current version/);
+  await change(ws, f1.id, (d) => { d['status'] = 'in_review'; });
+
+  // The current one is followed up and approved: it waits for the usual apply.
+  await service.close(f1.id);
+  const f2 = await startFollowUp(c2.id);
+  await withProposal(f2.id);
+  assert.equal((await service.approve(f2.id)).status, 'approved');
+
+  // The correction it follows gone: said, never approved.
+  const f3 = await (async () => { await change(ws, f2.id, (d) => { d['status'] = 'done'; }); return startFollowUp(c2.id); })();
+  await withProposal(f3.id);
+  await fsp.rm(path.join(ws, 'context-updates', c2.id), { recursive: true });
+  await assert.rejects(service.approve(f3.id), /no longer there/);
 });
 
 test('a task records the version it was made from, keeps it when found again, and no update can change it', async (t) => {

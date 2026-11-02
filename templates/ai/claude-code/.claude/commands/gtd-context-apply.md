@@ -12,6 +12,8 @@ Read `context-updates/$ARGUMENTS/update.md`. If it does not exist, tell the user
 If it has `kind: meeting-correction`, there is nothing to apply: a correction finishes when the
 executive approves it in the dashboard. Tell them so and stop, changing nothing.
 
+If it has `kind: correction-follow-up`, first check that the correction it `follows` still has `status: done`, and that no other update in `context-updates/` with `kind: meeting-correction` and `status: done` has `correction.base.update_id` equal to it (a newer correction of the same meeting). If either fails, the follow-up may spread a value that was corrected again: write nothing, set no status or outcome, and tell the executive to close it and follow up the current correction.
+
 - `approved`: continue.
 - `applying`: an earlier run stopped half way. Continue, and skip proposals whose
   `outcome` is already set.

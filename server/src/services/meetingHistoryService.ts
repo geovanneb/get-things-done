@@ -45,7 +45,7 @@ export interface HistoryMeeting {
    * The record's versions, when it has any beyond the original or one is being made: `corrected`, or `conflict` and
    * `broken`, where the record shown is the last version reached from the original and no correction can build on it.
    */
-  correction: { state: ChainState; head_at: string | null; original: { update_id: string; record_id: string }; open: string[] } | null;
+  correction: { state: ChainState; head_at: string | null; original: { update_id: string; record_id: string }; open: string[]; head_changed?: boolean } | null;
   /** Records in the update that no meeting of it is linked to (a digest analyzed before records named their meeting). */
   unlinked_records: number;
   /** The user keeps it: System cleanup's Meetings rule skips it. */
@@ -161,7 +161,7 @@ function summary(u: ContextUpdate, m: HeldMeeting, present: Set<string> | null, 
     record: record ? { id: record.id, revision: record.revision, confirmation: record.confirmation, confirmed_at: record.confirmed_at, link: m.link } : null,
     record_owner: record ? { update_id: current ? chain!.head!.update_id : u.id, record_id: record.id } : null,
     correction: chain && chain.state !== 'original'
-      ? { state: chain.state, head_at: chain.head?.at ?? null, original: chain.root, open: chain.open }
+      ? { state: chain.state, head_at: chain.head?.at ?? null, original: chain.root, open: chain.open, head_changed: chain.head_changed }
       : chain?.open.length ? { state: 'original', head_at: null, original: chain.root, open: chain.open } : null,
     unlinked_records: unlinked,
     kept: u.kept_meetings.includes(m.key),

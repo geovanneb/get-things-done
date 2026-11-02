@@ -25,10 +25,12 @@ const COMMAND_FOR: Record<string, 'analyze' | 'apply'> = { ready: 'analyze', app
  * While a run is going the page checks on it one request at a time. A failed check keeps the last known state
  * (and Stop) and tries again; an answer for another update, or an older one, is ignored.
  */
-export default function AnalysisRun({ updateId, status, onChange, onRunning }: {
+export default function AnalysisRun({ updateId, status, onChange, onRunning, startable = true }: {
   updateId: string;
   status: string;
   onChange: () => void;
+  /** False: a run going on is still shown, with Stop, but none is offered to start or continue. */
+  startable?: boolean;
   /** Tells the page a run is going, so it does not ask the user to run the command too. */
   onRunning?: (running: boolean) => void;
 }) {
@@ -120,7 +122,7 @@ export default function AnalysisRun({ updateId, status, onChange, onRunning }: {
 
   const problem = runner?.problems[0]?.message;
   const ended = run && !running ? run : null;
-  const command = COMMAND_FOR[status];
+  const command = startable ? COMMAND_FOR[status] : undefined;
   const noun = (ended ?? run)?.command === 'apply' ? 'Apply' : 'Analysis';
 
   return (

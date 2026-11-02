@@ -628,6 +628,16 @@ try {
       actionNotice.state === 'current' && actionNotice.meeting === `${meeting.id}-M-01` && actionNotice.current?.update_id === corr.id
       && madeTask.meeting_action_source?.update_id === meeting.id && madeTask.meeting_action_source?.root_index === 0,
       JSON.stringify(actionNotice).slice(0, 200));
+    // Its follow-up: an ordinary update listing what changed, never a meeting.
+    const follow = corr.id ? await json('POST', `/api/context-updates/${corr.id}/follow-up`) : null;
+    const followBody = follow ? await follow.json() : {};
+    const followMaterial = followBody.id ? await (await fetch(`${base}/api/context-updates/${followBody.id}/materials/corrections.md`)).text() : '';
+    const followAgain = corr.id ? await json('POST', `/api/context-updates/${corr.id}/follow-up`) : null;
+    check('a finished correction opens one follow-up that lists what changed, and it is never a meeting',
+      follow?.status === 201 && followBody.kind === 'correction-follow-up' && followBody.follows === corr.id
+      && followMaterial.includes('Fictional decision, corrected') && followAgain?.status === 409
+      && !(await (await fetch(`${base}/api/meetings/history`)).json()).some((m) => m.update_id === followBody.id),
+      `follow=${follow?.status} again=${followAgain?.status}`);
     // Never starts a real AI run: only the runner's status and a refusal for an update that is not ready.
     const runnerStatus = await (await fetch(`${base}/api/runner`)).json();
     const notReady = await json('POST', `/api/context-updates/${meeting.id}/run`, { command: 'analyze' });

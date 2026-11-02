@@ -177,6 +177,8 @@ export interface CorrectionEnvelope {
 }
 
 export const CORRECTION_KIND = 'meeting-correction';
+/** An ordinary update, opened from a finished correction, to find context and stakeholder notes that still use the old values. */
+export const FOLLOW_UP_KIND = 'correction-follow-up';
 const SLOT_ID = /^A-\d{2,3}$/;
 const REVISION = /^[0-9a-f]{16}$/;
 const UPDATE_ID_PATTERN = /^CU-\d{4}-\d{4}$/;
@@ -276,6 +278,8 @@ export interface ContextUpdate {
   kind: string | null;
   /** A `meeting-correction` only: what it corrects (see CorrectionEnvelope). Null otherwise, or when not valid. */
   correction: CorrectionEnvelope | null;
+  /** A `correction-follow-up` only: the correction it follows up. Written by the dashboard; null otherwise. */
+  follows: string | null;
   /** For a meeting digest: which queued meeting each file came from. Written by the dashboard only; kept after the materials go. */
   digest_meetings: DigestMeeting[];
   /** For a Kaizen: the root cause analysis. Null for every other kind. */
@@ -359,7 +363,9 @@ export interface ContextUpdateDetail extends ContextUpdate {
    * meeting's current record (`stale` when another correction finished first), why approving would be refused now
    * (`blocked`, empty once done), and what the record changes in it.
    */
-  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[] };
+  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean };
+  /** A `correction-follow-up` only, while not done: why its material no longer describes the current record (null when it does). */
+  follow_up_problem?: string | null;
 }
 
 function httpError(status: number, message: string): Error {
@@ -551,6 +557,21 @@ function normalizeCorrection(raw: unknown): CorrectionEnvelope | null {
  * base's id, and has one action item per slot, in the slots' order. Anything else is a problem on its records, so
  * none can be confirmed. A record outside a correction never says it amends anything.
  */
+/**
+ * Why a follow-up's material no longer describes the meeting's current record: the correction it follows is gone, not
+ * finished, or no longer the head of an intact chain (a newer correction finished, or the versions do not hold). Null
+ * while it is current.
+ */
+export function followUpProblem(update: Pick<ContextUpdate, 'follows'>, all: ContextUpdate[]): string | null {
+  const correction = update.follows ? all.find((u) => u.id === update.follows) : null;
+  if (!correction?.correction || correction.status !== 'done') return `The correction this follows up (${update.follows ?? 'none'}) is no longer there. Close or delete this follow-up`;
+  const chain = correctionChain(correction.correction.meeting, correction.correction.root, all);
+  if (chain.state !== 'corrected' || chain.head?.update_id !== correction.id) {
+    return `${correction.id} is no longer the meeting's current version${chain.state === 'conflict' || chain.state === 'broken' ? ` (its versions are ${chain.state})` : ''}, so this follow-up may spread an outdated value. Close or delete it, and follow up the current correction`;
+  }
+  return null;
+}
+
 /** The pins of a correction that are not its meeting's own files, as its original update holds them. */
 function foreignPins(env: CorrectionEnvelope, all: ContextUpdate[]): string[] {
   const root = all.find((u) => u.id === env.root.update_id);
@@ -563,6 +584,11 @@ function checkCorrectionRecords(update: Pick<ContextUpdate, 'kind' | 'correction
     r.problems.push(problem);
     if (r.confirmation === 'confirmed') { r.confirmation = null; r.confirmed_at = null; r.changed_since_confirmed = true; }
   };
+  if (update.kind === FOLLOW_UP_KIND) {
+    // A follow-up looks for the old values in the context; a meeting's record is never its business.
+    for (const r of update.meeting_records) flag(r, 'a follow-up of a correction holds no meeting records');
+    return;
+  }
   if (update.kind !== CORRECTION_KIND) {
     for (const r of update.meeting_records) if (r.amends || r.corrections.length || r.action_items.some((a) => a.slot != null)) flag(r, 'only a correction says what a record amends');
     return;
@@ -822,6 +848,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
     meeting_records: normalizeRecords(data['meeting_records'], correction ? correctionBinding(correction) : undefined),
     correction,
+    follows: data['kind'] === FOLLOW_UP_KIND && typeof data['follows'] === 'string' && UPDATE_ID_PATTERN.test(data['follows']) ? data['follows'] : null,
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
     kept_meetings: Array.isArray(data['kept_meetings']) ? (data['kept_meetings'] as unknown[]).filter((k): k is string => typeof k === 'string' && MEETING_KEY.test(k)).slice(0, 50) : [],
@@ -1087,17 +1114,24 @@ export class ContextUpdateService {
         ...t, current: (recorded(t) || (await hashOf(t.source)) === t.source_sha256) && (await hashOf(t.file)) === t.sha256,
       })));
       const correction_review = current.kind === CORRECTION_KIND && current.correction ? await this.correctionReview(current) : undefined;
-      return { ...current, proposals, material_files, transcripts, ...(correction_review ? { correction_review } : {}) };
+      const follow_up_problem = current.kind === FOLLOW_UP_KIND && current.status !== 'done' ? followUpProblem(current, await this.list()) : undefined;
+      return { ...current, proposals, material_files, transcripts, ...(correction_review ? { correction_review } : {}), ...(follow_up_problem !== undefined ? { follow_up_problem } : {}) };
     });
   }
 
   /**
-   * Before an analysis the dashboard starts: a correction's pins must be its meeting's own files, so the analysis never
-   * reads another meeting's transcript on the strength of an edited envelope.
+   * Before a run the dashboard starts: a correction's pins must be its meeting's own files, so the analysis never reads
+   * another meeting's transcript on the strength of an edited envelope; a follow-up, analyzed or applied, must still
+   * follow the meeting's current version, so it never spreads a value a newer correction replaced.
    */
-  async analysisPreflight(id: string): Promise<void> {
+  async runPreflight(id: string, command: 'analyze' | 'apply' = 'analyze'): Promise<void> {
     const { update } = await this.read(id);
-    if (update.kind !== CORRECTION_KIND) return;
+    if (update.kind === FOLLOW_UP_KIND) {
+      const problem = followUpProblem(update, await this.list());
+      if (problem) throw httpError(409, problem);
+      return;
+    }
+    if (update.kind !== CORRECTION_KIND || command !== 'analyze') return;
     if (!update.correction) throw httpError(409, `${id} does not say what it corrects; delete it and start again from the meeting`);
     const foreign = foreignPins(update.correction, await this.list());
     if (foreign.length) throw httpError(409, `${id} pins ${foreign[0]}, which is not one of this meeting's files; delete it and start again from the meeting`);
@@ -1112,12 +1146,15 @@ export class ContextUpdateService {
       const env = update.correction!;
       const found = all.find((u) => u.id === env.base.update_id)?.meeting_records.find((r) => r.id === env.base.record_id);
       const base = found && found.revision === env.base.revision ? found : null;
-      return { base, stale: false, blocked: [], changes: base && record ? recordDiff(base, record) : [], doubts_dropped: base && record ? doubtsDropped(base, record) : [] };
+      // Still the meeting's current version: only then can it be followed up.
+      const chain = correctionChain(env.meeting, env.root, all);
+      const current = chain.state === 'corrected' && chain.head?.update_id === update.id;
+      return { base, stale: false, blocked: [], changes: base && record ? recordDiff(base, record) : [], doubts_dropped: base && record ? doubtsDropped(base, record) : [], current };
     }
-    if (!record) return { base: null, stale: false, blocked: [], changes: [], doubts_dropped: [] };
+    if (!record) return { base: null, stale: false, blocked: [], changes: [], doubts_dropped: [], current: false };
     const check = await this.correctionCheck(update, record, all);
     const base = check.base;
-    return { base, stale: check.stale, blocked: check.blocked, changes: base ? recordDiff(base, record) : [], doubts_dropped: base ? doubtsDropped(base, record) : [] };
+    return { base, stale: check.stale, blocked: check.blocked, changes: base ? recordDiff(base, record) : [], doubts_dropped: base ? doubtsDropped(base, record) : [], current: false };
   }
 
 
@@ -1537,6 +1574,19 @@ export class ContextUpdateService {
    * seen half made. Only the dashboard calls this, with the envelope it computed under the corrections lock.
    */
   async createCorrection(input: { title: string; meeting_date: string; notes: string; correction: CorrectionEnvelope; materials: { name: string; content: string }[] }): Promise<ContextUpdate> {
+    return this.createSystem(input, { kind: CORRECTION_KIND, correction: input.correction });
+  }
+
+  /** A follow-up of a finished correction: an ordinary update, made like a correction (materials first, update.md last). */
+  async createFollowUp(input: { title: string; meeting_date: string; notes: string; follows: string; materials: { name: string; content: string }[] }): Promise<ContextUpdate> {
+    return this.createSystem(input, { kind: FOLLOW_UP_KIND, follows: input.follows });
+  }
+
+  /**
+   * An update the dashboard opens with its own materials: the folder reserved, the materials written, update.md last,
+   * so until then the folder is no update and nothing can claim it.
+   */
+  private async createSystem(input: { title: string; meeting_date: string; notes: string; materials: { name: string; content: string }[] }, fields: Record<string, unknown>): Promise<ContextUpdate> {
     await fsp.mkdir(this.rootDir(), { recursive: true });
     await workspaceEntry(workspaceService.getWorkspacePath(), this.rootDir());
     let id = '';
@@ -1554,7 +1604,7 @@ export class ContextUpdateService {
     for (const m of input.materials) await saveAttachment(path.join(dir, 'materials'), m.name, Buffer.from(m.content, 'utf-8'), 'update.md');
     const data: Record<string, unknown> = {
       schema_version: '1.0', id, type: 'context-update', title: input.title.slice(0, 200),
-      origin: 'meetings', kind: CORRECTION_KIND, correction: input.correction,
+      origin: 'meetings', ...fields,
       status: 'ready', source_date: isDateOnly(input.meeting_date) ? input.meeting_date : new Date().toISOString().slice(0, 10),
       created_at: new Date().toISOString(), materials: await this.materialList(dir), proposals: [],
     };
@@ -1947,6 +1997,16 @@ export class ContextUpdateService {
     // A correction is finished under the corrections lock (outside this update's queue), so only one correction of a
     // version ever becomes the next one, whichever dashboard approves.
     const kind = (await this.read(id).catch(() => null))?.update.kind;
+    // A follow-up is approved only while its correction is still the meeting's current version, checked under the same
+    // lock a correction finishes under, so a newer one cannot finish in between.
+    if (kind === FOLLOW_UP_KIND) {
+      return withCorrectionsLock(async () => {
+        const { update } = await this.read(id);
+        const problem = update.status === 'in_review' ? followUpProblem(update, await this.list()) : null;
+        if (problem) throw httpError(409, problem);
+        return this.approveQueued(id);
+      });
+    }
     if (kind !== CORRECTION_KIND) return this.approveQueued(id);
     return withCorrectionsLock(async () => {
       // Approved before and stopped after it became current (a crash, a lost reply): finish it, never check it again.

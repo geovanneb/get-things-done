@@ -275,6 +275,15 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   // No task from a disputed record: the versions must hold.
   const canCreate = record?.confirmation === 'confirmed' && done && holds;
   const canCorrect = canCreate && h.review_state === 'final' && holds && !versions?.open.length;
+  // The current correction's old values may still be in the context: an update for the AI tool to find them.
+  const followUp = async () => {
+    setBusy(true);
+    try {
+      const created = await apiPost<{ id: string }>(`/api/context-updates/${recordOwner}/follow-up`);
+      notify.success(`${created.id} opened. Analyze it to find notes that still use the old values.`);
+      navigate(`/context/updates/${created.id}`);
+    } catch (err) { notify.error(err, 'Could not start a follow-up. Try again.'); } finally { setBusy(false); }
+  };
   const suggest = async () => {
     setBusy(true);
     try {
@@ -374,6 +383,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
               <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
                 Corrected{versions.head_at ? ` on ${day(versions.head_at)}` : ''} in <Link to={`/context/updates/${recordOwner}`} className="gtd-link">{recordOwner}</Link>.
                 {' '}<Link to={`/context/updates/${versions.original.update_id}`} className="gtd-link">See the original record</Link>.
+                {versions.head_changed && <>{' '}<Button size="sm" variant="secondary" disabled={busy} onClick={() => void followUp()}>Check the context</Button></>}
               </p>
             )}
             <MeetingRecordCard record={record} reviewing={false} confirmation={record.confirmation}
