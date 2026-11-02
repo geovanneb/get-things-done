@@ -13,6 +13,20 @@ import { MentionService } from './mentionService';
 import { orgChartService } from './orgChartService';
 import { listFolderFiles } from '../utils/files';
 import { checkOfficeFile } from '../utils/officeEncryption';
+import { checkTaskMeetings, sheetForRun, type SelectionCheck } from './meetingSources';
+
+/** What the package says about the meetings it holds: what was left out, and why. */
+function summarizeMeetingCheck(c: SelectionCheck): NonNullable<ExecutionPackage['meeting_check']> {
+  return {
+    selection_id: c.selection?.id ?? null,
+    pinned_at: c.selection?.at ?? null,
+    unpinned: c.unpinned,
+    not_pinned: c.selection?.problems ?? [],
+    left_out: c.sources.filter((s) => s.state !== 'ok').map((s) => ({ meeting: s.meeting, path: s.path, state: s.state as 'changed' | 'missing' })),
+    record_changed: c.record_changed,
+    review_changes: c.review_changes,
+  };
+}
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -39,6 +53,8 @@ interface BuildOptions {
   includeTemplate: boolean;
   selectedContextIds?: string[];
   selectedStakeholderRefs?: string[];
+  /** A preview only reads: it never pins a meeting the Objective mentions. */
+  preview?: boolean;
 }
 
 /** Folders whose other files the agent is told to load: the task's own folder, and a note's or template's folder. */
@@ -67,6 +83,9 @@ export class ExecutionPackageService {
   async buildPackage(taskId: string, options: BuildOptions): Promise<ExecutionPackage> {
     const task = await taskService.getTask(taskId);
     const files: ExecutionPackage['files'] = [];
+    // Known before the files: a run's meeting sheet is named after its package.
+    const packageId = uuidv4();
+    let meetingCheck: SelectionCheck | null = null;
 
     // Add task file
     if (task.path) {
@@ -77,10 +96,36 @@ export class ExecutionPackageService {
     // Files @-mentioned in the task's Objective: always included, on top of the normal selection.
     // A mention adds files; it never narrows what the options below would include.
     for (const m of mentionService.extractMentions(task.body)) {
+      if (m.href.startsWith('/meetings/')) continue; // a meeting: its pinned sources, below
       const abs = await mentionService.resolve(m.href);
       if (!abs) continue;
       const stats = await fileService.getFileStats(abs);
       files.push({ path: abs, type: mentionType(m.href), size: stats.size, hash: stats.hash, mentioned: true });
+    }
+
+    // Meetings mentioned in the Objective: the task's pinned sheet, and each pinned file still holding its pinned bytes.
+    // A changed or missing file stays out (the sheet and the package's meeting check say why), never newer text.
+    const meetings = mentionService.meetingIds(task.body);
+    if (task.path && meetings.length > 0) {
+      // A run pins what is new and writes the sheet again from the selection, with what changed since marked; a
+      // preview only reads.
+      // A run pins what is new and gets its own sheet, written once in the same transaction: a later refresh never
+      // changes what this run reads. A preview only reads.
+      const run = options.preview
+        ? { check: await checkTaskMeetings(task.path, meetings), sheet: null }
+        : await sheetForRun(task.path, async () => mentionService.meetingIds((await taskService.getTask(taskId)).body), packageId);
+      const check = run.check;
+      if (run.sheet) {
+        const sheetStats = await fileService.getFileStats(run.sheet);
+        files.push({ path: run.sheet, type: 'meeting_sources', size: sheetStats.size, hash: sheetStats.hash, mentioned: true });
+      }
+      for (const s of check.sources.filter((c) => c.state === 'ok')) {
+        const abs = path.join(await fsp.realpath(workspaceService.getWorkspacePath()).catch(() => workspaceService.getWorkspacePath()), s.current_path ?? s.path);
+        if (files.some((f) => f.path === abs)) continue;
+        const stats = await fileService.getFileStats(abs);
+        files.push({ path: abs, type: 'meeting', size: stats.size, hash: stats.hash, mentioned: true });
+      }
+      meetingCheck = check;
     }
 
     // Add stakeholders
@@ -170,7 +215,7 @@ export class ExecutionPackageService {
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
     const unreadable = await unreadableFiles(files);
     const pkg: ExecutionPackage = {
-      id: uuidv4(),
+      id: packageId,
       task_id: taskId,
       created_at: new Date().toISOString(),
       files,
@@ -180,18 +225,20 @@ export class ExecutionPackageService {
       command: '',
       total_size_bytes: totalSize,
       ...(unreadable.length > 0 && { unreadable_files: unreadable }),
+      ...(meetingCheck && { meeting_check: summarizeMeetingCheck(meetingCheck) }),
     };
 
     pkg.command = this.generateCommand(pkg);
     return pkg;
   }
 
-  async getPackagePreview(taskId: string): Promise<{ estimatedTokens: number; files: ExecutionPackage['files']; command: string; unreadable_files?: ExecutionPackage['unreadable_files'] }> {
+  async getPackagePreview(taskId: string): Promise<{ estimatedTokens: number; files: ExecutionPackage['files']; command: string; unreadable_files?: ExecutionPackage['unreadable_files']; meeting_check?: ExecutionPackage['meeting_check'] }> {
     const pkg = await this.buildPackage(taskId, {
       includeStakeholders: true,
       includeContext: true,
       includeProfile: true,
       includeTemplate: true,
+      preview: true,
     });
 
     // Rough token estimate: ~4 chars per token
@@ -202,6 +249,7 @@ export class ExecutionPackageService {
       files: pkg.files,
       command: pkg.command,
       ...(pkg.unreadable_files && { unreadable_files: pkg.unreadable_files }),
+      ...(pkg.meeting_check && { meeting_check: pkg.meeting_check }),
     };
   }
 

@@ -14,7 +14,7 @@ router.get('/', async (req: Request, res: Response) => {
 // GET /api/mentions/resolve?href=  → { exists }  (chips show deleted files struck through)
 router.get('/resolve', async (req: Request, res: Response) => {
   const href = (req.query['href'] as string | undefined) ?? '';
-  res.json({ exists: Boolean(href) && (await mentionService.resolve(href)) !== null });
+  res.json({ exists: Boolean(href) && (await mentionService.exists(href)) });
 });
 
 export default router;

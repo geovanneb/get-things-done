@@ -237,7 +237,7 @@ export default function NewTaskModal({
           {saveError && <Notice tone="critical" title="The task was not created.">{saveError}</Notice>}
           <div className="gtd-detail">
             <div className="gtd-detail__main">
-              <Field label="Objective" htmlFor="new-task-objective" hint="Type @ to mention a stakeholder, template, context note or task." style={{ marginBottom: 'var(--space-6)' }}>
+              <Field label="Objective" htmlFor="new-task-objective" hint="Type @ to mention a stakeholder, template, context note, task or meeting." style={{ marginBottom: 'var(--space-6)' }}>
                 <MentionTextarea
                   id="new-task-objective"
                   className="gtd-control"

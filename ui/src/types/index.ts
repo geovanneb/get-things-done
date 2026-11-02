@@ -866,3 +866,23 @@ export interface MeetingDetail {
   update_records: { id: string; title: string; meeting_date: string; confirmation: MeetingRecord['confirmation'] }[];
   sources: MeetingSource[];
 }
+
+/** What a task may read of a meeting it mentions, as pinned when the task was saved (server: meetingSources.ts). */
+export interface PinnedMeeting {
+  id: string;
+  title: string;
+  meeting_date: string;
+  review: 'queued' | 'waiting' | 'provisional' | 'final';
+  record: { id: string; update_id: string; revision: string; confirmation: 'confirmed' | 'rejected' | null } | null;
+  sources: { path: string; name: string; kind: 'transcript' | 'notes'; sha256: string }[];
+  unavailable: { name: string; reason: string }[];
+}
+
+/** A task's pinned meetings, checked against what is there now. */
+export interface MeetingSourcesCheck {
+  selection: { id: string; at: string; meetings: PinnedMeeting[]; problems: { id: string; reason: string }[] } | null;
+  unpinned: string[];
+  sources: { meeting: string; path: string; state: 'ok' | 'changed' | 'missing'; current_path?: string }[];
+  record_changed: string[];
+  review_changes: { meeting: string; change: string }[];
+}

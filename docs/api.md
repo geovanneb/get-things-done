@@ -102,7 +102,9 @@ The stream sends a comment line every 30 seconds to keep the connection open.
 | `GET` | `/api/tasks/:id/content` | Get the Markdown body of `task.md` |
 | `PUT` | `/api/tasks/:id/content` | Replace the Markdown body. Body: `{ "content": "…" }` |
 | `POST` | `/api/tasks/:id/execution-package` | Build and save an execution package for an agent. Returns `201` |
-| `GET` | `/api/tasks/:id/execution-package/preview` | Preview the files and size of the package without saving it |
+| `GET` | `/api/tasks/:id/execution-package/preview` | Preview the files and size of the package without saving it. It never pins a meeting |
+| `GET` | `/api/tasks/:id/meeting-sources` | The meetings the Objective mentions (`[@title](/meetings/<id>)`), as pinned when the task was saved, checked against what is there now: `selection` (when, the meetings with their files and SHA-256, record and review state, and `problems` for mentions that could not be pinned), `unpinned` (mentioned since), `sources` (each pinned file `ok`, `changed` or `missing`), `record_changed`. Saving a task pins newly mentioned meetings; a pin is never refreshed by itself |
+| `POST` | `/api/tasks/:id/meeting-sources/refresh` | Pin the mentioned meetings again as they are now, as a new selection. Earlier selections stay in `sources/meetings.json`. Returns the check |
 | `GET` | `/api/tasks/:id/files` | List the files attached to the task |
 | `POST` | `/api/tasks/:id/files` | Upload a file to the task (multipart, field `file`). Returns `201` |
 | `DELETE` | `/api/tasks/:id/files/:filename` | Delete one attached file. Returns `204` |
@@ -561,8 +563,8 @@ GET /api/agent-activity
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/api/search` | Full-text search. `q` is required; `types` limits the result types (comma-separated, for example `task,context`) |
-| `GET` | `/api/mentions` | Suggestions for the `@` picker in a task's objective. `q` and `limit` (1 to 50, default 8) |
-| `GET` | `/api/mentions/resolve` | Check that a mentioned file still exists. `href` is the link to check |
+| `GET` | `/api/mentions` | Suggestions for the `@` picker in a task's objective. `q` and `limit` (1 to 50, default 8). Type `meeting` lists meetings in the queue and meetings an update holds whose id is final, linked as `/meetings/<id>` |
+| `GET` | `/api/mentions/resolve` | Check that a mentioned file, or meeting, still exists. `href` is the link to check. A meeting whose review is still open counts as missing until its update is done |
 
 ```text
 GET /api/search?q=carrier

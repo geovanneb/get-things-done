@@ -13,6 +13,7 @@ function mentionType(href: string): MentionType | null {
   if (h.startsWith('context/')) return 'context';
   if (h.startsWith('outputs/')) return 'template';
   if (h.startsWith('tasks/')) return 'task';
+  if (h.startsWith('meetings/')) return 'meeting';
   return null;
 }
 
@@ -53,6 +54,8 @@ function mentionRoute(rawHref: string | undefined): string | null {
   if (!href || !href.startsWith('/')) return null;
   const task = href.match(/^\/tasks\/[^/]+\/(TASK-\d{4}-\d{4})\//);
   if (task) return `/board/task/${task[1]}`;
+  // A meeting's mention is its page's path.
+  if (/^\/meetings\/(MQ|CU)-[0-9A-Z-]+$/.test(href)) return href;
   const stk = href.match(/^\/stakeholders\/[^/]+\/([a-z]+-\d+)\.md$/i);
   if (stk) return `/stakeholders/${stk[1].toUpperCase()}`;
   if (href.startsWith('/context/')) return '/context';

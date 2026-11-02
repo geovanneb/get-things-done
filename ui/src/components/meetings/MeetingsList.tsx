@@ -6,13 +6,15 @@ import Card from '@/components/common/Card';
 import EmptyState from '@/components/common/EmptyState';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Notice from '@/components/common/Notice';
-import { SearchInput, Select } from '@/components/common/Input';
+import { Checkbox, SearchInput, Select } from '@/components/common/Input';
 import { SegmentedControl } from '@/components/common/Tabs';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
 import { apiDelete, apiPost } from '@/utils/api';
 import { groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
+import { canMakeDeliverable, deliverableDraft } from '@/utils/meetingDeliverable';
+import { useAppDispatch } from '@/store';
 import type { HistoryMeeting, MeetingDigest } from '@/types';
 
 /** How many rows show before "Show older"; what needs the user is always shown. */
@@ -44,9 +46,14 @@ function Status({ status, label }: { status: RowStatus; label: string }) {
   );
 }
 
-function Row({ row, now }: { row: MeetingRow; now: Date }) {
+function Row({ row, now, selected, onSelect }: { row: MeetingRow; now: Date; selected: boolean; onSelect: (on: boolean) => void }) {
+  const selectable = canMakeDeliverable(row);
   return (
     <li className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 'var(--space-4)', rowGap: 'var(--space-2)' }}>
+      {/* Every row keeps the same indent, also one that cannot be picked yet (its review is still open). */}
+      <span style={{ flex: '0 0 20px' }}>
+        {selectable && <Checkbox checked={selected} onChange={onSelect} label={<span className="sr-only">Select {row.title}</span>} />}
+      </span>
       <span className="mono" style={{ flex: '0 0 64px', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{whenLabel(row, now)}</span>
       <div style={{ flex: '1 1 220px', minWidth: 0 }}>
         <Link to={row.href} className="gtd-link-strong truncate" style={{ display: 'block', fontSize: 'var(--text-sm)' }}>{row.title}</Link>
@@ -79,6 +86,9 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   const [all, setAll] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
+  // Meetings picked for a deliverable, in the order they were picked.
+  const [selected, setSelected] = React.useState<string[]>([]);
+  const dispatch = useAppDispatch();
   const now = new Date();
 
   const rows = job && history ? meetingRows(job.queue, history, {
@@ -93,6 +103,9 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   const limited = query.trim() || all ? found : [...urgent, ...others.slice(0, SHOWN)];
   const hidden = found.length - limited.length;
   const trash = rows.filter((r) => r.inTrash);
+  // A meeting that left the list, or can no longer be used, is no longer picked.
+  const picked = selected.flatMap((id) => rows.filter((r) => r.id === id && canMakeDeliverable(r)));
+  const select = (id: string, on: boolean) => setSelected((prev) => (on ? [...prev.filter((x) => x !== id), id] : prev.filter((x) => x !== id)));
   const options: { value: MeetingFilter; label: string }[] = [
     { value: 'all', label: `All ${count('all')}` },
     { value: 'you', label: `Needs you ${count('you')}` },
@@ -135,9 +148,16 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
             groupRows(limited, now).map((g) => (
               <section key={g.label} aria-label={g.label}>
                 <h3 style={{ margin: 0, padding: 'var(--space-2) var(--space-5)', fontSize: 'var(--text-xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)', background: 'var(--color-bg)', borderBottom: '1px solid var(--color-border)' }}>{g.label}</h3>
-                <ul aria-label={`Meetings, ${g.label}`} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} />)}</ul>
+                <ul aria-label={`Meetings, ${g.label}`} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} selected={selected.includes(r.id)} onSelect={(on) => select(r.id, on)} />)}</ul>
               </section>
             ))
+          )}
+          {picked.length > 0 && (
+            <div role="region" aria-label="Selected meetings" style={{ position: 'sticky', bottom: 0, zIndex: 'var(--z-sticky)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+              <span style={{ flex: '1 1 auto', fontSize: 'var(--text-sm)' }}>{picked.length === 1 ? '1 meeting selected' : `${picked.length} meetings selected`}</span>
+              <Button size="sm" variant="ghost" onClick={() => setSelected([])}>Clear</Button>
+              <Button size="sm" variant="primary" onClick={() => { dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: deliverableDraft(picked) }); setSelected([]); }}>Create deliverable</Button>
+            </div>
           )}
           {hidden > 0 && <div style={{ padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)' }}><Button size="sm" variant="ghost" onClick={() => setAll(true)}>Show {hidden} older</Button></div>}
           {trash.length > 0 && (

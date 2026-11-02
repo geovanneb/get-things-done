@@ -4,7 +4,7 @@ import { apiGet } from '@/utils/api';
 import MentionIcon from './MentionIcon';
 
 export interface MentionCandidate {
-  type: 'stakeholder' | 'template' | 'context' | 'task';
+  type: 'stakeholder' | 'template' | 'context' | 'task' | 'meeting';
   id: string;
   label: string;
   detail?: string;
@@ -17,6 +17,7 @@ const GROUPS: { type: MentionCandidate['type']; title: string }[] = [
   { type: 'template', title: 'Output templates' },
   { type: 'context', title: 'Context notes' },
   { type: 'task', title: 'Tasks' },
+  { type: 'meeting', title: 'Meetings' },
 ];
 
 /** In the "All" tab, at most this many results per type; the rest sit behind "Show N more". */
