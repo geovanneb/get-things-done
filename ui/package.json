@@ -16,6 +16,7 @@
     "test:meeting-prep": "tsx src/utils/meetingPrep.test.ts",
     "test:meeting-participants": "tsx src/utils/meetingParticipants.test.ts",
     "test:meeting-deliverable": "tsx src/utils/meetingDeliverable.test.ts",
+    "test:record-doubts": "tsx src/utils/recordDoubts.test.ts",
     "test:review-choices": "tsx src/utils/reviewChoices.test.ts",
     "test:update-types": "tsx src/utils/updateTypes.test.ts",
     "test:api-errors": "tsx src/utils/api.test.ts",

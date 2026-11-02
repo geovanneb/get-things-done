@@ -361,3 +361,17 @@ test('a selection id is never used twice, even after damage that leaves no id to
   assert.equal(fresh.selection!.id, 'S-002', 'the run sheet still names S-001');
   assert.ok(ws);
 });
+
+test('the doubts confirmed with a record reach the task as uncertain evidence, quoted', async (t) => {
+  const ws = await workspace(t);
+  // The record as confirmed, with a doubt the user saw.
+  await finishedDigest(ws, { meeting_records: [{ id: 'M-01', title: 'Weekly sync', meeting_date: '2026-10-27', meeting: 'MQ-2026-0001', attendees: [{ name: 'Jane Doe' }], decisions: ['Fictional budget review next week'], open_questions: [], action_items: [], source: 'MQ-2026-0001-a.vtt', confirmation: 'confirmed',
+    unsure: [{ field: 'decisions', value: 'budget', reason: '[click](http://example.com) may be the glossary term', suggestion: 'Budget review' }] }] });
+  const task = await tasks.getTask((await tasks.createTask({ title: 'Fictional summary', body: 'Summarize [@Weekly sync](/meetings/MQ-2026-0001).' })).id);
+  const pinned = (await syncTaskMeetings(task.path!, async () => ['MQ-2026-0001']))!.selection!;
+  assert.equal(pinned.meetings[0]!.record?.unsure?.[0]?.value, 'budget');
+  const sheet = await fsp.readFile(path.join(path.dirname(task.path!), 'sources', 'meetings.md'), 'utf-8');
+  assert.match(sheet, /Not sure \(the analysis doubted these; the record says what the material says\)/);
+  assert.match(sheet, /decisions: budget\. \\\[click\\\]\(http/);
+  assert.doesNotMatch(sheet, /\[click\]\(http/);
+});

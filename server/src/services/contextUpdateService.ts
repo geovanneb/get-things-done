@@ -157,6 +157,10 @@ export interface MeetingSpeaker { label: string; person: MeetingPerson | null; r
  * the context proposals. A confirmed record is the reviewed account of the meeting; the transcript stays
  * unreviewed material. Confirming means the user checked the record, not that every attendee agreed to it.
  */
+/** A field of a record the analysis could be wrong about. */
+export const DOUBT_FIELDS = ['title', 'meeting_date', 'attendees', 'speakers', 'decisions', 'open_questions', 'action_items'] as const;
+export interface RecordDoubt { field: typeof DOUBT_FIELDS[number]; value: string; reason: string; suggestion: string }
+
 export interface MeetingRecord {
   id: string;
   title: string;
@@ -171,6 +175,11 @@ export interface MeetingRecord {
   source: string;
   /** In a meeting digest: the queued meeting it is about (`queued_as` in materials/meetings.md). Null when not given. */
   meeting: string | null;
+  /**
+   * What the analysis is not sure of, for the user to check before confirming: a field, the exact text it is about,
+   * why, and what it may be instead. Never a reason to change the record by itself.
+   */
+  unsure: RecordDoubt[];
   /**
    * Set by the user in the dashboard, never by an agent. `confirmed` only counts while the record still has
    * the content the user confirmed (`confirmed_hash` in the file); otherwise it reads as null.
@@ -443,8 +452,27 @@ function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' |
     // Only when given: records confirmed before meetings were named stay confirmed.
     ...(r.meeting ? [['meeting', r.meeting]] : []),
     // Only when there are any: a record confirmed before speakers existed stays confirmed.
-    ...(r.speakers.length ? [r.speakers.map((s) => [s.label, s.source, s.person ? [s.person.ref, s.person.name] : null, s.reason])] : [])];
+    ...(r.speakers.length ? [r.speakers.map((s) => [s.label, s.source, s.person ? [s.person.ref, s.person.name] : null, s.reason])] : []),
+    // The same for doubts: confirming covers what the user was told the analysis was not sure of.
+    ...(r.unsure.length ? [['unsure', r.unsure.map((d) => [d.field, d.value, d.reason, d.suggestion])]] : [])];
   return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 16);
+}
+
+/** What the analysis is not sure of. A doubt that cannot be shown faithfully is a problem, like any other field. */
+function recordDoubts(raw: unknown[], problems: string[]): RecordDoubt[] {
+  return raw.map((entry, i) => {
+    const what = `doubt ${i + 1}`;
+    const o = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>;
+    if (o !== entry) problems.push(`${what} is not an object`);
+    const field = typeof o['field'] === 'string' && (DOUBT_FIELDS as readonly string[]).includes(o['field']) ? o['field'] as RecordDoubt['field'] : null;
+    if (!field) problems.push(`${what} names no field of the record (${DOUBT_FIELDS.join(', ')})`);
+    const value = recordText(o['value'], `${what} value`, problems);
+    if (!value) problems.push(`${what} does not say which text it is about`);
+    const reason = recordText(o['reason'], `${what} reason`, problems);
+    if (!reason) problems.push(`${what} does not say why`);
+    const suggestion = o['suggestion'] == null ? '' : recordText(o['suggestion'], `${what} suggestion`, problems);
+    return { field: field ?? 'title', value, reason, suggestion };
+  });
 }
 
 /** The speakers of a record. A label is `Speaker 2` and is there once per recording; anything else cannot be confirmed. */
@@ -488,12 +516,15 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
       action_items: shownActionItems(recordList(r['action_items'], 'action_items', problems), problems).map((x) => x.item),
       source: recordText(r['source'], 'source', problems),
       meeting: typeof r['meeting'] === 'string' && /^MQ-\d{4}-\d{4}$/.test(r['meeting'].trim()) ? r['meeting'].trim() : null,
+      unsure: r['unsure'] == null ? [] : recordDoubts(recordList(r['unsure'], 'unsure', problems), problems),
     };
     const revision = recordRevision(content);
     const hash = typeof r['confirmed_hash'] === 'string' ? r['confirmed_hash'] : '';
     // A confirmation counts only for the content it was given for. One written without that hash (by hand
     // or by an agent) is not the user's confirmation.
-    const confirmedNow = r['confirmation'] === 'confirmed' && hash === revision;
+    // Nor while the record has a problem: what cannot be shown faithfully (a malformed doubt added after confirming,
+    // which reads as nothing) was never what the user confirmed.
+    const confirmedNow = r['confirmation'] === 'confirmed' && hash === revision && problems.length === 0;
     const confirmedAt = typeof r['confirmed_at'] === 'string' && !Number.isNaN(Date.parse(r['confirmed_at'])) ? r['confirmed_at'] : null;
     return {
       ...content,
@@ -501,7 +532,7 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
       confirmed_at: confirmedNow ? confirmedAt : null,
       revision,
       problems,
-      changed_since_confirmed: r['confirmation'] === 'confirmed' && hash !== '' && hash !== revision,
+      changed_since_confirmed: r['confirmation'] === 'confirmed' && hash !== '' && (hash !== revision || problems.length > 0),
     };
   });
   const counts = new Map<string, number>();
@@ -509,6 +540,12 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
   for (const r of records) {
     if (r.id && counts.get(r.id)! > 1) r.problems.push(`another record has the same id ${r.id}`);
     if (records.length > MAX_RECORDS) r.problems.push(`more than ${MAX_RECORDS} meeting records in one update`);
+    // A problem found across the records (a copied id) takes a confirmation away too, as one inside a record does.
+    if (r.problems.length && r.confirmation === 'confirmed') {
+      r.confirmation = null;
+      r.confirmed_at = null;
+      r.changed_since_confirmed = true;
+    }
   }
   return records;
 }

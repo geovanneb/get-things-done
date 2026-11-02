@@ -496,6 +496,16 @@ export interface MeetingRecord {
   changed_since_confirmed: boolean;
   /** In a meeting digest: the queued meeting the record is about, when the analysis named it. */
   meeting?: string | null;
+  /** What the analysis is not sure of: shown for the user to check before confirming. */
+  unsure?: RecordDoubt[];
+}
+
+/** A field of a meeting record the analysis could be wrong about, the exact text, why, and what it may be instead. */
+export interface RecordDoubt {
+  field: 'title' | 'meeting_date' | 'attendees' | 'speakers' | 'decisions' | 'open_questions' | 'action_items';
+  value: string;
+  reason: string;
+  suggestion: string;
 }
 
 /** The AI tool that runs workspace commands for the dashboard (GET /api/runner). */

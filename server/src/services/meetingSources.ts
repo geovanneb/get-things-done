@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
-import { ContextUpdateService, type MeetingRecord } from './contextUpdateService';
+import { ContextUpdateService, DOUBT_FIELDS, type MeetingRecord, type RecordDoubt } from './contextUpdateService';
 import { MeetingDigestService } from './meetingDigestService';
 import { MeetingHistoryService } from './meetingHistoryService';
 import { isMeetingId, isMeetingText, QUEUED_MEETING_ID } from './meetingLibrary';
@@ -65,6 +65,8 @@ export interface PinnedMeeting {
     update_id: string; revision: string; confirmation: MeetingRecord['confirmation'];
     /** The voices the record names, by label: still the agent's proposal unless the record is confirmed. */
     speakers: { label: string; name: string | null }[];
+    /** What the analysis was not sure of, as the user saw it when confirming. Absent in pins made before doubts existed. */
+    unsure?: RecordDoubt[];
   }) | null;
   sources: PinnedSource[];
   /** Files of the meeting that could not be pinned, and why (deleted, in the trash, not ready, a name unsafe to show). */
@@ -171,6 +173,7 @@ async function resolveHeld(id: string): Promise<PinnedMeeting> {
       ? {
         id: r.id, title: r.title, decisions: r.decisions, open_questions: r.open_questions, action_items: r.action_items, attendees: r.attendees,
         speakers: (r.speakers ?? []).map((s) => ({ label: s.label, name: s.person?.name ?? null })),
+        ...(r.unsure?.length ? { unsure: r.unsure } : {}),
         update_id: update.id, revision: detail.meeting.record.revision, confirmation: r.confirmation,
       }
       : null,
@@ -220,6 +223,10 @@ function validRecord(v: unknown): boolean {
   if (!(r['confirmation'] === null || r['confirmation'] === 'confirmed' || r['confirmation'] === 'rejected')) return false;
   if (!strings(r['decisions']) || !strings(r['open_questions']) || !isArray(r['attendees']) || !r['attendees'].every(person)) return false;
   if (!isArray(r['speakers']) || !r['speakers'].every((x) => { const sp = obj(x); return sp && isString(sp['label']) && (sp['name'] === null || isString(sp['name'])); })) return false;
+  if (!absentOr(r['unsure'], (u) => isArray(u) && u.every((x) => {
+    const d = obj(x);
+    return Boolean(d && (DOUBT_FIELDS as readonly string[]).includes(d['field'] as string) && isString(d['value']) && isString(d['reason']) && isString(d['suggestion']));
+  }))) return false;
   return isArray(r['action_items']) && r['action_items'].every((x) => {
     const a = obj(x);
     return a && isString(a['description']) && nullOr(a['owner'], person) && isString(a['due_date'])
@@ -497,6 +504,8 @@ export function renderSheet(selection: MeetingSelection | null, check?: Selectio
       list('Decisions', r.decisions ?? []);
       list('Open questions', r.open_questions ?? []);
       list('Action items', (r.action_items ?? []).map((a) => [a.description, a.owner?.name ? `owner ${a.owner.name}` : '', a.due_date ? `due ${a.due_date}` : ''].filter(Boolean).join(' · ')));
+      // The analysis's own doubts: evidence that something may be wrong, never a correction to make or follow.
+      list('Not sure (the analysis doubted these; the record says what the material says)', (r.unsure ?? []).map((d) => `${d.field}: ${d.value}. ${d.reason}${d.suggestion ? ` Maybe: ${d.suggestion}.` : ''}`));
     } else {
       lines.push('- No reviewed record.');
     }
