@@ -623,6 +623,11 @@ try {
       && corrected.record?.decisions?.[0] === 'Fictional decision, corrected' && corrected.meeting?.record_owner?.update_id === corr.id
       && corrected.meeting?.correction?.state === 'corrected' && corrTask?.status === 200 && corrTaskBody.task?.id === madeBody.task?.id,
       `start=${started.status} done=${corrDone.status} state=${corrected.meeting?.correction?.state} task=${corrTask?.status}`);
+    const actionNotice = madeBody.task?.id ? await (await fetch(`${base}/api/tasks/${madeBody.task.id}/meeting-action`)).json() : {};
+    check('a task from a corrected meeting says whether its item changed since it was made',
+      actionNotice.state === 'current' && actionNotice.meeting === `${meeting.id}-M-01` && actionNotice.current?.update_id === corr.id
+      && madeTask.meeting_action_source?.update_id === meeting.id && madeTask.meeting_action_source?.root_index === 0,
+      JSON.stringify(actionNotice).slice(0, 200));
     // Never starts a real AI run: only the runner's status and a refusal for an update that is not ready.
     const runnerStatus = await (await fetch(`${base}/api/runner`)).json();
     const notReady = await json('POST', `/api/context-updates/${meeting.id}/run`, { command: 'analyze' });

@@ -42,6 +42,8 @@ export interface Task {
   routine_occurrence?: string;
   /** The meeting action item this task was made from (set by the dashboard). */
   meeting_action?: string;
+  /** The version of the meeting record it was made from, and the original item's place (set by the dashboard). */
+  meeting_action_source?: { update_id: string; record_id: string; revision: string; root_index: number };
   skills: string[];
   estimated_hours?: number;
   body?: string;
@@ -904,6 +906,15 @@ export interface MeetingDetail {
   record: MeetingRecord | null;
   update_records: { id: string; title: string; meeting_date: string; confirmation: MeetingRecord['confirmation'] }[];
   sources: MeetingSource[];
+}
+
+/** For a task made from a meeting action item: what the record says about it now, versus when the task was made. */
+export interface ActionNotice {
+  state: 'none' | 'current' | 'changed' | 'conflict' | 'broken' | 'unknown' | 'ambiguous' | 'gone';
+  meeting: string | null;
+  changes: { property: 'description' | 'owner' | 'due_date'; before: string; after: string }[];
+  current: { update_id: string; record_id: string; at: string | null } | null;
+  legacy: boolean;
 }
 
 /** What a task may read of a meeting it mentions, as pinned when the task was saved (server: meetingSources.ts). */

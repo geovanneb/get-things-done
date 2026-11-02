@@ -8,7 +8,7 @@ import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { MeetingHistoryService } from '../src/services/meetingHistoryService';
 import { startCorrection } from '../src/services/meetingCorrectionService';
 import { recordDiff } from '../src/services/meetingCorrections';
-import type { MeetingRecord } from '../src/services/contextUpdateService';
+import { actionItemKey, type MeetingRecord } from '../src/services/contextUpdateService';
 import { stringifyMarkdown, parseMarkdown } from '../src/utils/markdown';
 
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -387,4 +387,202 @@ test('an analysis never starts from a correction that pins another meeting\'s fi
     pin['path'] = 'context-updates/CU-2026-0001/materials/MQ-2026-0002-b.vtt';
   });
   await assert.rejects(service.analysisPreflight(c.id), /not one of this meeting's files/);
+});
+
+test('a task records the version it was made from, keeps it when found again, and no update can change it', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const { TaskService } = await import('../src/services/taskService');
+  const tasks = new TaskService();
+  const root = (await service.get('CU-2026-0001')).meeting_records[0]!;
+  const made = await service.createActionItemTask('CU-2026-0001', 'M-01', { item: 0, revision: root.revision, task: { title: 'Call', priority: 'medium' } });
+  const source = { update_id: 'CU-2026-0001', record_id: 'M-01', revision: root.revision, root_index: 0 };
+  assert.deepEqual((made.task as unknown as Record<string, unknown>)['meeting_action_source'], source);
+
+  const c = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c.id);
+  await confirm(c.id);
+  await service.approve(c.id);
+  const head = (await service.get(c.id)).meeting_records[0]!;
+  const again = await service.createActionItemTask(c.id, 'M-01', { item: 0, revision: head.revision, task: { title: 'Call', priority: 'medium' } });
+  assert.equal(again.task.id, made.task.id, 'the same task');
+  const saved = (await tasks.getTask(made.task.id)) as unknown as Record<string, unknown>;
+  assert.deepEqual(saved['meeting_action_source'], source, 'found again: what it recorded first stays');
+
+  await tasks.updateTask(made.task.id, { title: 'Call them', meeting_action: 'x/y/z', meeting_action_source: null } as never);
+  const after = (await tasks.getTask(made.task.id)) as unknown as Record<string, unknown>;
+  assert.deepEqual([after['title'], after['meeting_action'], after['meeting_action_source']], ['Call them', saved['meeting_action'], source]);
+});
+
+test('task notices: what changed for the task\'s own item since the version it was made from, never guessed', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const { TaskService } = await import('../src/services/taskService');
+  const { actionNotice } = await import('../src/services/meetingActionNotice');
+  const tasks = new TaskService();
+  const notice = async (id: string) => actionNotice((await tasks.getTask(id)) as unknown as Record<string, unknown>);
+  const taskFile = (id: string) => path.join(ws, 'tasks', 'active', id, 'task.md');
+  const editTask = async (id: string, fn: (d: Record<string, unknown>) => void) => {
+    const parsed = parseMarkdown(await fsp.readFile(taskFile(id), 'utf-8'));
+    fn(parsed.data);
+    await fsp.writeFile(taskFile(id), stringifyMarkdown(parsed.content, parsed.data));
+  };
+
+  const root = (await service.get('CU-2026-0001')).meeting_records[0]!;
+  const fromRoot = (await service.createActionItemTask('CU-2026-0001', 'M-01', { item: 0, revision: root.revision, task: { title: 'Call', priority: 'medium' } })).task.id;
+  assert.equal((await notice(fromRoot)).state, 'current');
+  assert.equal((await actionNotice({ title: 'Not from a meeting' })).state, 'none');
+
+  // Corrected: the description and the owner of the item.
+  const c = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c.id, (r) => { (r['action_items'] as Record<string, unknown>[])[0]!['owner'] = { name: 'Jane Dough' }; });
+  await confirm(c.id);
+  await service.approve(c.id);
+  const n = await notice(fromRoot);
+  assert.deepEqual([n.state, n.meeting, n.current?.update_id, n.legacy], ['changed', 'MQ-2026-0001', c.id, false]);
+  assert.deepEqual(n.changes.map((x) => [x.property, x.before, x.after]), [['description', 'Call Dual Line', 'Call Dual Lane'], ['owner', 'Jane Doe', 'Jane Dough']]);
+
+  // A task made from the corrected version: nothing changed since. Without its version (made before tasks recorded it),
+  // the original stands in for it.
+  await editTask(fromRoot, (d) => { delete d['meeting_action_source']; });
+  const legacy = await notice(fromRoot);
+  assert.deepEqual([legacy.state, legacy.legacy], ['changed', true]);
+  const headRevision = (await service.get(c.id)).meeting_records[0]!.revision;
+  await editTask(fromRoot, (d) => { d['meeting_action_source'] = { update_id: c.id, record_id: 'M-01', revision: headRevision, root_index: 0 }; });
+  assert.equal((await notice(fromRoot)).state, 'current');
+
+  // A version that is not one of the record's versions: unknown, never compared.
+  await editTask(fromRoot, (d) => { (d['meeting_action_source'] as Record<string, unknown>)['revision'] = 'ffffffffffffffff'; });
+  assert.equal((await notice(fromRoot)).state, 'unknown');
+
+  // Two corrections of the same version: a conflict, nothing listed.
+  const sibling = await service.createCorrection({ title: 'Sibling', meeting_date: '2026-10-27', notes: '', correction: c.correction!, materials: [] });
+  await analyzed(ws, sibling.id);
+  await confirm(sibling.id);
+  await change(ws, sibling.id, (d) => { d['status'] = 'done'; });
+  const conflict = await notice(fromRoot);
+  assert.deepEqual([conflict.state, conflict.changes], ['conflict', []]);
+});
+
+test('task notices: an older task whose original has two items alike is ambiguous, never matched to one', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  await change(ws, 'CU-2026-0001', (d) => {
+    const r = (d['meeting_records'] as Record<string, unknown>[])[0]!;
+    r['action_items'] = [{ description: 'Call Dual Line', owner: { name: 'Jane Doe' } }, { description: 'Call Dual Line', owner: { name: 'Jane Doe' } }];
+  });
+  const revision = (await service.get('CU-2026-0001')).meeting_records[0]!.revision;
+  await change(ws, 'CU-2026-0001', (d) => { (d['meeting_records'] as Record<string, unknown>[])[0]!['confirmed_hash'] = revision; });
+  const { actionNotice } = await import('../src/services/meetingActionNotice');
+  const key = actionItemKey({ description: 'Call Dual Line', owner: { ref: null, name: 'Jane Doe' }, due_date: '', task_ref: null });
+  assert.equal((await actionNotice({ meeting_action: `CU-2026-0001/M-01/${key}` })).state, 'ambiguous');
+  assert.equal((await actionNotice({ meeting_action: `CU-2026-0001/M-01/${key}`, meeting_action_source: { update_id: 'CU-2026-0001', record_id: 'M-01', revision, root_index: 1 } })).state, 'current');
+});
+
+test('a task made first from a correction records that version and its slot\'s original place; requests never set either', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  // Two items in the original, so the place matters.
+  await change(ws, 'CU-2026-0001', (d) => {
+    (d['meeting_records'] as Record<string, unknown>[])[0]!['action_items'] = [{ description: 'Call Dual Line', owner: { name: 'Jane Doe' } }, { description: 'Send the Dual Line quote', owner: { name: 'Jane Doe' } }];
+  });
+  const rootRevision = (await service.get('CU-2026-0001')).meeting_records[0]!.revision;
+  await change(ws, 'CU-2026-0001', (d) => { (d['meeting_records'] as Record<string, unknown>[])[0]!['confirmed_hash'] = rootRevision; });
+  const { TaskService } = await import('../src/services/taskService');
+  const tasks = new TaskService();
+
+  const c = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c.id);
+  await confirm(c.id);
+  await service.approve(c.id);
+  const head = (await service.get(c.id)).meeting_records[0]!;
+  const made = await service.createActionItemTask(c.id, 'M-01', { item: 1, revision: head.revision, task: { title: 'Send', priority: 'medium' } });
+  const source = { update_id: c.id, record_id: 'M-01', revision: head.revision, root_index: 1 };
+  const onDisk = async (id: string) => parseMarkdown(await fsp.readFile(path.join(ws, 'tasks', 'active', id, 'task.md'), 'utf-8')).data;
+  assert.deepEqual((await onDisk(made.task.id))['meeting_action_source'], source);
+
+  // The original's same item finds that task, and its first record stays.
+  const fromRoot = await service.createActionItemTask('CU-2026-0001', 'M-01', { item: 1, revision: rootRevision, task: { title: 'Send', priority: 'medium' } });
+  assert.equal(fromRoot.task.id, made.task.id);
+  assert.deepEqual((await onDisk(made.task.id))['meeting_action_source'], source);
+
+  // A request that names either field: never taken, on create or on update.
+  const spoof = { meeting_action: `CU-2026-0001/M-01/${actionItemKey(head.action_items[0]!)}`, meeting_action_source: source };
+  const plain = await tasks.createTask({ title: 'Plain', ...spoof } as never);
+  await tasks.updateTask(plain.id, spoof as never);
+  const plainOnDisk = await onDisk(plain.id);
+  assert.deepEqual([plainOnDisk['meeting_action'], plainOnDisk['meeting_action_source']], [undefined, undefined]);
+
+  // What is written validates against the workspace's task schema.
+  const { default: Ajv } = await import('ajv');
+  const schema = JSON.parse(await fsp.readFile(path.join(__dirname, '..', '..', 'templates', 'workspace', '.schemas', 'task.schema.json'), 'utf-8'));
+  const ajv = new Ajv({ strict: false, allErrors: true });
+  const validate = ajv.compile(schema);
+  const data = JSON.parse(JSON.stringify(await onDisk(made.task.id)));
+  assert.ok(validate(data), JSON.stringify(validate.errors));
+});
+
+test('task notices: a task from one correction compared after the next; what the meeting\'s versions say comes first', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const { actionNotice } = await import('../src/services/meetingActionNotice');
+  const c1 = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c1.id);
+  await confirm(c1.id);
+  await service.approve(c1.id);
+  const h1 = (await service.get(c1.id)).meeting_records[0]!;
+  const made = await service.createActionItemTask(c1.id, 'M-01', { item: 0, revision: h1.revision, task: { title: 'Call', priority: 'medium' } });
+  const task = made.task as unknown as Record<string, unknown>;
+  assert.equal((await actionNotice(task)).state, 'current');
+
+  // The next correction changes only the date: that alone is listed, from the first correction's item.
+  const c2 = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c2.id, (r) => {
+    r['decisions'] = h1.decisions;
+    r['action_items'] = h1.action_items.map((a, i) => ({ description: a.description, owner: a.owner, due_date: '2026-11-20', slot: c2.correction!.slots[i]!.slot }));
+    r['corrections'] = [];
+  });
+  await confirm(c2.id);
+  await service.approve(c2.id);
+  const n = await actionNotice(task);
+  assert.deepEqual([n.state, n.changes.map((x) => [x.property, x.before, x.after])], ['changed', [['due_date', '', '2026-11-20']]]);
+
+  // What the task recorded, unreadable: never compared with the original instead.
+  for (const bad of [null, { ...(task['meeting_action_source'] as object), root_index: '0' }, { update_id: c1.id }]) {
+    const x = await actionNotice({ ...task, meeting_action_source: bad });
+    assert.deepEqual([x.state, x.changes, x.current], ['unknown', [], null], JSON.stringify(bad));
+  }
+
+  // A correction naming this original with another meeting never decides the meeting, nor the answer.
+  await service.createCorrection({ title: 'Elsewhere', meeting_date: '2026-10-27', notes: '', correction: { ...c2.correction!, meeting: 'MQ-2026-0009' }, materials: [] });
+  const still = await actionNotice(task);
+  assert.deepEqual([still.state, still.meeting], ['changed', 'MQ-2026-0001']);
+
+  // The original edited on disk: the versions no longer hold, and that is what the task says, with nothing compared.
+  await change(ws, 'CU-2026-0001', (d) => { ((d['meeting_records'] as Record<string, unknown>[])[0]!['action_items'] as Record<string, unknown>[])[0]!['description'] = 'Call someone'; });
+  const broken = await actionNotice(task);
+  assert.deepEqual([broken.state, broken.changes, broken.current], ['broken', [], null]);
+
+  // The original's update gone: gone.
+  await fsp.rm(path.join(ws, 'context-updates', 'CU-2026-0001'), { recursive: true });
+  assert.equal((await actionNotice(task)).state, 'gone');
+});
+
+test('task notices: a conflict is said before an older task\'s ambiguous item', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  await change(ws, 'CU-2026-0001', (d) => {
+    (d['meeting_records'] as Record<string, unknown>[])[0]!['action_items'] = [{ description: 'Call Dual Line', owner: { name: 'Jane Doe' } }, { description: 'Call Dual Line', owner: { name: 'Jane Doe' } }];
+  });
+  const revision = (await service.get('CU-2026-0001')).meeting_records[0]!.revision;
+  await change(ws, 'CU-2026-0001', (d) => { (d['meeting_records'] as Record<string, unknown>[])[0]!['confirmed_hash'] = revision; });
+  const { actionNotice } = await import('../src/services/meetingActionNotice');
+  const key = actionItemKey({ description: 'Call Dual Line', owner: { ref: null, name: 'Jane Doe' }, due_date: '', task_ref: null });
+  const c = await startCorrection('MQ-2026-0001');
+  for (const id of [c.id, (await service.createCorrection({ title: 'Sibling', meeting_date: '2026-10-27', notes: '', correction: c.correction!, materials: [] })).id]) {
+    await analyzed(ws, id);
+    await confirm(id);
+    await change(ws, id, (d) => { d['status'] = 'done'; });
+  }
+  assert.equal((await actionNotice({ meeting_action: `CU-2026-0001/M-01/${key}` })).state, 'conflict');
 });

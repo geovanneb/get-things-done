@@ -6,6 +6,7 @@ import { ExecutionPackageService } from '../services/executionPackageService';
 import { TaskStatus, Priority, type Task } from '../types';
 import { MentionService } from '../services/mentionService';
 import { checkTaskMeetings, refreshTaskMeetings, syncTaskMeetings } from '../services/meetingSources';
+import { actionNotice } from '../services/meetingActionNotice';
 import { utf8FileNames } from '../utils/uploadNames';
 
 const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limits: { fileSize: 50 * 1024 * 1024 } });
@@ -129,6 +130,11 @@ router.post('/:id/meeting-sources/refresh', async (req: Request, res: Response) 
   const task = await taskService.getTask(param(req, 'id'));
   if (!task.path) { res.status(404).json({ error: 'Not Found', message: 'Task file not found' }); return; }
   res.json(await refreshTaskMeetings(task.path, mentionedMeetings(task.id)));
+});
+
+// GET /api/tasks/:id/meeting-action  for a task made from a meeting action item: whether the meeting record changed since
+router.get('/:id/meeting-action', async (req: Request, res: Response) => {
+  res.json(await actionNotice(await taskService.getTask(param(req, 'id')) as unknown as Record<string, unknown>));
 });
 
 // GET /api/tasks/:id/files
