@@ -61,6 +61,7 @@
           }}
         },
         "source": {"type": "string", "maxLength": 1000, "description": "Where the record comes from, e.g. the material file."},
+        "meeting_id": {"type": "string", "description": "Set by the dashboard when the update is done, never by an agent: the meeting this record is about (MQ-... in a digest, else CU-...-M-nn). Not part of what the executive confirms."},
         "meeting": {"type": "string", "pattern": "^MQ-\\d{4}-\\d{4}$", "description": "A meeting digest only: the queued meeting this record is about, its queued_as id in materials/meetings.md."},
         "unsure": {"type": "array", "maxItems": 30, "description": "What the analysis is not sure of, for the executive to check before confirming. Never changes the record by itself.", "items": {"type": "object", "required": ["field", "value", "reason"], "properties": {
           "field": {"type": "string", "enum": ["title", "meeting_date", "attendees", "speakers", "decisions", "open_questions", "action_items"]},
@@ -116,9 +117,10 @@
     "materials": {
       "type": "array",
       "description": "Kept by the dashboard. Stays as the record after the files themselves are deleted (or while keep_materials holds them).",
-      "items": {"type": "object", "properties": {"name": {"type": "string"}, "size": {"type": "number"}, "type": {"type": "string"}}}
+      "items": {"type": "object", "properties": {"name": {"type": "string"}, "size": {"type": "number"}, "type": {"type": "string"}, "meetings": {"type": "array", "maxItems": 50, "items": {"type": "string"}, "description": "Set by the dashboard when the update is done, never by an agent: the meetings this file belongs to."}}}
     },
     "keep_materials": {"type": "boolean", "description": "Set by the executive in the dashboard, never by an agent. When true, the apply step and closing keep materials/; only the executive releases it."},
+    "meetings_linked_at": {"type": "string", "format": "date-time", "description": "Set by the dashboard when it saved which meeting each record and file belongs to. From then on those saved links are read as they are."},
     "keep_meeting_text": {"type": "boolean", "description": "Set by the dashboard, never by an agent. When true, the apply step leaves materials/ alone: the dashboard keeps the meetings' transcripts and notes and removes the rest."},
     "kept_meetings": {"type": "array", "maxItems": 50, "items": {"type": "string"}, "description": "Set by the dashboard: meetings the executive keeps out of System cleanup."},
     "deleted_meetings": {"type": "array", "maxItems": 50, "items": {"type": "object"}, "description": "Set by the dashboard: meetings whose text was deleted, and the trash entry holding it until it is deleted for good."},

@@ -164,7 +164,7 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
             <section aria-labelledby="meetings-trash" style={{ borderTop: '1px solid var(--color-border)', padding: 'var(--space-3) var(--space-5)' }}>
               <h3 id="meetings-trash" style={{ margin: 0, fontSize: 'var(--text-sm)', fontWeight: 600 }}>In the trash ({trash.length})</h3>
               <p style={{ margin: '2px 0 var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                Deleted meetings wait here, still on this computer, until you delete them for good{retention?.enabled ? ', or System cleanup does 30 days after they were deleted' : ''}. Their confirmed records stay with their update.
+                The trash is not erasure: deleted meetings wait here, still on this computer, until you delete them for good{retention?.enabled ? ', or System cleanup does 30 days after they were deleted' : ''}. Their confirmed records stay with their update.
               </p>
               <ul aria-label="Meetings in the trash" className="gtd-list">
                 {trash.map((r) => (

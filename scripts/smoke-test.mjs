@@ -571,6 +571,12 @@ try {
       badRecord.status === 400 && staleRecord.status === 409 && meetingDone.status === 'done' && meetingDone.meeting_records?.[0]?.confirmation === 'confirmed'
       && !fs.existsSync(path.join(meetingDir, 'materials')),
       `bad=${badRecord.status} stale=${staleRecord.status} status=${meetingDone.status}`);
+    // Done, its record id is final: the meeting's id is saved on the record, and the meeting opens by it.
+    const savedMeeting = await fetch(`${base}/api/meetings/${meeting.id}-M-01`);
+    check('a finished import saves its meeting id on the record, and the meeting opens by that id',
+      meetingDone.meeting_records?.[0]?.meeting_id === `${meeting.id}-M-01` && typeof meetingDone.meetings_linked_at === 'string'
+      && meetingDone.meeting_records[0].confirmation === 'confirmed' && savedMeeting.status === 200,
+      `meeting_id=${meetingDone.meeting_records?.[0]?.meeting_id} linked=${meetingDone.meetings_linked_at} detail=${savedMeeting.status}`);
     const vttForm = new FormData();
     vttForm.append('file', new Blob(['WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Fictional Speaker>Fictional words.</v>\n']), 'sync.vtt');
     const vttUpdate = await (await json('POST', '/api/context-updates', { title: 'Fictional sync' })).json();

@@ -135,6 +135,85 @@ test('a meeting says its record version, each file\'s hash and state, and an unc
   assert.deepEqual((await history.detail('MQ-2026-0002')).sources.map((s) => s.state), ['missing', 'missing']);
 });
 
+/** update.md as written, to check what the dashboard saved. */
+async function raw(ws: string, id: string): Promise<Record<string, unknown>> {
+  return parseMarkdown(await fsp.readFile(path.join(ws, 'context-updates', id, 'update.md'), 'utf-8')).data as Record<string, unknown>;
+}
+const rawRecords = (data: Record<string, unknown>) => data['meeting_records'] as Record<string, unknown>[];
+
+test('closing an imported update saves each meeting\'s id on its record and files, and a confirmation stays', async (t) => {
+  const ws = await workspace(t);
+  await update(ws, 'CU-2026-0002', {
+    meeting_records: [record('M-01', { source: 'steering.vtt' }), record('M-02', { source: 'vendor.vtt' })],
+    transcripts: [transcript('steering.transcript.md', 'steering.vtt'), transcript('vendor.transcript.md', 'vendor.vtt')],
+  }, { 'steering.vtt': vtt('Kim Park', 'Steering.'), 'steering.transcript.md': 'copy s', 'vendor.vtt': vtt('Kim Park', 'Vendor.'), 'vendor.transcript.md': 'copy v' });
+  const before = await updates.get('CU-2026-0002');
+  const m1 = before.meeting_records.find((r) => r.id === 'M-01')!;
+  await updates.saveMeetingRecords('CU-2026-0002', { 'M-01': { confirmation: 'confirmed', revision: m1.revision } });
+
+  await updates.close('CU-2026-0002');
+  const data = await raw(ws, 'CU-2026-0002');
+  assert.ok(typeof data['meetings_linked_at'] === 'string');
+  assert.deepEqual(rawRecords(data).map((r) => r['meeting_id']), ['CU-2026-0002-M-01', 'CU-2026-0002-M-02']);
+  assert.deepEqual((data['materials'] as Record<string, unknown>[]).map((m) => [m['name'], m['meetings']]).sort(), [
+    ['steering.transcript.md', ['CU-2026-0002-M-01']], ['steering.vtt', ['CU-2026-0002-M-01']],
+    ['vendor.transcript.md', ['CU-2026-0002-M-02']], ['vendor.vtt', ['CU-2026-0002-M-02']],
+  ]);
+  const after = (await updates.get('CU-2026-0002')).meeting_records.find((r) => r.id === 'M-01')!;
+  assert.deepEqual([after.confirmation, after.revision], ['confirmed', m1.revision], 'the saved id is not part of what was confirmed');
+
+  // Saved means permanent: a record whose source is edited by hand afterwards stays with the files saved for it.
+  const edited = await raw(ws, 'CU-2026-0002');
+  rawRecords(edited)[0]!['source'] = 'vendor.vtt';
+  await fsp.writeFile(path.join(ws, 'context-updates', 'CU-2026-0002', 'update.md'), stringifyMarkdown('', edited));
+  const steering = (await history.list()).find((m) => m.id === 'CU-2026-0002-M-01')!;
+  assert.equal(steering.record?.link, 'saved');
+  assert.deepEqual((await history.detail('CU-2026-0002-M-01')).sources.map((s) => s.name), ['steering.vtt']);
+});
+
+test('a digest saves only the links that are certain, and a meeting id an agent wrote never counts', async (t) => {
+  const ws = await workspace(t);
+  // M-01 names its meeting. M-02 and M-03 name nothing, so which one is MQ-2026-0001's is not certain;
+  // M-02 also carries a meeting_id the analysis made up.
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0002' }), record('M-02', { meeting_id: 'MQ-2026-0001' }), record('M-03')]);
+  const open = new Map((await history.list()).map((m) => [m.id, m]));
+  assert.equal(open.get('MQ-2026-0001')!.record_state, 'ambiguous', 'before the update is done, a written meeting_id is not read');
+
+  await updates.close('CU-2026-0001');
+  const data = await raw(ws, 'CU-2026-0001');
+  assert.deepEqual(rawRecords(data).map((r) => r['meeting_id'] ?? null), ['MQ-2026-0002', null, null]);
+  const done = new Map((await history.list()).map((m) => [m.id, m]));
+  assert.deepEqual([done.get('MQ-2026-0002')!.record?.id, done.get('MQ-2026-0002')!.record?.link], ['M-01', 'saved']);
+  assert.equal(done.get('MQ-2026-0001')!.record_state, 'ambiguous', 'an unclear link stays unclear');
+  // A digest's files already sit under their meeting; they are saved on the materials too.
+  const materials = new Map((data['materials'] as Record<string, unknown>[]).map((m) => [m['name'], m['meetings']]));
+  assert.deepEqual([materials.get('MQ-2026-0002-b.vtt'), materials.get('meetings.md')], [['MQ-2026-0002'], undefined]);
+});
+
+test('an update the apply command finished gets its links saved the first time it is opened', async (t) => {
+  const ws = await workspace(t);
+  await update(ws, 'CU-2026-0002', { status: 'done', applied_at: '2026-10-28T10:00:00.000Z', meeting_records: [record('M-01', { source: 'call.vtt' })] }, { 'call.vtt': vtt('Kim Park', 'Hi.') });
+  // Not opened yet: the link is worked out as before, and nothing is written by reading the list.
+  assert.equal((await history.list())[0]!.record?.link, null);
+  assert.equal((await raw(ws, 'CU-2026-0002'))['meetings_linked_at'], undefined);
+  await updates.get('CU-2026-0002');
+  const data = await raw(ws, 'CU-2026-0002');
+  assert.ok(typeof data['meetings_linked_at'] === 'string');
+  assert.equal(rawRecords(data)[0]!['meeting_id'], 'CU-2026-0002-M-01');
+  const savedAt = data['meetings_linked_at'];
+  await updates.get('CU-2026-0002');
+  assert.equal((await raw(ws, 'CU-2026-0002'))['meetings_linked_at'], savedAt, 'saved once, not on every read');
+});
+
+test('an update with no meeting gets no links saved', async (t) => {
+  const ws = await workspace(t);
+  await update(ws, 'CU-2026-0005', {}, { 'deck.md': '# A deck, not a meeting' });
+  await updates.close('CU-2026-0005');
+  const data = await raw(ws, 'CU-2026-0005');
+  assert.equal(data['meetings_linked_at'], undefined);
+  assert.equal((data['materials'] as Record<string, unknown>[])[0]!['meetings'], undefined);
+});
+
 test('a meeting\'s text is read from its own files only', async (t) => {
   const ws = await workspace(t);
   await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
