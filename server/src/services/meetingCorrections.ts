@@ -1,4 +1,4 @@
-import { actionItemKey, CORRECTION_KIND, type ContextUpdate, type MeetingRecord, type RecordVersion } from './contextUpdateService';
+import { actionItemKey, CORRECTION_KIND, DOUBT_FIELDS, type ContextUpdate, type MeetingPerson, type MeetingRecord, type RecordChange, type RecordVersion } from './contextUpdateService';
 import { heldMeetings } from './meetingLibrary';
 
 /**
@@ -117,4 +117,75 @@ export function correctionChain(meeting: string, root: { update_id: string; reco
 export function rootActionIdentity(correction: NonNullable<ContextUpdate['correction']>, slot: string): string | null {
   const s = correction.slots.find((x) => x.slot === slot);
   return s ? `${correction.root.update_id}/${correction.root.record_id}/${s.root_key}` : null;
+}
+
+/** One field of a record that a correction changed: how it read in the version corrected and how it reads now. */
+export interface FieldChange { field: RecordChange['field']; before: string[]; after: string[] }
+
+// Quoted, the link named apart: a name can never read as another name with a link, or the other way round.
+const personText = (p: MeetingPerson | null) => (p ? `${JSON.stringify(p.name)}${p.ref ? ` (stakeholder ${p.ref})` : ''}` : '');
+
+/** Each field of a record as the lines a reader sees. */
+export function fieldLines(r: MeetingRecord): Record<RecordChange['field'], string[]> {
+  return {
+    title: [r.title],
+    meeting_date: [r.meeting_date],
+    attendees: r.attendees.map(personText),
+    speakers: r.speakers.map((s) => `${s.label} in ${s.source}: ${personText(s.person) || 'unknown'}${s.reason ? ` (${s.reason})` : ''}`),
+    decisions: r.decisions,
+    open_questions: r.open_questions,
+    // The description quoted, so text in it never reads as an owner or a date.
+    action_items: r.action_items.map((a) => [JSON.stringify(a.description), `owner: ${personText(a.owner) || 'none'}`, `due: ${a.due_date || 'none'}`].join(' · ')),
+  };
+}
+
+/**
+ * What a correction actually changed, field by field, worked out from the two records. The agent's explanations
+ * annotate this; they never stand in for it, so a change the agent did not explain still shows.
+ */
+export function recordDiff(before: MeetingRecord, after: MeetingRecord): FieldChange[] {
+  const a = fieldLines(before);
+  const b = fieldLines(after);
+  const x = fieldValues(before);
+  const y = fieldValues(after);
+  // Whether a field changed is decided on its values, never on the lines shown: two different values can read alike.
+  return DOUBT_FIELDS.filter((f) => JSON.stringify(x[f]) !== JSON.stringify(y[f])).map((field) => ({ field, before: a[field], after: b[field] }));
+}
+
+const personValue = (p: MeetingPerson | null) => (p ? [p.ref, p.name] : null);
+
+/**
+ * Each field of a record as the single values the analysis can quote: a title, a name, a decision, an item's
+ * description, owner or date. What a change marked not sure is checked against.
+ */
+export function fieldTexts(r: MeetingRecord): Record<RecordChange['field'], string[]> {
+  return {
+    title: [r.title],
+    meeting_date: [r.meeting_date],
+    attendees: r.attendees.map((p) => p.name),
+    speakers: r.speakers.flatMap((s) => (s.person ? [s.person.name] : [])),
+    decisions: r.decisions,
+    open_questions: r.open_questions,
+    action_items: r.action_items.flatMap((i) => [i.description, ...(i.owner ? [i.owner.name] : []), ...(i.due_date ? [i.due_date] : [])]),
+  };
+}
+
+/** Doubts of the version corrected that the corrected record no longer has: shown, never dropped silently. */
+export function doubtsDropped(before: MeetingRecord, after: MeetingRecord): MeetingRecord['unsure'] {
+  const key = (d: MeetingRecord['unsure'][number]) => JSON.stringify([d.field, d.value]);
+  const kept = new Set(after.unsure.map(key));
+  return before.unsure.filter((d) => !kept.has(key(d)));
+}
+
+/** Each field of a record as values: what decides whether a correction changed it. */
+function fieldValues(r: MeetingRecord): Record<RecordChange['field'], unknown> {
+  return {
+    title: r.title,
+    meeting_date: r.meeting_date,
+    attendees: r.attendees.map(personValue),
+    speakers: r.speakers.map((s) => [s.label, s.source, personValue(s.person), s.reason]),
+    decisions: r.decisions,
+    open_questions: r.open_questions,
+    action_items: r.action_items.map((i) => [i.description, personValue(i.owner), i.due_date]),
+  };
 }

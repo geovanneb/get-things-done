@@ -3,6 +3,7 @@ import { param } from '../utils/params';
 import { MeetingHistoryService } from '../services/meetingHistoryService';
 import { isMeetingId } from '../services/meetingLibrary';
 import { sendFile } from '../utils/files';
+import { startCorrection } from '../services/meetingCorrectionService';
 
 const router = Router();
 const service = new MeetingHistoryService();
@@ -37,6 +38,11 @@ router.get('/:id/text/:file', async (req: Request, res: Response) => {
 router.get('/:id/audio/:file', async (req: Request, res: Response) => {
   // The sender every attachment uses: sandboxed, never sniffed.
   sendFile(res, await service.audio(meetingId(req), param(req, 'file')), false);
+});
+
+// POST /api/meetings/:id/corrections  starts a correction of the meeting's reviewed record: a context update to analyze
+router.post('/:id/corrections', async (req: Request, res: Response) => {
+  res.status(201).json(await startCorrection(meetingId(req)));
 });
 
 // PUT /api/meetings/:id/keep  { keep: boolean }  System cleanup never removes a kept meeting

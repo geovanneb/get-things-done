@@ -15,7 +15,7 @@ import { formatRelativeDate } from '@/utils/format';
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { doubtLine, doubtsAbout } from '@/utils/recordDoubts';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
-import type { ContextUpdate, ContextUpdateProposal, MeetingPerson, MeetingRecord, MeetingSpeaker, RecordDoubt, Stakeholder } from '@/types';
+import type { ContextUpdate, ContextUpdateProposal, FieldChange, MeetingPerson, MeetingRecord, MeetingSpeaker, RecordChange, RecordDoubt, Stakeholder } from '@/types';
 import AnalysisRun from './AnalysisRun';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
@@ -220,6 +220,93 @@ export function MeetingRecordCard({ record, reviewing, confirmation, onChoose, o
         </div>
       )}
     </article>
+  );
+}
+
+const FIELD_LABELS: Record<RecordDoubt['field'], string> = {
+  title: 'Title', meeting_date: 'Date', attendees: 'Attendees', speakers: 'Speakers', decisions: 'Decisions', open_questions: 'Open questions', action_items: 'Action items',
+};
+
+/** One side of a changed field: its lines, the ones not on the other side marked, in words as well as colour. */
+function ChangeSide({ label, lines, other, tone }: { label: string; lines: string[]; other: string[]; tone: 'before' | 'after' }) {
+  const color = tone === 'before' ? 'var(--color-critical)' : 'var(--color-success)';
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 2 }}>{label}</div>
+      {lines.length === 0 || (lines.length === 1 && !lines[0]) ? <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>(empty)</div> : (
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-sm)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {lines.map((line, i) => {
+            // Same number of lines: compared place by place, so a reorder still shows. Otherwise by occurrence: the
+            // second of two equal lines is changed when the other side has only one.
+            const occurrence = lines.slice(0, i).filter((l) => l === line).length;
+            const changed = lines.length === other.length ? other[i] !== line : occurrence >= other.filter((l) => l === line).length;
+            return (
+              <li key={i} style={{ overflowWrap: 'anywhere', ...(changed ? { color, fontWeight: 600 } : { color: 'var(--color-text-secondary)' }) }}>
+                {line || '(empty)'}{changed && <span className="sr-only">{tone === 'before' ? ' (changed or removed)' : ' (changed or added)'}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A correction, as the executive judges it: each field the server found changed, before and after, with the agent's
+ * reason. Changes the agent was not sure of are listed apart: the record keeps the old value for those.
+ */
+function CorrectionCard({ review, explanations, open, rejected }: { review: NonNullable<ContextUpdate['correction_review']>; explanations: RecordChange[]; open: boolean; rejected: boolean }) {
+  const sure = explanations.filter((c) => c.sure);
+  const suggestions = explanations.filter((c) => !c.sure);
+  return (
+    <section aria-label="What the correction changes" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <h4 style={{ ...sectionLabel, margin: 0 }}>{open ? 'What changes in the record' : rejected ? 'What this correction suggested (rejected, not applied)' : 'What changed in the record'}</h4>
+      {open && review.blocked.length > 0 && (
+        <HelpBox tone="critical" title={review.stale ? 'Another correction of this meeting finished first' : 'This correction cannot be approved'}>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>{review.blocked.map((b, i) => <li key={i}>{b}</li>)}</ul>
+        </HelpBox>
+      )}
+      {!review.base && (
+        <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+          The version this corrected is no longer here, so the changes cannot be shown against it.
+        </p>
+      )}
+      {review.base && review.changes.length === 0 && (
+        <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+          {open ? 'Nothing: the agent found nothing to correct. Close this correction to keep the record as it is.' : 'Nothing changed.'}
+        </p>
+      )}
+      {review.changes.map((c: FieldChange) => {
+        const why = sure.filter((x) => x.field === c.field);
+        return (
+          <div key={c.field} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid var(--color-border)' }}>
+            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{FIELD_LABELS[c.field]}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+              <ChangeSide label="Before" lines={c.before} other={c.after} tone="before" />
+              <ChangeSide label="After" lines={c.after} other={c.before} tone="after" />
+            </div>
+            {why.length > 0
+              ? <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{why.map((x, i) => <li key={i}><strong>Why:</strong> {x.reason}</li>)}</ul>
+              : <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>The agent did not explain this change. Check it against the transcript.</div>}
+          </div>
+        );
+      })}
+      {review.doubts_dropped.length > 0 && (
+        <HelpBox tone="warning" title="No longer marked not sure">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>{review.doubts_dropped.map((d, i) => <li key={i}>{doubtLine(d)}</li>)}</ul>
+          The version before had these doubts; the corrected record does not. Check that the correction really settles them.
+        </HelpBox>
+      )}
+      {suggestions.length > 0 && (
+        <HelpBox tone="warning" title="Not sure: suggested, not applied">
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {suggestions.map((x, i) => <li key={i}>{FIELD_LABELS[x.field] ?? x.field}: "{x.before}" may be "{x.after}". {x.reason}</li>)}
+          </ul>
+          The record keeps the current value for these{open ? ', and approving does not change them' : ''}. Check them in the transcript.
+        </HelpBox>
+      )}
+    </section>
   );
 }
 
@@ -445,11 +532,15 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const records = u.meeting_records ?? [];
   const recordChoice = (r: MeetingRecord) => shownChoice(confirmations, r.id, r.confirmation);
   const confirmedCount = records.filter((r) => recordChoice(r) === 'confirmed').length;
-  const canApprove = acceptedCount > 0 || confirmedCount > 0;
+  // A correction the check refuses (stale, its version gone, a record that does not hold) cannot be approved.
+  const correctionBlocked = u.kind === 'meeting-correction' && (u.correction_review?.blocked.length ?? 0) > 0;
+  const canApprove = (acceptedCount > 0 || confirmedCount > 0) && !correctionBlocked;
   // Removals are done by the dashboard on approval and a meeting record needs no file; only creates and
   // updates need the apply command.
   const noFileToWrite = canApprove && u.proposals.every((p) => decisions[p.id]?.decision !== 'accepted' || p.action === 'remove');
-  const approveHint = !noFileToWrite ? 'After approving, you copy one command to apply.'
+  const isCorrection = u.kind === 'meeting-correction';
+  const approveHint = isCorrection ? 'Approving makes the confirmed record the meeting\'s current version.'
+    : !noFileToWrite ? 'After approving, you copy one command to apply.'
     : acceptedCount > 0 ? 'Approving moves the selected files to the trash right away.'
     : 'Approving keeps the confirmed meeting records and finishes the update.';
 
@@ -611,14 +702,14 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
           <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 600 }}>{u.title}</h2>
-          <TypeBadge origin={u.origin} />
+          <TypeBadge origin={u.origin} kind={u.kind} />
           <StatusPill status={u.status} />
           <span style={{ marginLeft: 'auto' }}>
             {u.status !== 'applying' && <Button variant="ghost" size="sm" onClick={remove}>Delete</Button>}
           </span>
         </div>
         <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {u.kind === 'memory-review' ? 'review of your existing memory · ' : u.kaizen ? '' : <>material from {u.source_date || 'unknown date'} · </>}{u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.kaizen ? 'opened from task feedback' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {isCorrection ? <>correction of the meeting record {u.correction?.meeting}, opened from the meeting {formatRelativeDate(u.created_at)}</> : <>{u.kind === 'memory-review' ? 'review of your existing memory · ' : u.kaizen ? '' : <>material from {u.source_date || 'unknown date'} · </>}{u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.kaizen ? 'opened from task feedback' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}</>}
           {u.applied_at && <> · finished {formatRelativeDate(u.applied_at)}</>}
         </div>
       </div>
@@ -742,7 +833,14 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             {records.length > 0 && (
               <section aria-label="Meeting records" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <h4 style={{ ...sectionLabel, margin: 0 }}>Meetings · {records.length}</h4>
-                {reviewing && (
+                {isCorrection && u.correction_review && <CorrectionCard review={u.correction_review} explanations={records[0]?.corrections ?? []} open={u.status !== 'done'} rejected={records[0]?.confirmation === 'rejected'} />}
+                {reviewing && isCorrection && (
+                  <HelpBox>
+                    The corrected record as a whole. Check the changes above against the transcript, then confirm it and approve: the
+                    meeting then shows this version, and the one before stays one click away. Reject it or close to keep the current record.
+                  </HelpBox>
+                )}
+                {reviewing && !isCorrection && (
                   <HelpBox>
                     What each meeting was, as the agent read it. Confirm a record that is right, even when the meeting changes
                     nothing in your context; it stays with this update as the reviewed account. Records you do not confirm are
@@ -758,7 +856,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               </section>
             )}
 
-            {u.proposals.length === 0 ? (
+            {isCorrection ? null : u.proposals.length === 0 ? (
               <HelpBox title="Nothing worth changing">
                 {u.kaizen
                   ? 'The agent found no file change that would prevent this. Close the update, or add a note on what to change and analyze again.'
@@ -818,10 +916,10 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             </Button>
             {(u.proposals.length > 0 || records.length > 0) && (
               <Button variant="primary" disabled={!canApprove || saving > 0} loading={busy === 'approve'}
-                title={saving > 0 ? 'Saving your choices...' : !canApprove ? 'Tick at least one proposal or confirm a meeting record, or close without changes' : noFileToWrite ? 'Finish this update now: nothing needs the apply command' : 'Lock your selection and get the apply command'}
+                title={saving > 0 ? 'Saving your choices...' : correctionBlocked ? 'This correction cannot be approved: see what it says above. Close it, or reject the record' : !canApprove ? 'Tick at least one proposal or confirm a meeting record, or close without changes' : noFileToWrite ? 'Finish this update now: nothing needs the apply command' : 'Lock your selection and get the apply command'}
                 onClick={() => run('approve', () => apiPost(`/api/context-updates/${u.id}/approve`),
-                  !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.')}>
-                {acceptedCount > 0 ? `Approve ${acceptedCount} selected` : 'Approve'}
+                  isCorrection ? 'Corrected. The meeting shows the new version of its record.' : !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.')}>
+                {acceptedCount > 0 ? `Approve ${acceptedCount} selected` : isCorrection ? 'Approve correction' : 'Approve'}
               </Button>
             )}
           </span>

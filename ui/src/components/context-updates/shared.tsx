@@ -153,8 +153,8 @@ export const sectionLabel: React.CSSProperties = {
  * Marks an update the user did not import (a meeting digest, a memory review). Imports, the usual case, get no
  * badge. Neutral on purpose: color on these cards means status.
  */
-export function TypeBadge({ origin }: { origin: string | null }) {
-  const type = updateType({ origin });
+export function TypeBadge({ origin, kind }: { origin: string | null; kind?: string | null }) {
+  const type = updateType({ origin, kind });
   if (type === 'imported') return null;
   const meta = typeMeta(type);
   return <span title={meta.hint} style={{ display: 'inline-flex' }}><Badge variant="default">{meta.label}</Badge></span>;

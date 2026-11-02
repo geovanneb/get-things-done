@@ -137,9 +137,30 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    tasks, and never `remove`. Each draft is the whole file with only your change; each
    `rationale` says how it prevents the root cause. Never change `origin`, `kind`,
    `kaizen_note`, `task_ref`, `symptom`, `root_cause` or `area`.
+9. **Meeting correction** (`origin: meetings`, `kind: meeting-correction`, opened by the
+   dashboard from a meeting to correct its reviewed record). Do steps 1 and 5 as usual; this
+   replaces steps 2 to 4 (no context scan, no proposals). First check
+   `materials/meeting-sources.md` against the frontmatter's `correction.sources`: the same files,
+   each under `context-updates/<correction.root.update_id>/materials/`, with the same SHA-256; if
+   they differ, stop, write nothing and tell the executive. Then read
+   `materials/correction-target.md` (the record to correct) and only those files, each after
+   checking its SHA-256 (leave out one that does not match, and say so), plus `stakeholders/` and
+   `context/glossary/`. Never other files of `context-updates/`. Write exactly one meeting record:
+   the target with your corrections applied (misheard names against the stakeholders, terms
+   against the glossary, people, title, date, speakers' names), keeping `id`, `meeting`,
+   `amends`, `source` and every action item's `slot` exactly as the target gives them, and the
+   action items in the same number and order. Keep the target's `unsure` entries you do not
+   settle. Add `corrections`, one per change: `field`, `before` and `after` (whole values,
+   quoted exactly), `reason` and `sure` (true or false). When you are not sure, keep the original
+   value in the record and give the change with `sure: false`, as a suggestion; it is not
+   applied, and that field then stays exactly as it was (no other change in it). Never translate or romanize names, never guess, and write `proposals: []`. Nothing to
+   correct: the record unchanged with `corrections: []`. In step 5, leave every `confirmation`
+   unset. Never change `origin`, `kind` or `correction`. A correction is never applied: it
+   finishes when the executive approves it in the dashboard.
 
 **"Apply context update CU-...":**
-1. Only when `status` is `approved` (or `applying`, to resume). Set `status: applying`.
+1. Only when `status` is `approved` (or `applying`, to resume), and never for `kind: meeting-correction`
+   (nothing to apply: it finishes in the dashboard; say so and stop). Set `status: applying`.
 2. For each proposal with `decision: accepted` except `action: remove` (leave those to
    the dashboard, with no outcome): write `proposals/<id>.md` to the target
    as reviewed. If the target changed after `analyzed_at` (an app update can change an
