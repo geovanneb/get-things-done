@@ -38,6 +38,17 @@ export function isMeetingText(name: string): boolean {
  */
 export type RecordLink = 'explicit' | 'source' | 'only';
 
+/**
+ * How far the review of a meeting's update got: `waiting` before the analysis wrote a record, `provisional` while the
+ * update is in review, approved or being applied (a re-analysis may still change its records), `final` once it is done.
+ */
+export type ReviewState = 'waiting' | 'provisional' | 'final';
+
+export function reviewState(u: ContextUpdate): ReviewState {
+  if (u.status === 'done') return 'final';
+  return u.status === 'ready' || u.status === 'analyzing' ? 'waiting' : 'provisional';
+}
+
 export interface HeldMeeting {
   id: string;
   /** What identifies it inside its update: the queue id, the record id, or '' for an import with no record yet. */
@@ -52,6 +63,12 @@ export interface HeldMeeting {
   files: string[];
   /** It came from a recording made or uploaded into the queue. */
   recorded: boolean;
+  /**
+   * Its id is final, so other features may link to it and the API answers for it. A queued meeting's MQ id always is.
+   * A record id (`M-01`) is written by the analysis and may be renumbered when the update is analyzed again, so a
+   * record-only meeting's id is final only once its update is done.
+   */
+  linkable: boolean;
 }
 
 /** Updates the dashboard or a person opened about something other than meetings. */
@@ -71,7 +88,7 @@ export function heldMeetings(u: ContextUpdate): HeldMeeting[] {
   if (!aboutMeetings(u)) return [];
   const records = u.meeting_records.filter((r) => /^M-\d{2,3}$/.test(r.id));
   if (u.digest_meetings.length) return digestMeetings(u, records);
-  const base = { update_id: u.id, origin: 'update' as const, recorded: false };
+  const base = { update_id: u.id, origin: 'update' as const, recorded: false, linkable: u.status === 'done' };
   if (records.length) {
     const materials = u.materials.map((m) => m.name);
     return records.map((r) => {
@@ -83,7 +100,7 @@ export function heldMeetings(u: ContextUpdate): HeldMeeting[] {
   // Not analyzed yet: an imported transcript is a meeting waiting for its record. Anything else is not known to be one.
   const transcript = u.transcripts.some((t) => t.kind === 'webvtt');
   if (transcript && (u.status === 'ready' || u.status === 'analyzing')) {
-    return [{ ...base, id: u.id, key: '', title: u.title, meeting_date: u.source_date, record: null, link: null, files: withCopies(u, u.materials.map((m) => m.name)) }];
+    return [{ ...base, linkable: false, id: u.id, key: '', title: u.title, meeting_date: u.source_date, record: null, link: null, files: withCopies(u, u.materials.map((m) => m.name)) }];
   }
   return [];
 }
@@ -112,9 +129,29 @@ function digestMeetings(u: ContextUpdate, records: MeetingRecord[]): HeldMeeting
     const found = linked.get(m.id);
     return {
       id: m.id, key: m.id, update_id: u.id, origin: 'digest' as const, title: m.title || m.id, meeting_date: m.meeting_date || u.source_date,
-      record: found?.record ?? null, link: found?.link ?? null, files: filesOf.get(m.id) ?? [], recorded: Boolean(m.recordings?.length),
+      record: found?.record ?? null, link: found?.link ?? null, files: filesOf.get(m.id) ?? [], recorded: Boolean(m.recordings?.length), linkable: true,
     };
   });
+}
+
+/**
+ * The SHA-256 the update recorded for a material file: a digest file, a recording or its transcript, or a readable copy
+ * and its original. Null for a file whose hash was never recorded (a file imported by hand, before any copy was made).
+ */
+export function recordedHash(u: ContextUpdate, file: string): string | null {
+  for (const m of u.digest_meetings) {
+    const f = m.files.find((x) => x.file === file);
+    if (f?.sha256) return f.sha256;
+    for (const r of m.recordings ?? []) {
+      if (r.transcript === file && r.transcript_sha256) return r.transcript_sha256;
+      if (r.file === file && r.source_sha256) return r.source_sha256;
+    }
+  }
+  for (const t of u.transcripts) {
+    if (t.file === file && t.sha256) return t.sha256;
+    if (t.source === file && t.source_sha256) return t.source_sha256;
+  }
+  return null;
 }
 
 /**

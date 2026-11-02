@@ -12,6 +12,8 @@ export interface RowStatus { label: string; tone: StatusTone | null; detail?: st
 
 export interface MeetingRow {
   id: string;
+  /** Where the row opens: the meeting's own dialog, or its update while a record-only meeting's id is not final. */
+  href: string;
   title: string;
   /** YYYY-MM-DD */
   date: string;
@@ -98,7 +100,7 @@ export function meetingRows(queue: QueuedMeeting[], history: HistoryMeeting[], f
     ...queue.map((m): MeetingRow => {
       const processing = queueProcessing(m, facts);
       return {
-        id: m.id, title: m.title, date: m.meeting_date, time: meetingPeriod(m), people: people(m),
+        id: m.id, href: `/meetings/${m.id}`, title: m.title, date: m.meeting_date, time: meetingPeriod(m), people: people(m),
         source: m.files.some((f) => f.recording) ? 'Recorded' : 'Uploaded files',
         processing, review: { label: 'Not yet', tone: null },
         needsYou: processing.label === 'Needs you' || needsYou(m, facts.installed, facts.runnable),
@@ -106,7 +108,7 @@ export function meetingRows(queue: QueuedMeeting[], history: HistoryMeeting[], f
       };
     }),
     ...history.filter((h) => !queued.has(h.id)).map((h): MeetingRow => ({
-      id: h.id, title: h.title, date: h.meeting_date, time: null, people: h.people,
+      id: h.id, href: h.linkable ? `/meetings/${h.id}` : `/context/updates/${h.update_id}`, title: h.title, date: h.meeting_date, time: null, people: h.people,
       source: h.origin === 'update' ? 'Imported as an update' : h.recorded ? 'Recorded' : 'Uploaded files',
       processing: historyProcessing(h), review: historyReview(h), needsYou: false,
       textGone: !h.has_text && !h.deleted?.in_trash, inTrash: Boolean(h.deleted?.in_trash), held: h,
@@ -131,7 +133,7 @@ export function matchingRows(rows: MeetingRow[], query: string): MeetingRow[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return rows;
   return rows.filter((r) => {
-    const text = [r.title, r.date, r.id, ...r.people].join(' ').toLowerCase();
+    const text = [r.title, r.date, r.held?.linkable === false ? '' : r.id, ...r.people].join(' ').toLowerCase();
     return words.every((w) => text.includes(w));
   });
 }

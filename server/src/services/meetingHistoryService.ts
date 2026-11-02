@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { ContextUpdateService, readableText, AUDIO_EXTENSIONS, type ContextUpdate, type MeetingRecord, type UpdateStatus } from './contextUpdateService';
 import { MeetingDigestService } from './meetingDigestService';
-import { heldMeetings, importedParts, isMeetingId, isMeetingText, QUEUED_MEETING_ID, retentionStart, type HeldMeeting, type RecordLink } from './meetingLibrary';
+import { heldMeetings, importedParts, isMeetingId, isMeetingText, QUEUED_MEETING_ID, recordedHash, retentionStart, reviewState, type HeldMeeting, type RecordLink, type ReviewState } from './meetingLibrary';
 import { fileInside, topLevelName } from '../utils/files';
 import { MAX_CONVERT_BYTES } from '../utils/transcript';
 
@@ -13,7 +13,17 @@ import { MAX_CONVERT_BYTES } from '../utils/transcript';
  */
 
 export interface HistoryMeeting {
+  /** Use it as a link only when `linkable`: see HeldMeeting.linkable. */
   id: string;
+  /** Its id is final: the API answers for it and other features may link to it. False for a record-only meeting until its update is done. */
+  linkable: boolean;
+  /** Provisional while its update is reviewed, final once it is done. See ReviewState. */
+  review_state: ReviewState;
+  /**
+   * `linked`: a record is shown as this meeting's. `ambiguous`: its update has records, but which one is this meeting's
+   * is not certain, so none is shown as its own. `none`: no record (not analyzed yet, or none was written).
+   */
+  record_state: 'linked' | 'ambiguous' | 'none';
   update_id: string;
   origin: HeldMeeting['origin'];
   title: string;
@@ -22,7 +32,8 @@ export interface HistoryMeeting {
   people: string[];
   recorded: boolean;
   update: { id: string; title: string; status: UpdateStatus; created_at: string; analyzed_at: string | null; applied_at: string | null; context_changed: boolean };
-  record: { id: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: RecordLink | null } | null;
+  /** `revision` is the record's version: it changes whenever its content does. */
+  record: { id: string; revision: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: RecordLink | null } | null;
   /** Records in the update that no meeting of it is linked to (a digest analyzed before records named their meeting). */
   unlinked_records: number;
   /** The user keeps it: System cleanup's Meetings rule skips it. */
@@ -43,6 +54,13 @@ export interface MeetingSource {
   name: string;
   kind: 'transcript' | 'recording' | 'notes' | 'file';
   present: boolean;
+  /**
+   * `present`: here. `unavailable`: not here now but can come back (its meeting is in the trash). `missing`: gone for
+   * good (removed when its update was done, deleted for good, or never kept).
+   */
+  state: 'present' | 'unavailable' | 'missing';
+  /** The SHA-256 the update recorded for it; null when none was recorded (a file imported by hand). */
+  sha256: string | null;
   /** It can be read here as text (a transcript, notes), now or when it was present. */
   readable: boolean;
   /** Why it is not here, when it is not. */
@@ -67,8 +85,12 @@ const queue = new MeetingDigestService();
 function summary(u: ContextUpdate, m: HeldMeeting, present: Set<string> | null): HistoryMeeting {
   const deleted = u.deleted_meetings.find((d) => d.meeting === m.key);
   const linked = new Set(heldMeetings(u).map((h) => h.record?.id).filter(Boolean));
+  const unlinked = m.origin === 'digest' ? u.meeting_records.filter((r) => !linked.has(r.id)).length : 0;
   return {
     id: m.id,
+    linkable: m.linkable,
+    review_state: reviewState(u),
+    record_state: m.record ? 'linked' : unlinked ? 'ambiguous' : 'none',
     update_id: u.id,
     origin: m.origin,
     title: m.title,
@@ -80,8 +102,8 @@ function summary(u: ContextUpdate, m: HeldMeeting, present: Set<string> | null):
       // Something reviewed in it was changed in the context. A digest changes the context as one update, not per meeting.
       context_changed: u.proposals.some((p) => p.decision === 'accepted' && (p.outcome === 'applied' || p.outcome === 'merged' || (p.action === 'remove' && Boolean(p.outcome) && p.outcome !== 'skipped'))),
     },
-    record: m.record ? { id: m.record.id, confirmation: m.record.confirmation, confirmed_at: m.record.confirmed_at, link: m.link } : null,
-    unlinked_records: m.origin === 'digest' ? u.meeting_records.filter((r) => !linked.has(r.id)).length : 0,
+    record: m.record ? { id: m.record.id, revision: m.record.revision, confirmation: m.record.confirmation, confirmed_at: m.record.confirmed_at, link: m.link } : null,
+    unlinked_records: unlinked,
     kept: u.kept_meetings.includes(m.key),
     deleted: deleted ? { at: deleted.at, by: deleted.by, in_trash: Boolean(deleted.trash) } : null,
     retention_start: retentionStart(m, u),
@@ -106,6 +128,8 @@ export class MeetingHistoryService {
     const updates = imported ? [await contextUpdates.list().then((all) => all.find((u) => u.id === imported.update))] : await contextUpdates.list();
     for (const u of updates) {
       const meeting = u ? heldMeetings(u).find((m) => m.id === id) : undefined;
+      // A record id can still change while its update is reviewed: no feature may hold on to it until it is done.
+      if (u && meeting && !meeting.linkable) throw httpError(409, `This meeting waits for the review of ${u.id}: open it in Context > Updates`);
       if (u && meeting) return { update: u, meeting };
     }
     throw httpError(404, `Meeting not found: ${id}`);
@@ -117,12 +141,15 @@ export class MeetingHistoryService {
     const update = await contextUpdates.get(listed.id);
     const meeting = heldMeetings(update).find((m) => m.id === id);
     if (!meeting) throw httpError(404, `Meeting not found: ${id}`);
+    if (!meeting.linkable) throw httpError(409, `This meeting waits for the review of ${update.id}: open it in Context > Updates`);
     const present = new Set(update.material_files.map((f) => f.name));
     const deleted = update.deleted_meetings.find((d) => d.meeting === meeting.key);
     const copies = new Map(update.transcripts.map((t) => [t.file, t]));
     const prefix = meeting.origin === 'digest' ? `${meeting.id}-` : '';
-    const why = (): string => {
-      if (deleted) return deleted.trash ? 'Deleted: it is in the trash.' : 'Deleted for good.';
+    // Only the files its deletion moved: an audio file or photo was removed when the update was done, not with the meeting.
+    const movedWith = (names: string[]) => Boolean(deleted && names.some((n) => deleted.files.includes(n)));
+    const why = (names: string[]): string => {
+      if (deleted && movedWith(names)) return deleted.trash ? 'Deleted: it is in the trash.' : 'Deleted for good.';
       if (update.status !== 'done') return 'It is not in the update any more.';
       return update.applied_at
         ? `Removed when ${update.id} was done, on ${new Date(update.applied_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${update.keep_meeting_text ? '' : ', before Meetings kept transcripts'}.`
@@ -138,15 +165,18 @@ export class MeetingHistoryService {
           : copy || ext === '.vtt' || copies.has(file) ? 'transcript' as const
             : isMeetingText(file) ? 'notes' as const : 'file' as const;
         const isPresent = present.has(file) || Boolean(copy && present.has(copy.file));
+        const names = copy ? [file, copy.file] : [file];
         return {
           file, name: file.startsWith(prefix) ? file.slice(prefix.length) : file, kind, present: isPresent,
-          readable: kind === 'transcript' || kind === 'notes', missing: isPresent ? null : why(),
+          state: isPresent ? 'present' as const : deleted?.trash && movedWith(names) ? 'unavailable' as const : 'missing' as const,
+          sha256: recordedHash(update, file),
+          readable: kind === 'transcript' || kind === 'notes', missing: isPresent ? null : why(names),
         };
       });
     // A recording whose audio left the queue without going into the digest (Keep recordings off).
     const digest = meeting.origin === 'digest' ? update.digest_meetings.find((m) => m.id === meeting.id) : undefined;
     for (const r of digest?.recordings ?? []) {
-      if (r.file === null) sources.push({ file: r.source, name: r.source, kind: 'recording', present: false, readable: false, missing: 'Removed when it went into the digest (Keep recordings is off).' });
+      if (r.file === null) sources.push({ file: r.source, name: r.source, kind: 'recording', present: false, state: 'missing', sha256: r.source_sha256 || null, readable: false, missing: 'Removed when it went into the digest (Keep recordings is off).' });
     }
     const order = { transcript: 0, notes: 1, recording: 2, file: 3 };
     sources.sort((a, b) => order[a.kind] - order[b.kind] || a.name.localeCompare(b.name));

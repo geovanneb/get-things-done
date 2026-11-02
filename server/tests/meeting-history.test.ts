@@ -92,6 +92,49 @@ test('a record is shown with a meeting only when that is certain', async (t) => 
   assert.deepEqual(detail.update_records.map((r) => r.id), ['M-01', 'M-02'], 'shown as the update\'s records instead');
 });
 
+test('a record-only meeting gets an id to link to only once its update is done', async (t) => {
+  const ws = await workspace(t);
+  // Record ids are written by the analysis: a re-analysis during review may number them differently.
+  await update(ws, 'CU-2026-0002', { meeting_records: [record('M-01', { source: 'steering.vtt' })] }, { 'steering.vtt': vtt('Kim Park', 'Hello.') });
+  await update(ws, 'CU-2026-0003', { status: 'ready', transcripts: [transcript('call.transcript.md', 'call.vtt')] }, { 'call.vtt': vtt('Kim Park', 'Hi.') });
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
+  const byId = new Map((await history.list()).map((m) => [m.id, m]));
+  assert.deepEqual([byId.get('CU-2026-0002-M-01')!.linkable, byId.get('CU-2026-0002-M-01')!.review_state], [false, 'provisional']);
+  assert.deepEqual([byId.get('CU-2026-0003')!.linkable, byId.get('CU-2026-0003')!.review_state], [false, 'waiting']);
+  assert.deepEqual([byId.get('MQ-2026-0001')!.linkable, byId.get('MQ-2026-0001')!.review_state], [true, 'provisional'], 'a queue id is final from the start');
+  const refused = (err: { statusCode?: number }) => err.statusCode === 409;
+  await assert.rejects(history.detail('CU-2026-0002-M-01'), refused);
+  await assert.rejects(history.text('CU-2026-0002-M-01', 'steering.vtt'), refused);
+  await assert.rejects(history.keep('CU-2026-0002-M-01', true), refused, 'a kept record id could point at another meeting after a re-analysis');
+  await assert.rejects(history.detail('CU-2026-0003'), refused);
+
+  await updates.close('CU-2026-0002');
+  const done = (await history.list()).find((m) => m.id === 'CU-2026-0002-M-01')!;
+  assert.deepEqual([done.linkable, done.review_state], [true, 'final']);
+  assert.equal((await history.detail('CU-2026-0002-M-01')).meeting.id, 'CU-2026-0002-M-01');
+});
+
+test('a meeting says its record version, each file\'s hash and state, and an unclear record link', async (t) => {
+  const ws = await workspace(t);
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0002' }), record('M-02'), record('M-03')]);
+  const linked = await history.detail('MQ-2026-0002');
+  assert.equal(linked.meeting.record_state, 'linked');
+  assert.match(linked.meeting.record?.revision ?? '', /^[0-9a-f]{16}$/);
+  assert.deepEqual(linked.sources.map((s) => [s.name, s.sha256, s.state]), [['b.vtt', '2', 'present'], ['board.png', '3', 'present']]);
+  // Two records left for one meeting: which is its own is not certain, so none is shown.
+  const unclear = await history.detail('MQ-2026-0001');
+  assert.deepEqual([unclear.meeting.record_state, unclear.record], ['ambiguous', null]);
+
+  // Once its text is in the trash, a file can come back; deleted for good, it is missing.
+  await cleanup.update({ meetings: { keep_text: true } });
+  await updates.close('CU-2026-0001');
+  await updates.trashMeeting('CU-2026-0001', 'MQ-2026-0002');
+  // The photo went when the update was done; only the transcript went to the trash with the meeting.
+  assert.deepEqual((await history.detail('MQ-2026-0002')).sources.map((s) => [s.name, s.state]), [['b.vtt', 'unavailable'], ['board.png', 'missing']]);
+  await updates.purgeMeeting('CU-2026-0001', 'MQ-2026-0002');
+  assert.deepEqual((await history.detail('MQ-2026-0002')).sources.map((s) => s.state), ['missing', 'missing']);
+});
+
 test('a meeting\'s text is read from its own files only', async (t) => {
   const ws = await workspace(t);
   await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);

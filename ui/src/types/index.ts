@@ -829,7 +829,11 @@ export interface Transcription {
 
 /** A meeting held by a context update: a digest's meeting (MQ-…) or a record of an imported update (CU-…-M-01). */
 export interface HistoryMeeting {
+  /** A link only when `linkable`: a record-only meeting's id can change until its update is done. */
   id: string;
+  linkable: boolean;
+  review_state: 'waiting' | 'provisional' | 'final';
+  record_state: 'linked' | 'ambiguous' | 'none';
   update_id: string;
   origin: 'digest' | 'update';
   title: string;
@@ -837,7 +841,7 @@ export interface HistoryMeeting {
   people: string[];
   recorded: boolean;
   update: { id: string; title: string; status: ContextUpdateStatus; created_at: string; analyzed_at: string | null; applied_at: string | null; context_changed: boolean };
-  record: { id: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: 'explicit' | 'source' | 'only' | null } | null;
+  record: { id: string; revision: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: 'explicit' | 'source' | 'only' | null } | null;
   unlinked_records: number;
   kept: boolean;
   deleted: { at: string; by: 'user' | 'system-cleanup'; in_trash: boolean } | null;
@@ -850,6 +854,8 @@ export interface MeetingSource {
   name: string;
   kind: 'transcript' | 'recording' | 'notes' | 'file';
   present: boolean;
+  state: 'present' | 'unavailable' | 'missing';
+  sha256: string | null;
   readable: boolean;
   missing: string | null;
 }

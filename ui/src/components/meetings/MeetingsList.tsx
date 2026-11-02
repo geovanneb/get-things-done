@@ -49,7 +49,7 @@ function Row({ row, now }: { row: MeetingRow; now: Date }) {
     <li className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 'var(--space-4)', rowGap: 'var(--space-2)' }}>
       <span className="mono" style={{ flex: '0 0 64px', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{whenLabel(row, now)}</span>
       <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-        <Link to={`/meetings/${row.id}`} className="gtd-link-strong truncate" style={{ display: 'block', fontSize: 'var(--text-sm)' }}>{row.title}</Link>
+        <Link to={row.href} className="gtd-link-strong truncate" style={{ display: 'block', fontSize: 'var(--text-sm)' }}>{row.title}</Link>
         <div className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           {row.source}{row.people.length ? ` · ${row.people.join(', ')}` : ''}
           {row.textGone && <em> · transcript no longer kept</em>}

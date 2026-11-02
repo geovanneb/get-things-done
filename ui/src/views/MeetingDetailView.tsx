@@ -320,9 +320,10 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
       {tab === 'record' && (
         record ? (
           <>
-            {h.update.status === 'in_review' && (
-              <Notice tone="info" title="This record waits for your review." action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Review it</Link>}>
-                Confirm or reject it with the rest of {h.update_id}.
+            {h.review_state === 'provisional' && (
+              <Notice tone="info" title="Provisional: this record is still under review."
+                action={h.update.status === 'in_review' ? <Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Review it</Link> : undefined}>
+                {h.update.status === 'in_review' ? `Confirm or reject it with the rest of ${h.update_id}.` : `It becomes final when ${h.update_id} is done.`} Until then it can still change.
               </Notice>
             )}
             <MeetingRecordCard record={record} reviewing={false} confirmation={record.confirmation}
@@ -331,10 +332,10 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
               From <Link to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>. Tasks come only from a confirmed record, through the same step as in Context &gt; Updates.
             </p>
           </>
-        ) : unlinked.length ? (
-          <Notice tone="info" title="This digest's records are not linked to its meetings."
+        ) : h.record_state === 'ambiguous' ? (
+          <Notice tone="info" title="It is not clear which record is this meeting's."
             action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open {h.update_id}</Link>}>
-            It was analyzed before records named their meeting, so none is shown here as this meeting's. Its records: {unlinked.map((r) => r.title || r.id).join('; ')}.
+            None of this digest's records names this meeting or only its files, so none is shown here as its own. Its records: {unlinked.map((r) => r.title || r.id).join('; ')}.
           </Notice>
         ) : (
           <EmptyState size="compact" title="No record yet"
