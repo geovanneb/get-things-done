@@ -810,4 +810,32 @@ test('a confirmed record copied under the same id is no longer confirmed, and a 
   await assert.rejects(service.approve(id), /changed after you confirmed it/);
   r = both[0]!;
   assert.ok(r.problems.some((p) => p.includes('same id')));
+
+test('two dashboards making a task from the same action item at once get one task; a link to another item\'s task is refused', async (t) => {
+  const { ws, service, id, file, choose } = await withMeetings(t, [{ ...MEETINGS[0], action_items: [...MEETINGS[0]!.action_items, { description: 'Book the room' }] }]);
+  await choose({ 'M-01': 'confirmed' });
+  await service.approve(id);
+  const shown = (await service.get(id)).meeting_records[0]!;
+  // Two dashboards are two processes: each makes the task slowly, so both look for it before either has made it.
+  const { execFile } = await import('node:child_process');
+  const child = () => new Promise<{ task?: string; created?: boolean; error?: string }>((resolve, reject) => {
+    execFile(process.execPath, ['--import', 'tsx', path.join(__dirname, 'fixtures', 'action-task-child.ts'), id, 'M-01', shown.revision],
+      { env: { ...process.env, ESB_WORKSPACE_PATH: ws }, timeout: 60_000 }, (err, stdout) => {
+        const line = stdout.trim().split('\n').pop() ?? '';
+        try { resolve(JSON.parse(line)); } catch { reject(err ?? new Error(stdout)); }
+      });
+  });
+  const [a, b] = await Promise.all([child(), child()]);
+  assert.ok(a.task && a.task === b.task, `one task: ${JSON.stringify([a, b])}`);
+  assert.deepEqual([a.created, b.created].sort(), [false, true]);
+  assert.equal((await taskIds(ws)).length, 1);
+
+  // The second item's link is pointed at the first item's task (an edit by hand): refused, never reused.
+  const second = await service.createActionItemTask(id, 'M-01', { item: 1, revision: shown.revision, task: { title: 'Fictional task 2' } });
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+  const records = parsed.data['meeting_records'] as { action_items: Record<string, unknown>[] }[];
+  records[0]!.action_items[1]!['task_ref'] = a.task;
+  await fsp.writeFile(file, stringifyMarkdown(parsed.content, parsed.data));
+  await assert.rejects(service.createActionItemTask(id, 'M-01', { item: 1, revision: shown.revision, task: { title: 'x' } }), /belongs to another action item/);
+  assert.notEqual(second.task.id, a.task);
 });

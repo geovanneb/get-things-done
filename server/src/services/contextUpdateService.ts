@@ -7,6 +7,7 @@ import { reserveIds, reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
+import { lock, unlock } from '../utils/fileLock';
 import { moveFilesToTrash, moveToTrash, trashEntry } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
@@ -563,6 +564,27 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
 }
 
 /** What identifies an action item for its task: its content, so the same item always maps to the same task. */
+/** How long a task from an action item waits for another dashboard making the same one. */
+const ACTION_LOCK_WAIT_MS = 10_000;
+
+/**
+ * One task per action item, across every dashboard: find-by-identity, create and link run under a lock named after
+ * the item's identity. Taken inside an update's queue, never the other way round.
+ */
+async function withActionLock<T>(identity: string, operation: () => Promise<T>): Promise<T> {
+  const ws = workspaceService.getWorkspacePath();
+  const dir = await workspaceEntry(ws, path.join(ws, '.situation-board', 'locks'), true);
+  await fsp.mkdir(dir, { recursive: true });
+  await workspaceEntry(ws, dir);
+  const name = `action-${createHash('sha256').update(identity).digest('hex').slice(0, 32)}.lock`;
+  const held = await lock(path.join(dir, name), ACTION_LOCK_WAIT_MS, () => httpError(409, 'A task is being made from this action item elsewhere; try again in a moment'));
+  try {
+    return await operation();
+  } finally {
+    await unlock(held);
+  }
+}
+
 function actionItemKey(a: MeetingActionItem): string {
   const content = [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date];
   return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 12);
@@ -975,9 +997,16 @@ export class ContextUpdateService {
 
       const tasksDir = path.join(workspaceService.getWorkspacePath(), 'tasks');
       const action = record.action_items[item]!;
+      // Recorded on the task, so a crash between writing the task and the link cannot lead to a second task.
+      const identity = `${update.id}/${record.id}/${actionItemKey(action)}`;
       if (action.task_ref) {
         if (!(await taskExists(tasksDir, action.task_ref))) throw httpError(409, `This action item had a task, ${action.task_ref}, which no longer exists`);
-        return { update, task: await taskService.getTask(action.task_ref).catch(() => ({ id: action.task_ref } as Task)), created: false };
+        const linked = await taskService.getTask(action.task_ref).catch(() => ({ id: action.task_ref } as Task));
+        // A link to a task made for another action item is never taken as this item's task. One made before tasks
+        // recorded their item has no identity to compare, and is taken as it is.
+        const theirs = (linked as unknown as Record<string, unknown>)['meeting_action'];
+        if (typeof theirs === 'string' && theirs !== identity) throw httpError(409, `This action item's task link, ${action.task_ref}, belongs to another action item; fix the link in ${update.id}`);
+        return { update, task: linked, created: false };
       }
       const raws = this.rawRecords(data);
       const raw = raws[index] as Record<string, unknown>;
@@ -985,16 +1014,16 @@ export class ContextUpdateService {
       const rawIndex = shownActionItems(rawItems, [])[item]?.index;
       if (rawIndex === undefined) throw httpError(400, 'Invalid action item');
 
-      // Recorded on the task, so a crash between writing the task and the link cannot lead to a second task.
-      const identity = `${update.id}/${record.id}/${actionItemKey(action)}`;
-      const found = await taskService.findByMeetingAction(identity);
-      const task = found ?? await taskService.createTask(fields as Partial<Task>, { meeting_action: identity });
-      const entry = rawItems[rawIndex];
-      // A plain-text item becomes an object with the same text, so it can hold the link; what it says is unchanged.
-      rawItems[rawIndex] = { ...(entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : { description: entry }), task_ref: task.id };
-      raws[index] = { ...raw, action_items: rawItems };
-      await this.write(file, data, update.notes, { meeting_records: raws });
-      return { update: (await this.read(id)).update, task, created: !found };
+      return withActionLock(identity, async () => {
+        const found = await taskService.findByMeetingAction(identity);
+        const task = found ?? await taskService.createTask(fields as Partial<Task>, { meeting_action: identity });
+        const entry = rawItems[rawIndex];
+        // A plain-text item becomes an object with the same text, so it can hold the link; what it says is unchanged.
+        rawItems[rawIndex] = { ...(entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : { description: entry }), task_ref: task.id };
+        raws[index] = { ...raw, action_items: rawItems };
+        await this.write(file, data, update.notes, { meeting_records: raws });
+        return { update: (await this.read(id)).update, task, created: !found };
+      });
     });
   }
 
