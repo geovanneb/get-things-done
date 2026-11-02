@@ -84,7 +84,7 @@ the list stacks above the content on a phone.
 | Part of a longer form or dialog | `FormSection` | a heading and an optional description; groups are ruled off |
 | A consent or confirmation the user must give before an action | `gtd-consent` around a `Checkbox` | the primary action stays disabled until it is checked; say so in the footer |
 | Rows inside a card | `Card padding="none"` + `<ul className="gtd-list">` with `gtd-list__row` | divider lines; extra controls (search, notices) sit in a padded band above or below |
-| Running text read in place (a transcript, a preview) | `gtd-reading-box` | scrolls inside itself |
+| Running text read in place (a transcript, a preview) | `gtd-reading-box` | scrolls inside itself; with a recording, each time is a ghost `Button` with `gtd-reading-box__time` that plays from there, and the turn being heard gets `gtd-reading-box__heard` and `aria-current="time"` (see `MeetingText`) |
 | A small value with inline actions (a speaker and its name) | `gtd-chip` + `gtd-chip__action` | |
 | Search a list | `SearchInput` | the placeholder names what is searched and is the accessible name |
 | Switch views of a page | `Tabs` | arrow keys move between tabs |

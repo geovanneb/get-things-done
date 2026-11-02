@@ -704,6 +704,20 @@ try {
       wavUp.status === 201 && wavMeeting.files?.[0]?.recording?.status === 'pending' && oggUp.status === 415
       && /waits? for transcription|not done yet/.test(waitRun.message ?? '') && stillQueued,
       `up=${wavUp.status} ogg=${oggUp.status} run=${waitRun.message}`);
+    // Played from the Meetings page: only an audio file of that meeting, sandboxed, and seekable with Range.
+    const audioUrl = `${base}/api/meetings/${recorded.id}/audio/workshop.wav`;
+    const audioPart = await fetch(audioUrl, { headers: { Range: 'bytes=0-3' } });
+    const audioBytes = Buffer.from(await audioPart.arrayBuffer()).toString('ascii');
+    const audioWhole = await fetch(audioUrl);
+    await audioWhole.arrayBuffer();
+    const audioOther = await fetch(`${base}/api/meetings/${recorded.id}/audio/other.wav`);
+    const audioText = await fetch(`${base}/api/meetings/${recorded.id}/audio/meeting.md`);
+    check('a meeting\'s recording plays from its own file only, and a player can seek in it',
+      audioPart.status === 206 && audioBytes === 'RIFF' && audioPart.headers.get('content-range') === `bytes 0-3/${wavHead.length + wavData.length}`
+      && audioWhole.status === 200 && audioWhole.headers.get('accept-ranges') === 'bytes'
+      && audioPart.headers.get('content-security-policy')?.includes('sandbox') && audioPart.headers.get('x-content-type-options') === 'nosniff'
+      && audioOther.status === 404 && audioText.status === 415,
+      `part=${audioPart.status} ${audioPart.headers.get('content-range')} whole=${audioWhole.status} other=${audioOther.status} text=${audioText.status}`);
     // A meeting recorded in blocks: stored once, sealed, and removed again, so the smoke queue stays as it was.
     const liveMeeting = await (await json('POST', '/api/meeting-queue', { title: 'Fictional recorded meeting', meeting_date: '2026-10-30' })).json();
     const recordToken = 'fictional-smoke-writer-token';

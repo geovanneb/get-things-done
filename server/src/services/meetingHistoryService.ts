@@ -72,8 +72,10 @@ export interface MeetingSource {
   state: 'present' | 'unavailable' | 'missing';
   /** The SHA-256 the update recorded for it; null when none was recorded (a file imported by hand). */
   sha256: string | null;
-  /** It can be read here as text (a transcript, notes), now or when it was present. */
+  /** It can be read here as text (a transcript, notes, or a recording through its transcript), now or when it was present. */
   readable: boolean;
+  /** A recording whose audio is here to play (`GET /api/meetings/:id/audio/:file`). False when only its transcript is kept. */
+  playable: boolean;
   /** Why it is not here, when it is not. */
   missing: string | null;
 }
@@ -228,13 +230,16 @@ export class MeetingHistoryService {
           file, name: file.startsWith(prefix) ? file.slice(prefix.length) : file, kind, present: isPresent,
           state: isPresent ? 'present' as const : deleted?.trash && movedWith(names) ? 'unavailable' as const : 'missing' as const,
           sha256: recordedHash(update, file),
-          readable: kind === 'transcript' || kind === 'notes', missing: isPresent ? null : why(names),
+          // A kept recording is read through its transcript, like any original with a readable copy.
+          readable: kind === 'transcript' || kind === 'notes' || (kind === 'recording' && Boolean(copy)),
+          playable: kind === 'recording' && !deleted && present.has(file),
+          missing: isPresent ? null : why(names),
         };
       });
     // A recording whose audio left the queue without going into the digest (Keep recordings off).
     const digest = meeting.origin === 'digest' ? update.digest_meetings.find((m) => m.id === meeting.id) : undefined;
     for (const r of digest?.recordings ?? []) {
-      if (r.file === null) sources.push({ file: r.source, name: r.source, kind: 'recording', present: false, state: 'missing', sha256: r.source_sha256 || null, readable: false, missing: 'Removed when it went into the digest (Keep recordings is off).' });
+      if (r.file === null) sources.push({ file: r.source, name: r.source, kind: 'recording', present: false, state: 'missing', sha256: r.source_sha256 || null, readable: false, playable: false, missing: 'Removed when it went into the digest (Keep recordings is off).' });
     }
     const order = { transcript: 0, notes: 1, recording: 2, file: 3 };
     sources.sort((a, b) => order[a.kind] - order[b.kind] || a.name.localeCompare(b.name));
@@ -277,6 +282,31 @@ export class MeetingHistoryService {
     const original = await contextUpdates.materialPath(update.id, file).catch(() => null);
     if (!original) throw httpError(410, 'This file is no longer kept');
     return this.readAsText(original, file);
+  }
+
+  /**
+   * A recording of a meeting, to play: only an audio file of this meeting, never any other file of the workspace. A
+   * queued meeting's recording is refused while it is still being recorded.
+   */
+  async audio(id: string, name: unknown): Promise<string> {
+    const asked = topLevelName(name as string);
+    if (!AUDIO_EXTENSIONS.has(path.extname(asked).toLowerCase())) throw httpError(415, 'Only a recording can be played here; open the file instead');
+    if (QUEUED_MEETING_ID.test(id)) {
+      const inQueue = await queue.loadMeeting(id).catch(() => null);
+      if (inQueue) {
+        const stored = inQueue.files.find((f) => f.name === asked)?.name;
+        if (!stored) throw httpError(404, 'No such recording in this meeting');
+        if (inQueue.live?.name === stored) throw httpError(409, 'This recording is still being made');
+        return fileInside(await queue.meetingFolder(id), stored);
+      }
+    }
+    const { update, meeting } = await this.held(id);
+    const file = meeting.files.find((f) => f === asked);
+    if (!file) throw httpError(404, 'No such recording in this meeting');
+    if (update.deleted_meetings.some((d) => d.meeting === meeting.key)) throw httpError(410, 'This meeting was deleted');
+    const full = await contextUpdates.materialPath(update.id, file).catch(() => null);
+    if (!full) throw httpError(410, 'This recording is no longer kept');
+    return full;
   }
 
   private async readAsText(full: string, name: string): Promise<string> {
