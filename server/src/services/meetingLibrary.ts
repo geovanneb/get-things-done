@@ -74,7 +74,8 @@ export interface HeldMeeting {
 
 /** Updates the dashboard or a person opened about something other than meetings. */
 function aboutMeetings(u: ContextUpdate): boolean {
-  if (u.origin === 'system-cleanup' || u.kind === 'kaizen' || u.kind === 'memory-review') return false;
+  // A correction is a later version of a meeting's record, not a meeting of its own.
+  if (u.origin === 'system-cleanup' || u.kind === 'kaizen' || u.kind === 'memory-review' || u.kind === 'meeting-correction') return false;
   return true;
 }
 

@@ -1,9 +1,10 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
-import { ContextUpdateService, readableText, AUDIO_EXTENSIONS, type ContextUpdate, type MeetingRecord, type UpdateStatus } from './contextUpdateService';
+import { ContextUpdateService, readableText, AUDIO_EXTENSIONS, CORRECTION_KIND, type ContextUpdate, type MeetingRecord, type UpdateStatus } from './contextUpdateService';
 import { MeetingDigestService } from './meetingDigestService';
 import { heldMeetings, importedParts, isMeetingId, isMeetingText, QUEUED_MEETING_ID, recordedHash, retentionStart, reviewState, type HeldMeeting, type RecordLink, type ReviewState } from './meetingLibrary';
 import { fileInside, topLevelName } from '../utils/files';
+import { correctionChain, type ChainState, type CorrectionChain } from './meetingCorrections';
 import { MAX_CONVERT_BYTES } from '../utils/transcript';
 
 /**
@@ -34,6 +35,16 @@ export interface HistoryMeeting {
   update: { id: string; title: string; status: UpdateStatus; created_at: string; analyzed_at: string | null; applied_at: string | null; context_changed: boolean };
   /** `revision` is the record's version: it changes whenever its content does. */
   record: { id: string; revision: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: RecordLink | null } | null;
+  /**
+   * Whose record is shown: the original update's, or a correction's once one counts. The files are always
+   * `update_id`'s: keep, delete, restore and retention stay with it.
+   */
+  record_owner: { update_id: string; record_id: string } | null;
+  /**
+   * The record's versions, when it has any beyond the original or one is being made: `corrected`, or `conflict` and
+   * `broken`, where the record shown is the last version reached from the original and no correction can build on it.
+   */
+  correction: { state: ChainState; head_at: string | null; original: { update_id: string; record_id: string }; open: string[] } | null;
   /** Records in the update that no meeting of it is linked to (a digest analyzed before records named their meeting). */
   unlinked_records: number;
   /** The user keeps it: System cleanup's Meetings rule skips it. */
@@ -82,10 +93,44 @@ function httpError(status: number, message: string): Error {
 const contextUpdates = new ContextUpdateService();
 const queue = new MeetingDigestService();
 
-function summary(u: ContextUpdate, m: HeldMeeting, present: Set<string> | null): HistoryMeeting {
+/**
+ * The chain of a meeting's record, when it has a final confirmed one: corrections can only build on that. Null for a
+ * meeting without such a record, whose record is simply the one its update holds.
+ */
+function chainOf(u: ContextUpdate, m: HeldMeeting, all: ContextUpdate[]): CorrectionChain | null {
+  // No record linked to it any more, yet corrections claim it: their chain, broken, so they are never hidden.
+  if (!m.record) {
+    const claim = all.find((c) => c.kind === CORRECTION_KIND && c.correction?.meeting === m.id);
+    return claim?.correction ? correctionChain(m.id, claim.correction.root, all) : null;
+  }
+  // Also for an original that is not final or not confirmed (any more): corrections that build on it show it broken.
+  return correctionChain(m.id, { update_id: u.id, record_id: m.record.id }, all);
+}
+
+/**
+ * A meeting known only from its corrections: its original update is gone. Listed as broken, with no record of its
+ * own, linking to its latest correction, so the corrections are never lost from sight.
+ */
+function orphan(meeting: string, corrections: ContextUpdate[]): HistoryMeeting {
+  const latest = corrections[0]!;
+  const r = latest.meeting_records[0];
+  return {
+    id: meeting, linkable: false, review_state: 'final', record_state: 'none', update_id: latest.id, origin: 'update',
+    title: r?.title || meeting, meeting_date: r?.meeting_date ?? '', people: [], recorded: false,
+    update: { id: latest.id, title: latest.title, status: latest.status, created_at: latest.created_at, analyzed_at: latest.analyzed_at, applied_at: latest.applied_at, context_changed: false },
+    record: null, record_owner: null, unlinked_records: 0, kept: false, deleted: null,
+    correction: { state: 'broken', head_at: null, original: latest.correction!.root, open: corrections.filter((u) => u.status !== 'done').map((u) => u.id) },
+    retention_start: r?.meeting_date || latest.created_at.slice(0, 10), has_text: false,
+  };
+}
+
+function summary(u: ContextUpdate, m: HeldMeeting, present: Set<string> | null, chain: CorrectionChain | null = null): HistoryMeeting {
   const deleted = u.deleted_meetings.find((d) => d.meeting === m.key);
   const linked = new Set(heldMeetings(u).map((h) => h.record?.id).filter(Boolean));
   const unlinked = m.origin === 'digest' ? u.meeting_records.filter((r) => !linked.has(r.id)).length : 0;
+  // The record shown is the current version: a correction's, once one counts. The files stay the original update's.
+  const current = chain?.head && chain.head.update_id !== u.id ? chain.head_record : null;
+  const record = current ?? m.record;
   return {
     id: m.id,
     linkable: m.linkable,
@@ -93,16 +138,21 @@ function summary(u: ContextUpdate, m: HeldMeeting, present: Set<string> | null):
     record_state: m.record ? 'linked' : unlinked ? 'ambiguous' : 'none',
     update_id: u.id,
     origin: m.origin,
-    title: m.title,
-    meeting_date: m.meeting_date,
-    people: (m.record?.attendees ?? []).map((p) => p.name).filter(Boolean),
+    // A correction's values whenever one counts, also an emptied date: never the original's behind it.
+    title: current ? current.title : m.title,
+    meeting_date: current ? current.meeting_date : m.meeting_date,
+    people: (record?.attendees ?? []).map((p) => p.name).filter(Boolean),
     recorded: m.recorded,
     update: {
       id: u.id, title: u.title, status: u.status, created_at: u.created_at, analyzed_at: u.analyzed_at, applied_at: u.applied_at,
       // Something reviewed in it was changed in the context. A digest changes the context as one update, not per meeting.
       context_changed: u.proposals.some((p) => p.decision === 'accepted' && (p.outcome === 'applied' || p.outcome === 'merged' || (p.action === 'remove' && Boolean(p.outcome) && p.outcome !== 'skipped'))),
     },
-    record: m.record ? { id: m.record.id, revision: m.record.revision, confirmation: m.record.confirmation, confirmed_at: m.record.confirmed_at, link: m.link } : null,
+    record: record ? { id: record.id, revision: record.revision, confirmation: record.confirmation, confirmed_at: record.confirmed_at, link: m.link } : null,
+    record_owner: record ? { update_id: current ? chain!.head!.update_id : u.id, record_id: record.id } : null,
+    correction: chain && chain.state !== 'original'
+      ? { state: chain.state, head_at: chain.head?.at ?? null, original: chain.root, open: chain.open }
+      : chain?.open.length ? { state: 'original', head_at: null, original: chain.root, open: chain.open } : null,
     unlinked_records: unlinked,
     kept: u.kept_meetings.includes(m.key),
     deleted: deleted ? { at: deleted.at, by: deleted.by, in_trash: Boolean(deleted.trash) } : null,
@@ -115,9 +165,17 @@ export class MeetingHistoryService {
   /** Every meeting held by a context update, newest first. Updates that cannot be read are left out, as in Context. */
   async list(): Promise<HistoryMeeting[]> {
     const out: HistoryMeeting[] = [];
-    for (const u of await contextUpdates.list()) {
-      for (const m of heldMeetings(u)) out.push(summary(u, m, null));
+    const all = await contextUpdates.list();
+    for (const u of all) {
+      for (const m of heldMeetings(u)) out.push(summary(u, m, null, chainOf(u, m, all)));
     }
+    // Corrections whose meeting is no longer held by any update: shown, broken, rather than lost.
+    const orphans = new Map<string, ContextUpdate[]>();
+    for (const u of all) {
+      if (u.kind !== CORRECTION_KIND || !u.correction || out.some((m) => m.id === u.correction!.meeting)) continue;
+      orphans.set(u.correction.meeting, [...(orphans.get(u.correction.meeting) ?? []), u]);
+    }
+    for (const [meeting, corrections] of orphans) out.push(orphan(meeting, corrections));
     return out.sort((a, b) => b.meeting_date.localeCompare(a.meeting_date) || b.update_id.localeCompare(a.update_id) || a.id.localeCompare(b.id));
   }
 
@@ -180,10 +238,13 @@ export class MeetingHistoryService {
     }
     const order = { transcript: 0, notes: 1, recording: 2, file: 3 };
     sources.sort((a, b) => order[a.kind] - order[b.kind] || a.name.localeCompare(b.name));
-    const record = meeting.record ? update.meeting_records.find((r) => r.id === meeting.record!.id) ?? null : null;
+    const original = meeting.record ? update.meeting_records.find((r) => r.id === meeting.record!.id) ?? null : null;
+    const chain = chainOf(update, meeting, await contextUpdates.list());
+    // The current version of the record: a correction's once one counts, else the original.
+    const record = chain?.head && chain.head.update_id !== update.id ? chain.head_record : original;
     const linked = new Set(heldMeetings(update).map((h) => h.record?.id).filter(Boolean));
     return {
-      meeting: summary(update, meeting, present),
+      meeting: summary(update, meeting, present, chain),
       record,
       update_records: record ? [] : update.meeting_records.filter((r) => !linked.has(r.id)).map((r) => ({ id: r.id, title: r.title, meeting_date: r.meeting_date, confirmation: r.confirmation })),
       sources,

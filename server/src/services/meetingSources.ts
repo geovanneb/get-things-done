@@ -150,6 +150,11 @@ async function resolveQueued(id: string): Promise<PinnedMeeting> {
 /** A meeting an update holds: its readable files as the Meetings history lists them, and its record. */
 async function resolveHeld(id: string): Promise<PinnedMeeting> {
   const detail = await history.detail(id);
+  // Conflicting or broken versions: which record is current is not known, so none is given to a task as if it were.
+  const state = detail.meeting.correction?.state;
+  if (state === 'conflict' || state === 'broken') {
+    throw httpError(409, `The versions of this meeting's record ${state === 'conflict' ? 'conflict' : 'are broken'}: resolve it in Context > Updates before a task uses it`);
+  }
   const update = await contextUpdates.get(detail.meeting.update_id);
   const materials = path.join(workspace.getWorkspacePath(), 'context-updates', update.id, 'materials');
   const sources: PinnedSource[] = [];
@@ -174,7 +179,8 @@ async function resolveHeld(id: string): Promise<PinnedMeeting> {
         id: r.id, title: r.title, decisions: r.decisions, open_questions: r.open_questions, action_items: r.action_items, attendees: r.attendees,
         speakers: (r.speakers ?? []).map((s) => ({ label: s.label, name: s.person?.name ?? null })),
         ...(r.unsure?.length ? { unsure: r.unsure } : {}),
-        update_id: update.id, revision: detail.meeting.record.revision, confirmation: r.confirmation,
+        // Whose record this is: a correction's once one counts, while the files stay the original update's.
+        update_id: detail.meeting.record_owner?.update_id ?? update.id, revision: detail.meeting.record.revision, confirmation: r.confirmation,
       }
       : null,
     sources,

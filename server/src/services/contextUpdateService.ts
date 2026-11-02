@@ -7,6 +7,8 @@ import { reserveIds, reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
+import { lock, unlock } from '../utils/fileLock';
+import { correctionChain, rootActionIdentity } from './meetingCorrections';
 import { moveFilesToTrash, moveToTrash, trashEntry } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
@@ -148,7 +150,31 @@ export interface MeetingPerson { ref: string | null; name: string; ref_found?: b
  * `task_ref` is the task the user created from this item in the dashboard, so it is not created twice. It is
  * not part of what was confirmed. `task_found` (detail only) says whether that task still exists.
  */
-export interface MeetingActionItem { description: string; owner: MeetingPerson | null; due_date: string; task_ref: string | null; task_found?: boolean }
+/**
+ * `slot` is set only in a corrected record: the server-issued id of the original item this one is (see the update's
+ * `correction`), never inferred from its position or text.
+ */
+export interface MeetingActionItem { description: string; owner: MeetingPerson | null; due_date: string; task_ref: string | null; task_found?: boolean; slot?: string | null }
+
+/** A version of a meeting record: its update, its id there, and the content a confirmation was given for. */
+export interface RecordVersion { update_id: string; record_id: string; revision: string }
+
+/**
+ * What a `meeting-correction` update corrects, written by the dashboard only: the meeting, its original record (the
+ * root), the version corrected (the base, the current one when the correction was made), and one server-issued slot
+ * per action item of the base, naming the root item it stands for.
+ */
+export interface CorrectionEnvelope {
+  meeting: string;
+  root: { update_id: string; record_id: string };
+  base: RecordVersion;
+  slots: { slot: string; root_key: string; root_index: number }[];
+}
+
+export const CORRECTION_KIND = 'meeting-correction';
+const SLOT_ID = /^A-\d{2,3}$/;
+const REVISION = /^[0-9a-f]{16}$/;
+const UPDATE_ID_PATTERN = /^CU-\d{4}-\d{4}$/;
 
 /**
  * Who a voice in a transcript may be: the agent's proposal, with why. `label` belongs to the recording `source`, not to
@@ -179,6 +205,8 @@ export interface MeetingRecord {
   source: string;
   /** In a meeting digest: the queued meeting it is about (`queued_as` in materials/meetings.md). Null when not given. */
   meeting: string | null;
+  /** In a `meeting-correction` update only: the version this record corrects. Null everywhere else. */
+  amends: RecordVersion | null;
   /**
    * What the analysis is not sure of, for the user to check before confirming: a field, the exact text it is about,
    * why, and what it may be instead. Never a reason to change the record by itself.
@@ -233,6 +261,8 @@ export interface ContextUpdate {
   origin: string | null;
   /** What the analysis is about: 'memory-review' reviews the existing memory; 'daily-digest' is meetings from the queue. */
   kind: string | null;
+  /** A `meeting-correction` only: what it corrects (see CorrectionEnvelope). Null otherwise, or when not valid. */
+  correction: CorrectionEnvelope | null;
   /** For a meeting digest: which queued meeting each file came from. Written by the dashboard only; kept after the materials go. */
   digest_meetings: DigestMeeting[];
   /** For a Kaizen: the root cause analysis. Null for every other kind. */
@@ -451,13 +481,68 @@ function shownActionItems(list: unknown[], problems: string[]): { item: MeetingA
         owner: a['owner'] == null ? null : recordPerson(a['owner'], `action item ${i + 1} owner`, problems),
         due_date: recordDate(a['due_date'], `action item ${i + 1} due_date`, problems),
         task_ref: typeof a['task_ref'] === 'string' && TASK_REF_PATTERN.test(a['task_ref']) ? a['task_ref'] : null,
+        ...(a['slot'] != null ? { slot: typeof a['slot'] === 'string' && SLOT_ID.test(a['slot']) ? a['slot'] : (problems.push(`action item ${i + 1} has a slot that is not like A-01`), null) } : {}),
       };
     return { item, index: i };
   }).filter((x) => x.item.description || x.item.owner || x.item.due_date);
 }
 
+/** A record version as written, or null when any part of it is not valid. */
+function recordVersion(raw: unknown): RecordVersion | null {
+  const o = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null) as Record<string, unknown> | null;
+  if (!o) return null;
+  const { update_id, record_id, revision } = o;
+  return typeof update_id === 'string' && UPDATE_ID_PATTERN.test(update_id) && typeof record_id === 'string' && RECORD_ID_PATTERN.test(record_id)
+    && typeof revision === 'string' && REVISION.test(revision) ? { update_id, record_id, revision } : null;
+}
+
+/** A `meeting-correction` update's envelope, or null when it is missing or any part of it is not valid. */
+function normalizeCorrection(raw: unknown): CorrectionEnvelope | null {
+  const o = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null) as Record<string, unknown> | null;
+  if (!o || typeof o['meeting'] !== 'string' || !/^(MQ-\d{4}-\d{4}|CU-\d{4}-\d{4}-M-\d{2,3})$/.test(o['meeting'])) return null;
+  const root = (o['root'] && typeof o['root'] === 'object' ? o['root'] : {}) as Record<string, unknown>;
+  if (typeof root['update_id'] !== 'string' || !UPDATE_ID_PATTERN.test(root['update_id']) || typeof root['record_id'] !== 'string' || !RECORD_ID_PATTERN.test(root['record_id'])) return null;
+  const base = recordVersion(o['base']);
+  if (!base || !Array.isArray(o['slots']) || o['slots'].length > 30) return null;
+  const slots: CorrectionEnvelope['slots'] = [];
+  for (const entry of o['slots'] as unknown[]) {
+    const x = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    if (typeof x['slot'] !== 'string' || !SLOT_ID.test(x['slot']) || typeof x['root_key'] !== 'string' || !/^[0-9a-f]{12}$/.test(x['root_key'])
+      || typeof x['root_index'] !== 'number' || !Number.isInteger(x['root_index']) || x['root_index'] < 0) return null;
+    if (slots.some((y) => y.slot === x['slot'])) return null;
+    slots.push({ slot: x['slot'], root_key: x['root_key'], root_index: x['root_index'] });
+  }
+  return { meeting: o['meeting'], root: { update_id: root['update_id'], record_id: root['record_id'] }, base, slots };
+}
+
+/**
+ * A correction update holds exactly one record, the corrected one: it says it amends the envelope's base, keeps the
+ * base's id, and has one action item per slot, in the slots' order. Anything else is a problem on its records, so
+ * none can be confirmed. A record outside a correction never says it amends anything.
+ */
+function checkCorrectionRecords(update: Pick<ContextUpdate, 'kind' | 'correction' | 'meeting_records'>): void {
+  const flag = (r: MeetingRecord, problem: string) => {
+    r.problems.push(problem);
+    if (r.confirmation === 'confirmed') { r.confirmation = null; r.confirmed_at = null; r.changed_since_confirmed = true; }
+  };
+  if (update.kind !== CORRECTION_KIND) {
+    for (const r of update.meeting_records) if (r.amends || r.action_items.some((a) => a.slot != null)) flag(r, 'only a correction says what a record amends');
+    return;
+  }
+  const env = update.correction;
+  for (const r of update.meeting_records) {
+    if (!env) { flag(r, 'the correction does not say what it corrects'); continue; }
+    if (update.meeting_records.length !== 1) flag(r, 'a correction holds exactly one record');
+    const a = r.amends;
+    if (!a || a.update_id !== env.base.update_id || a.record_id !== env.base.record_id || a.revision !== env.base.revision) flag(r, 'the record does not amend the version this correction is for');
+    if (r.id !== env.base.record_id) flag(r, `a corrected record keeps the id ${env.base.record_id}`);
+    const slots = r.action_items.map((x) => x.slot ?? null);
+    if (slots.length !== env.slots.length || slots.some((sl, i) => sl !== env.slots[i]!.slot)) flag(r, 'the action items are not the original ones, one each, in order');
+  }
+}
+
 /** The content a confirmation is bound to, in a fixed order. */
-function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' | 'revision' | 'problems' | 'changed_since_confirmed'>): string {
+function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' | 'revision' | 'problems' | 'changed_since_confirmed'>, binding?: string): string {
   const content = [r.id, r.title, r.meeting_date, r.attendees.map((p) => [p.ref, p.name]), r.decisions, r.open_questions,
     r.action_items.map((a) => [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date]), r.source,
     // Only when given: records confirmed before meetings were named stay confirmed.
@@ -465,7 +550,14 @@ function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' |
     // Only when there are any: a record confirmed before speakers existed stays confirmed.
     ...(r.speakers.length ? [r.speakers.map((s) => [s.label, s.source, s.person ? [s.person.ref, s.person.name] : null, s.reason])] : []),
     // The same for doubts: confirming covers what the user was told the analysis was not sure of.
-    ...(r.unsure.length ? [['unsure', r.unsure.map((d) => [d.field, d.value, d.reason, d.suggestion])]] : [])];
+    ...(r.unsure.length ? [['unsure', r.unsure.map((d) => [d.field, d.value, d.reason, d.suggestion])]] : []),
+    // A correction's link to what it corrects, and which original item each action is: part of what is confirmed, so
+    // neither can change unnoticed afterwards. Absent from every other record, whose versions stay as they were.
+    ...(r.amends ? [['amends', r.amends.update_id, r.amends.record_id, r.amends.revision]] : []),
+    ...(r.action_items.some((a) => a.slot != null) ? [['slots', r.action_items.map((a) => a.slot ?? null)]] : []),
+    // In a correction, what the dashboard wrote about it (meeting, original, version corrected, which original item each
+    // slot is): an edit to it after confirming takes the confirmation away too.
+    ...(binding ? [['correction', binding]] : [])];
   return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 16);
 }
 
@@ -506,7 +598,13 @@ function recordSpeakers(raw: unknown[], problems: string[]): MeetingSpeaker[] {
  * Reads the agent's records without changing what they say: nothing is shortened, renamed or invented. What
  * cannot be shown faithfully, or has no unique id, gets a problem and cannot be confirmed until it is fixed.
  */
-function normalizeRecords(raw: unknown): MeetingRecord[] {
+/** A correction's envelope as the confirmation of its record covers it. */
+function correctionBinding(env: CorrectionEnvelope): string {
+  return JSON.stringify([env.meeting, env.root.update_id, env.root.record_id, env.base.update_id, env.base.record_id, env.base.revision,
+    env.slots.map((x) => [x.slot, x.root_key, x.root_index])]);
+}
+
+function normalizeRecords(raw: unknown, binding?: string): MeetingRecord[] {
   if (!Array.isArray(raw)) return [];
   const records = raw.map((entry) => {
     const problems: string[] = [];
@@ -529,8 +627,9 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
       meeting: typeof r['meeting'] === 'string' && /^MQ-\d{4}-\d{4}$/.test(r['meeting'].trim()) ? r['meeting'].trim() : null,
       unsure: r['unsure'] == null ? [] : recordDoubts(recordList(r['unsure'], 'unsure', problems), problems),
       meeting_id: isMeetingId(r['meeting_id']) ? r['meeting_id'] : null,
+      amends: r['amends'] == null ? null : recordVersion(r['amends']) ?? (problems.push('amends is not a record version (update_id, record_id, revision)'), null),
     };
-    const revision = recordRevision(content);
+    const revision = recordRevision(content, binding);
     const hash = typeof r['confirmed_hash'] === 'string' ? r['confirmed_hash'] : '';
     // A confirmation counts only for the content it was given for. One written without that hash (by hand
     // or by an agent) is not the user's confirmation.
@@ -563,7 +662,28 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
 }
 
 /** What identifies an action item for its task: its content, so the same item always maps to the same task. */
-function actionItemKey(a: MeetingActionItem): string {
+/** How long a task from an action item waits for another dashboard making the same one. */
+const ACTION_LOCK_WAIT_MS = 10_000;
+
+/**
+ * One task per action item, across every dashboard: find-by-identity, create and link run under a lock named after
+ * the item's identity. Taken inside an update's queue, never the other way round.
+ */
+async function withActionLock<T>(identity: string, operation: () => Promise<T>): Promise<T> {
+  const ws = workspaceService.getWorkspacePath();
+  const dir = await workspaceEntry(ws, path.join(ws, '.situation-board', 'locks'), true);
+  await fsp.mkdir(dir, { recursive: true });
+  await workspaceEntry(ws, dir);
+  const name = `action-${createHash('sha256').update(identity).digest('hex').slice(0, 32)}.lock`;
+  const held = await lock(path.join(dir, name), ACTION_LOCK_WAIT_MS, () => httpError(409, 'A task is being made from this action item elsewhere; try again in a moment'));
+  try {
+    return await operation();
+  } finally {
+    await unlock(held);
+  }
+}
+
+export function actionItemKey(a: MeetingActionItem): string {
   const content = [a.description, a.owner ? [a.owner.ref, a.owner.name] : null, a.due_date];
   return createHash('sha256').update(JSON.stringify(content)).digest('hex').slice(0, 12);
 }
@@ -589,7 +709,8 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
       return { name: str(o['name']), size: Number(o['size']) || 0, type: str(o['type']), meetings };
     })
     : [];
-  return {
+  const correction = data['kind'] === CORRECTION_KIND ? normalizeCorrection(data['correction']) : null;
+  const update: ContextUpdate = {
     // The folder name is the id: a file edited to say otherwise must not point the dashboard elsewhere.
     id: folderId,
     title: str(data['title']) || folderId,
@@ -618,12 +739,15 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     digest_meetings: normalizeDigestMeetings(data['digest_meetings']),
     kaizen: normalizeKaizen(data),
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
-    meeting_records: normalizeRecords(data['meeting_records']),
+    meeting_records: normalizeRecords(data['meeting_records'], correction ? correctionBinding(correction) : undefined),
+    correction,
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
     kept_meetings: Array.isArray(data['kept_meetings']) ? (data['kept_meetings'] as unknown[]).filter((k): k is string => typeof k === 'string' && MEETING_KEY.test(k)).slice(0, 50) : [],
     deleted_meetings: normalizeDeletedMeetings(data['deleted_meetings']),
   };
+  checkCorrectionRecords(update);
+  return update;
 }
 
 /** A meeting inside an update: its queue id in a digest, else its record id. */
@@ -975,9 +1099,17 @@ export class ContextUpdateService {
 
       const tasksDir = path.join(workspaceService.getWorkspacePath(), 'tasks');
       const action = record.action_items[item]!;
+      // Recorded on the task, so a crash between writing the task and the link cannot lead to a second task. A corrected
+      // item is its original: the same identity, found through its slot in a chain that holds, never its own.
+      const identity = await this.actionIdentity(update, record, action);
       if (action.task_ref) {
         if (!(await taskExists(tasksDir, action.task_ref))) throw httpError(409, `This action item had a task, ${action.task_ref}, which no longer exists`);
-        return { update, task: await taskService.getTask(action.task_ref).catch(() => ({ id: action.task_ref } as Task)), created: false };
+        const linked = await taskService.getTask(action.task_ref).catch(() => ({ id: action.task_ref } as Task));
+        // A link to a task made for another action item is never taken as this item's task. One made before tasks
+        // recorded their item has no identity to compare, and is taken as it is.
+        const theirs = (linked as unknown as Record<string, unknown>)['meeting_action'];
+        if (typeof theirs === 'string' && theirs !== identity) throw httpError(409, `This action item's task link, ${action.task_ref}, belongs to another action item; fix the link in ${update.id}`);
+        return { update, task: linked, created: false };
       }
       const raws = this.rawRecords(data);
       const raw = raws[index] as Record<string, unknown>;
@@ -985,17 +1117,34 @@ export class ContextUpdateService {
       const rawIndex = shownActionItems(rawItems, [])[item]?.index;
       if (rawIndex === undefined) throw httpError(400, 'Invalid action item');
 
-      // Recorded on the task, so a crash between writing the task and the link cannot lead to a second task.
-      const identity = `${update.id}/${record.id}/${actionItemKey(action)}`;
-      const found = await taskService.findByMeetingAction(identity);
-      const task = found ?? await taskService.createTask(fields as Partial<Task>, { meeting_action: identity });
-      const entry = rawItems[rawIndex];
-      // A plain-text item becomes an object with the same text, so it can hold the link; what it says is unchanged.
-      rawItems[rawIndex] = { ...(entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : { description: entry }), task_ref: task.id };
-      raws[index] = { ...raw, action_items: rawItems };
-      await this.write(file, data, update.notes, { meeting_records: raws });
-      return { update: (await this.read(id)).update, task, created: !found };
+      return withActionLock(identity, async () => {
+        const found = await taskService.findByMeetingAction(identity);
+        const task = found ?? await taskService.createTask(fields as Partial<Task>, { meeting_action: identity });
+        const entry = rawItems[rawIndex];
+        // A plain-text item becomes an object with the same text, so it can hold the link; what it says is unchanged.
+        rawItems[rawIndex] = { ...(entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : { description: entry }), task_ref: task.id };
+        raws[index] = { ...raw, action_items: rawItems };
+        await this.write(file, data, update.notes, { meeting_records: raws });
+        return { update: (await this.read(id)).update, task, created: !found };
+      });
     });
+  }
+
+  /**
+   * The identity a task made from this action item carries. For a correction, the original item's: only while the chain
+   * of versions holds and this record is its current one, so a task never rests on a version that does not count.
+   */
+  private async actionIdentity(update: ContextUpdate, record: MeetingRecord, action: MeetingActionItem): Promise<string> {
+    if (update.kind !== CORRECTION_KIND) return `${update.id}/${record.id}/${actionItemKey(action)}`;
+    const env = update.correction;
+    if (!env) throw httpError(409, `${update.id} does not say what it corrects, so its action items cannot become tasks`);
+    const chain = correctionChain(env.meeting, env.root, await this.list());
+    if (chain.state !== 'corrected' || chain.head?.update_id !== update.id || chain.head.record_id !== record.id) {
+      throw httpError(409, `This record is not the current version of the meeting's record (${chain.state}), so its action items cannot become tasks`);
+    }
+    const identity = action.slot ? rootActionIdentity(env, action.slot) : null;
+    if (!identity) throw httpError(409, 'This action item does not say which original item it is');
+    return identity;
   }
 
   /** The hash of each transcript a record's speakers come from. A transcript that is not among the materials is refused. */
