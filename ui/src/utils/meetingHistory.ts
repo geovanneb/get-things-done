@@ -128,11 +128,15 @@ export function inFilter(row: MeetingRow, filter: MeetingFilter): boolean {
   return Boolean(row.held) && (filter === 'reviewed' ? done : !done);
 }
 
-/** Rows whose title, date, source or people hold every word of `query`. */
-export function matchingRows(rows: MeetingRow[], query: string): MeetingRow[] {
+/**
+ * Rows whose title, date, source or people hold every word of `query`, and the rows found by what was said in them
+ * (`said`, the ids the server found in their transcripts and notes).
+ */
+export function matchingRows(rows: MeetingRow[], query: string, said: ReadonlySet<string> = new Set()): MeetingRow[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return rows;
   return rows.filter((r) => {
+    if (said.has(r.id)) return true;
     const text = [r.title, r.date, r.held?.linkable === false ? '' : r.id, ...r.people].join(' ').toLowerCase();
     return words.every((w) => text.includes(w));
   });

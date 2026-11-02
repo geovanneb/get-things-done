@@ -47,6 +47,8 @@ const pending = meetingRows([], [held('CU-2026-0002-M-01', '2026-10-28', { origi
 assert.equal(pending[0]!.href, '/context/updates/CU-2026-0003');
 assert.deepEqual(matchingRows(pending, 'M-01'), [], 'no link to a record id that may still change');
 assert.deepEqual(matchingRows(rows, 'jane 2026-10-27').map((r) => r.id), ['MQ-2026-0007'], 'every word, from title, date or people');
+assert.deepEqual(matchingRows(rows, 'warehouse lease', new Set(['MQ-2026-0007'])).map((r) => r.id), ['MQ-2026-0007'], 'or found by what was said in it');
+assert.deepEqual(matchingRows(rows, '', new Set(['MQ-2026-0007'])).length, rows.length, 'no query, every row');
 
 // Grouped by when they took place.
 const now = new Date(2026, 9, 31, 15, 0);

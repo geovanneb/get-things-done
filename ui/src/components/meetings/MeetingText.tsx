@@ -16,10 +16,14 @@ const secondsOf = (time: string) => time.split(':').reduce((total, part) => tota
  * With `audio` (the recording the transcript was made from, while it is kept), a player is shown above the text, each
  * time plays the recording from there, and the turn being heard is marked.
  */
-export function MeetingText({ url, names = {}, audio }: { url: string; names?: Record<string, string>; audio?: { url: string; label: string } }) {
+export function MeetingText({ url, names = {}, audio, initialFind = '' }: {
+  url: string; names?: Record<string, string>; audio?: { url: string; label: string };
+  /** Words to find when it opens: the search the meeting was found with. */
+  initialFind?: string;
+}) {
   const [loaded, setLoaded] = React.useState<{ text: string; turns: TranscriptPart[] | null } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [find, setFind] = React.useState('');
+  const [find, setFind] = React.useState(initialFind);
   const [copied, setCopied] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
   React.useEffect(() => {
