@@ -810,6 +810,7 @@ test('a confirmed record copied under the same id is no longer confirmed, and a 
   await assert.rejects(service.approve(id), /changed after you confirmed it/);
   r = both[0]!;
   assert.ok(r.problems.some((p) => p.includes('same id')));
+});
 
 test('two dashboards making a task from the same action item at once get one task; a link to another item\'s task is refused', async (t) => {
   const { ws, service, id, file, choose } = await withMeetings(t, [{ ...MEETINGS[0], action_items: [...MEETINGS[0]!.action_items, { description: 'Book the room' }] }]);
