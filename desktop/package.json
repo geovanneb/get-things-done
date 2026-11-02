@@ -24,7 +24,7 @@
   "license": "MIT",
   "dependencies": {
     "dugite": "3.2.3",
-    "electron-updater": "6.8.10"
+    "electron-updater": "6.8.11"
   },
   "build": {
     "appId": "io.github.geovanneb.getthingsdone",
