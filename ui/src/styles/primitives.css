@@ -442,6 +442,20 @@ input[type="checkbox"]:disabled, input[type="radio"]:disabled { cursor: not-allo
   line-height: var(--leading-normal);
 }
 .gtd-reading-box > p + p { margin-top: var(--space-2); }
+/* A time that plays the recording from there, and the turn being heard (marked with aria-current too). */
+.gtd-reading-box .gtd-btn.gtd-reading-box__time {
+  height: auto;
+  padding: 0 var(--space-1);
+  margin-right: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+}
+.gtd-reading-box__heard {
+  background: var(--color-accent-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 var(--space-1) var(--color-accent-subtle);
+}
 
 /* Sortable column header: the button is the keyboard target, the th carries aria-sort. */
 .gtd-sort-btn {

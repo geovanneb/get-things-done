@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import { MeetingHistoryService } from '../services/meetingHistoryService';
 import { isMeetingId } from '../services/meetingLibrary';
+import { sendFile } from '../utils/files';
 
 const router = Router();
 const service = new MeetingHistoryService();
@@ -30,6 +31,12 @@ router.get('/:id/text/:file', async (req: Request, res: Response) => {
   res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.type('text/plain; charset=utf-8').send(text);
+});
+
+// GET /api/meetings/:id/audio/:file  a recording of the meeting, to play; Range requests work, so seeking does
+router.get('/:id/audio/:file', async (req: Request, res: Response) => {
+  // The sender every attachment uses: sandboxed, never sniffed.
+  sendFile(res, await service.audio(meetingId(req), param(req, 'file')), false);
 });
 
 // PUT /api/meetings/:id/keep  { keep: boolean }  System cleanup never removes a kept meeting

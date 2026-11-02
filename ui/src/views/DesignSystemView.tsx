@@ -200,6 +200,11 @@ export default function DesignSystemView() {
             <p><span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>00:01</span>Carrier volumes are up nine percent.</p>
             <p><span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>00:05</span>Agreed, let us write it down.</p>
           </div>
+          <p style={{ margin: 'var(--space-3) 0 var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>With its recording: a time plays from there, and the turn being heard is marked.</p>
+          <div className="gtd-reading-box" tabIndex={0} aria-label="Example transcript with its recording">
+            <p><Button size="sm" variant="ghost" className="gtd-reading-box__time" aria-label="Play from 00:01">00:01</Button>Carrier volumes are up nine percent.</p>
+            <p className="gtd-reading-box__heard" aria-current="time"><Button size="sm" variant="ghost" className="gtd-reading-box__time" aria-label="Play from 00:05">00:05</Button>Agreed, let us write it down.</p>
+          </div>
         </Card>
         <Card title="Table" padding="none" badge={<CountBadge count={2} />}>
           <div className="gtd-table-wrap">

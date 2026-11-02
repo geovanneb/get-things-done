@@ -237,6 +237,84 @@ test('a queued meeting\'s imported transcript and notes can be read before any d
   await assert.rejects(history.text(m.id, 'other.md'), /No such file in this meeting/);
 });
 
+/** A digest of one recorded meeting, as the digest writes it with Keep recordings on: the audio is kept next to its transcript. */
+async function recordedDigest(ws: string, id: string, extra: Record<string, unknown> = {}): Promise<void> {
+  await update(ws, id, {
+    origin: 'meetings', kind: 'daily-digest',
+    digest_meetings: [{
+      id: 'MQ-2026-0001', title: 'Weekly sync', meeting_date: '2026-10-27',
+      files: [{ source: 'call.webm', file: 'MQ-2026-0001-call.webm', sha256: 'a1' }, { source: 'call.transcript.md', file: 'MQ-2026-0001-call.transcript.md', sha256: 't1' }],
+      recordings: [{ source: 'call.webm', source_sha256: 'a1', transcript: 'MQ-2026-0001-call.transcript.md', transcript_sha256: 't1', complete: true, file: 'MQ-2026-0001-call.webm' }],
+    }],
+    transcripts: [{ file: 'MQ-2026-0001-call.transcript.md', source: 'MQ-2026-0001-call.webm', source_sha256: 'a1', sha256: 't1', complete: true, kind: 'audio' }],
+    meeting_records: [record('M-01', { meeting: 'MQ-2026-0001' })], ...extra,
+  }, { 'meetings.md': '# Meetings in this digest', 'MQ-2026-0001-call.webm': 'fictional audio', 'MQ-2026-0001-call.transcript.md': 'copy of the call' });
+}
+
+test('a kept recording is read through its transcript and played from its own file only', async (t) => {
+  const ws = await workspace(t);
+  await recordedDigest(ws, 'CU-2026-0001');
+  const { sources } = await history.detail('MQ-2026-0001');
+  assert.deepEqual(sources.map((s) => [s.name, s.kind, s.readable, s.playable]), [['call.webm', 'recording', true, true]],
+    'one recording, with something to read and something to play (it read as "No transcript" before)');
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-call.webm'), 'copy of the call');
+  assert.equal(await history.audio('MQ-2026-0001', 'MQ-2026-0001-call.webm'), await fsp.realpath(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials', 'MQ-2026-0001-call.webm')));
+  const status = (code: number) => (err: { statusCode?: number }) => err.statusCode === code;
+  await assert.rejects(history.audio('MQ-2026-0001', 'MQ-2026-0001-call.transcript.md'), status(415), 'only audio is played');
+  await assert.rejects(history.audio('MQ-2026-0001', 'meetings.md'), status(415));
+  await assert.rejects(history.audio('MQ-2026-0001', 'other.webm'), status(404), 'not a file of this meeting');
+  await assert.rejects(history.audio('MQ-2026-0001', '../update.webm'), /Invalid file name/);
+});
+
+test('once only the meeting text is kept, the recording is read but no longer played', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await recordedDigest(ws, 'CU-2026-0001');
+  await updates.close('CU-2026-0001');
+  const { sources } = await history.detail('MQ-2026-0001');
+  assert.deepEqual(sources.map((s) => [s.kind, s.readable, s.playable, s.present]), [['recording', true, false, true]], 'its transcript stays, its audio does not');
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-call.webm'), 'copy of the call');
+  await assert.rejects(history.audio('MQ-2026-0001', 'MQ-2026-0001-call.webm'), (err: { statusCode?: number }) => err.statusCode === 410);
+});
+
+test('a deleted meeting\'s recording is not played, and comes back with it', async (t) => {
+  const ws = await workspace(t);
+  await recordedDigest(ws, 'CU-2026-0001', { status: 'done', applied_at: '2026-10-28T10:00:00.000Z', keep_materials: true });
+  await history.remove('MQ-2026-0001');
+  assert.equal((await history.detail('MQ-2026-0001')).sources[0]!.playable, false);
+  await assert.rejects(history.audio('MQ-2026-0001', 'MQ-2026-0001-call.webm'), (err: { statusCode?: number }) => err.statusCode === 410);
+  await history.restore('MQ-2026-0001');
+  assert.equal((await history.detail('MQ-2026-0001')).sources[0]!.playable, true);
+  assert.ok(await history.audio('MQ-2026-0001', 'MQ-2026-0001-call.webm'));
+});
+
+/** A short PCM WAV file of silence, which every computer can transcribe. */
+function wav(seconds = 1): Buffer {
+  const rate = 16000;
+  const data = Buffer.alloc(rate * 2 * seconds);
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8); head.write('fmt ', 12);
+  head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22); head.writeUInt32LE(rate, 24);
+  head.writeUInt32LE(rate * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34); head.write('data', 36); head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+
+test('a queued meeting\'s recording can be played before any digest, but not while it is being recorded', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const m = await queue.createMeeting({ title: 'Weekly sync', meeting_date: '2026-10-28' });
+  await queue.addFile(m.id, 'call.wav', wav());
+  await queue.addFile(m.id, 'notes.md', Buffer.from('Fictional notes'));
+  assert.match(await history.audio(m.id, 'call.wav'), /call\.wav$/);
+  await assert.rejects(history.audio(m.id, 'notes.md'), (err: { statusCode?: number }) => err.statusCode === 415);
+  await assert.rejects(history.audio(m.id, 'other.wav'), /No such recording in this meeting/);
+  // The file a live recording writes is refused until it is finished, also under a name a listed file has.
+  const manifest = path.join(await queue.meetingFolder(m.id), 'meeting.md');
+  const { data, content } = parseMarkdown(await fsp.readFile(manifest, 'utf8'));
+  await fsp.writeFile(manifest, stringifyMarkdown(content, { ...data, live_recording: { generation: '00000000-0000-4000-8000-000000000001', token_sha256: 'x'.repeat(64), state: 'recording', started_at: '2026-10-28T09:00:00.000Z', name: 'call.wav' } }));
+  await assert.rejects(history.audio(m.id, 'call.wav'), (err: { statusCode?: number }) => err.statusCode === 409);
+});
+
 test('without the user\'s choice, a reviewed update deletes its materials as before', async (t) => {
   const ws = await workspace(t);
   await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);

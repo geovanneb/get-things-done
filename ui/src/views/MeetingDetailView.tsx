@@ -36,6 +36,8 @@ export interface MeetingsOutlet {
 type MeetingTab = 'transcript' | 'record' | 'tasks' | 'files';
 const BADGE: Record<StatusTone, string> = { critical: 'error', info: 'info', warning: 'warning', accent: 'accent-subtle', muted: 'muted', success: 'success' };
 const TEXT = /\.(vtt|txt|md|docx)$/i;
+/** A recording of a meeting, to play: the server sends only audio files of that meeting. */
+const audioUrl = (meeting: string, file: string) => `/api/meetings/${encodeURIComponent(meeting)}/audio/${encodeURIComponent(file)}`;
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 const longDate = (date: string) => {
   const [y, m, d] = date.split('-').map(Number);
@@ -162,13 +164,15 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
     recordingNow: (q) => (recorder.active && recorder.meetingId === q.id) || recordingElsewhere(q),
   });
   // What can be read: each recording's transcript (or its live draft), and transcripts or notes added as files.
-  const sources = m.files.flatMap((f) => {
+  const sources = m.files.flatMap((f): { key: string; label: string; url: string; names: Record<string, string>; audio?: { url: string; label: string } }[] => {
     const r = f.recording;
+    // The recording is in the queue until its digest takes it, so it can always be played with its transcript.
+    const audio = { url: audioUrl(m.id, f.name), label: `Recording ${f.name}` };
     if (r?.transcript && r.transcript_sha256) {
       const names = r.speaker_names && r.speaker_names.transcript_sha256 === r.transcript_sha256 ? r.speaker_names.names : [];
-      return [{ key: f.name, label: `${f.name}, transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.transcript)}`, names: Object.fromEntries(names.map((n) => [n.label, n.name])) }];
+      return [{ key: f.name, label: `${f.name}, transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.transcript)}`, names: Object.fromEntries(names.map((n) => [n.label, n.name])), audio }];
     }
-    if (r?.draft) return [{ key: f.name, label: `${f.name}, live transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.draft.transcript)}`, names: {} }];
+    if (r?.draft) return [{ key: f.name, label: `${f.name}, live transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.draft.transcript)}`, names: {}, audio }];
     if (!r && TEXT.test(f.name) && !m.files.some((o) => o.recording?.transcript === f.name || o.recording?.draft?.transcript === f.name)) {
       return [{ key: f.name, label: f.name, url: `/api/meetings/${m.id}/text/${encodeURIComponent(f.name)}`, names: {} }];
     }
@@ -183,7 +187,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   const main = tab === 'transcript' ? (
     <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
       <SourcePicker sources={sources} value={shown?.key ?? ''} onChange={setPicked} />
-      {shown ? <MeetingText key={shown.url} url={shown.url} names={shown.names} />
+      {shown ? <MeetingText key={shown.url} url={shown.url} names={shown.names} {...(shown.audio ? { audio: shown.audio } : {})} />
         : transcriptOnItsWay(m) ? <LoadingSpinner text="The transcript appears here when transcription finishes." />
           : <EmptyState size="compact" title="Nothing to read yet" description="This meeting has no transcript or notes that can be shown here. Its files are in the Files tab." action={{ label: 'Show the files', onClick: () => setTab('files') }} />}
     </div>
@@ -302,8 +306,14 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
       {trashNotice}
       {tab === 'transcript' && (shown ? (
         <>
-          <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.name }))} value={shown.file} onChange={setPicked} />
-          <MeetingText key={shown.file} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} />
+          <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.kind === 'recording' ? `${s.name}, transcript` : s.name }))} value={shown.file} onChange={setPicked} />
+          <MeetingText key={shown.file} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`}
+            {...(shown.playable ? { audio: { url: audioUrl(h.id, shown.file), label: `Recording ${shown.name}` } } : {})} />
+          {shown.kind === 'recording' && !shown.playable && (
+            <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              Only the transcript of this recording is kept, so it cannot be played. Recordings are kept when Keep recordings is on in Settings &gt; Transcription.
+            </p>
+          )}
         </>
       ) : (
         <>
@@ -363,9 +373,12 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
             <li key={s.file} className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
               <span className="mono truncate" style={{ flex: '1 1 200px', minWidth: 0 }}>{s.name}</span>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{{ transcript: 'Transcript', recording: 'Recording', notes: 'Notes', file: 'File' }[s.kind]}</span>
-              {s.present
+              {s.playable && <Button size="sm" variant="secondary" onClick={() => { setPicked(s.file); setTab('transcript'); }}>Play</Button>}
+              {s.present && (s.kind !== 'recording' || s.playable)
                 ? <a href={`/api/context-updates/${h.update_id}/materials/${encodeURIComponent(s.file)}`} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open</a>
-                : <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{s.missing}</em>}
+                : s.present
+                  ? <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Its audio is not kept. Its transcript is in the Transcript tab.</em>
+                  : <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{s.missing}</em>}
             </li>
           ))}
           {sources.length === 0 && <li className="gtd-list__row" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No files are recorded for this meeting.</li>}

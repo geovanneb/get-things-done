@@ -867,6 +867,8 @@ export interface MeetingSource {
   state: 'present' | 'unavailable' | 'missing';
   sha256: string | null;
   readable: boolean;
+  /** A recording whose audio is here to play, at /api/meetings/:id/audio/:file. False when only its transcript is kept. */
+  playable: boolean;
   missing: string | null;
 }
 
