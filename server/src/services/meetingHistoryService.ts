@@ -195,16 +195,20 @@ export class MeetingHistoryService {
    * meeting, and only text: never a way to read any file of the workspace.
    */
   async text(id: string, name: unknown): Promise<string> {
-    const file = topLevelName(name as string);
+    const asked = topLevelName(name as string);
+    // From here on, the name as the meeting stores it, never the one from the request: a converted transcript holds
+    // its file's name, and a response should not echo what the request sent.
     if (QUEUED_MEETING_ID.test(id)) {
       const inQueue = await queue.loadMeeting(id).catch(() => null);
       if (inQueue) {
-        if (!inQueue.files.some((f) => f.name === file)) throw httpError(404, 'No such file in this meeting');
-        return this.readAsText(await fileInside(await queue.meetingFolder(id), file), file);
+        const stored = inQueue.files.find((f) => f.name === asked)?.name;
+        if (!stored) throw httpError(404, 'No such file in this meeting');
+        return this.readAsText(await fileInside(await queue.meetingFolder(id), stored), stored);
       }
     }
     const { update, meeting } = await this.held(id);
-    if (!meeting.files.includes(file)) throw httpError(404, 'No such file in this meeting');
+    const file = meeting.files.find((f) => f === asked);
+    if (!file) throw httpError(404, 'No such file in this meeting');
     if (update.deleted_meetings.some((d) => d.meeting === meeting.key)) throw httpError(410, 'This meeting was deleted');
     const copy = update.transcripts.find((t) => t.source === file);
     const shown = copy ? await contextUpdates.materialPath(update.id, copy.file).catch(() => null) : null;
