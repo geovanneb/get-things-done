@@ -892,6 +892,13 @@ export interface MeetingSource {
   missing: string | null;
 }
 
+/** A meeting found by what was said in it (GET /api/meetings/search). `file` is the meeting file it is in. */
+export interface MeetingSearchHit {
+  id: string;
+  places: number;
+  snippets: { file: string; time: string | null; speaker: string | null; text: string }[];
+}
+
 export interface MeetingDetail {
   meeting: HistoryMeeting;
   record: MeetingRecord | null;

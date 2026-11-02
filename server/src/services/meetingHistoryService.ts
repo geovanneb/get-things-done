@@ -6,6 +6,7 @@ import { heldMeetings, importedParts, isMeetingId, isMeetingText, QUEUED_MEETING
 import { fileInside, topLevelName } from '../utils/files';
 import { correctionChain, type ChainState, type CorrectionChain } from './meetingCorrections';
 import { MAX_CONVERT_BYTES } from '../utils/transcript';
+import { MAX_QUERY, MIN_QUERY, queryWords, searchMeeting, type SearchHit } from './meetingSearch';
 
 /**
  * The Meetings history: every meeting a context update holds (digests and updates imported by hand), read from what the
@@ -91,6 +92,13 @@ export interface MeetingDetail {
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
 }
+
+/**
+ * Text already read for a search, by file, size and time it was changed: typing a query searches every meeting again,
+ * and most transcripts have not changed since the last key. Bounded, so it never holds more than a few hundred files.
+ */
+const searchCache = new Map<string, { stamp: string; text: string }>();
+const SEARCH_CACHE_FILES = 300;
 
 const contextUpdates = new ContextUpdateService();
 const queue = new MeetingDigestService();
@@ -307,6 +315,73 @@ export class MeetingHistoryService {
     const full = await contextUpdates.materialPath(update.id, file).catch(() => null);
     if (!full) throw httpError(410, 'This recording is no longer kept');
     return full;
+  }
+
+  /**
+   * Meetings whose own transcripts and notes hold every word of `query`, with where. Only text the reader can show:
+   * queued meetings and meetings an update holds, never one in the trash, never audio or other files.
+   */
+  async search(query: unknown): Promise<{ results: SearchHit[]; searched: number }> {
+    if (typeof query !== 'string' || query.trim().length < MIN_QUERY || query.length > MAX_QUERY) {
+      throw httpError(400, `Search for ${MIN_QUERY} to ${MAX_QUERY} characters`);
+    }
+    const words = queryWords(query);
+    const results: SearchHit[] = [];
+    let searched = 0;
+    const seen = new Set<string>();
+    const { meetings: queued } = await queue.readQueue();
+    for (const m of queued) {
+      // Each recording's transcript (or its live draft), and transcripts or notes added as files: what its reader shows.
+      const shown = new Set(m.files.flatMap((f) => [f.recording?.transcript, f.recording?.draft?.transcript].filter((n): n is string => Boolean(n))));
+      const names = [...shown, ...m.files.filter((f) => !f.recording && !shown.has(f.name) && isMeetingText(f.name)).map((f) => f.name)];
+      const folder = await queue.meetingFolder(m.id).catch(() => null);
+      const texts = folder ? await this.searchTexts(names.map((name) => ({ file: name, read: () => fileInside(folder, name) }))) : [];
+      seen.add(m.id);
+      if (!texts.length) continue;
+      searched++;
+      const hit = searchMeeting(m.id, texts, words);
+      if (hit) results.push(hit);
+    }
+    for (const u of await contextUpdates.list()) {
+      for (const m of heldMeetings(u)) {
+        // A meeting being handed to a digest is listed by the queue; one in the trash is not searched.
+        if (seen.has(m.id) || u.deleted_meetings.some((d) => d.meeting === m.key)) continue;
+        seen.add(m.id);
+        const copies = new Map(u.transcripts.map((t) => [t.source, t.file]));
+        // An original with a readable copy is read as that copy, named by the original, as the reader does.
+        const files = m.files.filter((f) => !u.transcripts.some((t) => t.file === f && m.files.includes(t.source)));
+        const texts = await this.searchTexts(files.flatMap((f) => {
+          const read = copies.get(f) ?? f;
+          return isMeetingText(read) ? [{ file: f, read: () => contextUpdates.materialPath(u.id, read) }] : [];
+        }));
+        if (!texts.length) continue;
+        searched++;
+        const hit = searchMeeting(m.id, texts, words);
+        if (hit) results.push(hit);
+      }
+    }
+    return { results, searched };
+  }
+
+  /** The text of each file that can still be read; one that is gone, too large or not text is left out. */
+  private async searchTexts(files: { file: string; read: () => Promise<string> }[]): Promise<{ file: string; text: string }[]> {
+    const out: { file: string; text: string }[] = [];
+    for (const { file, read } of files) {
+      const full = await read().catch(() => null);
+      const stat = full ? await fsp.stat(full).catch(() => null) : null;
+      if (!full || !stat || stat.size > MAX_CONVERT_BYTES) continue;
+      const stamp = `${stat.size}:${stat.mtimeMs}`;
+      let text = searchCache.get(full)?.stamp === stamp ? searchCache.get(full)!.text : null;
+      if (text === null) {
+        text = readableText(path.basename(full), await fsp.readFile(full).catch(() => Buffer.alloc(0)));
+        if (text === null) continue;
+        searchCache.delete(full);
+        searchCache.set(full, { stamp, text });
+        if (searchCache.size > SEARCH_CACHE_FILES) searchCache.delete(searchCache.keys().next().value!);
+      }
+      out.push({ file, text });
+    }
+    return out;
   }
 
   private async readAsText(full: string, name: string): Promise<string> {

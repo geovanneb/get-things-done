@@ -14,8 +14,9 @@ import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
 import { apiDelete, apiPost } from '@/utils/api';
 import { groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
 import { canMakeDeliverable, deliverableDraft } from '@/utils/meetingDeliverable';
+import { clockLine } from '@/utils/transcriptReading';
 import { useAppDispatch } from '@/store';
-import type { HistoryMeeting, MeetingDigest } from '@/types';
+import type { HistoryMeeting, MeetingDigest, MeetingSearchHit } from '@/types';
 
 /** How many rows show before "Show older"; what needs the user is always shown. */
 const SHOWN = 30;
@@ -46,8 +47,60 @@ function Status({ status, label }: { status: RowStatus; label: string }) {
   );
 }
 
-function Row({ row, now, selected, onSelect }: { row: MeetingRow; now: Date; selected: boolean; onSelect: (on: boolean) => void }) {
+/**
+ * The meetings whose transcripts and notes hold every word of `query`, asked of the server once typing pauses. Null
+ * while there is nothing to ask (fewer than two characters) or no answer yet.
+ */
+function useSaidSearch(query: string): { hits: Map<string, MeetingSearchHit> | null; searching: boolean; error: string | null } {
+  const q = query.trim();
+  const [state, setState] = React.useState<{ q: string; hits: Map<string, MeetingSearchHit> | null; error: string | null }>({ q: '', hits: null, error: null });
+  React.useEffect(() => {
+    if (q.length < 2) return undefined;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      fetch(`/api/meetings/search?q=${encodeURIComponent(q)}`, { signal: abort.signal })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? `The search failed (${res.status}).`);
+          return res.json() as Promise<{ results: MeetingSearchHit[] }>;
+        })
+        .then((body) => setState({ q, hits: new Map(body.results.map((h) => [h.id, h])), error: null }))
+        .catch((err: Error) => { if (!abort.signal.aborted) setState({ q, hits: null, error: err.message }); });
+    }, 300);
+    return () => { clearTimeout(timer); abort.abort(); };
+  }, [q]);
+  const current = q.length >= 2 && state.q === q;
+  return { hits: current ? state.hits : null, searching: q.length >= 2 && !current, error: current ? state.error : null };
+}
+
+/** `text` with each of `words` marked, ignoring case. */
+function Marked({ text, words }: { text: string; words: string[] }) {
+  const pattern = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).filter(Boolean).join('|');
+  if (!pattern) return <>{text}</>;
+  const parts = text.split(new RegExp(`(${pattern})`, 'gi'));
+  return <>{parts.map((p, i) => (i % 2 ? <mark key={i} className="gtd-mark">{p}</mark> : <React.Fragment key={i}>{p}</React.Fragment>))}</>;
+}
+
+/** Where a meeting was found by what was said: the best place, and how many more. */
+function Said({ hit, words }: { hit: MeetingSearchHit; words: string[] }) {
+  const s = hit.snippets[0];
+  if (!s) return null;
+  const more = hit.places - 1;
+  return (
+    <div style={{ marginTop: 2, fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', overflowWrap: 'anywhere' }}>
+      {s.time ? <span className="mono">{clockLine(s.time)} </span> : null}
+      {s.speaker ? <strong style={{ fontWeight: 600 }}>{s.speaker}: </strong> : null}
+      <Marked text={s.text} words={words} />
+      {more > 0 && <span style={{ color: 'var(--color-text-muted)' }}> · {more === 1 ? '1 more place' : `${more} more places`}</span>}
+    </div>
+  );
+}
+
+function Row({ row, now, selected, onSelect, said, words }: { row: MeetingRow; now: Date; selected: boolean; onSelect: (on: boolean) => void; said?: MeetingSearchHit | undefined; words: string[] }) {
   const selectable = canMakeDeliverable(row);
+  // Found by what was said: open the file it was found in, finding the words of the query that place holds.
+  const first = said?.snippets[0];
+  const inFirst = first ? words.filter((w) => `${first.speaker ?? ''} ${first.text}`.toLowerCase().includes(w)) : [];
+  const href = first && row.href.startsWith('/meetings/') ? `${row.href}?${new URLSearchParams({ find: inFirst.join(' '), file: first.file })}` : row.href;
   return (
     <li className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 'var(--space-4)', rowGap: 'var(--space-2)' }}>
       {/* Every row keeps the same indent, also one that cannot be picked yet (its review is still open). */}
@@ -56,11 +109,12 @@ function Row({ row, now, selected, onSelect }: { row: MeetingRow; now: Date; sel
       </span>
       <span className="mono" style={{ flex: '0 0 64px', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{whenLabel(row, now)}</span>
       <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-        <Link to={row.href} className="gtd-link-strong truncate" style={{ display: 'block', fontSize: 'var(--text-sm)' }}>{row.title}</Link>
+        <Link to={href} className="gtd-link-strong truncate" style={{ display: 'block', fontSize: 'var(--text-sm)' }}>{row.title}</Link>
         <div className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           {row.source}{row.people.length ? ` · ${row.people.join(', ')}` : ''}
           {row.textGone && <em> · transcript no longer kept</em>}
         </div>
+        {said && <Said hit={said} words={words} />}
       </div>
       <Status status={row.processing} label="Processing" />
       <Status status={row.review} label="Review" />
@@ -97,7 +151,9 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
     recordingNow: (m) => (recorder.active && recorder.meetingId === m.id) || recordingElsewhere(m),
   }) : [];
   const count = (f: MeetingFilter) => rows.filter((r) => inFilter(r, f)).length;
-  const found = matchingRows(rows.filter((r) => inFilter(r, filter)), query);
+  const said = useSaidSearch(query);
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const found = matchingRows(rows.filter((r) => inFilter(r, filter)), query, new Set(said.hits?.keys() ?? []));
   const urgent = found.filter((r) => r.needsYou);
   const others = found.filter((r) => !r.needsYou);
   const limited = query.trim() || all ? found : [...urgent, ...others.slice(0, SHOWN)];
@@ -127,11 +183,16 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
       {job && history && (
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderBottom: '1px solid var(--color-border)' }}>
-            <SearchInput value={query} onChange={setQuery} placeholder="Search title, date or people" size="sm" width={narrow ? '100%' : 280} />
+            <SearchInput value={query} onChange={setQuery} placeholder="Search titles, people or what was said" size="sm" width={narrow ? '100%' : 300} />
             {narrow
               ? <Select label="Show" size="sm" value={filter} onChange={(v) => setFilter(v as MeetingFilter)} options={options} />
               : <SegmentedControl label="Show" value={filter} onChange={setFilter} options={options} />}
           </div>
+          {said.error && (
+            <div style={{ padding: 'var(--space-3) var(--space-5)' }}>
+              <Notice tone="warning" title="Could not search what was said.">{said.error} Titles, dates and people are still searched.</Notice>
+            </div>
+          )}
           {job.queue_problems.length > 0 && (
             <div style={{ padding: 'var(--space-3) var(--space-5)' }}>
               <Notice tone="critical" title="Some meetings in the queue cannot be read.">{job.queue_problems.map((p) => `${p.id}: ${p.reason}`).join(' ')}</Notice>
@@ -140,15 +201,17 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
           {rows.filter((r) => !r.inTrash).length === 0 ? (
             <EmptyState size="compact" title="No meetings yet"
               description="Record a meeting, or add a recording or transcript under Context > Updates. Each one stays here after its digest." />
+          ) : found.length === 0 && said.searching ? (
+            <LoadingSpinner text="Searching what was said…" />
           ) : found.length === 0 ? (
             <EmptyState size="compact" title={query ? `No meeting matches "${query}"` : 'No meetings here'}
-              description={query ? 'Try a title, a date or a name.' : 'Choose another filter to see the others.'}
+              description={query ? 'Try a title, a date, a name or words said in the meeting. Meetings whose transcript is no longer kept can only be found by title, date or people.' : 'Choose another filter to see the others.'}
               action={query ? { label: 'Clear search', onClick: () => setQuery('') } : { label: 'Show all meetings', onClick: () => setFilter('all') }} />
           ) : (
             groupRows(limited, now).map((g) => (
               <section key={g.label} aria-label={g.label}>
                 <h3 style={{ margin: 0, padding: 'var(--space-2) var(--space-5)', fontSize: 'var(--text-xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)', background: 'var(--color-bg)', borderBottom: '1px solid var(--color-border)' }}>{g.label}</h3>
-                <ul aria-label={`Meetings, ${g.label}`} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} selected={selected.includes(r.id)} onSelect={(on) => select(r.id, on)} />)}</ul>
+                <ul aria-label={`Meetings, ${g.label}`} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} selected={selected.includes(r.id)} onSelect={(on) => select(r.id, on)} said={said.hits?.get(r.id)} words={words} />)}</ul>
               </section>
             ))
           )}

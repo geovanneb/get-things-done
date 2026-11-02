@@ -681,6 +681,12 @@ try {
       && heldMeeting.status === 200 && heldText.status === 200 && heldTextBody.includes('Standup words.')
       && heldText.headers.get('content-security-policy')?.includes('sandbox') && otherFile.status === 404 && badMeetingId.status === 400,
       `held=${heldMeeting.status} text=${heldText.status} other=${otherFile.status} bad=${badMeetingId.status}`);
+    // Found again by what was said in it, not only by its title.
+    const saidSearch = await (await fetch(`${base}/api/meetings/search?q=${encodeURIComponent('standup words')}`)).json();
+    const saidShort = await fetch(`${base}/api/meetings/search?q=s`);
+    check('a digested meeting is found by what was said in it, with where',
+      saidSearch.results?.some((r) => r.id === queued.id && r.snippets?.[0]?.text?.includes('Standup words')) && saidShort.status === 400,
+      `results=${JSON.stringify(saidSearch.results?.map((r) => r.id))} short=${saidShort.status}`);
     // A task made from that meeting: the picker offers it, saving pins what the agent may read, and the package holds it.
     const meetingPick = await (await fetch(`${base}/api/mentions?q=standup&limit=20`)).json();
     const fromMeeting = await (await json('POST', '/api/tasks', { title: 'Fictional standup summary', body: `Summarize [@Fictional standup](/meetings/${queued.id}).` })).json();

@@ -452,6 +452,12 @@ input[type="checkbox"]:disabled, input[type="radio"]:disabled { cursor: not-allo
   font-size: var(--text-xs);
   color: var(--color-accent);
 }
+/* Words found by a search, marked in running text. */
+mark.gtd-mark {
+  background: var(--color-accent-subtle);
+  color: inherit;
+  border-radius: var(--radius-sm);
+}
 .gtd-reading-box__heard {
   background: var(--color-accent-subtle);
   border-radius: var(--radius-sm);

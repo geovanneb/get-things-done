@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { Link, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import EmptyState from '@/components/common/EmptyState';
@@ -164,21 +164,24 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
     recordingNow: (q) => (recorder.active && recorder.meetingId === q.id) || recordingElsewhere(q),
   });
   // What can be read: each recording's transcript (or its live draft), and transcripts or notes added as files.
-  const sources = m.files.flatMap((f): { key: string; label: string; url: string; names: Record<string, string>; audio?: { url: string; label: string } }[] => {
+  const sources = m.files.flatMap((f): { key: string; label: string; url: string; text: string; names: Record<string, string>; audio?: { url: string; label: string } }[] => {
     const r = f.recording;
     // The recording is in the queue until its digest takes it, so it can always be played with its transcript.
     const audio = { url: audioUrl(m.id, f.name), label: `Recording ${f.name}` };
     if (r?.transcript && r.transcript_sha256) {
       const names = r.speaker_names && r.speaker_names.transcript_sha256 === r.transcript_sha256 ? r.speaker_names.names : [];
-      return [{ key: f.name, label: `${f.name}, transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.transcript)}`, names: Object.fromEntries(names.map((n) => [n.label, n.name])), audio }];
+      return [{ key: f.name, label: `${f.name}, transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.transcript)}`, text: r.transcript, names: Object.fromEntries(names.map((n) => [n.label, n.name])), audio }];
     }
-    if (r?.draft) return [{ key: f.name, label: `${f.name}, live transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.draft.transcript)}`, names: {}, audio }];
+    if (r?.draft) return [{ key: f.name, label: `${f.name}, live transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.draft.transcript)}`, text: r.draft.transcript, names: {}, audio }];
     if (!r && TEXT.test(f.name) && !m.files.some((o) => o.recording?.transcript === f.name || o.recording?.draft?.transcript === f.name)) {
-      return [{ key: f.name, label: f.name, url: `/api/meetings/${m.id}/text/${encodeURIComponent(f.name)}`, names: {} }];
+      return [{ key: f.name, label: f.name, url: `/api/meetings/${m.id}/text/${encodeURIComponent(f.name)}`, text: f.name, names: {} }];
     }
     return [];
   });
-  const [picked, setPicked] = useState<string>('');
+  // Found by a search: open the file it was found in, with the words to find.
+  const [params] = useSearchParams();
+  const found = params.get('find') ?? '';
+  const [picked, setPicked] = useState<string>(() => sources.find((s) => s.text === params.get('file'))?.key ?? '');
   const shown = sources.find((s) => s.key === picked) ?? sources[0];
   const recorded = m.files.some((f) => f.recording);
   const transcribed = m.files.filter((f) => f.recording).every((f) => f.recording!.status === 'done' || (f.recording!.status === 'partial' && f.recording!.accepted));
@@ -187,7 +190,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   const main = tab === 'transcript' ? (
     <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
       <SourcePicker sources={sources} value={shown?.key ?? ''} onChange={setPicked} />
-      {shown ? <MeetingText key={shown.url} url={shown.url} names={shown.names} {...(shown.audio ? { audio: shown.audio } : {})} />
+      {shown ? <MeetingText key={shown.url} url={shown.url} names={shown.names} initialFind={found} {...(shown.audio ? { audio: shown.audio } : {})} />
         : transcriptOnItsWay(m) ? <LoadingSpinner text="The transcript appears here when transcription finishes." />
           : <EmptyState size="compact" title="Nothing to read yet" description="This meeting has no transcript or notes that can be shown here. Its files are in the Files tab." action={{ label: 'Show the files', onClick: () => setTab('files') }} />}
     </div>
@@ -238,7 +241,10 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   const updatesVersion = useDataVersion('context-updates');
   const { data, error, refetch } = useApi<MeetingDetail>(`/api/meetings/${encodeURIComponent(id)}`, [updatesVersion]);
   const [tab, setTab] = useState<MeetingTab>('transcript');
-  const [picked, setPicked] = useState('');
+  // Found by a search: open the file it was found in, with the words to find.
+  const [params] = useSearchParams();
+  const found = params.get('find') ?? '';
+  const [picked, setPicked] = useState(() => params.get('file') ?? '');
   const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
 
@@ -322,7 +328,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
       {tab === 'transcript' && (shown ? (
         <>
           <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.kind === 'recording' ? `${s.name}, transcript` : s.name }))} value={shown.file} onChange={setPicked} />
-          <MeetingText key={shown.file} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`}
+          <MeetingText key={shown.file} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} initialFind={found}
             {...(shown.playable ? { audio: { url: audioUrl(h.id, shown.file), label: `Recording ${shown.name}` } } : {})} />
           {shown.kind === 'recording' && !shown.playable && (
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
