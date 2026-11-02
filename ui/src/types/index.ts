@@ -908,6 +908,15 @@ export interface MeetingDetail {
   sources: MeetingSource[];
 }
 
+/** For a task made from a meeting action item: what the record says about it now, versus when the task was made. */
+export interface ActionNotice {
+  state: 'none' | 'current' | 'changed' | 'conflict' | 'broken' | 'unknown' | 'ambiguous' | 'gone';
+  meeting: string | null;
+  changes: { property: 'description' | 'owner' | 'due_date'; before: string; after: string }[];
+  current: { update_id: string; record_id: string; at: string | null } | null;
+  legacy: boolean;
+}
+
 /** What a task may read of a meeting it mentions, as pinned when the task was saved (server: meetingSources.ts). */
 export interface PinnedMeeting {
   id: string;

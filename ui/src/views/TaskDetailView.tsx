@@ -1,4 +1,5 @@
 import TaskMeetingSources from '@/components/board/TaskMeetingSources';
+import TaskMeetingAction from '@/components/board/TaskMeetingAction';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { sectionLabelStyle } from '@/components/task-form/styles';
 import Input, { Select } from '@/components/common/Input';
@@ -168,6 +169,7 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task
   return (
     <div className="gtd-detail">
       <div className="gtd-detail__main">
+        {task.meeting_action && <TaskMeetingAction taskId={task.id} refreshKey={savedCount} />}
         <MarkdownSection label="Objective" content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
         {/\]\(\/meetings\//.test(task.body ?? '') && <TaskMeetingSources taskId={task.id} refreshKey={savedCount} pinError={pinError} onPinned={onPinned} />}
         <div style={{ marginBottom: 'var(--space-6)' }}>
