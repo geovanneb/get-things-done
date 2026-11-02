@@ -74,7 +74,7 @@ the list stacks above the content on a phone.
 | --- | --- | --- |
 | A text action | `Button` | `primary` (one per group), `secondary` (default), `ghost` (low emphasis, Cancel), `danger` (destructive); sizes `sm` `md` `lg`; `loading`, `icon`, `block` |
 | An icon-only action | `IconButton` | `label` is required (name and tooltip); `tone="danger"`; `outline`; sizes `sm` 28px, `md` 34px |
-| A group of content | `Card` | `padding="md"` content, `"compact"` repeated cards, `"none"` lists and tables (header gets a divider); `title`, `description`, `actions`, `badge`, `footer`. A card with only a header keeps the same space below it |
+| A group of content | `Card` | `padding="md"` content, `"compact"` repeated cards, `"none"` lists and tables (header gets a divider); `title`, `description`, `actions`, `badge`, `footer`. A card with only a header keeps the same space below it; nested cards keep their own padding |
 | Equivalent cards | `CardGrid` | one column on a phone, more as the page widens |
 | A titled group without a surface | `Section` | |
 | A text field, select, textarea | `Input`, `Select`, `Textarea` | `label`, `required`, `optional`, `hint`, `error`, `size` |
@@ -86,7 +86,7 @@ the list stacks above the content on a phone.
 | Rows inside a card | `Card padding="none"` + `<ul className="gtd-list">` with `gtd-list__row` | divider lines; extra controls (search, notices) sit in a padded band above or below |
 | Running text read in place (a transcript, a preview) | `gtd-reading-box` | scrolls inside itself; with a recording, each time is a ghost `Button` with `gtd-reading-box__time` that plays from there, and the turn being heard gets `gtd-reading-box__heard` and `aria-current="time"` (see `MeetingText`) |
 | A small value with inline actions (a speaker and its name) | `gtd-chip` + `gtd-chip__action` | |
-| Search a list | `SearchInput` | the placeholder names what is searched and is the accessible name |
+| Search a list | `SearchInput` | `id` ties an optional visible `Field` label to the input; the placeholder names what is searched and is the accessible name |
 | Switch views of a page | `Tabs` | arrow keys move between tabs |
 | Pick one option that filters or formats | `SegmentedControl` | |
 | A count | `CountBadge` | `neutral`, `accent`, `warning`, `critical` |
@@ -200,7 +200,7 @@ from code, the Setup flow (outside the app shell), the Context split view and th
 | --- | --- | --- |
 | `npm run test:design` | Static rules over `ui/src`: no literal colours, font sizes or z-index; only the four weights; no browser `alert`/`confirm`; no `<style>` tags; no extra `h1`; no hand-built modal; no removed focus outline; every view inside `<Page>`. Ratchet rules: JavaScript hover handlers, numeric radii, hand-made banners, raw buttons and hand-made card surfaces may not grow past `scripts/design-baseline.json`. | `npm test`, CI |
 | `npm run test:primitives --workspace=ui` | Behaviour and accessibility of the primitives (names, labels, roles, busy and invalid states, heading levels). | `npm test`, CI |
-| `npm run test:visual` | In a browser, on a seeded demo workspace: every page at 390, 768 and 1280px has no sideways scroll, one `h1`, labelled fields and named buttons, and no page errors; dialog focus and Escape, tab arrow keys; screenshots of stable screens (showcase, templates, stakeholders, profile) in light and dark against `ui/visual-baselines/<platform>/`. | CI job "Design (browser)" |
+| `npm run test:visual` | In a browser, on a seeded demo workspace: every page at 390, 768 and 1280px in both themes has no sideways scroll, one `h1`, labelled fields and named buttons, and no page errors; dialog focus and Escape, tab arrow keys; screenshots of stable screens (showcase, templates, stakeholders, profile) in light and dark against `ui/visual-baselines/<platform>/`. | CI job "Design (browser)" |
 | `npm run design:baseline` | Records the ratchet counts after you remove legacy patterns. Never run it to make room for new ones. | by hand |
 
 `test:visual` needs a build and Playwright: `npm i --no-save playwright && npx playwright install chromium`.

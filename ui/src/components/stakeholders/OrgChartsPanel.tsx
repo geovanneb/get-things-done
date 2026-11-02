@@ -3,6 +3,8 @@ import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useNavigate } from 'react-router-dom';
 import Avatar from '@/components/common/Avatar';
 import Button from '@/components/common/Button';
+import { Tabs } from '@/components/common/Tabs';
+import { icons } from '@/components/common/IconButton';
 import EmptyState from '@/components/common/EmptyState';
 import Input from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
@@ -463,7 +465,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, padding: '12px 8px 8px 12px' }}>
           <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Charts</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button size="sm" variant="ghost" onClick={() => { setEditingChart(null); setFormOpen(true); }}>+ New</Button>
+            <Button size="sm" variant="ghost" icon={icons.plus} onClick={() => { setEditingChart(null); setFormOpen(true); }}>New chart</Button>
             <button type="button" className="org-rail-btn" onClick={toggleList} aria-label="Hide the chart list" title="Hide the chart list">
               <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M9 3L5 7l4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
@@ -497,19 +499,13 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
           <>
             <header style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', padding: '14px 16px', borderBottom: '1px solid var(--color-border)' }}>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--color-text)' }}>{chart.name}</h2>
+                <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600, color: 'var(--color-text)' }}>{chart.name}</h2>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>
                   {[chart.organization, chart.description].filter(Boolean).join(' · ') || 'No organization set'}
                 </div>
               </div>
-              <div role="tablist" aria-label="Chart view" className="org-view-toggle">
-                {(['chart', 'outline', 'units'] as View[]).map((v) => (
-                  <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}
-                    className={view === v ? 'org-view-toggle__btn org-view-toggle__btn--active' : 'org-view-toggle__btn'}>
-                    {VIEW_LABELS[v]}
-                  </button>
-                ))}
-              </div>
+              <Tabs label="Chart view" value={view} onChange={setView}
+                items={(['chart', 'outline', 'units'] as View[]).map((id) => ({ id, label: VIEW_LABELS[id] }))} />
               {fullscreen ? (
                 <button ref={exitBtn} type="button" className="org-tool-btn org-tool-btn--primary" onClick={exitFullscreen} title="Exit full screen (Esc)">
                   Exit full screen
@@ -521,7 +517,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
                     {panelOpen ? 'Close Add people' : 'Add people'}
                   </Button>
                   <Button size="sm" variant="secondary" onClick={() => { setEditingChart(chart); setFormOpen(true); }}>Edit details</Button>
-                  <Button size="sm" variant="ghost" onClick={deleteChart} style={{ color: 'var(--color-critical)' }}>Delete</Button>
+                  <Button size="sm" variant="danger" onClick={deleteChart}>Delete chart</Button>
                 </>
               )}
             </header>
@@ -554,7 +550,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
                       </div>
                   )}
                     {view === 'units' && (
-                      <button type="button" className="org-tool-btn" onClick={() => setUnitForm({ editing: null, parent: null })}>+ New unit</button>
+                      <Button size="sm" icon={icons.plus} onClick={() => setUnitForm({ editing: null, parent: null })}>New unit</Button>
                     )}
                     {view !== 'units' && (
                     <div className="org-search" role="search">

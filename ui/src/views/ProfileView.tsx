@@ -148,7 +148,7 @@ export default function ProfileView() {
           <div style={{ display: 'flex', gap: 'var(--space-5)', alignItems: 'center' }}>
             <Avatar name={profile.name || '?'} size="xl" />
             <div style={{ minWidth: 0 }}>
-              <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, lineHeight: 'var(--leading-tight)', overflowWrap: 'anywhere' }}>{profile.name}</h2>
+              <h2 style={{ fontSize: 'var(--text-xl)', fontWeight: 600, lineHeight: 'var(--leading-tight)', overflowWrap: 'anywhere' }}>{profile.name}</h2>
               {profile.role && <p style={{ fontSize: 'var(--text-md)', color: 'var(--color-text-secondary)', marginTop: 'var(--space-1)' }}>{profile.role}</p>}
               {profile.organization && <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginTop: 2 }}>{profile.organization}</p>}
             </div>

@@ -99,7 +99,7 @@ function UnitCard({ node, members, people, titles, dragging, onAssign, onUnitAct
     <div className={`org-unit${drop.over ? ' org-unit--drop' : ''}`} data-unit={unit.id} {...drop.handlers}>
       <div className="org-unit__head">
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="org-node__clamp" style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--color-text)' }}>{unit.name}</div>
+          <div className="org-node__clamp" style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>{unit.name}</div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             {refs.length} {refs.length === 1 ? 'person' : 'people'}{headElsewhere ? ` · led by ${headElsewhere}` : ''}
           </div>
@@ -139,7 +139,7 @@ function Bucket({ title, refs, unit, people, titles, dragging, onAssign, ...rest
   return (
     <div className={`org-unit org-unit--bucket${drop.over ? ' org-unit--drop' : ''}`} style={{ width: columns * 206 + 16 }} {...drop.handlers}>
       <div className="org-unit__head">
-        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 700, color: 'var(--color-text-secondary)' }}>{title} · {refs.length}</div>
+        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>{title} · {refs.length}</div>
       </div>
       <PersonList refs={sorted} people={people} titles={titles} {...rest} wrap />
       {refs.length === 0 && <div className="org-unit__empty">Drop here to take someone out of their unit</div>}

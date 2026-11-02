@@ -50,10 +50,6 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { 
   // The task was saved: show the rendered text again.
   useEffect(() => { setEditing(false); }, [closeSignal]);
 
-  const linkStyle: React.CSSProperties = {
-    fontSize: 'var(--text-xs)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0,
-  };
-
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -62,18 +58,17 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { 
         </h3>
         {editing ? (
           <>
-            <button onClick={() => setEditing(false)} style={{ ...linkStyle, color: 'var(--color-accent)' }}>Done</button>
-            <button
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Done editing</Button>
+            <Button size="sm" variant="ghost"
               onClick={() => { onChange(original); setEditing(false); }}
-              style={{ ...linkStyle, color: 'var(--color-text-muted)' }}
             >
-              Discard
-            </button>
+              Discard changes
+            </Button>
           </>
         ) : (
-          <button onClick={() => { setOriginal(content); setEditing(true); }} style={{ ...linkStyle, color: 'var(--color-accent)' }}>
+          <Button size="sm" variant="ghost" onClick={() => { setOriginal(content); setEditing(true); }} aria-label={`Edit ${label.toLowerCase()}`}>
             Edit
-          </button>
+          </Button>
         )}
       </div>
       {editing ? (
@@ -278,17 +273,7 @@ function FilesTab({ taskId }: { taskId: string }) {
                 {formatDate(f.modified)}
               </span>
               <Badge size="sm">{f.type}</Badge>
-              <button
-                onClick={() => handleDelete(f.name)}
-                title="Remove file"
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: 0, flexShrink: 0 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-critical)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-muted)'; }}
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </button>
+              <IconButton onClick={() => handleDelete(f.name)} label={`Remove ${f.name}`} icon={icons.close} tone="danger" />
             </div>
           ))}
         </div>
