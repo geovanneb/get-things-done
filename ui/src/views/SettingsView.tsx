@@ -52,10 +52,6 @@ const LEVEL_VISUALS: Record<'error' | 'warning' | 'info', LevelVisuals> = {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function SectionCard({ title, description, children }: { title: string; description?: React.ReactNode; children: React.ReactNode }) {
-  return <Card title={title} description={description}>{children}</Card>;
-}
-
 function AboutRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <FieldRow label={label}>
@@ -690,7 +686,7 @@ export default function SettingsView() {
     <Page width="narrow">
 
       {/* Section 1: Workspace */}
-      <SectionCard title="Workspace">
+      <Card title="Workspace">
         <FieldRow label="Workspace path">
           <div
             title={config?.path ?? ''}
@@ -778,10 +774,10 @@ export default function SettingsView() {
         {validationResults !== null && (
           <ValidationResultsList results={validationResults} />
         )}
-      </SectionCard>
+      </Card>
 
       {/* Section 2: Git */}
-      <SectionCard title="Git">
+      <Card title="Git">
         {config?.git_enabled === false ? (
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
             {config.git_installed === false
@@ -809,18 +805,18 @@ export default function SettingsView() {
             {gitStatus && <GitStatusPanel status={gitStatus} />}
           </>
         )}
-      </SectionCard>
+      </Card>
 
       {/* Section 3: Appearance */}
-      <SectionCard title="Cleanup and retention">
+      <Card title="Cleanup and retention">
         <CleanupPointer />
-      </SectionCard>
+      </Card>
 
-      <SectionCard title="Transcription">
+      <Card title="Transcription">
         <TranscriptionSettings />
-      </SectionCard>
+      </Card>
 
-      <SectionCard title="Appearance">
+      <Card title="Appearance">
         <FieldRow label="Theme">
           <SegmentedControl
             label="Theme"
@@ -876,10 +872,10 @@ export default function SettingsView() {
           Theme, accent color, text size and task IDs are stored in this browser. The sidebar
           order is saved in the workspace, so it follows you to the desktop app and other computers.
         </p>
-      </SectionCard>
+      </Card>
 
       {/* Section 4: Experimental */}
-      <SectionCard title="Experimental">
+      <Card title="Experimental">
         <div
           style={{
             display: 'flex',
@@ -926,10 +922,10 @@ export default function SettingsView() {
             onChange={(next) => dispatch({ type: 'SET_AGENTIC_VISUAL_MODE', payload: next })}
           />
         </div>
-      </SectionCard>
+      </Card>
 
       {/* Section 5: About */}
-      <SectionCard title="About">
+      <Card title="About">
         <AboutRow label="Version"        value={config?.app_version ?? ''} />
         <AboutRow label="API"            value={window.location.host} mono />
         <AboutRow label="Workspace path" value={config?.path ?? ''} mono />
@@ -937,7 +933,7 @@ export default function SettingsView() {
           label="Last validated"
           value={lastValidated ? formatDate(lastValidated.toISOString()) : 'Never'}
         />
-      </SectionCard>
+      </Card>
 
       {/* Change workspace modal */}
       <Modal

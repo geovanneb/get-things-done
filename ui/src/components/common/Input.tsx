@@ -264,6 +264,7 @@ export function Select({
  * ("Search templates"); the same text is the accessible name. Full width on a phone.
  */
 export function SearchInput({
+  id,
   value,
   onChange,
   placeholder,
@@ -272,6 +273,7 @@ export function SearchInput({
   onKeyDown,
   autoFocus,
 }: {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
@@ -289,6 +291,7 @@ export function SearchInput({
         </svg>
       </span>
       <input
+        id={id}
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}

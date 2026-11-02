@@ -610,7 +610,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
           ← All updates
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
-          <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 700 }}>{u.title}</h2>
+          <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 600 }}>{u.title}</h2>
           <TypeBadge origin={u.origin} />
           <StatusPill status={u.status} />
           <span style={{ marginLeft: 'auto' }}>

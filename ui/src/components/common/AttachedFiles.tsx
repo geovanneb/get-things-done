@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNotify } from '@/hooks/useNotify';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import Button from '@/components/common/Button';
+import IconButton, { icons } from './IconButton';
+import Notice from './Notice';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import OfficeCheckBadge from '@/components/common/OfficeCheckBadge';
 import { apiGet } from '@/utils/api';
@@ -28,11 +30,6 @@ async function responseError(res: Response, fallback: string): Promise<Error> {
   return new Error(body?.message ?? `${fallback} (${res.status})`);
 }
 
-const iconButton: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, border: 'none',
-  background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: 0, flexShrink: 0,
-};
-
 /**
  * Files kept next to a template or a context note: open one in a new tab, download it, attach or remove.
  * Opening uses the browser's own viewer (PDF, HTML, images, text); other types download.
@@ -44,16 +41,24 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
   const notify = useNotify();
   const [files, setFiles] = useState<AttachedFile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [openFolders, setOpenFolders] = useState<Set<string>>(() => new Set());
   const inputRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useMemo(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false, []);
 
   useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    setFiles([]);
     apiGet<AttachedFile[]>(baseUrl)
-      .then((data) => { setFiles(data ?? []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [baseUrl]);
+      .then((data) => { if (!cancelled) setFiles(data ?? []); })
+      .catch(() => { if (!cancelled) setError(true); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [baseUrl, attempt]);
 
   // Another template or note: its folders start collapsed again.
   useEffect(() => { setOpenFolders(new Set()); }, [baseUrl]);
@@ -94,12 +99,13 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
     } catch (err) { notify.error(err, 'Could not remove the file. Try again.'); }
   };
 
-  if (loading) return <LoadingSpinner />;
+  if (loading) return <LoadingSpinner text="Loading attached files…" />;
+  if (error) return <Notice tone="critical" title="Could not load attached files." action={<Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}>Check the connection and try again.</Notice>;
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <label style={labelStyle}>{label}</label>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+        <span style={labelStyle}>{label}</span>
         <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleUpload} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {archiveUrl && files.length > 0 && (
@@ -169,20 +175,14 @@ function FileRow({ file, url, label, onRemove, note }: { file: AttachedFile; url
       </a>
       <OfficeCheckBadge check={file.officeCheck} />
       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>{(file.size / 1024).toFixed(1)} KB</span>
-      <a href={`${url}?download=1`} download={label} title="Download" aria-label={`Download ${file.name}`} style={iconButton}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-accent)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
+      <a href={`${url}?download=1`} download={label} title="Download" aria-label={`Download ${file.name}`} className="gtd-icon-btn gtd-icon-btn--sm">
         <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
           <path d="M7 1.5v8M3.5 6.5 7 10l3.5-3.5M2 12.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </a>
       {onRemove ? (
-        <button type="button" onClick={onRemove} title="Remove" aria-label={`Remove ${file.name}`} style={iconButton}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-critical)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true"><path d="M1 1l9 9M10 1l-9 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-        </button>
-      ) : <span style={{ width: 20, flexShrink: 0 }} />}
+        <IconButton onClick={onRemove} label={`Remove ${file.name}`} icon={icons.close} tone="danger" />
+      ) : <span style={{ width: 'var(--control-height-sm)', flexShrink: 0 }} />}
     </div>
   );
 }

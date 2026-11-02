@@ -53,7 +53,7 @@ function Steps({ title, steps }: { title: string; steps: { label: string; detail
   const mark = { done: '✓', now: '•', later: '' } as const;
   return (
     <section aria-label={title} style={{ marginBottom: 'var(--space-5)' }}>
-      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>{title}</h3>
+      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>{title}</h3>
       <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         {steps.map((s) => (
           <li key={s.label} style={{ display: 'grid', gridTemplateColumns: '20px 1fr', gap: 'var(--space-2)', alignItems: 'start' }}>
@@ -79,7 +79,7 @@ function Steps({ title, steps }: { title: string; steps: { label: string; detail
 function Details({ rows }: { rows: [string, React.ReactNode][] }) {
   return (
     <section aria-label="Details">
-      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>Details</h3>
+      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Details</h3>
       <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, auto) 1fr', gap: 'var(--space-1) var(--space-3)', margin: 0, fontSize: 'var(--text-sm)' }}>
         {rows.map(([k, v]) => <React.Fragment key={k}><dt style={{ color: 'var(--color-text-muted)' }}>{k}</dt><dd style={{ margin: 0, minWidth: 0 }}>{v}</dd></React.Fragment>)}
       </dl>

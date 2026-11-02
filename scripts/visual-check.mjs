@@ -64,6 +64,7 @@ const PAGES = [
   { path: '/stakeholders?tab=charts' },
   { path: '/outputs', compare: true },
   { path: '/agents' },
+  { path: '/agent-floor' },
   { path: '/routines' },
   { path: '/profile', compare: true },
   { path: '/settings' },
@@ -99,10 +100,15 @@ try {
   }
   if (!healthy) throw new Error('the server did not start');
   execFileSync(process.execPath, [path.join(root, 'scripts/seed-demo.mjs'), base], { env, stdio: 'pipe' });
+  for (const [endpoint, prefix] of [['/api/stakeholders', '/stakeholders/'], ['/api/context-updates', '/context/updates/']]) {
+    const records = await (await fetch(base + endpoint)).json();
+    if (records[0]) PAGES.push({ path: prefix + records[0].id });
+  }
   // Two fictional meetings in the queue, so the Meetings page shows its list.
   for (const [title, date] of [['Weekly logistics sync', '2026-10-30'], ['Q4 board prep', '2026-10-31']]) {
     const post = (url, body) => fetch(base + url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const meeting = await (await post('/api/meeting-queue', { title, meeting_date: date, participants: [{ name: 'Kim Park' }] })).json();
+    if (title === 'Weekly logistics sync') PAGES.push({ path: `/meetings/${meeting.id}` });
     const form = new FormData();
     form.append('file', new Blob(['WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<v Speaker 1>Fictional words.</v>\n']), 'notes.vtt');
     await fetch(`${base}/api/meeting-queue/${meeting.id}/files`, { method: 'POST', body: form });
@@ -137,36 +143,63 @@ try {
   };
 
   // ---- Behaviour on every page and width ----------------------------------
-  for (const width of WIDTHS) {
-    const { context, page, errors } = await open(width);
-    for (const { path: route } of PAGES) {
-      await page.goto(base + route);
-      await settle(page);
-      const report = await page.evaluate(() => {
-        const main = document.querySelector('main') ?? document.body;
-        const name = (el) => (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '').trim()
-          || [...el.querySelectorAll('[aria-label],[title]')].map((x) => x.getAttribute('aria-label') || x.getAttribute('title')).join('').trim()
-          || (el.getAttribute('aria-labelledby') && document.getElementById(el.getAttribute('aria-labelledby'))?.textContent?.trim());
-        const visible = (el) => el.offsetParent !== null || el.getClientRects().length > 0;
-        const fields = [...document.querySelectorAll('input:not([type=hidden]):not([type=file]), select, textarea')].filter(visible);
-        const unlabelled = fields.filter((el) => !(el.labels?.length || el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || el.closest('label')));
-        const unnamed = [...document.querySelectorAll('button, a[href], [role="tab"]')].filter(visible).filter((el) => !name(el));
-        return {
-          // What a person can actually scroll: the content area, and the window itself.
-          overflow: Math.max(0, main.scrollWidth - main.clientWidth, (window.scrollTo(10000, 0), window.scrollX)),
-          h1: document.querySelectorAll('h1').length,
-          unlabelled: unlabelled.map((el) => el.outerHTML.slice(0, 90)),
-          unnamed: unnamed.map((el) => el.outerHTML.slice(0, 90)),
-        };
-      });
-      const where = `${route} @${width}`;
-      check(`${where}: no sideways scroll`, report.overflow <= 1, `${report.overflow}px wider than the window`);
-      check(`${where}: one h1`, report.h1 === 1, `${report.h1} h1 elements`);
-      check(`${where}: every field has a label`, report.unlabelled.length === 0, report.unlabelled.join(' | '));
-      check(`${where}: every button and link has a name`, report.unnamed.length === 0, report.unnamed.join(' | '));
+  for (const theme of ['light', 'dark']) {
+    for (const width of WIDTHS) {
+      const { context, page, errors } = await open(width, theme);
+      for (const { path: route } of PAGES) {
+        await page.goto(base + route);
+        await settle(page);
+        const report = await page.evaluate(() => {
+          const main = document.querySelector('main') ?? document.body;
+          const name = (el) => (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '').trim()
+            || [...el.querySelectorAll('[aria-label],[title]')].map((x) => x.getAttribute('aria-label') || x.getAttribute('title')).join('').trim()
+            || (el.getAttribute('aria-labelledby') && document.getElementById(el.getAttribute('aria-labelledby'))?.textContent?.trim());
+          const visible = (el) => el.offsetParent !== null || el.getClientRects().length > 0;
+          const fields = [...document.querySelectorAll('input:not([type=hidden]):not([type=file]), select, textarea')].filter(visible);
+          const unlabelled = fields.filter((el) => !(el.labels?.length || el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || el.closest('label')));
+          const unnamed = [...document.querySelectorAll('button, a[href], [role="tab"]')].filter(visible).filter((el) => !name(el));
+          return {
+            // What a person can actually scroll: the content area, and the window itself.
+            overflow: Math.max(0, main.scrollWidth - main.clientWidth, (window.scrollTo(10000, 0), window.scrollX)),
+            h1: document.querySelectorAll('h1').length,
+            unlabelled: unlabelled.map((el) => el.outerHTML.slice(0, 90)),
+            unnamed: unnamed.map((el) => el.outerHTML.slice(0, 90)),
+          };
+        });
+        if (route === '/design-system') {
+          await page.getByText('Search', { exact: true }).click();
+          check(`search label focuses its field @${width} ${theme}`, await page.locator('#showcase-search').evaluate((el) => el === document.activeElement));
+          const nested = await page.evaluate(() => {
+            const original = document.querySelector('.gtd-card');
+            const outer = document.createElement('div');
+            outer.className = 'gtd-card gtd-card--compact';
+            const clone = original.cloneNode(true);
+            outer.append(clone); original.after(outer);
+            const before = getComputedStyle(original.querySelector('.gtd-card__body')).padding;
+            const after = getComputedStyle(clone.querySelector('.gtd-card__body')).padding;
+            outer.remove();
+            return before === after;
+          });
+          check(`nested cards keep their own padding @${width} ${theme}`, nested);
+        }
+        if (route === '/stakeholders?tab=charts') {
+          await page.getByRole('tab', { name: 'Chart', exact: true }).focus();
+          await page.keyboard.press('ArrowRight');
+          check(`chart keyboard navigation @${width} ${theme}`, await page.getByRole('tab', { name: 'Outline', exact: true }).getAttribute('aria-selected') === 'true');
+          await page.keyboard.press('Home');
+        }
+        const routeShots = path.join(outDir, 'routes');
+        fs.mkdirSync(routeShots, { recursive: true });
+        await page.screenshot({ path: path.join(routeShots, `${route.replace(/\W+/g, '-')}-${width}-${theme}.png`) });
+        const where = `${route} @${width} ${theme}`;
+        check(`${where}: no sideways scroll`, report.overflow <= 1, `${report.overflow}px wider than the window`);
+        check(`${where}: one h1`, report.h1 === 1, `${report.h1} h1 elements`);
+        check(`${where}: every field has a label`, report.unlabelled.length === 0, report.unlabelled.join(' | '));
+        check(`${where}: every button and link has a name`, report.unnamed.length === 0, report.unnamed.join(' | '));
+      }
+      check(`no page errors @${width} ${theme}`, errors.length === 0, errors.slice(0, 3).join(' | '));
+      await context.close();
     }
-    check(`no page errors @${width}`, errors.length === 0, errors.slice(0, 3).join(' | '));
-    await context.close();
   }
 
   // ---- Contrast of the colour tokens, per theme and accent ------------------
@@ -243,6 +276,33 @@ try {
     await page.keyboard.press('ArrowRight');
     check('keyboard: arrow keys move between tabs',
       await page.evaluate(() => document.activeElement?.getAttribute('role') === 'tab' && document.activeElement?.getAttribute('aria-selected') === 'true' && document.activeElement.textContent?.startsWith('List')));
+    await page.goto(`${base}/stakeholders?tab=charts`);
+    await settle(page);
+    await page.getByRole('tab', { name: 'Chart', exact: true }).focus();
+    await page.keyboard.press('ArrowRight');
+    check('keyboard: chart views use the shared tab navigation', await page.getByRole('tab', { name: 'Outline', exact: true }).getAttribute('aria-selected') === 'true');
+    await page.keyboard.press('End');
+    check('keyboard: End reaches the last chart view', await page.getByRole('tab', { name: 'Units', exact: true }).getAttribute('aria-selected') === 'true');
+    await context.close();
+  }
+
+  // A failed attachment fetch must offer recovery, never claim the folder is empty.
+  {
+    const { context, page } = await open(390);
+    let failFiles = true;
+    await page.route('**/api/outputs/templates/*/files', async (route) => {
+      if (failFiles) await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Temporary failure' }) });
+      else await route.continue();
+    });
+    await page.goto(`${base}/outputs`);
+    await settle(page);
+    await page.getByRole('button', { name: /^Edit / }).first().click();
+    await page.getByText('Could not load attached files.', { exact: true }).waitFor();
+    check('attachments: a failed request is not an empty folder', await page.getByText('No files attached.', { exact: true }).count() === 0);
+    failFiles = false;
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
+    await page.getByRole('button', { name: 'Attach file', exact: true }).waitFor();
+    check('attachments: retry recovers without reopening the dialog', await page.getByText('Could not load attached files.', { exact: true }).count() === 0);
     await context.close();
   }
 

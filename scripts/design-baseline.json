@@ -1,6 +1,6 @@
 {
   "js-hover": {
-    "components/common/AttachedFiles.tsx": 8,
+    "components/common/AttachedFiles.tsx": 4,
     "components/context-updates/UpdatesList.tsx": 2,
     "components/layout/NavMore.tsx": 4,
     "components/layout/NavRail.tsx": 2,
@@ -8,10 +8,8 @@
     "components/layout/WorkspaceSwitcher.tsx": 8,
     "components/stakeholders/OrgChartDialogs.tsx": 4,
     "components/task-form/DeliverableRow.tsx": 2,
-    "components/task-form/IconRemoveButton.tsx": 2,
     "components/task-form/StakeholderPicker.tsx": 2,
-    "views/StakeholderDetailView.tsx": 4,
-    "views/TaskDetailView.tsx": 2
+    "views/StakeholderDetailView.tsx": 4
   },
   "numeric-radius": {
     "components/common/Toggle.tsx": 2,
@@ -43,7 +41,7 @@
     "views/SetupView.tsx": 1
   },
   "raw-button": {
-    "components/common/AttachedFiles.tsx": 2,
+    "components/common/AttachedFiles.tsx": 1,
     "components/common/Button.tsx": 1,
     "components/common/IconButton.tsx": 1,
     "components/common/SearchOverlay.tsx": 1,
@@ -57,15 +55,14 @@
     "components/routines/RoutineEditor.tsx": 2,
     "components/stakeholders/OrgChartDialogs.tsx": 5,
     "components/stakeholders/OrgChartTree.tsx": 2,
-    "components/stakeholders/OrgChartsPanel.tsx": 19,
+    "components/stakeholders/OrgChartsPanel.tsx": 17,
     "components/stakeholders/OrgUnitsView.tsx": 3,
     "views/AgentsView.tsx": 2,
     "views/BoardView.tsx": 2,
     "views/ContextView.tsx": 3,
     "views/OutputsView.tsx": 1,
     "views/SetupView.tsx": 1,
-    "views/StakeholdersView.tsx": 1,
-    "views/TaskDetailView.tsx": 2
+    "views/StakeholdersView.tsx": 1
   },
   "inline-surface": {
     "components/common/GitIndicator.tsx": 1,

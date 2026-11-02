@@ -133,20 +133,6 @@ function BackArrowIcon() {
 }
 
 // ---------------------------------------------------------------------------
-// Section card wrapper
-// ---------------------------------------------------------------------------
-
-interface SectionCardProps {
-  title: string;
-  badge?: React.ReactNode;
-  children: React.ReactNode;
-}
-
-function SectionCard({ title, badge, children }: SectionCardProps) {
-  return <Card title={title} badge={badge} headingLevel={2}>{children}</Card>;
-}
-
-// ---------------------------------------------------------------------------
 // Task list item
 // ---------------------------------------------------------------------------
 
@@ -356,7 +342,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
             style: {
               margin: 0,
               fontSize: 'var(--text-xl)',
-              fontWeight: 700,
+              fontWeight: 600,
               color: 'var(--color-text)',
               lineHeight: 1.2,
             },
@@ -426,7 +412,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
       </div>
 
       {/* Organization */}
-      <SectionCard title="Organization">
+      <Card headingLevel={embedded ? 3 : 2} title="Organization">
         {positions.length === 0 ? (
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
             Not in any org chart yet.{' '}
@@ -471,11 +457,11 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
             ))}
           </div>
         )}
-      </SectionCard>
+      </Card>
 
       {/* What matters */}
       {stakeholder.what_matters && (
-        <SectionCard title="What matters">
+        <Card headingLevel={embedded ? 3 : 2} title="What matters">
           <p
             style={{
               margin: 0,
@@ -486,18 +472,18 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
           >
             {stakeholder.what_matters}
           </p>
-        </SectionCard>
+        </Card>
       )}
 
       {/* Notes */}
       {notes && (
-        <SectionCard title="Notes">
+        <Card headingLevel={embedded ? 3 : 2} title="Notes">
           <MarkdownView content={notes} />
-        </SectionCard>
+        </Card>
       )}
 
       {/* Related tasks */}
-      <SectionCard
+      <Card headingLevel={embedded ? 3 : 2}
         title="Related tasks"
         badge={
           <Badge variant="default" size="sm">
@@ -517,7 +503,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
             ))}
           </div>
         )}
-      </SectionCard>
+      </Card>
     </Frame>
     </div>
   );

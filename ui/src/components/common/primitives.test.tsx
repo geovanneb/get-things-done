@@ -55,7 +55,8 @@ const optional = html(<Input label="Email" optional value="" onChange={noop} />)
 check('an optional field is labelled as optional', optional.includes('(optional)'));
 const select = html(<Select id="fmt" label="Format" value="PDF" onChange={noop} options={[{ value: 'PDF', label: 'PDF' }, { value: 'MD', label: 'MD' }]} />);
 check('a select is labelled and keeps its value', attr(select, 'for') === 'fmt' && /<option value="PDF" selected="">/.test(select));
-const search = html(<SearchInput value="" onChange={noop} placeholder="Search templates" />);
+const search = html(<SearchInput id="search-templates" value="" onChange={noop} placeholder="Search templates" />);
+check('a search field exposes its id for a visible label', attr(search, 'id') === 'search-templates');
 check('a search box is a search field named by its placeholder', attr(search, 'type') === 'search' && attr(search, 'aria-label') === 'Search templates');
 const framed = html(<Field label="Due date" htmlFor="due"><input id="due" /></Field>);
 check('Field labels any control', attr(framed, 'for') === 'due');

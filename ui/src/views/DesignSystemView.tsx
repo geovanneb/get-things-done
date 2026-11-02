@@ -67,7 +67,7 @@ export default function DesignSystemView() {
 
       <Section id="ds-type" title="Type and spacing">
         <CardGrid>
-          <Card title="Type scale" description="--text-*, scaled by the text-size preference">
+          <Card headingLevel={3} title="Type scale" description="--text-*, scaled by the text-size preference">
             <div className="gtd-stack" style={{ gap: 'var(--space-2)' }}>
               {TEXT_TOKENS.map((t) => (
                 <div key={t} style={{ fontSize: `var(--text-${t})`, fontWeight: t === 'xl' || t === 'lg' ? 600 : 400 }} className="truncate">
@@ -76,7 +76,7 @@ export default function DesignSystemView() {
               ))}
             </div>
           </Card>
-          <Card title="Spacing scale" description="--space-*, a 4px scale">
+          <Card headingLevel={3} title="Spacing scale" description="--space-*, a 4px scale">
             <div className="gtd-stack" style={{ gap: 'var(--space-2)' }}>
               {SPACE_TOKENS.map((n) => (
                 <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
@@ -124,8 +124,8 @@ export default function DesignSystemView() {
             <Input label="With an error" value="" onChange={() => {}} error="Enter a name." />
             <Select label="Format" value="PDF" onChange={() => {}} hint="The file agents produce." options={[{ value: 'PDF', label: 'PDF' }, { value: 'DOCX', label: 'DOCX' }]} />
             <Input label="Disabled" value="Read only" onChange={() => {}} disabled />
-            <Field label="Search">
-              <SearchInput value="" onChange={() => {}} placeholder="Search templates" width="100%" />
+            <Field label="Search" htmlFor="showcase-search">
+              <SearchInput id="showcase-search" value="" onChange={() => {}} placeholder="Search templates" width="100%" />
             </Field>
             <Textarea label="Notes" hint="Markdown is supported." value="" onChange={() => {}} style={{ gridColumn: '1 / -1' }} />
           </div>
@@ -169,17 +169,17 @@ export default function DesignSystemView() {
 
       <Section id="ds-cards" title="Cards and lists" description="Card padding md for content, compact for repeated cards, none for lists and tables.">
         <CardGrid>
-          <Card title="Card with actions" description="A one-line description" actions={<IconButton label="Edit" icon={icons.edit} />}>
+          <Card headingLevel={3} title="Card with actions" description="A one-line description" actions={<IconButton label="Edit" icon={icons.edit} />}>
             Content uses the card's own spacing.
           </Card>
           <Card padding="compact" footer={<span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Updated today</span>}>
             A compact card in a grid, with a footer.
           </Card>
-          <Card title="A very long card title that has to wrap onto a second line without pushing the actions out" actions={<Button size="sm">Act</Button>}>
+          <Card headingLevel={3} title="A very long card title that has to wrap onto a second line without pushing the actions out" actions={<Button size="sm">Act</Button>}>
             Long titles wrap.
           </Card>
         </CardGrid>
-        <Card title="List" padding="none" badge={<CountBadge count={2} />} description="Rows with dividers inside a card (gtd-list)">
+        <Card headingLevel={3} title="List" padding="none" badge={<CountBadge count={2} />} description="Rows with dividers inside a card (gtd-list)">
           <ul className="gtd-list">
             <li className="gtd-list__row" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
               <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>2026-10-31</span>
@@ -195,7 +195,7 @@ export default function DesignSystemView() {
             </li>
           </ul>
         </Card>
-        <Card title="Reading box" description="Running text read in place, such as a transcript (gtd-reading-box)">
+        <Card headingLevel={3} title="Reading box" description="Running text read in place, such as a transcript (gtd-reading-box)">
           <div className="gtd-reading-box" tabIndex={0} aria-label="Example transcript">
             <p><span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>00:01</span>Carrier volumes are up nine percent.</p>
             <p><span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>00:05</span>Agreed, let us write it down.</p>
@@ -206,7 +206,7 @@ export default function DesignSystemView() {
             <p className="gtd-reading-box__heard" aria-current="time"><Button size="sm" variant="ghost" className="gtd-reading-box__time" aria-label="Play from 00:05">00:05</Button>Agreed, let us write it down.</p>
           </div>
         </Card>
-        <Card title="Table" padding="none" badge={<CountBadge count={2} />}>
+        <Card headingLevel={3} title="Table" padding="none" badge={<CountBadge count={2} />}>
           <div className="gtd-table-wrap">
             <table className="gtd-table">
               <thead><tr><th scope="col">Name</th><th scope="col">Role</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
