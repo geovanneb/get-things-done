@@ -123,7 +123,7 @@ function Header({ id, title, statuses, line, actions }: { id: string; title: str
         <span style={{ flex: 1 }} />
         {actions}
       </div>
-      {/* Read-only for now: corrections to a meeting will go through review. */}
+      {/* Read-only: a correction of the record goes through review, as a context update. */}
       <h2 className="gtd-modal__title" style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600 }}>{title}</h2>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
         {statuses.map((s) => <StatusBadge key={s.label} status={s} />)}
@@ -240,6 +240,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   const [tab, setTab] = useState<MeetingTab>('transcript');
   const [picked, setPicked] = useState('');
   const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
 
   if (error && !data) {
     const message = (() => { try { return (JSON.parse(error) as { message?: string }).message ?? error; } catch { return error; } })();
@@ -262,13 +263,27 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   const shown = readable.find((s) => s.file === picked) ?? readable[0];
   const firstMissing = sources.find((s) => s.readable && !s.present) ?? sources.find((s) => !s.present);
   const items = record?.action_items ?? [];
-  const canCreate = record?.confirmation === 'confirmed' && done;
+  // The record shown is the current version: a correction's once one counts. Its files stay with the original update.
+  const versions = h.correction;
+  const holds = !versions || versions.state === 'original' || versions.state === 'corrected';
+  // No task from a disputed record: the versions must hold.
+  const canCreate = record?.confirmation === 'confirmed' && done && holds;
+  const canCorrect = canCreate && h.review_state === 'final' && holds && !versions?.open.length;
+  const suggest = async () => {
+    setBusy(true);
+    try {
+      const started = await apiPost<{ id: string }>(`/api/meetings/${encodeURIComponent(h.id)}/corrections`);
+      notify.success(`${started.id} opened. Analyze it to get the suggested corrections.`);
+      navigate(`/context/updates/${started.id}`);
+    } catch (err) { notify.error(err, 'Could not start a correction. Try again.'); changed(); } finally { setBusy(false); }
+  };
+  const recordOwner = h.record_owner?.update_id ?? h.update_id;
   const createTask = async (r: MeetingRecord, item: number) => {
     const ownerRef = r.action_items[item]?.owner;
     let owner: Stakeholder | undefined;
     if (ownerRef?.ref && ownerRef.ref !== 'me' && ownerRef.ref_found) owner = await apiGet<Stakeholder>(`/api/stakeholders/${ownerRef.ref}`).catch(() => undefined);
     // The same conversion as in Context > Updates: a draft task the user checks before creating it.
-    dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: meetingActionDraft({ id: h.update_id }, r, item, owner) });
+    dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: meetingActionDraft({ id: recordOwner }, r, item, owner) });
   };
   const keptUntil = (() => {
     const r = outlet.retention;
@@ -336,12 +351,44 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
                 {h.update.status === 'in_review' ? `Confirm or reject it with the rest of ${h.update_id}.` : `It becomes final when ${h.update_id} is done.`} Until then it can still change.
               </Notice>
             )}
+            {versions && (versions.state === 'conflict' || versions.state === 'broken') ? (
+              <Notice tone="warning" title={versions.state === 'conflict' ? 'Two corrections of this record disagree.' : 'A version of this record is missing.'}
+                action={<Link to={`/context/updates/${versions.original.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open the original</Link>}>
+                {versions.state === 'conflict'
+                  ? 'Two corrections were made from the same version, so neither is shown as current. This is the last version both build on; no new correction or task source can start from it until one is removed.'
+                  : 'A correction builds on a version that is gone or no longer confirmed. This is the last version that holds; no new correction or task source can start from it.'}
+              </Notice>
+            ) : versions?.open.length ? (
+              <Notice tone="info" title="A correction of this record is waiting."
+                action={<Link to={`/context/updates/${versions.open[0]}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open {versions.open[0]}</Link>}>
+                The record below stays the current one until you approve the correction in Context &gt; Updates.
+              </Notice>
+            ) : null}
+            {versions?.state === 'corrected' && (
+              <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                Corrected{versions.head_at ? ` on ${day(versions.head_at)}` : ''} in <Link to={`/context/updates/${recordOwner}`} className="gtd-link">{recordOwner}</Link>.
+                {' '}<Link to={`/context/updates/${versions.original.update_id}`} className="gtd-link">See the original record</Link>.
+              </p>
+            )}
             <MeetingRecordCard record={record} reviewing={false} confirmation={record.confirmation}
               onChoose={() => {}} onSpeaker={() => {}} {...(canCreate ? { onCreateTask: (item: number) => void createTask(record, item) } : {})} />
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              From <Link to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>. Tasks come only from a confirmed record, through the same step as in Context &gt; Updates.
+              From <Link to={`/context/updates/${recordOwner}`} className="gtd-link">{recordOwner}</Link>. Tasks come only from a confirmed record, through the same step as in Context &gt; Updates.
             </p>
+            {canCorrect && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void suggest()}>Suggest corrections</Button>
+                <span style={{ flex: '1 1 240px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  A misheard name, a wrong term, title or date? Your AI tool checks the record against the transcript, your stakeholders and glossary, and you review what it suggests.
+                </span>
+              </div>
+            )}
           </>
+        ) : versions?.state === 'broken' ? (
+          <Notice tone="warning" title="The original record of this meeting is gone."
+            action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open {h.update_id}</Link>}>
+            Corrections of it are still here, in Context &gt; Updates, but none can count without the record they correct.
+          </Notice>
         ) : h.record_state === 'ambiguous' ? (
           <Notice tone="info" title="It is not clear which record is this meeting's."
             action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open {h.update_id}</Link>}>
@@ -360,7 +407,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
               {a.task_ref ? (a.task_found === false ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{a.task_ref} (no longer exists)</span>
                 : <Link to={`/board/task/${a.task_ref}`} className="gtd-link mono" style={{ fontSize: 'var(--text-xs)' }}>{a.task_ref}</Link>)
                 : canCreate ? <Button size="sm" variant="secondary" onClick={() => void createTask(record!, i)}>Create task</Button>
-                  : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{record?.confirmation === 'confirmed' ? 'After the review is done' : 'Once the record is confirmed'}</span>}
+                  : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{!holds ? 'Once its versions agree' : record?.confirmation === 'confirmed' ? 'After the review is done' : 'Once the record is confirmed'}</span>}
             </li>
           ))}
         </ul>

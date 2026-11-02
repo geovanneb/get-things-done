@@ -485,7 +485,8 @@ export interface MeetingRecord {
   decisions: string[];
   open_questions: string[];
   /** `task_ref`: the task created from the item in the dashboard; `task_found` (detail only): it still exists. */
-  action_items: { description: string; owner: MeetingPerson | null; due_date: string; task_ref: string | null; task_found?: boolean }[];
+  /** `slot` (corrections only): the dashboard's id for the original item this one stands for. */
+  action_items: { description: string; owner: MeetingPerson | null; due_date: string; task_ref: string | null; task_found?: boolean; slot?: string | null }[];
   source: string;
   confirmation: 'confirmed' | 'rejected' | null;
   confirmed_at: string | null;
@@ -498,7 +499,18 @@ export interface MeetingRecord {
   meeting?: string | null;
   /** What the analysis is not sure of: shown for the user to check before confirming. */
   unsure?: RecordDoubt[];
+  /** In a correction only: the version this record corrects. */
+  amends?: RecordVersion | null;
+  /** In a correction only: the agent's explanation of each change. `sure: false` only suggests; the record keeps the old value. */
+  corrections?: RecordChange[];
 }
+
+export interface RecordVersion { update_id: string; record_id: string; revision: string }
+
+export interface RecordChange { field: RecordDoubt['field']; before: string; after: string; reason: string; sure: boolean }
+
+/** A field a correction changed, worked out by the server from the two records. */
+export interface FieldChange { field: RecordDoubt['field']; before: string[]; after: string[] }
 
 /** A field of a meeting record the analysis could be wrong about, the exact text, why, and what it may be instead. */
 export interface RecordDoubt {
@@ -562,6 +574,10 @@ export interface ContextUpdate {
   digest_meetings?: DigestMeeting[];
   /** For a Kaizen: the root cause analysis. Null for every other kind. */
   kaizen?: KaizenAnalysis | null;
+  /** For a meeting correction: which meeting and which version of its record it corrects. Written by the dashboard. */
+  correction?: { meeting: string; root: { update_id: string; record_id: string }; base: RecordVersion } | null;
+  /** Detail of a correction only: the version corrected, whether it is still current, and what changed in it. */
+  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[] };
   proposals: ContextUpdateProposal[];
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
@@ -853,6 +869,10 @@ export interface HistoryMeeting {
   update: { id: string; title: string; status: ContextUpdateStatus; created_at: string; analyzed_at: string | null; applied_at: string | null; context_changed: boolean };
   record: { id: string; revision: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: 'explicit' | 'source' | 'only' | 'saved' | null } | null;
   unlinked_records: number;
+  /** Whose record is shown: the original update's, or a correction's once one counts. The files stay the original's. */
+  record_owner?: { update_id: string; record_id: string } | null;
+  /** The versions of the record, once a correction exists; null while there is only the original. */
+  correction?: { state: 'original' | 'corrected' | 'conflict' | 'broken'; head_at: string | null; original: { update_id: string; record_id: string }; open: string[] } | null;
   kept: boolean;
   deleted: { at: string; by: 'user' | 'system-cleanup'; in_trash: boolean } | null;
   retention_start: string;

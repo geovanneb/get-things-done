@@ -598,6 +598,31 @@ try {
       && madeBody.update?.meeting_records?.[0]?.action_items?.[0]?.task_ref === madeBody.task?.id
       && madeBody.update?.meeting_records?.[0]?.confirmation === 'confirmed' && String(madeTask.meeting_action).startsWith(`${meeting.id}/M-01/`),
       `made=${made.status} again=${madeAgain.status}`);
+    // A correction of that record: started from the meeting, analyzed (written here, fictional), confirmed and approved.
+    // The meeting then shows the corrected version, and its action item keeps the task made from the original.
+    const started = await json('POST', `/api/meetings/${meeting.id}-M-01/corrections`);
+    const corr = await started.json();
+    const corrDir = path.join(ws, 'context-updates', corr.id ?? 'none');
+    const env = corr.correction ?? {};
+    if (corr.id) {
+      fs.writeFileSync(path.join(corrDir, 'update.md'), fs.readFileSync(path.join(corrDir, 'update.md'), 'utf-8').replace('status: ready', [
+        'status: in_review', 'meeting_records:', '  - id: M-01', '    title: Weekly sync', "    meeting_date: '2026-10-20'",
+        `    meeting: ${JSON.stringify(env.meeting)}`, `    amends: ${JSON.stringify(env.base)}`, '    decisions:', '      - Fictional decision, corrected',
+        '    action_items:', `      - { description: Send the fictional plan, slot: ${JSON.stringify(env.slots?.[0]?.slot)} }`,
+        '    corrections:', '      - { field: decisions, before: Fictional decision, after: "Fictional decision, corrected", reason: Fictional reason, sure: true }',
+      ].join('\n')));
+      const corrRevision = (await (await fetch(`${base}/api/context-updates/${corr.id}`)).json()).meeting_records?.[0]?.revision;
+      await json('PUT', `/api/context-updates/${corr.id}/meeting-records`, { records: { 'M-01': { confirmation: 'confirmed', revision: corrRevision } } });
+    }
+    const corrDone = corr.id ? await (await json('POST', `/api/context-updates/${corr.id}/approve`)).json() : {};
+    const corrected = await (await fetch(`${base}/api/meetings/${meeting.id}-M-01`)).json();
+    const corrTask = corr.id ? await json('POST', `/api/context-updates/${corr.id}/meeting-records/M-01/tasks`, { item: 0, revision: corrDone.meeting_records?.[0]?.revision, task: { title: 'Send the fictional plan', priority: 'medium' } }) : null;
+    const corrTaskBody = corrTask ? await corrTask.json() : {};
+    check('a correction started from a meeting finishes on approval, the meeting shows it, and its action keeps its task',
+      started.status === 201 && corr.kind === 'meeting-correction' && corrDone.status === 'done'
+      && corrected.record?.decisions?.[0] === 'Fictional decision, corrected' && corrected.meeting?.record_owner?.update_id === corr.id
+      && corrected.meeting?.correction?.state === 'corrected' && corrTask?.status === 200 && corrTaskBody.task?.id === madeBody.task?.id,
+      `start=${started.status} done=${corrDone.status} state=${corrected.meeting?.correction?.state} task=${corrTask?.status}`);
     // Never starts a real AI run: only the runner's status and a refusal for an update that is not ready.
     const runnerStatus = await (await fetch(`${base}/api/runner`)).json();
     const notReady = await json('POST', `/api/context-updates/${meeting.id}/run`, { command: 'analyze' });

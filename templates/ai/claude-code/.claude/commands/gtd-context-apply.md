@@ -9,6 +9,9 @@ in the dashboard and approved some of them. Apply exactly those, nothing more.
 
 Read `context-updates/$ARGUMENTS/update.md`. If it does not exist, tell the user and stop.
 
+If it has `kind: meeting-correction`, there is nothing to apply: a correction finishes when the
+executive approves it in the dashboard. Tell them so and stop, changing nothing.
+
 - `approved`: continue.
 - `applying`: an earlier run stopped half way. Continue, and skip proposals whose
   `outcome` is already set.

@@ -23,6 +23,8 @@ check('the meeting digest and memory review are told apart by origin',
   updateType({ origin: 'meetings' }) === 'meeting-digest' && updateType({ origin: 'system-cleanup' }) === 'memory-review');
 check('an unknown origin is "other", never an import', updateType({ origin: 'future-job' }) === 'other');
 check('a Kaizen is its own type', updateType({ origin: 'kaizen' }) === 'kaizen');
+check('a correction is told from a digest by its kind',
+  updateType({ origin: 'meetings', kind: 'meeting-correction' }) === 'meeting-correction' && updateType({ origin: 'meetings', kind: 'daily-digest' }) === 'meeting-digest');
 
 check('all with no query keeps everything', filterUpdates(updates, 'all', '').length === updates.length);
 const imported = filterUpdates(updates, 'imported', '');

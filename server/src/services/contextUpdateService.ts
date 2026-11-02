@@ -8,7 +8,7 @@ import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
 import { lock, unlock } from '../utils/fileLock';
-import { correctionChain, rootActionIdentity } from './meetingCorrections';
+import { correctionChain, doubtsDropped, fieldTexts, recordDiff, rootActionIdentity, type FieldChange } from './meetingCorrections';
 import { moveFilesToTrash, moveToTrash, trashEntry } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
@@ -169,6 +169,11 @@ export interface CorrectionEnvelope {
   root: { update_id: string; record_id: string };
   base: RecordVersion;
   slots: { slot: string; root_key: string; root_index: number }[];
+  /**
+   * The meeting's readable files the analysis may use, pinned when the correction was made: paths from the workspace
+   * root (in the original update) and their SHA-256. The agent reads only these, and only while the bytes match.
+   */
+  sources: { path: string; name: string; kind: 'transcript' | 'notes'; sha256: string }[];
 }
 
 export const CORRECTION_KIND = 'meeting-correction';
@@ -189,6 +194,9 @@ export interface MeetingSpeaker { label: string; person: MeetingPerson | null; r
  */
 /** A field of a record the analysis could be wrong about. */
 export const DOUBT_FIELDS = ['title', 'meeting_date', 'attendees', 'speakers', 'decisions', 'open_questions', 'action_items'] as const;
+/** One change a correction made, as the analysis explains it. `sure: false` keeps the old value; it only suggests. */
+export interface RecordChange { field: typeof DOUBT_FIELDS[number]; before: string; after: string; reason: string; sure: boolean }
+
 export interface RecordDoubt { field: typeof DOUBT_FIELDS[number]; value: string; reason: string; suggestion: string }
 
 export interface MeetingRecord {
@@ -207,6 +215,11 @@ export interface MeetingRecord {
   meeting: string | null;
   /** In a `meeting-correction` update only: the version this record corrects. Null everywhere else. */
   amends: RecordVersion | null;
+  /**
+   * In a `meeting-correction` update only: the analysis's explanation of each change. What actually changed is worked
+   * out by comparing with the version corrected; an explanation never stands in for that.
+   */
+  corrections: RecordChange[];
   /**
    * What the analysis is not sure of, for the user to check before confirming: a field, the exact text it is about,
    * why, and what it may be instead. Never a reason to change the record by itself.
@@ -341,6 +354,12 @@ export interface ProposalDetail extends UpdateProposal {
 export interface ContextUpdateDetail extends ContextUpdate {
   proposals: ProposalDetail[];
   material_files: FolderFile[];
+  /**
+   * A `meeting-correction` only: the version it corrects (null when that is gone or changed), whether that is still the
+   * meeting's current record (`stale` when another correction finished first), why approving would be refused now
+   * (`blocked`, empty once done), and what the record changes in it.
+   */
+  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[] };
 }
 
 function httpError(status: number, message: string): Error {
@@ -512,7 +531,19 @@ function normalizeCorrection(raw: unknown): CorrectionEnvelope | null {
     if (slots.some((y) => y.slot === x['slot'])) return null;
     slots.push({ slot: x['slot'], root_key: x['root_key'], root_index: x['root_index'] });
   }
-  return { meeting: o['meeting'], root: { update_id: root['update_id'], record_id: root['record_id'] }, base, slots };
+  const sources: CorrectionEnvelope['sources'] = [];
+  for (const entry of Array.isArray(o['sources']) ? (o['sources'] as unknown[]).slice(0, 50) : []) {
+    const x = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    const p = x['path'];
+    // A path from the workspace root, POSIX, inside context-updates/ or the meeting queue: never anything else.
+    if (typeof p !== 'string' || !/^context-updates\/[^\\]+$/.test(p) || p.split('/').some((part) => part === '' || part === '.' || part === '..')
+      || [...p].some((c) => c.charCodeAt(0) < 0x20 || c === '`')) return null;
+    // Only the meeting's own files, which stay in the original update: never another update's material.
+    if (!p.startsWith(`context-updates/${root['update_id'] as string}/materials/`)) return null;
+    if (typeof x['name'] !== 'string' || (x['kind'] !== 'transcript' && x['kind'] !== 'notes') || typeof x['sha256'] !== 'string' || !/^[0-9a-f]{64}$/.test(x['sha256'])) return null;
+    sources.push({ path: p, name: x['name'], kind: x['kind'], sha256: x['sha256'] });
+  }
+  return { meeting: o['meeting'], root: { update_id: root['update_id'], record_id: root['record_id'] }, base, slots, sources };
 }
 
 /**
@@ -520,13 +551,20 @@ function normalizeCorrection(raw: unknown): CorrectionEnvelope | null {
  * base's id, and has one action item per slot, in the slots' order. Anything else is a problem on its records, so
  * none can be confirmed. A record outside a correction never says it amends anything.
  */
+/** The pins of a correction that are not its meeting's own files, as its original update holds them. */
+function foreignPins(env: CorrectionEnvelope, all: ContextUpdate[]): string[] {
+  const root = all.find((u) => u.id === env.root.update_id);
+  const own = new Set((root ? heldMeetings(root).find((m) => m.id === env.meeting)?.files ?? [] : []).map((f) => `context-updates/${env.root.update_id}/materials/${f}`));
+  return env.sources.map((s) => s.path).filter((p) => !own.has(p));
+}
+
 function checkCorrectionRecords(update: Pick<ContextUpdate, 'kind' | 'correction' | 'meeting_records'>): void {
   const flag = (r: MeetingRecord, problem: string) => {
     r.problems.push(problem);
     if (r.confirmation === 'confirmed') { r.confirmation = null; r.confirmed_at = null; r.changed_since_confirmed = true; }
   };
   if (update.kind !== CORRECTION_KIND) {
-    for (const r of update.meeting_records) if (r.amends || r.action_items.some((a) => a.slot != null)) flag(r, 'only a correction says what a record amends');
+    for (const r of update.meeting_records) if (r.amends || r.corrections.length || r.action_items.some((a) => a.slot != null)) flag(r, 'only a correction says what a record amends');
     return;
   }
   const env = update.correction;
@@ -555,6 +593,8 @@ function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' |
     // neither can change unnoticed afterwards. Absent from every other record, whose versions stay as they were.
     ...(r.amends ? [['amends', r.amends.update_id, r.amends.record_id, r.amends.revision]] : []),
     ...(r.action_items.some((a) => a.slot != null) ? [['slots', r.action_items.map((a) => a.slot ?? null)]] : []),
+    // A correction's explanations, as the user read them when confirming.
+    ...(r.corrections.length ? [['corrections', r.corrections.map((c) => [c.field, c.before, c.after, c.reason, c.sure])]] : []),
     // In a correction, what the dashboard wrote about it (meeting, original, version corrected, which original item each
     // slot is): an edit to it after confirming takes the confirmation away too.
     ...(binding ? [['correction', binding]] : [])];
@@ -562,6 +602,23 @@ function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' |
 }
 
 /** What the analysis is not sure of. A doubt that cannot be shown faithfully is a problem, like any other field. */
+/** A correction's explanations of its changes. One that cannot be shown faithfully is a problem. */
+function recordChanges(raw: unknown[], problems: string[]): RecordChange[] {
+  return raw.map((entry, i) => {
+    const what = `correction ${i + 1}`;
+    const o = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>;
+    if (o !== entry) problems.push(`${what} is not an object`);
+    const field = typeof o['field'] === 'string' && (DOUBT_FIELDS as readonly string[]).includes(o['field']) ? o['field'] as RecordChange['field'] : null;
+    if (!field) problems.push(`${what} names no field of the record (${DOUBT_FIELDS.join(', ')})`);
+    const before = o['before'] == null ? '' : recordText(o['before'], `${what} before`, problems);
+    const after = o['after'] == null ? '' : recordText(o['after'], `${what} after`, problems);
+    const reason = recordText(o['reason'], `${what} reason`, problems);
+    if (!reason) problems.push(`${what} does not say why`);
+    if (typeof o['sure'] !== 'boolean') problems.push(`${what} does not say whether it is sure (true or false)`);
+    return { field: field ?? 'title', before, after, reason, sure: o['sure'] === true };
+  });
+}
+
 function recordDoubts(raw: unknown[], problems: string[]): RecordDoubt[] {
   return raw.map((entry, i) => {
     const what = `doubt ${i + 1}`;
@@ -601,7 +658,9 @@ function recordSpeakers(raw: unknown[], problems: string[]): MeetingSpeaker[] {
 /** A correction's envelope as the confirmation of its record covers it. */
 function correctionBinding(env: CorrectionEnvelope): string {
   return JSON.stringify([env.meeting, env.root.update_id, env.root.record_id, env.base.update_id, env.base.record_id, env.base.revision,
-    env.slots.map((x) => [x.slot, x.root_key, x.root_index])]);
+    env.slots.map((x) => [x.slot, x.root_key, x.root_index]),
+    // Only when there are any: corrections written before sources were pinned keep their versions.
+    ...(env.sources.length ? [env.sources.map((x) => [x.path, x.sha256])] : [])]);
 }
 
 function normalizeRecords(raw: unknown, binding?: string): MeetingRecord[] {
@@ -628,6 +687,7 @@ function normalizeRecords(raw: unknown, binding?: string): MeetingRecord[] {
       unsure: r['unsure'] == null ? [] : recordDoubts(recordList(r['unsure'], 'unsure', problems), problems),
       meeting_id: isMeetingId(r['meeting_id']) ? r['meeting_id'] : null,
       amends: r['amends'] == null ? null : recordVersion(r['amends']) ?? (problems.push('amends is not a record version (update_id, record_id, revision)'), null),
+      corrections: r['corrections'] == null ? [] : recordChanges(recordList(r['corrections'], 'corrections', problems), problems),
     };
     const revision = recordRevision(content, binding);
     const hash = typeof r['confirmed_hash'] === 'string' ? r['confirmed_hash'] : '';
@@ -662,6 +722,27 @@ function normalizeRecords(raw: unknown, binding?: string): MeetingRecord[] {
 }
 
 /** What identifies an action item for its task: its content, so the same item always maps to the same task. */
+/** How long starting or finishing a correction waits for another dashboard doing the same. */
+const CORRECTIONS_LOCK_WAIT_MS = 10_000;
+
+/**
+ * One correction transition at a time, across every dashboard: starting one (is another open?) and finishing one (is
+ * its base still the current version?) read every update and must not interleave. Held for those short steps only,
+ * never during an analysis. Taken outside any update's queue.
+ */
+export async function withCorrectionsLock<T>(operation: () => Promise<T>): Promise<T> {
+  const ws = workspaceService.getWorkspacePath();
+  const dir = await workspaceEntry(ws, path.join(ws, '.situation-board', 'locks'), true);
+  await fsp.mkdir(dir, { recursive: true });
+  await workspaceEntry(ws, dir);
+  const held = await lock(path.join(dir, 'meeting-corrections.lock'), CORRECTIONS_LOCK_WAIT_MS, () => httpError(409, 'A correction is being started or finished elsewhere; try again in a moment'));
+  try {
+    return await operation();
+  } finally {
+    await unlock(held);
+  }
+}
+
 /** How long a task from an action item waits for another dashboard making the same one. */
 const ACTION_LOCK_WAIT_MS = 10_000;
 
@@ -1005,9 +1086,40 @@ export class ContextUpdateService {
       const transcripts = await Promise.all(current.transcripts.map(async (t) => ({
         ...t, current: (recorded(t) || (await hashOf(t.source)) === t.source_sha256) && (await hashOf(t.file)) === t.sha256,
       })));
-      return { ...current, proposals, material_files, transcripts };
+      const correction_review = current.kind === CORRECTION_KIND && current.correction ? await this.correctionReview(current) : undefined;
+      return { ...current, proposals, material_files, transcripts, ...(correction_review ? { correction_review } : {}) };
     });
   }
+
+  /**
+   * Before an analysis the dashboard starts: a correction's pins must be its meeting's own files, so the analysis never
+   * reads another meeting's transcript on the strength of an edited envelope.
+   */
+  async analysisPreflight(id: string): Promise<void> {
+    const { update } = await this.read(id);
+    if (update.kind !== CORRECTION_KIND) return;
+    if (!update.correction) throw httpError(409, `${id} does not say what it corrects; delete it and start again from the meeting`);
+    const foreign = foreignPins(update.correction, await this.list());
+    if (foreign.length) throw httpError(409, `${id} pins ${foreign[0]}, which is not one of this meeting's files; delete it and start again from the meeting`);
+  }
+
+  /** The version a correction corrects, as confirmed, what its record changes in it, and why it cannot finish. Read only. */
+  private async correctionReview(update: ContextUpdate): Promise<NonNullable<ContextUpdateDetail['correction_review']>> {
+    const record = update.meeting_records.length === 1 ? update.meeting_records[0]! : null;
+    const all = await this.list();
+    // Once done, a correction is the current version itself (or a later one built on it): nothing left to check.
+    if (update.status === 'done') {
+      const env = update.correction!;
+      const found = all.find((u) => u.id === env.base.update_id)?.meeting_records.find((r) => r.id === env.base.record_id);
+      const base = found && found.revision === env.base.revision ? found : null;
+      return { base, stale: false, blocked: [], changes: base && record ? recordDiff(base, record) : [], doubts_dropped: base && record ? doubtsDropped(base, record) : [] };
+    }
+    if (!record) return { base: null, stale: false, blocked: [], changes: [], doubts_dropped: [] };
+    const check = await this.correctionCheck(update, record, all);
+    const base = check.base;
+    return { base, stale: check.stale, blocked: check.blocked, changes: base ? recordDiff(base, record) : [], doubts_dropped: base ? doubtsDropped(base, record) : [] };
+  }
+
 
   /**
    * Moves the target of every accepted removal to the trash, once. A context note goes with its folder,
@@ -1135,7 +1247,14 @@ export class ContextUpdateService {
    * of versions holds and this record is its current one, so a task never rests on a version that does not count.
    */
   private async actionIdentity(update: ContextUpdate, record: MeetingRecord, action: MeetingActionItem): Promise<string> {
-    if (update.kind !== CORRECTION_KIND) return `${update.id}/${record.id}/${actionItemKey(action)}`;
+    if (update.kind !== CORRECTION_KIND) {
+      // An original with corrections: only while its versions hold, never from a disputed one.
+      const all = await this.list();
+      const claim = all.find((u) => u.kind === CORRECTION_KIND && u.correction?.root.update_id === update.id && u.correction.root.record_id === record.id);
+      const state = claim?.correction ? correctionChain(claim.correction.meeting, claim.correction.root, all).state : 'original';
+      if (state !== 'original' && state !== 'corrected') throw httpError(409, `The versions of this meeting's record are ${state}, so its action items cannot become tasks`);
+      return `${update.id}/${record.id}/${actionItemKey(action)}`;
+    }
     const env = update.correction;
     if (!env) throw httpError(409, `${update.id} does not say what it corrects, so its action items cannot become tasks`);
     const chain = correctionChain(env.meeting, env.root, await this.list());
@@ -1145,6 +1264,89 @@ export class ContextUpdateService {
     const identity = action.slot ? rootActionIdentity(env, action.slot) : null;
     if (!identity) throw httpError(409, 'This action item does not say which original item it is');
     return identity;
+  }
+
+  /**
+   * Before a correction is finished, under the corrections lock: it carries no proposals, its one record is confirmed,
+   * and the check below finds nothing. The speakers' evidence is written onto the raw record here, so the finish
+   * carries it.
+   */
+  private async checkCorrection(update: ContextUpdate, data: Record<string, unknown>): Promise<void> {
+    if (!update.correction) throw httpError(409, `${update.id} does not say what it corrects`);
+    if (this.rawProposals(data).length) throw httpError(409, 'A correction finishes without proposals: changes to the context go through an ordinary update');
+    const record = update.meeting_records[0];
+    if (update.meeting_records.length !== 1 || !record || record.confirmation !== 'confirmed' || record.problems.length) {
+      throw httpError(409, 'Confirm the corrected record before finishing, or close this correction');
+    }
+    const check = await this.correctionCheck(update, record, await this.list());
+    if (check.blocked.length) throw httpError(409, check.blocked[0]!);
+    const raws = this.rawRecords(data);
+    raws[0] = { ...(raws[0] as Record<string, unknown>), speakers_evidence: check.evidence };
+    data['meeting_records'] = raws;
+  }
+
+  /**
+   * Whether a correction's record can become the meeting's current version, checked against the versions themselves,
+   * never against what the correction says about them. The same check the review shows and the finish enforces:
+   * - the version it corrects is still the current one, and the versions hold (no other correction finished first);
+   * - the record keeps that version's source and `meeting`, and its slots are the ones that version's items stand
+   *   for (the head's own when it is a correction, else one per original item, in order);
+   * - a change the analysis is not sure of is not already in the record;
+   * - speakers: unchanged from that version, they keep its evidence as it is, also when the transcript is gone; a
+   *   changed speaker needs its transcript pinned when the correction started, still there with those bytes.
+   */
+  private async correctionCheck(update: ContextUpdate, record: MeetingRecord, all: ContextUpdate[]): Promise<{ base: MeetingRecord | null; stale: boolean; blocked: string[]; evidence: Record<string, string> | undefined }> {
+    const env = update.correction!;
+    const blocked: string[] = [];
+    const chain = correctionChain(env.meeting, env.root, all);
+    const head = chain.head;
+    const stale = (chain.state !== 'original' && chain.state !== 'corrected') || !head || head.update_id !== env.base.update_id || head.record_id !== env.base.record_id || head.revision !== env.base.revision;
+    if (stale) blocked.push('Another correction of this meeting finished first, or its versions no longer hold. Close this one and start again from the current record');
+    const baseUpdate = all.find((u) => u.id === env.base.update_id);
+    const found = baseUpdate?.meeting_records.find((r) => r.id === env.base.record_id);
+    const base = found && found.revision === env.base.revision && found.confirmation === 'confirmed' ? found : null;
+    if (!base) return { base, stale, blocked: [...blocked, 'The version this corrects is gone or changed. Close this one and start again from the current record'], evidence: undefined };
+
+    if (record.source !== base.source) blocked.push(`The corrected record must keep its source, ${base.source || '(none)'}`);
+    // `meeting` is a queued meeting's id (a digest's record) or none (an import's): the version's own, kept.
+    if (record.meeting !== base.meeting) blocked.push(`The corrected record must keep its meeting, ${base.meeting ?? '(none)'}`);
+    const rootRecord = all.find((u) => u.id === env.root.update_id)?.meeting_records.find((r) => r.id === env.root.record_id);
+    const expected = baseUpdate!.kind === CORRECTION_KIND && baseUpdate!.correction
+      ? baseUpdate!.correction.slots
+      : rootRecord ? rootRecord.action_items.map((item, i) => ({ slot: `A-${String(i + 1).padStart(2, '0')}`, root_key: actionItemKey(item), root_index: i })) : null;
+    if (!expected || JSON.stringify(expected) !== JSON.stringify(env.slots)) blocked.push('The action items no longer say which original item each one is. Close this one and start again');
+
+    // A field with a change marked not sure stays exactly as it was, so the suggestion is never applied in part: one
+    // that changed anyway (an owner swapped between items, a longer title, a deletion) is refused. The old value must
+    // be quoted exactly, so the suggestion says what it is about.
+    const changed = new Set(recordDiff(base, record).map((c) => c.field));
+    for (const c of record.corrections.filter((x) => !x.sure)) {
+      if (!fieldTexts(base)[c.field].includes(c.before)) blocked.push(`A change marked not sure must quote a value of ${c.field} exactly: "${c.before}". Analyze again, or close this correction`);
+      else if (changed.has(c.field)) blocked.push(`${c.field} has a change marked not sure, so it must stay as it was, yet it changed. Analyze again, or close this correction`);
+    }
+
+    for (const pin of foreignPins(env, all)) blocked.push(`The correction pins ${pin}, which is not one of this meeting's files. Close this one and start again`);
+
+    const speakersOf = (r: MeetingRecord) => JSON.stringify(r.speakers.map((sp) => [sp.label, sp.source, sp.person ? [sp.person.ref, sp.person.name] : null]).sort());
+    let evidence: Record<string, string> | undefined;
+    if (speakersOf(record) === speakersOf(base)) {
+      const baseRaw = this.rawRecords((await this.read(env.base.update_id)).data).find((r) => (r as Record<string, unknown>)?.['id'] === base.id) as Record<string, unknown> | undefined;
+      const inherited = baseRaw?.['speakers_evidence'];
+      evidence = record.speakers.length ? (inherited && typeof inherited === 'object' ? inherited as Record<string, string> : {}) : undefined;
+    } else if (record.speakers.length) {
+      evidence = {};
+      const materials = path.join(this.updateDir(env.root.update_id), 'materials');
+      for (const source of new Set(record.speakers.map((sp) => sp.source))) {
+        const pin = env.sources.find((x) => x.kind === 'transcript' && x.path === `context-updates/${env.root.update_id}/materials/${source}`);
+        const file = pin ? await fileInside(materials, source).catch(() => null) : null;
+        if (!pin || !file || (await hashFile(file)).sha256 !== pin.sha256) {
+          blocked.push(`A speaker can be corrected only from a transcript this correction started with, kept unchanged: ${source} in ${env.root.update_id}`);
+          continue;
+        }
+        evidence[source] = pin.sha256;
+      }
+    }
+    return { base, stale, blocked, evidence };
   }
 
   /** The hash of each transcript a record's speakers come from. A transcript that is not among the materials is refused. */
@@ -1323,6 +1525,36 @@ export class ContextUpdateService {
       proposals: [],
     };
     await this.write(path.join(dir, 'update.md'), data, notes, {});
+    return (await this.read(id)).update;
+  }
+
+  /**
+   * A correction of a meeting's record. Its generated materials are written first and update.md last, so it is never
+   * seen half made. Only the dashboard calls this, with the envelope it computed under the corrections lock.
+   */
+  async createCorrection(input: { title: string; meeting_date: string; notes: string; correction: CorrectionEnvelope; materials: { name: string; content: string }[] }): Promise<ContextUpdate> {
+    await fsp.mkdir(this.rootDir(), { recursive: true });
+    await workspaceEntry(workspaceService.getWorkspacePath(), this.rootDir());
+    let id = '';
+    let dir = '';
+    for (let attempt = 0; attempt < 20; attempt++) {
+      id = await this.nextId();
+      dir = path.join(this.rootDir(), id);
+      try { await fsp.mkdir(dir); break; } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        id = '';
+      }
+    }
+    if (!id) throw httpError(409, 'Could not reserve a new context update id; try again');
+    await fsp.mkdir(path.join(dir, 'materials'));
+    for (const m of input.materials) await saveAttachment(path.join(dir, 'materials'), m.name, Buffer.from(m.content, 'utf-8'), 'update.md');
+    const data: Record<string, unknown> = {
+      schema_version: '1.0', id, type: 'context-update', title: input.title.slice(0, 200),
+      origin: 'meetings', kind: CORRECTION_KIND, correction: input.correction,
+      status: 'ready', source_date: isDateOnly(input.meeting_date) ? input.meeting_date : new Date().toISOString().slice(0, 10),
+      created_at: new Date().toISOString(), materials: await this.materialList(dir), proposals: [],
+    };
+    await this.write(path.join(dir, 'update.md'), data, input.notes, {});
     return (await this.read(id)).update;
   }
 
@@ -1626,7 +1858,8 @@ export class ContextUpdateService {
       const normalized = update.meeting_records;
       // Who a speaker is holds for one transcript: its hash stays with the confirmation, also after the materials go.
       const evidence = new Map<string, Record<string, string>>();
-      for (const r of normalized) if (changes.get(r.id) === 'confirmed' && r.speakers.length) evidence.set(r.id, await this.speakerEvidence(id, r));
+      // A correction's speakers rest on the original's transcripts, not on its own materials: settled when it is finished.
+      for (const r of normalized) if (changes.get(r.id) === 'confirmed' && r.speakers.length && update.kind !== CORRECTION_KIND) evidence.set(r.id, await this.speakerEvidence(id, r));
       const records = this.rawRecords(data).map((raw, i) => {
         const r = normalized[i]!;
         if (!changes.has(r.id)) return raw;
@@ -1707,11 +1940,24 @@ export class ContextUpdateService {
    * rejected, and the apply command may run.
    */
   async approve(id: string): Promise<ContextUpdate> {
+    // A correction is finished under the corrections lock (outside this update's queue), so only one correction of a
+    // version ever becomes the next one, whichever dashboard approves.
+    const kind = (await this.read(id).catch(() => null))?.update.kind;
+    if (kind !== CORRECTION_KIND) return this.approveQueued(id);
+    return withCorrectionsLock(async () => {
+      // Approved before and stopped after it became current (a crash, a lost reply): finish it, never check it again.
+      if ((await this.read(id)).update.status === 'done') return this.get(id);
+      return this.approveQueued(id);
+    });
+  }
+
+  private async approveQueued(id: string): Promise<ContextUpdate> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review'], 'approve');
       await this.requireNoRun(id, 'approve');
-      await this.checkSpeakerEvidence(id, update, data);
+      if (update.kind === CORRECTION_KIND) await this.checkCorrection(update, data);
+      else await this.checkSpeakerEvidence(id, update, data);
       const records = this.frozenRecords(update, data);
       const confirmed = update.meeting_records.some((r) => r.confirmation === 'confirmed');
       if (!update.proposals.some((p) => p.decision === 'accepted') && !confirmed) {
@@ -1779,8 +2025,12 @@ export class ContextUpdateService {
       this.requireStatus(update, ['in_review', 'approved'], 'close');
       await this.requireNoRun(id, 'close');
       const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
-      // Before anything is deleted: a record changed after confirmation stops the close.
-      const records = this.frozenRecords(update, data);
+      // Before anything is deleted: a record changed after confirmation stops the close. A correction that is closed
+      // is not taken: its record is rejected, so it never becomes the meeting's current version.
+      const frozen = this.frozenRecords(update, data);
+      const records = update.kind === CORRECTION_KIND && frozen
+        ? this.clean(frozen.map((raw) => ({ ...(raw as Record<string, unknown>), confirmation: 'rejected', confirmed_at: undefined, confirmed_hash: undefined })))
+        : frozen;
       const keepText = await this.keepMeetingText(update);
       await this.cleanup({ ...update, keep_meeting_text: keepText }, update.keep_materials);
       await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined, ...this.linkPatch(update, data, records) });
@@ -1920,7 +2170,9 @@ export class ContextUpdateService {
    * stays taken, so digest receipts and run history that name it never point at a newer update.
    */
   async remove(id: string): Promise<void> {
-    return this.serialized(id, async () => {
+    // Under the corrections lock (outside the update's queue), like starting and finishing a correction: a version
+    // never goes while a correction is being checked against it.
+    return withCorrectionsLock(() => this.serialized(id, async () => {
       const { update } = await this.read(id);
       // Applying may have written some files already; deleting the record would hide what happened.
       this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
@@ -1928,6 +2180,6 @@ export class ContextUpdateService {
       const ws = workspaceService.getWorkspacePath();
       await reserveIds([id]);
       await moveToTrash(ws, await workspaceEntry(ws, this.updateDir(id)));
-    });
+    }));
   }
 }
