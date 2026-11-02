@@ -35,8 +35,9 @@ export function isMeetingText(name: string): boolean {
 /**
  * How a record is tied to a meeting of a digest: `explicit` when the record names it (`meeting: MQ-…`), `source` when
  * the record's source is a file of that meeting only, `only` when the digest holds one meeting and one record.
+ * `saved` when the link was saved on the record once its update was done (see meetingLinks), in any update.
  */
-export type RecordLink = 'explicit' | 'source' | 'only';
+export type RecordLink = 'explicit' | 'source' | 'only' | 'saved';
 
 /**
  * How far the review of a meeting's update got: `waiting` before the analysis wrote a record, `provisional` while the
@@ -83,12 +84,23 @@ const withCopies = (u: ContextUpdate, names: string[]): string[] => {
   return [...all];
 };
 
-/** Every meeting this update holds, in the order it lists them. */
+/**
+ * Every meeting this update holds, in the order it lists them. Once the update is done and its links are saved
+ * (`meetings_linked_at`), the saved links are read as they are: a later change in how links are worked out never moves
+ * a meeting, its record or its files. Before that, they are worked out from what the update records.
+ */
 export function heldMeetings(u: ContextUpdate): HeldMeeting[] {
   if (!aboutMeetings(u)) return [];
   const records = u.meeting_records.filter((r) => /^M-\d{2,3}$/.test(r.id));
   if (u.digest_meetings.length) return digestMeetings(u, records);
   const base = { update_id: u.id, origin: 'update' as const, recorded: false, linkable: u.status === 'done' };
+  if (u.meetings_linked_at) {
+    // A record keeps the id saved on it; the files are the ones saved with that id.
+    return records.filter((r) => r.meeting_id === `${u.id}-${r.id}`).map((r) => ({
+      ...base, id: r.meeting_id!, key: r.id, title: r.title || u.title, meeting_date: r.meeting_date || u.source_date, record: r, link: 'saved' as const,
+      files: withCopies(u, u.materials.filter((m) => m.meetings.includes(r.meeting_id!)).map((m) => m.name)),
+    }));
+  }
   if (records.length) {
     const materials = u.materials.map((m) => m.name);
     return records.map((r) => {
@@ -110,6 +122,11 @@ function digestMeetings(u: ContextUpdate, records: MeetingRecord[]): HeldMeeting
     ...m.files.map((f) => f.file),
     ...(m.recordings ?? []).flatMap((r) => [r.transcript, ...(r.file ? [r.file] : [])]),
   ])]));
+  const linked = new Map<string, { record: MeetingRecord; link: RecordLink }>();
+  if (u.meetings_linked_at) {
+    for (const r of records) if (r.meeting_id && filesOf.has(r.meeting_id) && !linked.has(r.meeting_id)) linked.set(r.meeting_id, { record: r, link: 'saved' });
+    return digestRows(u, filesOf, linked);
+  }
   // Which meetings each record could be: by the id it names, else by the files it names. Only a one-to-one match counts.
   const candidates = new Map<MeetingRecord, { ids: string[]; link: RecordLink }>();
   for (const r of records) {
@@ -118,13 +135,16 @@ function digestMeetings(u: ContextUpdate, records: MeetingRecord[]): HeldMeeting
     const ids = [...filesOf].filter(([, files]) => named.some((n) => files.includes(n))).map(([id]) => id);
     if (ids.length) candidates.set(r, { ids, link: 'source' });
   }
-  const linked = new Map<string, { record: MeetingRecord; link: RecordLink }>();
   const claims = new Map<string, number>();
   for (const { ids } of candidates.values()) if (ids.length === 1) claims.set(ids[0]!, (claims.get(ids[0]!) ?? 0) + 1);
   for (const [record, { ids, link }] of candidates) {
     if (ids.length === 1 && claims.get(ids[0]!) === 1) linked.set(ids[0]!, { record, link });
   }
   if (!linked.size && u.digest_meetings.length === 1 && records.length === 1) linked.set(u.digest_meetings[0]!.id, { record: records[0]!, link: 'only' });
+  return digestRows(u, filesOf, linked);
+}
+
+function digestRows(u: ContextUpdate, filesOf: Map<string, string[]>, linked: Map<string, { record: MeetingRecord; link: RecordLink }>): HeldMeeting[] {
   return u.digest_meetings.map((m) => {
     const found = linked.get(m.id);
     return {
@@ -132,6 +152,21 @@ function digestMeetings(u: ContextUpdate, records: MeetingRecord[]): HeldMeeting
       record: found?.record ?? null, link: found?.link ?? null, files: filesOf.get(m.id) ?? [], recorded: Boolean(m.recordings?.length), linkable: true,
     };
   });
+}
+
+/**
+ * What to save on an update once it is done, when its record ids are final: the meeting each record is about, and the
+ * meetings each material file belongs to (one file can belong to two meetings). A record whose meeting is not certain
+ * gets none, so an unclear link stays unclear. Pure: the context update service writes it.
+ */
+export function meetingLinks(u: ContextUpdate): { records: Map<string, string>; files: Map<string, string[]> } {
+  const records = new Map<string, string>();
+  const files = new Map<string, string[]>();
+  for (const m of heldMeetings({ ...u, status: 'done', meetings_linked_at: null })) {
+    if (m.record) records.set(m.record.id, m.id);
+    for (const f of m.files) files.set(f, [...(files.get(f) ?? []), m.id]);
+  }
+  return { records, files };
 }
 
 /**

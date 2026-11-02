@@ -14,7 +14,7 @@ import { hashFile } from '../utils/fileHash';
 import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown } from '../utils/transcript';
 import { TaskService } from './taskService';
 import { readManifest } from './scaffold';
-import { heldMeetings, meetingTextToKeep, ownFiles } from './meetingLibrary';
+import { heldMeetings, isMeetingId, meetingLinks, meetingTextToKeep, ownFiles } from './meetingLibrary';
 import { meetingTextKept } from './meetingTextSetting';
 import type { Task } from '../types';
 
@@ -87,7 +87,11 @@ const MAX_TEXT = 200_000;
 /** Larger files are not shown as a diff; the dashboard offers to open them instead. */
 const MAX_DIFF_BYTES = 512 * 1024;
 
-export interface UpdateMaterial { name: string; size: number; type: string }
+export interface UpdateMaterial {
+  name: string; size: number; type: string;
+  /** The meetings this file belongs to, saved by the dashboard when the update is done (see meetingLinks). Never set by an agent. */
+  meetings: string[];
+}
 
 /**
  * A readable copy the dashboard made from a WebVTT transcript or a Word document, recorded by the dashboard only.
@@ -172,6 +176,11 @@ export interface MeetingRecord {
   /** In a meeting digest: the queued meeting it is about (`queued_as` in materials/meetings.md). Null when not given. */
   meeting: string | null;
   /**
+   * The meeting this record is about, saved by the dashboard when the update is done: an MQ id in a digest, else
+   * `CU-…-M-nn`. Never set by an agent, and not part of what the user confirms, so saving it keeps a confirmation.
+   */
+  meeting_id: string | null;
+  /**
    * Set by the user in the dashboard, never by an agent. `confirmed` only counts while the record still has
    * the content the user confirmed (`confirmed_hash` in the file); otherwise it reads as null.
    */
@@ -209,6 +218,8 @@ export interface ContextUpdate {
    * text of its meetings stays in materials/ (see meetingLibrary). Never set by an agent.
    */
   keep_meeting_text: boolean;
+  /** When the dashboard saved which meeting each record and file belongs to (see meetingLinks). Null before. */
+  meetings_linked_at: string | null;
   /** Who opened this update: 'system-cleanup' for the memory review, null for an import by the user. */
   origin: string | null;
   /** What the analysis is about: 'memory-review' reviews the existing memory; 'daily-digest' is meetings from the queue. */
@@ -488,6 +499,7 @@ function normalizeRecords(raw: unknown): MeetingRecord[] {
       action_items: shownActionItems(recordList(r['action_items'], 'action_items', problems), problems).map((x) => x.item),
       source: recordText(r['source'], 'source', problems),
       meeting: typeof r['meeting'] === 'string' && /^MQ-\d{4}-\d{4}$/.test(r['meeting'].trim()) ? r['meeting'].trim() : null,
+      meeting_id: isMeetingId(r['meeting_id']) ? r['meeting_id'] : null,
     };
     const revision = recordRevision(content);
     const hash = typeof r['confirmed_hash'] === 'string' ? r['confirmed_hash'] : '';
@@ -536,7 +548,8 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
   const materials = Array.isArray(data['materials'])
     ? (data['materials'] as unknown[]).map((m) => {
       const o = (m && typeof m === 'object' ? m : {}) as Record<string, unknown>;
-      return { name: str(o['name']), size: Number(o['size']) || 0, type: str(o['type']) };
+      const meetings = Array.isArray(o['meetings']) ? (o['meetings'] as unknown[]).filter(isMeetingId).slice(0, 50) : [];
+      return { name: str(o['name']), size: Number(o['size']) || 0, type: str(o['type']), meetings };
     })
     : [];
   return {
@@ -562,6 +575,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     transcript_problems: normalizePairs(data['transcript_problems'], 'source', 'reason'),
     keep_materials: data['keep_materials'] === true,
     keep_meeting_text: data['keep_meeting_text'] === true,
+    meetings_linked_at: nullableStr(data['meetings_linked_at']),
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
     digest_meetings: normalizeDigestMeetings(data['digest_meetings']),
@@ -798,13 +812,18 @@ export class ContextUpdateService {
 
   async get(id: string): Promise<ContextUpdateDetail> {
     return this.serialized(id, async () => {
-      const { update } = await this.read(id);
+      const { update, data, file } = await this.read(id);
       const dir = this.updateDir(id);
       // The apply command deletes these itself, but an agent may lack permission to remove folders.
       // A done update never needs them again, so the dashboard finishes the cleanup.
       if (update.status === 'done') {
         await this.cleanup(update, update.keep_materials);
         await this.finishRemovals(id);
+        // The apply command set it done: its meeting links are saved here, the first time it is opened.
+        if (!update.meetings_linked_at) {
+          const links = this.linkPatch(update, data, Array.isArray(data['meeting_records']) ? this.rawRecords(data) : undefined);
+          if (Object.keys(links).length) await this.write(file, data, update.notes, links);
+        }
       }
       const { update: current } = await this.read(id);
       // The manifest is written with the system's separator; targets use "/".
@@ -1247,7 +1266,7 @@ export class ContextUpdateService {
     await fsp.rm(dir, { recursive: true });
   }
 
-  private async materialList(dir: string): Promise<UpdateMaterial[]> {
+  private async materialList(dir: string): Promise<Omit<UpdateMaterial, 'meetings'>[]> {
     const files = await listFolderFiles(path.join(dir, 'materials'));
     return files.map((f) => ({ name: f.name, size: f.size, type: f.type }));
   }
@@ -1445,6 +1464,33 @@ export class ContextUpdateService {
   }
 
   /**
+   * Saves which meeting each record and material file belongs to, as the update becomes done: its record ids are final
+   * then, so the link becomes permanent (see meetingLinks). A record or file with no certain meeting has the field
+   * removed, so a value an agent wrote never counts. Empty when the update holds no meeting.
+   */
+  private linkPatch(update: ContextUpdate, data: Record<string, unknown>, records: unknown[] | undefined): Record<string, unknown> {
+    const { records: recordLinks, files } = meetingLinks(update);
+    if (!recordLinks.size && !files.size) return {};
+    const patch: Record<string, unknown> = { meetings_linked_at: new Date().toISOString() };
+    if (records) {
+      // Raw records line up with the normalized ones, as in frozenRecords.
+      patch['meeting_records'] = records.map((raw, i) => {
+        const { meeting_id: _old, ...rest } = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        const id = recordLinks.get(update.meeting_records[i]?.id ?? '');
+        return id ? { ...rest, meeting_id: id } : rest;
+      });
+    }
+    if (Array.isArray(data['materials'])) {
+      patch['materials'] = (data['materials'] as unknown[]).map((raw) => {
+        const { meetings: _old, ...rest } = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+        const ids = files.get(String(rest['name'] ?? ''));
+        return ids ? { ...rest, meetings: ids } : rest;
+      });
+    }
+    return patch;
+  }
+
+  /**
    * At the end of the review a record nobody confirmed is rejected, like an unticked proposal. A record that
    * changed after the user confirmed it stops the review: the user must look at it again.
    */
@@ -1496,7 +1542,7 @@ export class ContextUpdateService {
       if (onlyRemovals) {
         const closed = proposals.map((raw, i) => normalizeProposal(raw, i).decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), outcome: 'skipped' });
         const keepText = await this.keepMeetingText(update);
-        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records, keep_meeting_text: keepText || undefined });
+        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records, keep_meeting_text: keepText || undefined, ...this.linkPatch(update, data, records) });
         await this.cleanup({ ...update, keep_meeting_text: keepText }, update.keep_materials);
         await this.finishRemovals(id);
       } else {
@@ -1551,7 +1597,7 @@ export class ContextUpdateService {
       const records = this.frozenRecords(update, data);
       const keepText = await this.keepMeetingText(update);
       await this.cleanup({ ...update, keep_meeting_text: keepText }, update.keep_materials);
-      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined });
+      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined, ...this.linkPatch(update, data, records) });
       return (await this.read(id)).update;
     });
   }

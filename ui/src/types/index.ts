@@ -841,7 +841,7 @@ export interface HistoryMeeting {
   people: string[];
   recorded: boolean;
   update: { id: string; title: string; status: ContextUpdateStatus; created_at: string; analyzed_at: string | null; applied_at: string | null; context_changed: boolean };
-  record: { id: string; revision: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: 'explicit' | 'source' | 'only' | null } | null;
+  record: { id: string; revision: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: 'explicit' | 'source' | 'only' | 'saved' | null } | null;
   unlinked_records: number;
   kept: boolean;
   deleted: { at: string; by: 'user' | 'system-cleanup'; in_trash: boolean } | null;
