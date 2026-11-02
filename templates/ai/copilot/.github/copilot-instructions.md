@@ -107,7 +107,8 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
 7. **Meeting digest** (`origin: meetings`, `kind: daily-digest`, made by the dashboard's
    Meeting digest job from the meeting queue): read `materials/meetings.md` first; it
    lists each meeting with its date, title, files and roughly how much text they hold
-   (`text_characters`). Add one meeting record per listed meeting with that meeting's date.
+   (`text_characters`). Add one meeting record per listed meeting with that meeting's date,
+   and `meeting` set to its `queued_as` id, so the dashboard shows the record with its meeting.
    Work one meeting at a time: read its files, note its facts and record, then the next;
    decide the proposals after the last one. Read a long transcript in parts, in order, and
    say in the summary if anything was only skimmed. Use each meeting's own date, not `source_date` (the
@@ -136,6 +137,7 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    when set. Set `updated_at` on each file that has it. Record
    `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
 3. Give rejected proposals `outcome: skipped`, set `status: done` and `applied_at`, then
-   delete `proposals/`, and `materials/` unless `update.md` has `keep_materials: true`
-   (the dashboard finishes this if you cannot). Never change `keep_materials` or
-   `meeting_records`. Keep `update.md` as the record.
+   delete `proposals/`, and `materials/` unless `update.md` has `keep_materials: true` or
+   `keep_meeting_text: true` (then the dashboard keeps the meeting text and removes the
+   rest; it also finishes the deleting if you cannot). Never change `keep_materials`,
+   `keep_meeting_text` or `meeting_records`. Keep `update.md` as the record.

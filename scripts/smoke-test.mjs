@@ -340,9 +340,11 @@ try {
   {
     const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
     const job = await (await fetch(`${base}/api/routines/system-cleanup`)).json();
-    check('system cleanup defaults to weekly, memory review on and no file rule',
+    // Meetings is the one rule on from the start: it only removes meeting text the user chose to keep.
+    check('system cleanup defaults to weekly, memory review on, and no file rule but Meetings',
       job.summary === 'Every Monday at 09:00' && job.settings?.enabled === true && job.settings.memory_review.enabled === true
-        && Object.values(job.settings.rules).every((r) => r.enabled === false), JSON.stringify(job).slice(0, 300));
+        && Object.entries(job.settings.rules).every(([type, r]) => r.enabled === (type === 'meetings'))
+        && job.settings.meetings?.keep_text === null, JSON.stringify(job).slice(0, 300));
     check('the workspace .gitignore keeps the trash out of git',
       fs.readFileSync(path.join(ws, '.gitignore'), 'utf8').includes('.situation-board/trash/'));
     const badRule = await send('PUT', '/api/routines/system-cleanup', { rules: { kaizen: { enabled: true, action: 'archive' } } });
@@ -636,6 +638,18 @@ try {
     const digestList = fs.readFileSync(path.join(ws, 'context-updates', digestBody.context_update ?? 'none', 'materials', 'meetings.md'), 'utf8');
     check('the people expected reach the digest as expected, not as proof of who came',
       digestList.includes('expected_participants: ["Sofia Reyes (STK-0001)", "Kim Park"]') && /not proof of who came/.test(digestUpdate.notes ?? ''));
+    // After the digest the meeting stays in the Meetings history, readable from its own files only.
+    const meetingHistory = await (await fetch(`${base}/api/meetings/history`)).json();
+    const heldMeeting = await fetch(`${base}/api/meetings/${queued.id}`);
+    const heldText = await fetch(`${base}/api/meetings/${queued.id}/text/${queued.id}-standup.vtt`);
+    const heldTextBody = await heldText.text();
+    const otherFile = await fetch(`${base}/api/meetings/${queued.id}/text/meetings.md`);
+    const badMeetingId = await fetch(`${base}/api/meetings/MQ-2026-1`);
+    check('a digested meeting stays in the Meetings history and reads only its own files',
+      Array.isArray(meetingHistory) && meetingHistory.some((m) => m.id === queued.id && m.update_id === digestBody.context_update)
+      && heldMeeting.status === 200 && heldText.status === 200 && heldTextBody.includes('Standup words.')
+      && heldText.headers.get('content-security-policy')?.includes('sandbox') && otherFile.status === 404 && badMeetingId.status === 400,
+      `held=${heldMeeting.status} text=${heldText.status} other=${otherFile.status} bad=${badMeetingId.status}`);
     const budget = await json('PUT', '/api/routines/meeting-digest', { max_characters: 200000 });
     const budgetBody = await budget.json();
     const badBudget = await json('PUT', '/api/routines/meeting-digest', { max_characters: 1000 });

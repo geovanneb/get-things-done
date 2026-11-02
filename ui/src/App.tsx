@@ -16,6 +16,7 @@ import type { SetupStatus } from './utils/setup';
 const SituationView = lazy(() => import('./views/SituationView'));
 const BoardView = lazy(() => import('./views/BoardView'));
 const TaskDetailView = lazy(() => import('./views/TaskDetailView'));
+const MeetingDetailView = lazy(() => import('./views/MeetingDetailView'));
 const StakeholdersView = lazy(() => import('./views/StakeholdersView'));
 const StakeholderDetailView = lazy(() => import('./views/StakeholderDetailView'));
 const OutputsView = lazy(() => import('./views/OutputsView'));
@@ -100,7 +101,9 @@ function AppRoutes() {
           <Route path="insights" element={<InsightsView />} />
           {/* Kaizen lives in Context updates now; an old link or bookmark lands there. */}
           <Route path="kaizen" element={<Navigate to="/context/updates" replace />} />
-          <Route path="meetings" element={<MeetingsView />} />
+          <Route path="meetings" element={<MeetingsView />}>
+            <Route path=":id" element={<MeetingDetailView />} />
+          </Route>
           <Route path="routines" element={<RoutinesView />} />
           <Route path="agent-floor" element={<AgentFloorView />} />
           <Route path="profile" element={<ProfileView />} />

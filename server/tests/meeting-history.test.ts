@@ -1,0 +1,259 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import * as fsp from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { ContextUpdateService } from '../src/services/contextUpdateService';
+import { MeetingHistoryService } from '../src/services/meetingHistoryService';
+import { MeetingDigestService } from '../src/services/meetingDigestService';
+import { SystemCleanupService, parseSettings, defaultSettings, MEETING_TRASH_DAYS } from '../src/services/systemCleanupService';
+import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
+import { trashDir } from '../src/services/trash';
+
+/** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
+async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-meetings-'));
+  const previous = process.env.ESB_WORKSPACE_PATH;
+  process.env.ESB_WORKSPACE_PATH = dir;
+  t.after(async () => {
+    if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
+    else process.env.ESB_WORKSPACE_PATH = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+  for (const d of ['tasks/active', 'tasks/archive', 'context-updates', '.situation-board/routines', '.situation-board/trash']) {
+    await fsp.mkdir(path.join(dir, d), { recursive: true });
+  }
+  return dir;
+}
+
+const updates = new ContextUpdateService();
+const history = new MeetingHistoryService();
+const cleanup = new SystemCleanupService();
+
+const vtt = (who: string, words: string) => `WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n<v ${who}>${words}</v>\n`;
+
+/** Writes a context update by hand, as an analysis and review leave it, with its material files. */
+async function update(ws: string, id: string, data: Record<string, unknown>, files: Record<string, string> = {}): Promise<void> {
+  const dir = path.join(ws, 'context-updates', id);
+  await fsp.mkdir(path.join(dir, 'materials'), { recursive: true });
+  for (const [name, content] of Object.entries(files)) await fsp.writeFile(path.join(dir, 'materials', name), content);
+  await fsp.writeFile(path.join(dir, 'update.md'), stringifyMarkdown('', {
+    schema_version: '1.0', id, type: 'context-update', title: `Fictional ${id}`, status: 'in_review', source_date: '2026-10-27',
+    created_at: '2026-10-27T18:00:00.000Z', updated_at: '2026-10-28T09:00:00.000Z',
+    materials: Object.keys(files).map((name) => ({ name, size: 1, type: 'text/plain' })), ...data,
+  }));
+}
+
+const record = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: `Meeting ${id}`, meeting_date: '2026-10-27', attendees: [{ name: 'Jane Doe' }], decisions: ['Fictional decision'], source: '', ...extra });
+const transcript = (file: string, source: string) => ({ file, source, source_sha256: 'x', sha256: 'y', complete: true, kind: 'webvtt' });
+
+/** A digest of two queued meetings: MQ-2026-0001 (a transcript) and MQ-2026-0002 (a transcript and a photo). */
+async function digest(ws: string, id: string, records: Record<string, unknown>[], extra: Record<string, unknown> = {}): Promise<void> {
+  await update(ws, id, {
+    origin: 'meetings', kind: 'daily-digest',
+    digest_meetings: [
+      { id: 'MQ-2026-0001', title: 'Weekly sync', meeting_date: '2026-10-27', files: [{ source: 'a.vtt', file: 'MQ-2026-0001-a.vtt', sha256: '1' }] },
+      { id: 'MQ-2026-0002', title: 'Pilot review', meeting_date: '2026-10-27', files: [{ source: 'b.vtt', file: 'MQ-2026-0002-b.vtt', sha256: '2' }, { source: 'board.png', file: 'MQ-2026-0002-board.png', sha256: '3' }] },
+    ],
+    transcripts: [transcript('MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt'), transcript('MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt')],
+    meeting_records: records, ...extra,
+  }, {
+    'meetings.md': '# Meetings in this digest', 'MQ-2026-0001-a.vtt': vtt('Jane Doe', 'Budget next week.'), 'MQ-2026-0001-a.transcript.md': 'copy a',
+    'MQ-2026-0002-b.vtt': vtt('Taro Yamada', 'Pilot on track.'), 'MQ-2026-0002-b.transcript.md': 'copy b', 'MQ-2026-0002-board.png': 'png',
+  });
+}
+
+test('the history lists digest meetings by queue id, imported records by update and record, and nothing else', async (t) => {
+  const ws = await workspace(t);
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0002' }), record('M-02', { source: 'MQ-2026-0001-a.transcript.md' })]);
+  await update(ws, 'CU-2026-0002', { meeting_records: [record('M-01', { source: 'steering.vtt' })], transcripts: [transcript('steering.transcript.md', 'steering.vtt')] }, { 'steering.vtt': vtt('Kim Park', 'Hello.') });
+  // Not analyzed yet: an imported transcript waits for its record. A memory review is not a meeting.
+  await update(ws, 'CU-2026-0003', { status: 'ready', transcripts: [transcript('call.transcript.md', 'call.vtt')] }, { 'call.vtt': vtt('Kim Park', 'Hi.') });
+  await update(ws, 'CU-2026-0004', { origin: 'system-cleanup', kind: 'memory-review', meeting_records: [record('M-01')] });
+  await update(ws, 'CU-2026-0005', { status: 'ready' }, { 'deck.md': '# A deck, not a meeting' });
+
+  const list = await history.list();
+  const byId = new Map(list.map((m) => [m.id, m]));
+  assert.deepEqual([...byId.keys()].sort(), ['CU-2026-0002-M-01', 'CU-2026-0003', 'MQ-2026-0001', 'MQ-2026-0002']);
+  assert.deepEqual([byId.get('MQ-2026-0002')!.record?.id, byId.get('MQ-2026-0002')!.record?.link], ['M-01', 'explicit'], 'a record that names its meeting');
+  assert.deepEqual([byId.get('MQ-2026-0001')!.record?.id, byId.get('MQ-2026-0001')!.record?.link], ['M-02', 'source'], 'a record whose source is a file of that meeting only');
+  assert.equal(byId.get('CU-2026-0002-M-01')!.origin, 'update');
+  assert.equal(byId.get('CU-2026-0003')!.record, null);
+});
+
+test('a record is shown with a meeting only when that is certain', async (t) => {
+  const ws = await workspace(t);
+  // Two records, neither naming a meeting or a file: no guessing which is which.
+  await digest(ws, 'CU-2026-0001', [record('M-01'), record('M-02')]);
+  const list = await history.list();
+  assert.ok(list.every((m) => m.record === null));
+  assert.ok(list.every((m) => m.unlinked_records === 2));
+  const detail = await history.detail('MQ-2026-0001');
+  assert.deepEqual(detail.update_records.map((r) => r.id), ['M-01', 'M-02'], 'shown as the update\'s records instead');
+});
+
+test('a record-only meeting gets an id to link to only once its update is done', async (t) => {
+  const ws = await workspace(t);
+  // Record ids are written by the analysis: a re-analysis during review may number them differently.
+  await update(ws, 'CU-2026-0002', { meeting_records: [record('M-01', { source: 'steering.vtt' })] }, { 'steering.vtt': vtt('Kim Park', 'Hello.') });
+  await update(ws, 'CU-2026-0003', { status: 'ready', transcripts: [transcript('call.transcript.md', 'call.vtt')] }, { 'call.vtt': vtt('Kim Park', 'Hi.') });
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
+  const byId = new Map((await history.list()).map((m) => [m.id, m]));
+  assert.deepEqual([byId.get('CU-2026-0002-M-01')!.linkable, byId.get('CU-2026-0002-M-01')!.review_state], [false, 'provisional']);
+  assert.deepEqual([byId.get('CU-2026-0003')!.linkable, byId.get('CU-2026-0003')!.review_state], [false, 'waiting']);
+  assert.deepEqual([byId.get('MQ-2026-0001')!.linkable, byId.get('MQ-2026-0001')!.review_state], [true, 'provisional'], 'a queue id is final from the start');
+  const refused = (err: { statusCode?: number }) => err.statusCode === 409;
+  await assert.rejects(history.detail('CU-2026-0002-M-01'), refused);
+  await assert.rejects(history.text('CU-2026-0002-M-01', 'steering.vtt'), refused);
+  await assert.rejects(history.keep('CU-2026-0002-M-01', true), refused, 'a kept record id could point at another meeting after a re-analysis');
+  await assert.rejects(history.detail('CU-2026-0003'), refused);
+
+  await updates.close('CU-2026-0002');
+  const done = (await history.list()).find((m) => m.id === 'CU-2026-0002-M-01')!;
+  assert.deepEqual([done.linkable, done.review_state], [true, 'final']);
+  assert.equal((await history.detail('CU-2026-0002-M-01')).meeting.id, 'CU-2026-0002-M-01');
+});
+
+test('a meeting says its record version, each file\'s hash and state, and an unclear record link', async (t) => {
+  const ws = await workspace(t);
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0002' }), record('M-02'), record('M-03')]);
+  const linked = await history.detail('MQ-2026-0002');
+  assert.equal(linked.meeting.record_state, 'linked');
+  assert.match(linked.meeting.record?.revision ?? '', /^[0-9a-f]{16}$/);
+  assert.deepEqual(linked.sources.map((s) => [s.name, s.sha256, s.state]), [['b.vtt', '2', 'present'], ['board.png', '3', 'present']]);
+  // Two records left for one meeting: which is its own is not certain, so none is shown.
+  const unclear = await history.detail('MQ-2026-0001');
+  assert.deepEqual([unclear.meeting.record_state, unclear.record], ['ambiguous', null]);
+
+  // Once its text is in the trash, a file can come back; deleted for good, it is missing.
+  await cleanup.update({ meetings: { keep_text: true } });
+  await updates.close('CU-2026-0001');
+  await updates.trashMeeting('CU-2026-0001', 'MQ-2026-0002');
+  // The photo went when the update was done; only the transcript went to the trash with the meeting.
+  assert.deepEqual((await history.detail('MQ-2026-0002')).sources.map((s) => [s.name, s.state]), [['b.vtt', 'unavailable'], ['board.png', 'missing']]);
+  await updates.purgeMeeting('CU-2026-0001', 'MQ-2026-0002');
+  assert.deepEqual((await history.detail('MQ-2026-0002')).sources.map((s) => s.state), ['missing', 'missing']);
+});
+
+test('a meeting\'s text is read from its own files only', async (t) => {
+  const ws = await workspace(t);
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a', 'a transcript is read as its readable copy');
+  await assert.rejects(history.text('MQ-2026-0001', 'MQ-2026-0002-b.vtt'), /No such file in this meeting/, 'another meeting\'s file');
+  await assert.rejects(history.text('MQ-2026-0001', '../update.md'), /Invalid file name/);
+  await assert.rejects(history.text('MQ-2026-0001', 'meetings.md'), /No such file in this meeting/);
+  await assert.rejects(history.text('MQ-2026-0002', 'MQ-2026-0002-board.png'), (err: { statusCode?: number }) => err.statusCode === 415);
+  await assert.rejects(history.text('CU-2026-0001-M-01', 'x'), (err: { statusCode?: number }) => err.statusCode === 404, 'a digest meeting is named by its queue id');
+  await assert.rejects(history.detail('MQ-2026-12345'), (err: { statusCode?: number }) => err.statusCode === 400);
+});
+
+test('a queued meeting\'s imported transcript and notes can be read before any digest', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const m = await queue.createMeeting({ title: 'Weekly sync', meeting_date: '2026-10-28' });
+  await queue.addFile(m.id, 'call.vtt', Buffer.from(vtt('Jane Doe', 'Budget next week.')));
+  await queue.addFile(m.id, 'notes.md', Buffer.from('Fictional notes'));
+  assert.match(await history.text(m.id, 'call.vtt'), /Budget next week\./);
+  assert.equal(await history.text(m.id, 'notes.md'), 'Fictional notes');
+  await assert.rejects(history.text(m.id, 'other.md'), /No such file in this meeting/);
+});
+
+test('without the user\'s choice, a reviewed update deletes its materials as before', async (t) => {
+  const ws = await workspace(t);
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
+  const done = await updates.close('CU-2026-0001');
+  assert.equal(done.keep_meeting_text, false);
+  await assert.rejects(fsp.access(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials')));
+});
+
+test('with meeting text kept, a reviewed update keeps only its meetings\' transcripts and notes', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
+  const done = await updates.close('CU-2026-0001');
+  assert.equal(done.keep_meeting_text, true, 'said in update.md, so the apply command leaves materials/ alone');
+  const left = (await fsp.readdir(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials'))).sort();
+  assert.deepEqual(left, ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt', 'MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt'], 'no photo, no meetings.md');
+  // An approved update says so before the apply command runs.
+  await digest(ws, 'CU-2026-0002', [record('M-01', { meeting: 'MQ-2026-0001', confirmation: null })], { proposals: [{ id: 'P-01', action: 'update', target: 'context/company/x/note.md', title: 'x', decision: 'accepted' }] });
+  const approved = await updates.approve('CU-2026-0002');
+  assert.equal(approved.keep_meeting_text, true);
+});
+
+test('one meeting is deleted to the trash, restored, and deleted for good; its record stays', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
+  await assert.rejects(history.remove('MQ-2026-0001'), (err: { statusCode?: number }) => err.statusCode === 409, 'not before the review is done');
+  await updates.close('CU-2026-0001');
+  const materials = path.join(ws, 'context-updates', 'CU-2026-0001', 'materials');
+
+  await history.remove('MQ-2026-0001');
+  assert.deepEqual((await fsp.readdir(materials)).sort(), ['MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt'], 'the other meeting stays');
+  const [entry] = await fsp.readdir(trashDir(ws));
+  assert.deepEqual((await fsp.readdir(path.join(trashDir(ws), entry!))).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
+  const deleted = (await history.list()).find((m) => m.id === 'MQ-2026-0001')!;
+  assert.deepEqual([deleted.deleted?.in_trash, deleted.record?.id], [true, 'M-01']);
+  await assert.rejects(history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), (err: { statusCode?: number }) => err.statusCode === 410);
+
+  await history.restore('MQ-2026-0001');
+  assert.equal((await fsp.readdir(materials)).length, 4);
+  assert.deepEqual(await fsp.readdir(trashDir(ws)), []);
+
+  await history.remove('MQ-2026-0001');
+  await history.purge('MQ-2026-0001');
+  assert.deepEqual(await fsp.readdir(trashDir(ws)), []);
+  const gone = (await history.list()).find((m) => m.id === 'MQ-2026-0001')!;
+  assert.deepEqual([gone.deleted?.in_trash, gone.has_text], [false, false]);
+  await assert.rejects(history.restore('MQ-2026-0001'), (err: { statusCode?: number }) => err.statusCode === 404);
+});
+
+test('a hand-edited deleted meeting never points restore outside the trash', async (t) => {
+  const ws = await workspace(t);
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })], {
+    status: 'done', deleted_meetings: [{ meeting: 'MQ-2026-0001', at: '2026-10-28T00:00:00Z', files: ['../update.md'], trash: '../../context-updates' }],
+  });
+  await assert.rejects(history.restore('MQ-2026-0001'), (err: { statusCode?: number }) => err.statusCode === 404);
+  assert.ok(await fsp.stat(path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md')));
+});
+
+test('the Meetings rule is on by default and counts from the later of the meeting and its import', () => {
+  const defaults = defaultSettings();
+  assert.deepEqual([defaults.rules.meetings.enabled, defaults.rules.meetings.older_than_days, defaults.rules.meetings.action], [true, 180, 'trash']);
+  assert.equal(defaults.meetings.keep_text, null, 'nothing is kept until the user chose');
+  assert.equal(parseSettings({ meetings: { keep_text: true } }).meetings.keep_text, true);
+  assert.throws(() => parseSettings({ meetings: { keep_text: 'yes' } }), /keep_text/);
+  assert.throws(() => parseSettings({ rules: { meetings: { action: 'archive' } } }), /rules\.meetings\.action/);
+});
+
+test('System cleanup moves old meeting text to the trash, skips kept meetings, then deletes it for good', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })], { created_at: '2026-01-05T00:00:00.000Z' });
+  // Imported long after the meeting: its 180 days count from the import.
+  await update(ws, 'CU-2026-0002', { meeting_records: [record('M-01', { meeting_date: '2025-01-01', source: 'old.vtt' })], created_at: '2026-12-01T00:00:00.000Z' }, { 'old.vtt': vtt('Kim Park', 'Old call.') });
+  await updates.close('CU-2026-0001');
+  await updates.close('CU-2026-0002');
+  await history.keep('MQ-2026-0002', true);
+
+  const settings = await cleanup.readSettings();
+  const now = new Date('2027-05-01T12:00:00');
+  const plan = await cleanup.plan(settings, now);
+  assert.deepEqual(plan.items.filter((i) => i.type === 'meetings').map((i) => i.id), ['MQ-2026-0001'], 'the kept one and the recent import stay');
+
+  // Finished context updates would otherwise remove the whole folder: it waits while meetings are kept in it.
+  const all = parseSettings({ rules: { context_updates: { enabled: true, older_than_days: 1 } } }, settings);
+  assert.ok(!(await cleanup.plan(all, now)).items.some((i) => i.type === 'context_updates' && i.id === 'CU-2026-0001'));
+
+  const ran = await cleanup.runNow(now);
+  assert.equal(ran.status, 'ok', ran.message);
+  const after = (await history.list()).find((m) => m.id === 'MQ-2026-0001')!;
+  assert.deepEqual([after.deleted?.by, after.deleted?.in_trash], ['system-cleanup', true]);
+
+  const later = new Date(now.getTime() + (MEETING_TRASH_DAYS + 1) * 86_400_000);
+  await cleanup.runNow(later);
+  const purged = (await history.list()).find((m) => m.id === 'MQ-2026-0001')!;
+  assert.equal(purged.deleted?.in_trash, false);
+  const raw = parseMarkdown(await fsp.readFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md'), 'utf-8')).data as Record<string, unknown>;
+  assert.ok(Array.isArray(raw['meeting_records']) && (raw['meeting_records'] as unknown[]).length === 1, 'the record stays');
+});

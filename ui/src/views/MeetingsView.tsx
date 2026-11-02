@@ -1,24 +1,72 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Outlet } from 'react-router-dom';
 import { useApi } from '@/hooks/useApi';
-import { apiPost } from '@/utils/api';
+import { apiPost, apiPut } from '@/utils/api';
 import { useDataVersion } from '@/store';
 import Button from '@/components/common/Button';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Card from '@/components/common/Card';
 import Notice from '@/components/common/Notice';
 import Page, { PageHeader } from '@/components/common/Page';
-import { CountBadge } from '@/components/common/Tabs';
+import Toggle from '@/components/common/Toggle';
 import { LiveTranscript } from '@/components/meetings/LiveTranscript';
 import { TranscriptReader } from '@/components/meetings/TranscriptReader';
-import { MeetingQueueList, recordingElsewhere } from '@/components/meetings/MeetingQueueList';
+import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
+import { MeetingsList } from '@/components/meetings/MeetingsList';
 import { useRecordLauncher } from '@/components/recording/RecordLauncher';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { readableTranscript, transcriptOnItsWay } from '@/utils/transcriptReading';
-import type { MeetingDigest } from '@/types';
+import type { HistoryMeeting, MeetingDigest, SystemCleanup } from '@/types';
+import type { MeetingsOutlet } from './MeetingDetailView';
 
 
 const REFRESH_MS = 10_000;
+
+/**
+ * Asked once, before any transcript is kept: meeting text used to be deleted when its review was done. Until the user
+ * answers, nothing is kept (the server reads an unanswered question as no). The answer can be changed in System cleanup.
+ */
+function KeepTextQuestion({ days, onAnswered }: { days: number; onAnswered: () => void }) {
+  const [keep, setKeep] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const answer = async (value: boolean) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPut('/api/routines/system-cleanup', { meetings: { keep_text: value } });
+      onAnswered();
+    } catch (err) {
+      setError((err as Error).message);
+      setSaving(false);
+    }
+  };
+  return (
+    <Card title="Meetings can now keep their transcripts" description="Until now, a meeting's transcript and notes were deleted once its review was done. Choose before any is kept.">
+      <div className="gtd-stack" style={{ gap: 'var(--space-3)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+          <Toggle id="keep-meeting-text" label="Keep meeting transcripts and notes" checked={keep} onChange={setKeep} />
+          <label htmlFor="keep-meeting-text">
+            <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>Keep meeting transcripts and notes</span><br />
+            Only the meeting text: not the other materials, and not the audio (that follows Keep recordings in Settings &gt; Transcription).
+          </label>
+        </div>
+        <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
+          <li>Each meeting is kept {days} days from the day it took place or was imported, then moved to the trash. Change this in Routines &gt; System cleanup &gt; Meetings.</li>
+          <li>Mark a meeting <strong>Keep this meeting</strong> to keep it longer, or delete it yourself at any time.</li>
+          <li>The trash holds it 30 more days, so you can restore it. It stays on this computer until then.</li>
+          <li>Kept text stays in its update's folder under context-updates/, where materials wait during review. Agents never read it as task input.</li>
+        </ul>
+        <span>Meetings reviewed before this version keep their confirmed records, but their transcripts were already deleted.</span>
+        {error && <Notice tone="critical" title="Your choice was not saved.">{error} Try again.</Notice>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+          <Button variant="ghost" disabled={saving} onClick={() => void answer(false)}>Not now, keep deleting them</Button>
+          <Button variant="primary" loading={saving} onClick={() => void answer(keep)}>{keep ? 'Keep transcripts' : 'Save my choice'}</Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 /**
  * When the queue goes into a digest, and a way to make one now: the meetings are here, so the button is too. A digest
@@ -67,6 +115,10 @@ export default function MeetingsView() {
   const updates = useDataVersion('context-updates');
   const transcription = useDataVersion('transcription');
   const { data, error, refetch } = useApi<MeetingDigest>('/api/routines/meeting-digest', [routines, updates, transcription]);
+  const { data: history, error: historyError, refetch: refetchHistory } = useApi<HistoryMeeting[]>('/api/meetings/history', [routines, updates]);
+  const { data: cleanup, refetch: refetchCleanup } = useApi<SystemCleanup>('/api/routines/system-cleanup', [routines]);
+  const retention = cleanup ? { keep_text: cleanup.settings.meetings?.keep_text ?? null, enabled: cleanup.settings.rules.meetings?.enabled ?? false, days: cleanup.settings.rules.meetings?.older_than_days ?? 180, action: cleanup.settings.rules.meetings?.action ?? 'trash' } : null;
+  const changed = React.useCallback(() => { refetch(); refetchHistory(); }, [refetch, refetchHistory]);
   // Nothing announces audio arriving or a page that crashed, so while a recording exists its state is asked for.
   const recording = Boolean(data?.queue.some((m) => m.live?.state === 'recording'));
   // What the reader shows: what was asked for, else the meeting that just ended, whose transcript opens by itself.
@@ -92,8 +144,9 @@ export default function MeetingsView() {
   const following = own ?? elsewhere?.id ?? null;
 
   return (
-    <Page width="narrow">
-      <PageHeader description="Record a meeting, read its transcript, and follow it into the next digest. The digest's schedule is in Routines." />
+    <Page width="default">
+      <PageHeader description="Every meeting, recorded here or imported: read it, see what was confirmed, and follow it into the next digest. The digest's schedule is in Routines." />
+      {retention && retention.keep_text === null && <KeepTextQuestion days={retention.days} onAnswered={() => { refetchCleanup(); refetchHistory(); }} />}
       <Card
         title={own ? recorder.title : elsewhere ? `${elsewhere.title}, recording in another page` : 'Recording'}
         description={following ? undefined : 'Transcribed on this computer. With a live model in Settings > Transcription, the text appears here as people speak.'}
@@ -111,12 +164,9 @@ export default function MeetingsView() {
           <LoadingSpinner inline text="The transcript appears here when it is ready." />
         </Card>
       )}
-      <Card title="Queue" padding="none" badge={data && data.queue.length > 0 ? <CountBadge count={data.queue.length} /> : undefined}
-        actions={data && <DigestNow job={data} onDone={refetch} />}>
-        {error && <div style={{ padding: 'var(--space-4) var(--space-5)' }}><Notice tone="critical" title="Could not load the queue.">{error}</Notice></div>}
-        {!data && !error && <LoadingSpinner text="Loading meetings…" />}
-        {data && <MeetingQueueList job={data} onChanged={refetch} onRecord={recorder.active ? undefined : openRecordDialog} onRead={(meeting, file) => setPicked({ meeting, file })} />}
-      </Card>
+      <MeetingsList job={data ?? null} history={history ?? null} error={error ?? historyError} retention={retention} onChanged={changed}
+        actions={data && <DigestNow job={data} onDone={changed} />} />
+      <Outlet context={{ job: data ?? null, retention, onChanged: changed } satisfies MeetingsOutlet} />
     </Page>
   );
 }

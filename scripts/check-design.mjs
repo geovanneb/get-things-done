@@ -35,6 +35,7 @@ const DIALOG_OWNERS = {
   'components/common/GitIndicator.tsx': 'non-modal popover dialog',
   'views/TaskDetailView.tsx': 'record dialog, uses the gtd-modal classes',
   'components/board/NewTaskModal.tsx': 'record dialog, uses the gtd-modal classes',
+  'views/MeetingDetailView.tsx': 'record dialog, uses the gtd-modal classes',
 };
 
 // Routed views that do not use <Page>, with the reason.
@@ -43,6 +44,7 @@ const PAGE_EXEMPT = {
   'views/AgentFloorView.tsx': 'experimental full-bleed canvas',
   'views/ContextView.tsx': 'split view (gtd-split), owns its panes',
   'views/TaskDetailView.tsx': 'a dialog over the board, not a page',
+  'views/MeetingDetailView.tsx': 'a dialog over the Meetings list, not a page',
 };
 
 const H1_OWNERS = ['components/layout/Header.tsx', 'views/SetupView.tsx'];

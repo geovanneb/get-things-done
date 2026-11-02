@@ -564,7 +564,7 @@ const DIGEST_BRIEF = [
   'This is a meeting digest: meetings from the meeting queue, collected by the dashboard.',
   '',
   '- `materials/meetings.md` lists each meeting with its date, title and files. Draft one meeting record per meeting,',
-  '  with that meeting\'s date.',
+  '  with that meeting\'s date and `meeting` set to its `queued_as` id, so the record shows with its meeting.',
   '- `expected_participants`, when a meeting has them, are who was expected, not proof of who came. Use them to resolve',
   '  names, and list someone as an attendee only when the meeting\'s files show they were there. In the summary, name',
   '  anyone expected who never appears in the files. When the files cannot show it (a transcript without speaker',

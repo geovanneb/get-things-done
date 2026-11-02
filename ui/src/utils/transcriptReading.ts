@@ -51,3 +51,28 @@ export function transcriptParts(markdown: string): TranscriptPart[] | null {
   }
   return parts;
 }
+
+/**
+ * The turns of any readable transcript copy (a recording's, or a WebVTT file's, where a speaker is a name as the file
+ * labels it): `[start → end] speaker` lines, each followed by indented text. Null when the text is not in that form, so
+ * it is shown as it is.
+ */
+export function transcriptTurns(markdown: string): TranscriptPart[] | null {
+  const lines = markdown.split('\n');
+  const open = lines.findIndex((line) => /^`{3,}text$/.test(line));
+  if (open < 0) return null;
+  const fence = lines[open]!.slice(0, -'text'.length);
+  const close = lines.indexOf(fence, open + 1);
+  if (close < 0) return null;
+  const parts: TranscriptPart[] = [];
+  for (const line of lines.slice(open + 1, close)) {
+    const turn = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\](?: (.+))?$/.exec(line);
+    const last = parts[parts.length - 1];
+    if (turn) {
+      const who = turn[2]?.trim();
+      parts.push({ time: turn[1]!, ...(who && who !== '(no speaker label)' ? { speaker: who } : {}), text: '' });
+    } else if (line.startsWith('  ') && last) last.text += (last.text ? ' ' : '') + line.trim();
+    else if (line.trim()) return null;
+  }
+  return parts;
+}

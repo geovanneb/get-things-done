@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readableTranscript, transcriptOnItsWay, transcriptParts } from './transcriptReading';
+import { readableTranscript, transcriptOnItsWay, transcriptParts, transcriptTurns } from './transcriptReading';
 import type { QueuedMeeting } from '@/types';
 
 const meeting = (files: QueuedMeeting['files']) => ({ id: 'MQ-2026-0001', files }) as QueuedMeeting;
@@ -32,4 +32,8 @@ assert.equal(transcriptParts('nothing here'), null, 'not a transcript: never rep
 assert.equal(transcriptParts('```text\nsome other format\n```\n'), null);
 assert.equal(transcriptParts('```text\n[00:00:01 → 00:00:02]\n  no end'), null);
 assert.deepEqual(transcriptParts('````text\n[08:00:00 → 08:00:02]\n  has ``` inside\n````\n'), [{ time: '08:00:00', text: 'has ``` inside' }], 'a longer fence around backticks');
+// A WebVTT copy names its speakers as the file does; a turn without a label has no speaker.
+assert.deepEqual(transcriptTurns('# Transcript\n\n```text\n[00:00:01 → 00:00:04] Daniel Okafor\n  Volumes are up.\n  Eight percent.\n\n[00:00:05 → 00:00:06] (no speaker label)\n  Hello.\n```\n'),
+  [{ time: '00:00:01', speaker: 'Daniel Okafor', text: 'Volumes are up. Eight percent.' }, { time: '00:00:05', text: 'Hello.' }]);
+assert.equal(transcriptTurns('Plain notes, no fence.'), null);
 console.log('transcript reading: ok');

@@ -494,6 +494,8 @@ export interface MeetingRecord {
   /** Why it cannot be confirmed as it is. */
   problems: string[];
   changed_since_confirmed: boolean;
+  /** In a meeting digest: the queued meeting the record is about, when the analysis named it. */
+  meeting?: string | null;
 }
 
 /** The AI tool that runs workspace commands for the dashboard (GET /api/runner). */
@@ -541,6 +543,8 @@ export interface ContextUpdate {
   transcript_problems: { source: string; reason: string }[];
   /** The user keeps materials/ after the update is done, until they release it. */
   keep_materials: boolean;
+  /** Set by the dashboard: once done, only the text of its meetings stays in materials/. */
+  keep_meeting_text?: boolean;
   /** Who opened it: 'system-cleanup' for the weekly memory review, null for an import. */
   origin: string | null;
   kind: string | null;
@@ -628,7 +632,7 @@ export interface RoutineRun {
 
 /* ---- System cleanup (the built-in routine) -------------------------------- */
 
-export type CleanupRuleType = 'completed_tasks' | 'archived_tasks' | 'context_updates' | 'kaizen' | 'trash';
+export type CleanupRuleType = 'completed_tasks' | 'archived_tasks' | 'context_updates' | 'meetings' | 'kaizen' | 'trash';
 export type CleanupAction = 'archive' | 'trash' | 'delete';
 
 export interface CleanupRule { enabled: boolean; older_than_days: number; action: CleanupAction }
@@ -640,6 +644,8 @@ export interface CleanupSettings {
   rules: Record<CleanupRuleType, CleanupRule>;
   keep_tag: string;
   max_items_per_run: number;
+  /** Meeting transcripts and notes stay after review (true) or go (false); null until the user chose. */
+  meetings: { keep_text: boolean | null };
   updated_at: string | null;
 }
 
@@ -817,4 +823,46 @@ export interface Transcription {
   models_dir: string;
   total_memory_gb: number;
   memory_hint: string | null;
+}
+
+/* ---- Meetings history (GET /api/meetings/…) -------------------------------- */
+
+/** A meeting held by a context update: a digest's meeting (MQ-…) or a record of an imported update (CU-…-M-01). */
+export interface HistoryMeeting {
+  /** A link only when `linkable`: a record-only meeting's id can change until its update is done. */
+  id: string;
+  linkable: boolean;
+  review_state: 'waiting' | 'provisional' | 'final';
+  record_state: 'linked' | 'ambiguous' | 'none';
+  update_id: string;
+  origin: 'digest' | 'update';
+  title: string;
+  meeting_date: string;
+  people: string[];
+  recorded: boolean;
+  update: { id: string; title: string; status: ContextUpdateStatus; created_at: string; analyzed_at: string | null; applied_at: string | null; context_changed: boolean };
+  record: { id: string; revision: string; confirmation: MeetingRecord['confirmation']; confirmed_at: string | null; link: 'explicit' | 'source' | 'only' | null } | null;
+  unlinked_records: number;
+  kept: boolean;
+  deleted: { at: string; by: 'user' | 'system-cleanup'; in_trash: boolean } | null;
+  retention_start: string;
+  has_text: boolean;
+}
+
+export interface MeetingSource {
+  file: string;
+  name: string;
+  kind: 'transcript' | 'recording' | 'notes' | 'file';
+  present: boolean;
+  state: 'present' | 'unavailable' | 'missing';
+  sha256: string | null;
+  readable: boolean;
+  missing: string | null;
+}
+
+export interface MeetingDetail {
+  meeting: HistoryMeeting;
+  record: MeetingRecord | null;
+  update_records: { id: string; title: string; meeting_date: string; confirmation: MeetingRecord['confirmation'] }[];
+  sources: MeetingSource[];
 }
