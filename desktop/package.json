@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "electron": "45.2.0",
-    "electron-builder": "26.17.0",
+    "electron-builder": "26.18.0",
     "typescript": "^7.0.2"
   },
   "license": "MIT",
