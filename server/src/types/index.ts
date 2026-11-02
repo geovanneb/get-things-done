@@ -188,6 +188,20 @@ export interface ExecutionPackage {
   total_size_bytes: number;
   /** Office files in the package or its folders that agents cannot read: encrypted (e.g. by a sensitivity label) or not a valid package. */
   unreadable_files?: { path: string; check: 'encrypted' | 'unsupported_container' }[];
+  /**
+   * The meetings the Objective mentions, when it does: when they were pinned, mentions not pinned yet or that could not
+   * be, pinned files left out because their bytes changed or they are gone, and records changed since.
+   */
+  meeting_check?: {
+    /** The selection the run used (`S-001`…): a deliverable names it, so later refreshes never hide what it was made from. */
+    selection_id: string | null;
+    pinned_at: string | null;
+    unpinned: string[];
+    not_pinned: { id: string; reason: string }[];
+    left_out: { meeting: string; path: string; state: 'changed' | 'missing' }[];
+    record_changed: string[];
+    review_changes: { meeting: string; change: string }[];
+  };
 }
 
 export interface ValidationResult {

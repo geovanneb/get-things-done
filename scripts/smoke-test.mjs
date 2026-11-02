@@ -650,6 +650,20 @@ try {
       && heldMeeting.status === 200 && heldText.status === 200 && heldTextBody.includes('Standup words.')
       && heldText.headers.get('content-security-policy')?.includes('sandbox') && otherFile.status === 404 && badMeetingId.status === 400,
       `held=${heldMeeting.status} text=${heldText.status} other=${otherFile.status} bad=${badMeetingId.status}`);
+    // A task made from that meeting: the picker offers it, saving pins what the agent may read, and the package holds it.
+    const meetingPick = await (await fetch(`${base}/api/mentions?q=standup&limit=20`)).json();
+    const fromMeeting = await (await json('POST', '/api/tasks', { title: 'Fictional standup summary', body: `Summarize [@Fictional standup](/meetings/${queued.id}).` })).json();
+    const pinned = await (await fetch(`${base}/api/tasks/${fromMeeting.id}/meeting-sources`)).json();
+    const meetingPkg = await (await json('POST', `/api/tasks/${fromMeeting.id}/execution-package`, {})).json();
+    const pinnedMeeting = pinned.selection?.meetings?.[0];
+    check('a task made from a meeting pins its transcript, and its package holds the sheet and that file only',
+      meetingPick.some((c) => c.type === 'meeting' && c.href === `/meetings/${queued.id}`)
+      && pinnedMeeting?.id === queued.id && pinnedMeeting.sources.length === 1 && pinnedMeeting.sources[0].kind === 'transcript'
+      && pinned.sources.every((x) => x.state === 'ok') && pinned.unpinned.length === 0
+      && meetingPkg.files?.some((f) => f.type === 'meeting_sources') && meetingPkg.files?.filter((f) => f.type === 'meeting').length === 1
+      && fs.existsSync(path.join(ws, 'tasks', 'active', fromMeeting.id, 'sources', 'meetings.md')),
+      `pick=${meetingPick.filter((c) => c.type === 'meeting').length} pinned=${pinnedMeeting?.id} files=${(meetingPkg.files ?? []).map((f) => f.type).join(',')}`);
+    await fetch(`${base}/api/tasks/${fromMeeting.id}`, { method: 'DELETE' });
     const budget = await json('PUT', '/api/routines/meeting-digest', { max_characters: 200000 });
     const budgetBody = await budget.json();
     const badBudget = await json('PUT', '/api/routines/meeting-digest', { max_characters: 1000 });

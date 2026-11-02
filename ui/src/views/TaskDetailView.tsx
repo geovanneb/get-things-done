@@ -1,3 +1,4 @@
+import TaskMeetingSources from '@/components/board/TaskMeetingSources';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { sectionLabelStyle } from '@/components/task-form/styles';
 import Input, { Select } from '@/components/common/Input';
@@ -76,7 +77,7 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { 
         )}
       </div>
       {editing ? (
-        <MarkdownEditor value={content} onChange={onChange} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, template, context note or task' : undefined} />
+        <MarkdownEditor value={content} onChange={onChange} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, template, context note, task or meeting' : undefined} />
       ) : (
         <MarkdownView content={content} />
       )}
@@ -143,7 +144,7 @@ function nextDeliverableId(deliverables: Task['deliverables']): string {
   return `DEL-${String(next).padStart(2, '0')}`;
 }
 
-function WorkTab({ task, onFieldChange, savedCount }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number }) {
+function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number; pinError: string | null; onPinned: () => void }) {
   const { data: allStakeholders } = useApi<Stakeholder[]>('/api/stakeholders');
 
   const saveField = (field: string) => (value: unknown) => onFieldChange(field, value);
@@ -173,6 +174,7 @@ function WorkTab({ task, onFieldChange, savedCount }: { task: Task; onFieldChang
     <div className="gtd-detail">
       <div className="gtd-detail__main">
         <MarkdownSection label="Objective" content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
+        {/\]\(\/meetings\//.test(task.body ?? '') && <TaskMeetingSources taskId={task.id} refreshKey={savedCount} pinError={pinError} onPinned={onPinned} />}
         <div style={{ marginBottom: 'var(--space-6)' }}>
           <DeliverableList
             items={task.deliverables}
@@ -307,6 +309,10 @@ export default function TaskDetailView() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
+  // The task saved, but its meetings could not be pinned: the meeting sources say so and offer a refresh.
+  const [pinError, setPinError] = useState<string | null>(null);
+  // Another task: its own diagnostics only.
+  useEffect(() => { setPinError(null); }, [id]);
 
   // Re-read the task when it changes on disk (agent updating status, deliverables)
   const tasksVersion = useDataVersion('tasks');
@@ -342,7 +348,8 @@ export default function TaskDetailView() {
     if (!localTask || !id) return;
     setSaving(true);
     try {
-      await apiPut(`/api/tasks/${id}`, localTask);
+      const saved = await apiPut<Task & { meeting_sources_error?: string }>(`/api/tasks/${id}`, localTask);
+      setPinError(saved?.meeting_sources_error ?? null);
       editingRef.current = false;
       setSavedCount((n) => n + 1);
       refetch();
@@ -438,7 +445,7 @@ export default function TaskDetailView() {
 
       <div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${tab}`}
         style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)' }}>
-        {tab === 'work' && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} />}
+        {tab === 'work' && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} />}
         {tab === 'files' && id && <FilesTab taskId={id} />}
       </div>
     </>,

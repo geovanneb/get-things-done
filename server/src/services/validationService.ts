@@ -192,8 +192,10 @@ export class ValidationService {
 
       // Check @-mentions in the Objective still point at an existing file
       for (const m of mentionService.extractMentions(task.body)) {
-        if (!(await mentionService.resolve(m.href))) {
-          results.push({ level: 'warning', rule: 'broken_mention', message: `Task ${task.id} mentions a missing file: @${m.label} (${m.href})`, path: task.path });
+        const problem = await mentionService.problem(m.href);
+        if (problem) {
+          const what = !m.href.startsWith('/meetings/') ? 'a missing file' : problem === 'in_review' ? 'a meeting still in review (it can be used once its update is done)' : 'a meeting that is gone';
+          results.push({ level: 'warning', rule: 'broken_mention', message: `Task ${task.id} mentions ${what}: @${m.label} (${m.href})`, path: task.path });
         }
       }
 

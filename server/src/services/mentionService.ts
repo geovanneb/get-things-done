@@ -7,6 +7,9 @@ import { ContextService } from './contextService';
 import { OutputService } from './outputService';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { MeetingHistoryService } from './meetingHistoryService';
+import { MeetingDigestService } from './meetingDigestService';
+import { meetingIdOf, resolveMeeting } from './meetingSources';
 
 const taskService = new TaskService();
 const stakeholderService = new StakeholderService();
@@ -14,8 +17,10 @@ const contextService = new ContextService();
 const outputService = new OutputService();
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
+const meetingHistory = new MeetingHistoryService();
+const meetingQueue = new MeetingDigestService();
 
-export type MentionType = 'stakeholder' | 'template' | 'context' | 'task';
+export type MentionType = 'stakeholder' | 'template' | 'context' | 'task' | 'meeting';
 
 export interface MentionCandidate {
   type: MentionType;
@@ -68,11 +73,37 @@ export class MentionService {
     return out;
   }
 
+  /** The meetings a piece of text mentions (`/meetings/<id>`), in order, without duplicates. */
+  meetingIds(markdown: string | undefined): string[] {
+    return this.extractMentions(markdown).flatMap((m) => meetingIdOf(m.href) ?? []);
+  }
+
   /**
-   * Absolute path of the file a mention points to, or null when it no longer exists.
+   * Whether a mention still points at something: a file, or a meeting the task may use (one whose review is still
+   * open cannot be linked to yet, so it counts as missing until its update is done).
+   */
+  async exists(href: string): Promise<boolean> {
+    return (await this.problem(href)) === null;
+  }
+
+  /** Why a mention points at nothing usable: `in_review` (a meeting whose record id may still change), `missing`, or null. */
+  async problem(href: string): Promise<'in_review' | 'missing' | null> {
+    const meeting = meetingIdOf(href);
+    if (meeting) {
+      return resolveMeeting(meeting).then(() => null, (err: { statusCode?: number }) => (err.statusCode === 409 ? 'in_review' as const : 'missing' as const));
+    }
+    if (href.startsWith('/meetings/')) return 'missing';
+    return (await this.resolve(href)) !== null ? null : 'missing';
+  }
+
+  /**
+   * Absolute path of the file a mention points to, or null when it no longer exists. A meeting is not a file: its
+   * mention resolves to null here, and to what may be read of it through `meetingSources`.
    * Task mentions are resolved by ID, so they keep working after a task moves to the archive.
    */
   async resolve(href: string): Promise<string | null> {
+    // Never the file system for a meeting, even once a meetings/ folder exists: its sources are pinned per task.
+    if (href.startsWith('/meetings/')) return null;
     const ws = path.resolve(workspaceService.getWorkspacePath());
     const direct = path.resolve(ws, '.' + href);
     if (!direct.startsWith(ws + path.sep)) return null; // never leave the workspace
@@ -153,7 +184,29 @@ export class MentionService {
         })),
     );
 
+    groups.push(await this.searchMeetings(match));
+
     return groups.flatMap((g) => g.slice(0, limit));
+  }
+
+  /**
+   * Meetings a task can be made from: ones still in the queue, and ones an update holds whose id is final. Newest
+   * first, with the date and how far their review got.
+   */
+  private async searchMeetings(match: (...fields: (string | undefined)[]) => boolean): Promise<MentionCandidate[]> {
+    const held = (await meetingHistory.list().catch(() => [])).filter((m) => m.linkable);
+    const queued = ((await meetingQueue.readQueue().catch(() => null))?.meetings ?? []).filter((m) => m.status === 'queued' && !m.in_digest);
+    // The same words as the task's meeting sources: not reviewed yet, in review, reviewed.
+    const review = (m: (typeof held)[number]) => m.deleted && m.record ? 'record only'
+      : m.review_state === 'final' ? 'reviewed' : m.review_state === 'provisional' ? 'in review' : 'not reviewed yet';
+    const all: (MentionCandidate & { date: string })[] = [
+      ...queued.map((m) => ({ type: 'meeting' as const, id: m.id, label: m.title, detail: [m.meeting_date, 'not reviewed yet'].filter(Boolean).join(' · '), href: `/meetings/${m.id}`, date: m.meeting_date })),
+      ...held.filter((m) => !queued.some((q) => q.id === m.id)).map((m) => ({ type: 'meeting' as const, id: m.id, label: m.title, detail: [m.meeting_date, review(m)].filter(Boolean).join(' · '), href: `/meetings/${m.id}`, date: m.meeting_date })),
+    ];
+    return all
+      .filter((m) => match(m.label, m.id, m.date))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map(({ date: _date, ...m }) => m);
   }
 
   private async listArchivedTasks() {
