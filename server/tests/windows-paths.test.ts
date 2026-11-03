@@ -11,6 +11,15 @@ test('the watcher ignores .git folders with Windows and POSIX separators', async
   assert.ok(!IGNORED_PATH.test('C:\\Users\\demo\\Northwind\\tasks\\T-0001\\task.md'));
 });
 
+test('the watcher reports a meeting\'s meeting.json with Windows and POSIX separators, and nothing else of its folder', async () => {
+  const { MEETING_MANIFEST } = await import('../src/services/watcherService');
+  assert.ok(MEETING_MANIFEST.test('C:\\Users\\demo\\Northwind\\meetings\\MQ-2026-0003\\meeting.json'));
+  assert.ok(MEETING_MANIFEST.test('/home/demo/northwind/meetings/MQ-2026-0003/meeting.json'));
+  assert.ok(!MEETING_MANIFEST.test('/home/demo/northwind/meetings/MQ-2026-0003/v1/meeting.json'));
+  assert.ok(!MEETING_MANIFEST.test('/home/demo/northwind/meetings/MQ-2026-0003/.meeting.json.tmp'));
+  assert.ok(!MEETING_MANIFEST.test('/home/demo/northwind/tasks/T-0001/meeting.json'));
+});
+
 test('the Windows Claude Code launch keeps the workspace path out of the cmd line', async () => {
   const { windowsClaudeLaunch } = await import('../src/routes/workspace');
   const workspace = 'C:\\Users\\demo\\R&D 100% Plan';

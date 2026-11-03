@@ -8,6 +8,12 @@ type EventHandler = (event: FileWatchEvent) => void;
 /** Paths the watcher never reports. Matches both separators: chokidar passes backslash paths on Windows. */
 export const IGNORED_PATH = /node_modules|\.git([\\/]|$)|\.tmp$/;
 
+/**
+ * A meeting folder's meeting.json: which version of its text is in use. Reported so that choosing a version in one
+ * dashboard shows the new text in another one too. Matches both separators.
+ */
+export const MEETING_MANIFEST = /[\\/]meetings[\\/][^\\/]+[\\/]meeting\.json$/;
+
 export class WatcherService {
   private watcher: FSWatcher | null = null;
   private handlers: Map<WatchEventType, EventHandler[]> = new Map();
@@ -31,11 +37,11 @@ export class WatcherService {
         if (IGNORED_PATH.test(filePath)) return true;
         if (skipDirs.some((dir) => filePath === dir || filePath.startsWith(dir + path.sep))) return true;
         // Only Markdown files matter, plus the routine, system cleanup and meeting digest run state: a failed run writes no task, and the
-        // dashboard must still show it. Directories must pass so their contents are watched.
+        // dashboard must still show it; and a meeting's meeting.json. Directories must pass so their contents are watched.
         const routineState = filePath.endsWith(path.join('.situation-board', 'routines', 'state.json'))
           || filePath.endsWith(path.join('.situation-board', 'routines', 'system-cleanup-state.json'))
           || filePath.endsWith(path.join('.situation-board', 'routines', 'meeting-digest-state.json'));
-        return Boolean(stats?.isFile()) && !filePath.endsWith('.md') && !routineState;
+        return Boolean(stats?.isFile()) && !filePath.endsWith('.md') && !routineState && !MEETING_MANIFEST.test(filePath);
       },
       persistent: true,
       ignoreInitial: true,
