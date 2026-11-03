@@ -32,6 +32,8 @@ const taskService = new TaskService();
 // Shared across service instances. Serializes this server's read-modify-write operations,
 // including filename reservation; external agents/processes still need coordination.
 const pendingUpdates = new Map<string, Promise<void>>();
+/** Per update, the kind lookups that come before its queue, in call order (see kindInOrder). */
+const pendingKinds = new Map<string, Promise<void>>();
 
 /**
  * Context updates: raw material (transcripts, slides, images, spreadsheets) that may change the context.
@@ -1166,6 +1168,22 @@ export class ContextUpdateService {
 
   private updateDir(id: string): string {
     return path.join(this.rootDir(), updateId(id));
+  }
+
+  /**
+   * The update's kind, read before a change joins its queue (a correction takes the corrections lock first). Reads of
+   * one update run one after another, in call order, so changes join its queue in the order they were made: a save
+   * made just before an approval is never overtaken by it because its read happened to take longer.
+   */
+  private kindInOrder(id: string): Promise<ContextUpdate['kind'] | undefined> {
+    let key: string;
+    try { key = this.updateDir(id); } catch { return Promise.resolve(undefined); }
+    const previous = pendingKinds.get(key) ?? Promise.resolve();
+    const result = previous.then(() => this.read(id).then((r) => r.update.kind, () => undefined));
+    const settled = result.then(() => {});
+    pendingKinds.set(key, settled);
+    void settled.then(() => { if (pendingKinds.get(key) === settled) pendingKinds.delete(key); });
+    return result;
   }
 
   private async serialized<T>(id: string, operation: () => Promise<T>): Promise<T> {
@@ -2328,7 +2346,7 @@ export class ContextUpdateService {
   async approve(id: string): Promise<ContextUpdate> {
     // A correction is finished under the corrections lock (outside this update's queue), so only one correction of a
     // version ever becomes the next one, whichever dashboard approves.
-    const kind = (await this.read(id).catch(() => null))?.update.kind;
+    const kind = await this.kindInOrder(id);
     // A follow-up is approved only while its correction is still the meeting's current version, checked under the same
     // lock a correction finishes under, so a newer one cannot finish in between.
     if (kind === FOLLOW_UP_KIND) {
@@ -2451,7 +2469,7 @@ export class ContextUpdateService {
    * two never interleave across dashboards. Other updates are only queued.
    */
   private async changing<T>(id: string, operation: () => Promise<T>): Promise<T> {
-    const kind = (await this.read(id).catch(() => null))?.update.kind;
+    const kind = await this.kindInOrder(id);
     return kind === CORRECTION_KIND ? withCorrectionsLock(() => this.serialized(id, operation)) : this.serialized(id, operation);
   }
 

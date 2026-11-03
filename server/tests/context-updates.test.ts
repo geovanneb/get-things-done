@@ -308,6 +308,33 @@ test('simultaneous review choices survive and approval waits for the preceding s
   assert.equal((await service.backToReview(id)).status, 'in_review', 'a failed mutation must release the queue');
 });
 
+test('a save made just before an approval is never overtaken by it, however long its first read takes', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({});
+  await analyze(ws, id, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md' }], { 'P-01.md': 'a' });
+  await service.saveDecisions(id, { 'P-01': { decision: 'accepted' } });
+  // The save's first read is slow (a busy disk, a large update.md); the approval's is not.
+  const proto = ContextUpdateService.prototype as unknown as { read: (id: string) => Promise<unknown> };
+  const read = proto.read;
+  let first = true;
+  proto.read = async function (this: unknown, ...args: [string]) {
+    if (first) { first = false; await new Promise((r) => setTimeout(r, 50)); }
+    return read.apply(this, args);
+  };
+  try {
+    await Promise.all([
+      service.saveDecisions(id, { 'P-01': { reviewer_note: 'Keep the wording' } }),
+      service.approve(id),
+    ]);
+  } finally {
+    proto.read = read;
+  }
+  const approved = await service.get(id);
+  assert.equal(approved.status, 'approved');
+  assert.equal(approved.proposals[0]!.reviewer_note, 'Keep the wording');
+});
+
 test('source dates reject impossible calendar days without changing the record', async (t) => {
   await workspace(t);
   const service = new ContextUpdateService();
