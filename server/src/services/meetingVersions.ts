@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { meetingsRoot, place, readFolder, writeManifest, type FolderManifest, type FolderState, type FolderVersion, type TranscribeRequest } from './meetingFolder';
 import { isMeetingId } from './meetingLibrary';
 import { hashFile } from '../utils/fileHash';
@@ -240,9 +240,14 @@ export async function recoverTranscriptions(ws: string, active: string | null): 
 /** A version's text files, read as text; null for a file it does not list or that is not text. */
 function versionReader(folder: Folder, version: FolderVersion): (name: string) => Promise<string | null> {
   return async (name) => {
-    if (!version.files.some((f) => f.name === name)) return null;
+    const listed = version.files.find((f) => f.name === name);
+    if (!listed) return null;
     const full = await fileInside(path.join(folder.dir, version.id), name).catch(() => null);
-    return full ? decodeText(await fsp.readFile(full)) : null;
+    if (!full) return null;
+    // Only the bytes the version lists: a file changed on disk since is never corrected as if it were that text.
+    const bytes = await fsp.readFile(full);
+    if (createHash('sha256').update(bytes).digest('hex') !== listed.sha256) throw httpError(409, `${name} in ${version.id} changed since it was kept, so its words cannot be corrected`);
+    return decodeText(bytes);
   };
 }
 
@@ -263,11 +268,22 @@ export async function checkTranscriptChanges(ws: string, id: string, version: un
  * Writes the next version of a meeting's text: `from_version` with exactly these changes (the originals and their
  * readable copies together), and makes it the current one, since approving the correction is the choice. Refused, with
  * nothing written, when `from_version` is not the current version any more or any change does not fit.
+ *
+ * Finishing again is safe: `receipt` names what is being finished (its caller hashes the confirmed record, the base and
+ * the changes). A version this correction already wrote with the same receipt is returned as it is, nothing written and
+ * the current version left alone, whatever was chosen since; the same correction with another receipt is refused.
  */
-export async function writeCorrectedVersion(ws: string, id: string, input: { from_version: unknown; correction: unknown; changes: unknown }): Promise<string> {
+export async function writeCorrectedVersion(ws: string, id: string, input: { from_version: unknown; correction: unknown; changes: unknown; receipt: unknown }): Promise<string> {
   if (typeof input.correction !== 'string' || !/^CU-\d{4}-\d{4}$/.test(input.correction)) throw httpError(400, 'Invalid correction: the id of the correction update');
+  if (typeof input.receipt !== 'string' || !/^[0-9a-f]{64}$/.test(input.receipt)) throw httpError(400, 'Invalid receipt: a SHA-256 of what is being finished');
   return withFolder(ws, id, async (folder) => {
     const m = folder.manifest;
+    // Written before (a crash between this and the correction's finish, a lost reply): the same, or refused.
+    const written = m.versions.find((v) => v.made_from === 'correction' && v.correction === input.correction);
+    if (written) {
+      if (written.receipt === input.receipt) return written.id;
+      throw httpError(409, `${input.correction as string} already wrote ${written.id}, from something else than what is finished now: nothing was written`);
+    }
     if (input.from_version !== m.current) throw httpError(409, `This meeting's text changed since the correction started (${m.current} is in use now): start the correction again`);
     const base = m.versions.find((v) => v.id === m.current)!;
     const { files, problems } = await applyChanges(input.changes, versionReader(folder, base));
@@ -294,7 +310,7 @@ export async function writeCorrectedVersion(ws: string, id: string, input: { fro
       await fsp.rename(draft, target);
       await writeManifest(folder, {
         ...m, current: next,
-        versions: [...m.versions, { id: next, at: new Date().toISOString(), made_from: 'correction', correction: input.correction as string, base: base.id, files: listed }],
+        versions: [...m.versions, { id: next, at: new Date().toISOString(), made_from: 'correction', correction: input.correction as string, base: base.id, receipt: input.receipt as string, files: listed }],
       });
       return next;
     } finally {

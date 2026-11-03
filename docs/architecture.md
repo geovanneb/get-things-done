@@ -58,7 +58,7 @@ turn, on one line; a WebVTT original changes in its one cue and its copy is made
 to differ only there. The new version becomes current, since approving the correction is the choice,
 and it is refused when the version it started from is no longer current.
 Remaining risk: the first move is coordinated with the update's own queue, not across two dashboards
-on the same workspace. A WebVTT original saved in UTF-16 is written back in UTF-8 when corrected.
+on the same workspace. A WebVTT original saved in UTF-16 is written back in UTF-8 when corrected. The writer takes a receipt (its caller's hash of what is being finished) and records it on the version: finishing the same correction again returns the version already written, and another receipt for it is refused. Reading a version's files checks their hashes, so a file changed on disk is never corrected.
 
 ## Request and file flow
 
