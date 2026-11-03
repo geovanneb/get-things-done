@@ -124,7 +124,7 @@ test('anything that is not WebVTT is left alone, and many speakers are read quic
 
 test('overlapping cues keep their own times, a cue in the header is reported, and many backticks are fine', () => {
   const overlap = transcriptMarkdown('x.vtt', 'h', parseWebVtt(vtt('00:00:01.000 --> 00:00:10.000\n<v A>long', '00:00:05.000 --> 00:00:06.000\n<v A>inside', '00:00:10.000 --> 00:00:12.000\n<v A>right after'))!);
-  assert.ok(overlap.includes('[00:00:01 → 00:00:10] A\n  long\n\n[00:00:05 → 00:00:12] A\n  inside\n  right after'), overlap);
+  assert.ok(overlap.includes('[00:00:01 → 00:00:10] A\n  long\n\n#2 [00:00:05 → 00:00:12] A\n  inside\n  right after'), overlap);
 
   const header = parseWebVtt('WEBVTT\n00:00:01.000 --> 00:00:02.000\nDo not launch\n\n00:00:03.000 --> 00:00:04.000\nSchedule next review\n')!;
   assert.deepEqual(header.cues.map((c) => c.text), ['Schedule next review']);

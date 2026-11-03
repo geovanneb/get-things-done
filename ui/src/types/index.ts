@@ -918,7 +918,7 @@ export interface MeetingDetail {
   update_records: { id: string; title: string; meeting_date: string; confirmation: MeetingRecord['confirmation'] }[];
   sources: MeetingSource[];
   /** The versions of its text, when it has a folder of its own: the reviewed one (`v1`) and any made by Transcribe again. */
-  versions: { id: string; at: string; made_from: 'review' | 'transcription'; model: string | null; current: boolean }[];
+  versions: { id: string; at: string; made_from: 'review' | 'transcription' | 'correction'; model: string | null; correction: string | null; current: boolean }[];
   /** Transcribe again: waiting, running or failed; null when none. */
   transcription: { file: string; model: string; status: 'pending' | 'running' | 'failed'; error: string | null; started_at: string | null } | null;
   /** How far it got, when this dashboard runs it. */

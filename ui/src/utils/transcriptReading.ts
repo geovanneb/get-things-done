@@ -43,7 +43,7 @@ export function transcriptParts(markdown: string): TranscriptPart[] | null {
   if (close < 0) return null;
   const parts: TranscriptPart[] = [];
   for (const line of lines.slice(open + 1, close)) {
-    const time = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\]( Speaker \d{1,3})?$/.exec(line);
+    const time = /^(?:#\d+ )?\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\]( Speaker \d{1,3})?$/.exec(line);
     const last = parts[parts.length - 1];
     if (time) parts.push({ time: time[1]!, ...(time[2] ? { speaker: time[2].trim() } : {}), text: '' });
     else if (line.startsWith('  ') && last) last.text += (last.text ? ' ' : '') + line.trim();
@@ -66,7 +66,7 @@ export function transcriptTurns(markdown: string): TranscriptPart[] | null {
   if (close < 0) return null;
   const parts: TranscriptPart[] = [];
   for (const line of lines.slice(open + 1, close)) {
-    const turn = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\](?: (.+))?$/.exec(line);
+    const turn = /^(?:#\d+ )?\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\](?: (.+))?$/.exec(line);
     const last = parts[parts.length - 1];
     if (turn) {
       const who = turn[2]?.trim();

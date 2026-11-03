@@ -84,7 +84,8 @@ export function VersionsSection({ detail, names, busy, onChoose }: {
             <span style={{ flex: '1 1 140px', minWidth: 0 }}>
               <strong>{v.id === 'v1' ? 'Reviewed' : `Version ${v.id.slice(1)}`}</strong>
               <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                {v.made_from === 'transcription' ? `${names[v.model ?? ''] ?? v.model}, ${when(v.at)}` : `As reviewed, ${when(v.at)}`}
+                {v.made_from === 'transcription' ? `${names[v.model ?? ''] ?? v.model}, ${when(v.at)}`
+                  : v.made_from === 'correction' ? `Corrected in ${v.correction}, ${when(v.at)}` : `As reviewed, ${when(v.at)}`}
               </span>
             </span>
             {v.current
@@ -93,7 +94,7 @@ export function VersionsSection({ detail, names, busy, onChoose }: {
           </li>
         ))}
       </ul>
-      {detail.versions.find((v) => v.current)?.id !== 'v1' && (
+      {detail.versions.find((v) => v.current)?.made_from === 'transcription' && (
         <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           The record stays the account of the reviewed version. Tasks made from it keep what they used.
         </p>

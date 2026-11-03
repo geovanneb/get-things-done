@@ -19,6 +19,9 @@ minor versions may include breaking changes.
   meeting moves its whole folder to the trash (#239).
 
 ### Added
+- **Numbered turns in transcripts.** Readable copies of WebVTT transcripts and recordings made from now on
+  number each turn (`#12 [00:14:03 → 00:14:21] Speaker 2`), so a correction can name exactly where a word
+  changes. Copies made before are read the same way (#239).
 - **Transcribe again.** A reviewed meeting whose recording is kept can be transcribed again with another
   model, from its Files tab. The result is added as a new version: the transcript you reviewed stays in use
   until you choose the new one in the side panel, the record stays as it was confirmed, and tasks keep what

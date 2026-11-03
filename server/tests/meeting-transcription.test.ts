@@ -96,7 +96,7 @@ test('a queued recording is transcribed, its transcript joins the meeting, and t
   assert.equal(r.owner, undefined, 'a finished job leaves no owner');
   const text = await fsp.readFile(path.join(ws, 'context-updates', 'meeting-queue', id, 'workshop.transcript.md'), 'utf-8');
   assert.match(text, /\*\*Complete\.\*\*/);
-  assert.match(text, /Fictional budget review\.\n\n\[00:00:02/);
+  assert.match(text, /Fictional budget review\.\n\n#2 \[00:00:02/);
   assert.ok((await queue.loadMeeting(id)).files.some((f) => f.name === 'workshop.transcript.md' && f.sha256 === r.transcript_sha256));
   assert.equal(job.progress(), null);
   await assert.rejects(fsp.access(path.join(ws, '.situation-board', 'routines', 'transcription.lock')), 'the job lock is released');

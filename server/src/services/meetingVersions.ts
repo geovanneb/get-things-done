@@ -7,6 +7,8 @@ import { hashFile } from '../utils/fileHash';
 import { fileInside, workspaceEntry } from '../utils/files';
 import { lock, unlock } from '../utils/fileLock';
 import { processAlive } from './runState';
+import { applyChanges } from './transcriptChanges';
+import { decodeText } from '../utils/transcript';
 
 /**
  * The versions of a meeting's text in its folder, and Transcribe again: everything that changes meeting.json after
@@ -233,4 +235,70 @@ export async function recoverTranscriptions(ws: string, active: string | null): 
       }
     }).catch(() => {});
   }
+}
+
+/** A version's text files, read as text; null for a file it does not list or that is not text. */
+function versionReader(folder: Folder, version: FolderVersion): (name: string) => Promise<string | null> {
+  return async (name) => {
+    if (!version.files.some((f) => f.name === name)) return null;
+    const full = await fileInside(path.join(folder.dir, version.id), name).catch(() => null);
+    return full ? decodeText(await fsp.readFile(full)) : null;
+  };
+}
+
+/**
+ * Whether corrections to the words of a version's transcripts fit, each one in order: null, or why not (turn not
+ * found, old text not there, there more than once, across two lines, an original that cannot change with its copy).
+ * Reads only: for the review of a correction, before it is approved.
+ */
+export async function checkTranscriptChanges(ws: string, id: string, version: unknown, changes: unknown): Promise<(string | null)[]> {
+  const folder = await readFolder(ws, id);
+  if (folder.state !== 'ok') throw httpError(folder.state === 'none' ? 404 : 409, folder.state === 'none' ? 'This meeting has no folder of its own' : `This meeting's folder cannot be used: ${folder.reason}`);
+  const v = folder.manifest.versions.find((x) => x.id === version);
+  if (!v) throw httpError(404, `This meeting has no version ${String(version)}`);
+  return (await applyChanges(changes, versionReader(folder, v))).problems;
+}
+
+/**
+ * Writes the next version of a meeting's text: `from_version` with exactly these changes (the originals and their
+ * readable copies together), and makes it the current one, since approving the correction is the choice. Refused, with
+ * nothing written, when `from_version` is not the current version any more or any change does not fit.
+ */
+export async function writeCorrectedVersion(ws: string, id: string, input: { from_version: unknown; correction: unknown; changes: unknown }): Promise<string> {
+  if (typeof input.correction !== 'string' || !/^CU-\d{4}-\d{4}$/.test(input.correction)) throw httpError(400, 'Invalid correction: the id of the correction update');
+  return withFolder(ws, id, async (folder) => {
+    const m = folder.manifest;
+    if (input.from_version !== m.current) throw httpError(409, `This meeting's text changed since the correction started (${m.current} is in use now): start the correction again`);
+    const base = m.versions.find((v) => v.id === m.current)!;
+    const { files, problems } = await applyChanges(input.changes, versionReader(folder, base));
+    const wrong = problems.map((p, i) => (p ? `change ${i + 1}: ${p}` : null)).filter(Boolean);
+    if (wrong.length) throw httpError(409, `These changes no longer fit, so nothing was written: ${wrong.join('; ')}`);
+    const next = nextVersionId(m);
+    const draft = path.join(folder.dir, `.${next}.${randomUUID()}.draft`);
+    try {
+      await fsp.mkdir(draft);
+      const listed: FolderVersion['files'] = [];
+      for (const f of base.files) {
+        const changed = files.get(f.name);
+        if (changed === undefined) {
+          const sha = await place(path.join(folder.versionDir, f.name), path.join(draft, f.name), f.sha256);
+          if (!sha) throw new Error(`${f.name} could not be carried over to the new version`);
+          listed.push({ name: f.name, sha256: sha });
+        } else {
+          await fsp.writeFile(path.join(draft, f.name), changed, { flag: 'wx' });
+          listed.push({ name: f.name, sha256: (await hashFile(path.join(draft, f.name))).sha256 });
+        }
+      }
+      const target = path.join(folder.dir, next);
+      await fsp.rm(target, { recursive: true, force: true });
+      await fsp.rename(draft, target);
+      await writeManifest(folder, {
+        ...m, current: next,
+        versions: [...m.versions, { id: next, at: new Date().toISOString(), made_from: 'correction', correction: input.correction as string, base: base.id, files: listed }],
+      });
+      return next;
+    } finally {
+      await fsp.rm(draft, { recursive: true, force: true }).catch(() => {});
+    }
+  });
 }
