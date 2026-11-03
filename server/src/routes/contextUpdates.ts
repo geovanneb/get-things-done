@@ -3,6 +3,7 @@ import multer from 'multer';
 import { param } from '../utils/params';
 import { sendFile } from '../utils/files';
 import { ContextUpdateService } from '../services/contextUpdateService';
+import { startFollowUp } from '../services/meetingCorrectionService';
 import { AgentRunnerService } from '../services/agentRunner';
 import { scheduleKaizenIntake } from '../services/kaizenIntake';
 import { utf8FileNames } from '../utils/uploadNames';
@@ -116,6 +117,11 @@ router.post('/:id/analysis-run/cancel', async (req: Request, res: Response) => {
 });
 
 // State changes made from the dashboard. The agent commands make the others by editing update.md.
+// POST /api/context-updates/:id/follow-up  from a finished correction: an update to find the old values in the context
+router.post('/:id/follow-up', async (req: Request, res: Response) => {
+  res.status(201).json(await startFollowUp(param(req, 'id')));
+});
+
 router.post('/:id/approve', async (req: Request, res: Response) => {
   res.json(await service.approve(param(req, 'id')));
 });

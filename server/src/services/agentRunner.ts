@@ -602,7 +602,7 @@ export class AgentRunnerService {
       const before = await this.updateStatus(workspace, uid);
       if (before === null) throw httpError(404, `Context update not found: ${uid}`);
       if (!allowedStatus.includes(before)) throw httpError(409, `Cannot ${command} while the update is "${before}"`);
-      if (command === 'analyze') await new ContextUpdateService().analysisPreflight(uid);
+      await new ContextUpdateService().runPreflight(uid, command);
       const targets = command === 'apply' ? await this.acceptedTargets(workspace, uid) : [];
       if (command === 'apply' && targets.length === 0) throw httpError(409, 'Nothing to apply: no accepted change writes a file');
       const check = await this.adapter.status(workspace);

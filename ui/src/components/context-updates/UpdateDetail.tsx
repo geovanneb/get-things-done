@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import { Textarea } from '@/components/common/Input';
@@ -466,6 +466,7 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
 
 export default function UpdateDetail({ id, onBack }: { id: string; onBack: () => void }) {
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const version = useDataVersion('context-updates');
   const { data, loading, error, refetch } = useApi<ContextUpdate>(`/api/context-updates/${id}`, [version]);
   const dispatch = useAppDispatch();
@@ -525,7 +526,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const meta = STATUS_META[u.status];
   const reviewing = u.status === 'in_review';
   // Steps where nothing moves until the user runs a command in the agent.
-  const command = running ? null : u.status === 'ready' ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
+  // A follow-up whose correction is no longer current is never offered for analysis or apply: it is closed or deleted.
+  const command = running || u.follow_up_problem ? null : u.status === 'ready' ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
   const copied = copiedFor === u.status;
   const selectable = u.proposals.filter((p) => !p.problem);
   const acceptedCount = u.proposals.filter((p) => decisions[p.id]?.decision === 'accepted').length;
@@ -533,7 +535,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const recordChoice = (r: MeetingRecord) => shownChoice(confirmations, r.id, r.confirmation);
   const confirmedCount = records.filter((r) => recordChoice(r) === 'confirmed').length;
   // A correction the check refuses (stale, its version gone, a record that does not hold) cannot be approved.
-  const correctionBlocked = u.kind === 'meeting-correction' && (u.correction_review?.blocked.length ?? 0) > 0;
+  const correctionBlocked = (u.kind === 'meeting-correction' && (u.correction_review?.blocked.length ?? 0) > 0) || Boolean(u.follow_up_problem);
   const canApprove = (acceptedCount > 0 || confirmedCount > 0) && !correctionBlocked;
   // Removals are done by the dashboard on approval and a meeting record needs no file; only creates and
   // updates need the apply command.
@@ -543,6 +545,12 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     : !noFileToWrite ? 'After approving, you copy one command to apply.'
     : acceptedCount > 0 ? 'Approving moves the selected files to the trash right away.'
     : 'Approving keeps the confirmed meeting records and finishes the update.';
+
+  // A finished correction that is still the meeting's current version: look for its old values in the context.
+  const followUp = () => run('follow', async () => {
+    const created = await apiPost<{ id: string }>(`/api/context-updates/${u.id}/follow-up`);
+    navigate(`/context/updates/${created.id}`);
+  }, 'Follow-up opened. Analyze it to find notes that still use the old values.');
 
   const run = async (label: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(label);
@@ -709,7 +717,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
           </span>
         </div>
         <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {isCorrection ? <>correction of the meeting record {u.correction?.meeting}, opened from the meeting {formatRelativeDate(u.created_at)}</> : <>{u.kind === 'memory-review' ? 'review of your existing memory · ' : u.kaizen ? '' : <>material from {u.source_date || 'unknown date'} · </>}{u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.kaizen ? 'opened from task feedback' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}</>}
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {isCorrection ? <>correction of the meeting record {u.correction?.meeting}, opened from the meeting {formatRelativeDate(u.created_at)}</> : u.kind === 'correction-follow-up' ? <>follow-up of {u.follows ? <Link to={`/context/updates/${u.follows}`} className="gtd-link">{u.follows}</Link> : 'a correction'}, opened {formatRelativeDate(u.created_at)}</> : <>{u.kind === 'memory-review' ? 'review of your existing memory · ' : u.kaizen ? '' : <>material from {u.source_date || 'unknown date'} · </>}{u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.kaizen ? 'opened from task feedback' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}</>}
           {u.applied_at && <> · finished {formatRelativeDate(u.applied_at)}</>}
         </div>
       </div>
@@ -718,27 +726,29 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
       {/* What to do next: always one clear action. */}
       <section ref={nextRef} aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
-        <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{u.status === 'done' ? doneNext : meta.next}</div>
-        {(u.status === 'ready' || u.status === 'analyzing') && !running && (
+        <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{u.status === 'done' ? doneNext : u.follow_up_problem
+          ? `This follow-up is outdated: ${['in_review', 'approved'].includes(u.status) ? 'close' : 'delete'} it, then follow up the meeting's current correction from the meeting.`
+          : meta.next}</div>
+        {(u.status === 'ready' || u.status === 'analyzing') && !running && !u.follow_up_problem && (
           <CommandBox ref={u.status === 'ready' ? copyRef : undefined} command={`/gtd-context-analyze ${u.id}`} emphasis={u.status === 'ready'}
             label={u.status === 'ready' ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Run in Claude Code to analyze'}
             onCopied={() => setCopiedFor(u.status)} />
         )}
 
-        {['ready', 'analyzing', 'in_review'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
-        {(u.status === 'approved' || u.status === 'applying') && !running && (
+        {['ready', 'analyzing', 'in_review'].includes(u.status) && <AnalysisRun startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
+        {(u.status === 'approved' || u.status === 'applying') && !running && !u.follow_up_problem && (
           <CommandBox ref={u.status === 'approved' ? copyRef : undefined} command={`/gtd-context-apply ${u.id}`} emphasis={u.status === 'approved'}
             label={u.status === 'approved' ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Run in Claude Code to apply your accepted changes'}
             onCopied={() => setCopiedFor(u.status)} />
         )}
-        {['approved', 'applying', 'done'].includes(u.status) && <AnalysisRun updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
-        {(u.status === 'analyzing' || u.status === 'applying') && !running && (
+        {['approved', 'applying', 'done'].includes(u.status) && <AnalysisRun startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
+        {(u.status === 'analyzing' || u.status === 'applying') && !running && !u.follow_up_problem && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             Taking too long, or the agent stopped? Run the same command again: it picks up where it left off.
             {u.status === 'analyzing' && <> Or <button type="button" onClick={reopen} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'inherit' }}>go back to collecting</button>.</>}
           </p>
         )}
-        {(u.status === 'ready' || u.status === 'analyzing') && (
+        {(u.status === 'ready' || u.status === 'analyzing') && !u.follow_up_problem && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             Using Codex or Copilot? Ask it to "analyze context update {u.id}". The workspace instructions explain the steps.
           </p>
@@ -751,6 +761,10 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       </section>
 
       {u.kaizen && <KaizenCard kaizen={u.kaizen} />}
+
+      {u.follow_up_problem && (
+        <HelpBox tone="critical" title="This follow-up no longer matches the meeting's record">{u.follow_up_problem}.</HelpBox>
+      )}
 
       {u.notes && (
         <section aria-label="Notes for the agent">
@@ -834,6 +848,14 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               <section aria-label="Meeting records" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <h4 style={{ ...sectionLabel, margin: 0 }}>Meetings · {records.length}</h4>
                 {isCorrection && u.correction_review && <CorrectionCard review={u.correction_review} explanations={records[0]?.corrections ?? []} open={u.status !== 'done'} rejected={records[0]?.confirmation === 'rejected'} />}
+                {isCorrection && u.status === 'done' && u.correction_review?.current && u.correction_review.changes.length > 0 && records[0]?.confirmation === 'confirmed' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <Button size="sm" variant="secondary" loading={busy === 'follow'} onClick={() => void followUp()}>Check the context</Button>
+                    <span style={{ flex: '1 1 240px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                      Notes written from the record before may still use the old names or terms. Your AI tool looks for them and proposes fixes you review.
+                    </span>
+                  </div>
+                )}
                 {reviewing && isCorrection && (
                   <HelpBox>
                     The corrected record as a whole. Check the changes above against the transcript, then confirm it and approve: the
@@ -858,7 +880,9 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
             {isCorrection ? null : u.proposals.length === 0 ? (
               <HelpBox title="Nothing worth changing">
-                {u.kaizen
+                {u.kind === 'correction-follow-up'
+                  ? 'The agent found no note in your context that still uses the old values.'
+                  : u.kaizen
                   ? 'The agent found no file change that would prevent this. Close the update, or add a note on what to change and analyze again.'
                   : 'The agent found nothing in this material that should change your context. That is a normal result: not every meeting changes what is true.'}{' '}{reviewing && (records.length > 0 ? 'Confirm the meeting records you want to keep and approve, or close the update.' : 'Close the update to finish.')}
               </HelpBox>
@@ -916,7 +940,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             </Button>
             {(u.proposals.length > 0 || records.length > 0) && (
               <Button variant="primary" disabled={!canApprove || saving > 0} loading={busy === 'approve'}
-                title={saving > 0 ? 'Saving your choices...' : correctionBlocked ? 'This correction cannot be approved: see what it says above. Close it, or reject the record' : !canApprove ? 'Tick at least one proposal or confirm a meeting record, or close without changes' : noFileToWrite ? 'Finish this update now: nothing needs the apply command' : 'Lock your selection and get the apply command'}
+                title={saving > 0 ? 'Saving your choices...' : correctionBlocked ? (u.follow_up_problem ? 'This follow-up no longer matches the meeting\'s record: close or delete it' : 'This correction cannot be approved: see what it says above. Close it, or reject the record') : !canApprove ? 'Tick at least one proposal or confirm a meeting record, or close without changes' : noFileToWrite ? 'Finish this update now: nothing needs the apply command' : 'Lock your selection and get the apply command'}
                 onClick={() => run('approve', () => apiPost(`/api/context-updates/${u.id}/approve`),
                   isCorrection ? 'Corrected. The meeting shows the new version of its record.' : !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.')}>
                 {acceptedCount > 0 ? `Approve ${acceptedCount} selected` : isCorrection ? 'Approve correction' : 'Approve'}

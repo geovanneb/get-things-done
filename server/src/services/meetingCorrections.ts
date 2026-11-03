@@ -29,6 +29,8 @@ export interface CorrectionChain {
   head_record: MeetingRecord | null;
   /** Every version from the root to the head, in order. */
   links: ChainLink[];
+  /** The head is a correction that changed something in the version before it (so it can be followed up). */
+  head_changed: boolean;
   /** Corrections of this meeting that are not done yet: one at a time may be open. */
   open: string[];
   /** Corrections that claim this meeting but do not count: not confirmed, malformed, or never reached from the root. */
@@ -84,7 +86,7 @@ export function correctionChain(meeting: string, root: { update_id: string; reco
   const rootRecord = owned && rootUpdate?.status === 'done' ? rootUpdate.meeting_records.find((r) => r.id === root.record_id && r.confirmation === 'confirmed') : undefined;
   const base = { root, open, invalid };
   if (!rootRecord) {
-    return { ...base, state: published.length ? 'broken' : 'original', head: null, head_record: null, links: [] };
+    return { ...base, state: published.length ? 'broken' : 'original', head: null, head_record: null, links: [], head_changed: false };
   }
 
   let head: ChainLink = { update_id: root.update_id, record_id: rootRecord.id, revision: rootRecord.revision, at: null };
@@ -92,6 +94,7 @@ export function correctionChain(meeting: string, root: { update_id: string; reco
   const links: ChainLink[] = [head];
   const reached = new Set<string>();
   let state: ChainState = 'original';
+  let headChanged = false;
   for (;;) {
     const next = published.filter((p) => sameVersion(p.update.correction!.base, head) && !reached.has(p.update.id) && slotsMatch(p.update, rootRecord));
     if (next.length === 0) break;
@@ -99,6 +102,7 @@ export function correctionChain(meeting: string, root: { update_id: string; reco
     const p = next[0]!;
     reached.add(p.update.id);
     head = { update_id: p.update.id, record_id: p.record.id, revision: p.record.revision, at: p.update.applied_at ?? p.update.updated_at ?? null };
+    headChanged = recordDiff(headRecord, p.record).length > 0;
     headRecord = p.record;
     links.push(head);
     state = 'corrected';
@@ -107,7 +111,7 @@ export function correctionChain(meeting: string, root: { update_id: string; reco
   const unreached = published.filter((p) => !reached.has(p.update.id));
   if (unreached.length && state !== 'conflict') state = 'broken';
   invalid.push(...unreached.map((p) => p.update.id));
-  return { ...base, state, head, head_record: headRecord, links };
+  return { ...base, state, head, head_record: headRecord, links, head_changed: state === 'corrected' && headChanged };
 }
 
 /**

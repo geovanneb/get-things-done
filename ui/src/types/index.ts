@@ -578,8 +578,12 @@ export interface ContextUpdate {
   kaizen?: KaizenAnalysis | null;
   /** For a meeting correction: which meeting and which version of its record it corrects. Written by the dashboard. */
   correction?: { meeting: string; root: { update_id: string; record_id: string }; base: RecordVersion } | null;
+  /** For a follow-up of a correction: the correction it follows. Written by the dashboard. */
+  follows?: string | null;
+  /** Detail of a follow-up not done yet: why its material no longer describes the meeting's current record, or null. */
+  follow_up_problem?: string | null;
   /** Detail of a correction only: the version corrected, whether it is still current, and what changed in it. */
-  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[] };
+  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean };
   proposals: ContextUpdateProposal[];
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
@@ -874,7 +878,7 @@ export interface HistoryMeeting {
   /** Whose record is shown: the original update's, or a correction's once one counts. The files stay the original's. */
   record_owner?: { update_id: string; record_id: string } | null;
   /** The versions of the record, once a correction exists; null while there is only the original. */
-  correction?: { state: 'original' | 'corrected' | 'conflict' | 'broken'; head_at: string | null; original: { update_id: string; record_id: string }; open: string[] } | null;
+  correction?: { state: 'original' | 'corrected' | 'conflict' | 'broken'; head_at: string | null; original: { update_id: string; record_id: string }; open: string[]; head_changed?: boolean } | null;
   kept: boolean;
   deleted: { at: string; by: 'user' | 'system-cleanup'; in_trash: boolean } | null;
   retention_start: string;
