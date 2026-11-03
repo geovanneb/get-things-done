@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link, useNavigate } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
@@ -15,7 +15,7 @@ import { formatRelativeDate } from '@/utils/format';
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { doubtLine, doubtsAbout } from '@/utils/recordDoubts';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
-import type { ContextUpdate, ContextUpdateProposal, FieldChange, MeetingPerson, MeetingRecord, MeetingSpeaker, RecordChange, RecordDoubt, Stakeholder } from '@/types';
+import type { ContextUpdate, ContextUpdateProposal, FieldChange, MeetingPerson, MeetingRecord, MeetingSpeaker, RecordChange, RecordDoubt, Stakeholder, TranscriptChangeView, TranscriptReview } from '@/types';
 import AnalysisRun from './AnalysisRun';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
@@ -252,16 +252,104 @@ function ChangeSide({ label, lines, other, tone }: { label: string; lines: strin
   );
 }
 
+/** One line of a turn, the changed words marked: struck out before, underlined after. */
+function WordLine({ line, words, tone }: { line: string; words: string; tone: 'before' | 'after' }) {
+  const at = line.indexOf(words);
+  const color = tone === 'before' ? 'var(--color-critical)' : 'var(--color-success)';
+  const Mark = tone === 'before' ? 'del' : 'ins';
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 2 }}>{tone === 'before' ? 'Before' : 'After'}</div>
+      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', overflowWrap: 'anywhere' }}>
+        {at < 0 ? line : <>{line.slice(0, at)}<Mark style={{ color, fontWeight: 600 }}>{words}</Mark>{line.slice(at + words.length)}</>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The transcript side of a correction: each word change on its turn, before and after. Sure ones and the suggestions
+ * used are what approving writes, as a new version of the meeting's text; the others are offered, or say why not.
+ */
+function TranscriptSection({ review, open, onUse, busy }: { review: TranscriptReview; open: boolean; onUse?: (index: number, use: boolean) => void; busy: boolean }) {
+  const where = (c: TranscriptChangeView) => [c.file, `#${c.turn}`, c.time, c.speaker].filter(Boolean).join(' · ');
+  // The server's reasons are phrased to follow a label ("Transcript change 2: it touches…"); shown alone, as a sentence.
+  const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+  const item = (i: number): CSSProperties => ({ display: 'flex', flexDirection: 'column', gap: 4, ...(i > 0 ? { paddingTop: 10, borderTop: '1px dashed var(--color-border)' } : {}) });
+  const counted = review.changes.filter((c) => c.sure || c.used);
+  const offered = review.changes.filter((c) => !c.sure && !c.used);
+  const lines = (c: TranscriptChangeView) => c.line_before === null || c.line_after === null
+    ? <div style={{ fontSize: 'var(--text-sm)' }}>"{c.before}" to "{c.after}"</div>
+    : (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+        <WordLine line={c.line_before} words={c.before} tone="before" />
+        <WordLine line={c.line_after} words={c.after} tone="after" />
+      </div>
+    );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, borderTop: '1px solid var(--color-border)' }}>
+      <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
+        Transcript{review.made ? ` · new version ${review.made.to}, from ${review.made.from}` : review.base ? ` · on ${review.base}` : ''}
+      </div>
+      {open && review.problem && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>{review.problem}</div>}
+      {counted.length === 0 && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{open ? 'No words change yet: the agent was not sure of these.' : 'No words changed.'}</div>
+      )}
+      {counted.map((c, i) => (
+        <div key={c.index} style={item(i)}>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>{where(c)}</div>
+          {lines(c)}
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span><strong>{c.used ? 'Used by you:' : 'Why:'}</strong> {c.reason}</span>
+            {c.used && onUse && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onUse(c.index, false)} aria-label={`Undo: transcript turn ${c.turn} "${c.before}" to "${c.after}"`}>Undo</Button>}
+          </div>
+          {open && c.problem && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-critical)' }}>{sentence(c.problem)}</div>}
+        </div>
+      ))}
+      {open && offered.length > 0 && (
+        <HelpBox tone="warning" title="Not sure: suggested, not applied">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {offered.map((c, i) => (
+              <div key={c.index} style={item(i)}>
+                <div style={{ fontSize: 'var(--text-xs)', overflowWrap: 'anywhere' }}>{where(c)}</div>
+                {lines(c)}
+                <div style={{ fontSize: 'var(--text-xs)' }}>{c.reason}</div>
+                {onUse && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Button size="sm" variant="secondary" disabled={busy || Boolean(c.problem)} onClick={() => onUse(c.index, true)}
+                      aria-label={`Use suggestion: transcript turn ${c.turn} "${c.before}" to "${c.after}"`}>Use suggestion</Button>
+                    {c.problem && <span style={{ fontSize: 'var(--text-xs)' }}>{sentence(c.problem)}</span>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {onUse ? 'Using a suggestion updates this draft record. Confirm it again and approve to write the new version.' : 'These are not applied. Check them in the transcript.'}
+        </HelpBox>
+      )}
+      {open && counted.length > 0 && (
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+          Approving writes these as a new version of the meeting's text. The version before stays, and you can go back to it.
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * A correction, as the executive judges it: each field the server found changed, before and after, with the agent's
  * reason. Changes the agent was not sure of are listed apart: the record keeps the old value for those.
  */
-function CorrectionCard({ review, explanations, open, rejected, onUse, busy = false }: {
+function CorrectionCard({ review, explanations, open, rejected, onUse, onUseWords, busy = false }: {
   review: NonNullable<ContextUpdate['correction_review']>; explanations: RecordChange[]; open: boolean; rejected: boolean;
   /** Set while the correction is in review: use a suggestion (by its place among the explanations), or take it back. */
   onUse?: (index: number, use: boolean) => void;
+  /** The same for a transcript suggestion, by its place in the record's transcript changes. */
+  onUseWords?: (index: number, use: boolean) => void;
   busy?: boolean;
 }) {
+  const words = review.transcript ?? null;
+  const wordsCount = Boolean(words?.changes.some((c) => c.sure || c.used));
   const sure = explanations.filter((c) => c.sure);
   // Each with its place among the explanations: what the server knows it by.
   const used = explanations.map((c, index) => ({ c, index })).filter((x) => !x.c.sure && x.c.taken);
@@ -269,7 +357,13 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, busy = fa
   const stateOf = (index: number) => review.suggestions.find((s) => s.index === index);
   return (
     <section aria-label="What the correction changes" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <h4 style={{ ...sectionLabel, margin: 0 }}>{open ? 'What changes in the record' : rejected ? 'What this correction suggested (rejected, not applied)' : 'What changed in the record'}</h4>
+      <h4 style={{ ...sectionLabel, margin: 0 }}>{open ? 'What this correction changes' : rejected ? 'What this correction suggested (rejected, not applied)' : 'What this correction changed'}</h4>
+      {open && review.finishing && (
+        <HelpBox tone="warning" title="Finishing was interrupted">
+          The new version of the meeting's text may already be written. Approve to complete this correction. Until then nothing in it can
+          change; it can be closed only if it has not written its new version yet.
+        </HelpBox>
+      )}
       {open && review.blocked.length > 0 && (
         <HelpBox tone="critical" title={review.stale ? 'Another correction of this meeting finished first' : 'This correction cannot be approved'}>
           <ul style={{ margin: 0, paddingLeft: 18 }}>{review.blocked.map((b, i) => <li key={i}>{b}</li>)}</ul>
@@ -280,9 +374,9 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, busy = fa
           The version this corrected is no longer here, so the changes cannot be shown against it.
         </p>
       )}
-      {review.base && review.changes.length === 0 && (
+      {review.base && review.changes.length === 0 && !wordsCount && (
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          {!open ? 'Nothing changed.' : suggestions.length ? 'No changes applied yet: the agent was not sure of these. Use the ones that are right, or close this correction.' : 'Nothing: the agent found nothing to correct. Close this correction to keep the record as it is.'}
+          {!open ? 'Nothing changed.' : suggestions.length || words?.changes.length ? 'No changes applied yet: the agent was not sure of these. Use the ones that are right, or close this correction.' : 'Nothing: the agent found nothing to correct. Close this correction to keep the record as it is.'}
         </p>
       )}
       {review.changes.map((c: FieldChange) => {
@@ -352,6 +446,7 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, busy = fa
             : `The record keeps the current value for these${open ? ', and approving does not change them' : ''}. Check them in the transcript.`}
         </HelpBox>
       )}
+      {words && !(rejected && !open) && <TranscriptSection review={words} open={open} busy={busy} {...(onUseWords ? { onUse: onUseWords } : {})} />}
     </section>
   );
 }
@@ -658,11 +753,11 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   };
 
   // A correction's suggestion used or taken back: a change to the record, saved like a speaker, then confirmed again.
-  const applySuggestion = async (record: MeetingRecord, index: number, use: boolean) => {
+  const applySuggestion = async (record: MeetingRecord, index: number, use: boolean, kind: 'suggestions' | 'transcript-suggestions' = 'suggestions') => {
     const ticket = pendingRecords.current.start(record.id);
     updateSaving();
     try {
-      await apiPost(`/api/context-updates/${u.id}/meeting-records/${record.id}/suggestions/${index}`, { revision: record.revision, use });
+      await apiPost(`/api/context-updates/${u.id}/meeting-records/${record.id}/${kind}/${index}`, { revision: record.revision, use });
       setConfirmations((c) => ({ ...c, [record.id]: null }));
       await refetch();
     } catch (err) {
@@ -912,8 +1007,11 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
               <section aria-label="Meeting records" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <h4 style={{ ...sectionLabel, margin: 0 }}>Meetings · {records.length}</h4>
                 {isCorrection && u.correction_review && <CorrectionCard review={u.correction_review} explanations={records[0]?.corrections ?? []} open={u.status !== 'done'} rejected={records[0]?.confirmation === 'rejected'}
-                  busy={saving > 0} {...(reviewing && records[0] ? { onUse: (index: number, use: boolean) => void applySuggestion(records[0]!, index, use) } : {})} />}
-                {isCorrection && u.status === 'done' && u.correction_review?.current && u.correction_review.changes.length > 0 && records[0]?.confirmation === 'confirmed' && (
+                  busy={saving > 0} {...(reviewing && records[0] && !u.correction_review.finishing ? {
+                    onUse: (index: number, use: boolean) => void applySuggestion(records[0]!, index, use),
+                    onUseWords: (index: number, use: boolean) => void applySuggestion(records[0]!, index, use, 'transcript-suggestions'),
+                  } : {})} />}
+                {isCorrection && u.status === 'done' && u.correction_review?.current && (u.correction_review.changes.length > 0 || Boolean(u.correction_review.transcript?.made)) && records[0]?.confirmation === 'confirmed' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <Button size="sm" variant="secondary" loading={busy === 'follow'} onClick={() => void followUp()}>Check the context</Button>
                     <span style={{ flex: '1 1 240px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>

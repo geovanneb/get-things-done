@@ -331,13 +331,18 @@ export async function writeCorrectedVersion(ws: string, id: string, input: { fro
     const written = m.versions.find((v) => v.made_from === 'correction' && v.correction === input.correction);
     if (written) {
       if (written.receipt === input.receipt) return written.id;
-      throw httpError(409, `${input.correction as string} already wrote ${written.id}, from something else than what is finished now: nothing was written`);
+      // Marked, so a caller never takes it for "nothing was written": a version of this correction exists.
+      throw Object.assign(httpError(409, `${input.correction as string} already wrote ${written.id}, from something else than what is finished now: nothing was written`), { written: written.id });
     }
-    if (input.from_version !== m.current) throw httpError(409, `This meeting's text changed since the correction started (${m.current} is in use now): start the correction again`);
+    // Refused after looking: marked `unwritten`, the only refusal that shows no version of this correction exists.
+    const unwritten = (err: Error) => Object.assign(err, { unwritten: true });
+    if (input.from_version !== m.current) throw unwritten(httpError(409, `This meeting's text changed since the correction started (${m.current} is in use now): start the correction again`));
     const base = m.versions.find((v) => v.id === m.current)!;
-    const { files, problems } = await applyChanges(input.changes, versionReader(folder, base));
+    const { files, problems } = await applyChanges(input.changes, versionReader(folder, base)).catch((err: Error & { statusCode?: number }) => {
+      throw err.statusCode === 409 ? unwritten(err) : err;
+    });
     const wrong = problems.map((p, i) => (p ? `change ${i + 1}: ${p}` : null)).filter(Boolean);
-    if (wrong.length) throw httpError(409, `These changes no longer fit, so nothing was written: ${wrong.join('; ')}`);
+    if (wrong.length) throw unwritten(httpError(409, `These changes no longer fit, so nothing was written: ${wrong.join('; ')}`));
     const next = nextVersionId(m);
     const draft = path.join(folder.dir, `.${next}.${randomUUID()}.draft`);
     try {
@@ -405,4 +410,15 @@ export function speakerNamesHoldForPin(manifest: FolderManifest | null, pinPath:
   const version = versionId ? manifest.versions.find((v) => v.id === versionId) : undefined;
   const sha = version?.files.find((f) => f.name === source)?.sha256;
   return sha !== undefined && speakerNamesHold(manifest, source, sha, confirmedOn);
+}
+
+/**
+ * One text file of a meeting's version, read as text, only as the version lists it (its hash is checked). Null when the
+ * meeting has no folder, the version or file is not listed, or it is not text. Read only.
+ */
+export async function readVersionFile(ws: string, id: string, version: string, name: string): Promise<string | null> {
+  const folder = await readFolder(ws, id);
+  if (folder.state !== 'ok') return null;
+  const v = folder.manifest.versions.find((x) => x.id === version);
+  return v ? versionReader(folder, v)(name) : null;
 }

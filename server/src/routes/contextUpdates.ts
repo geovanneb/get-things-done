@@ -90,6 +90,13 @@ router.post('/:id/meeting-records/:recordId/suggestions/:index', async (req: Req
   res.json(await service.useSuggestion(param(req, 'id'), param(req, 'recordId'), index, body(req)));
 });
 
+// POST /api/context-updates/:id/meeting-records/:recordId/transcript-suggestions/:index  { revision, use }  a correction's
+// transcript suggestion used, or taken back; the meeting's text changes only when the correction is finished
+router.post('/:id/meeting-records/:recordId/transcript-suggestions/:index', async (req: Request, res: Response) => {
+  const index = /^\d{1,3}$/.test(param(req, 'index')) ? Number(param(req, 'index')) : -1;
+  res.json(await service.useTranscriptSuggestion(param(req, 'id'), param(req, 'recordId'), index, body(req)));
+});
+
 // PUT /api/context-updates/:id/meeting-records/:recordId/speaker  { label, source, person, revision }  null: unknown
 router.put('/:id/meeting-records/:recordId/speaker', async (req: Request, res: Response) => {
   res.json(await service.setSpeaker(param(req, 'id'), param(req, 'recordId'), body(req)));

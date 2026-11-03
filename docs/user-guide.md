@@ -725,7 +725,11 @@ From a reviewed meeting's **Files** tab, choose **Transcribe again** and a downl
 
 ### Correcting a record
 
-Choose **Suggest corrections** from a confirmed, final meeting record. This creates a context update for analysis and review. Suggestions marked not sure leave the original value in place unless you choose to use them; you can take them back. Confirm and approve the correction before it becomes the current record. A follow-up can check the context for old values through the usual proposed-change workflow.
+Choose **Suggest corrections** from a confirmed, final meeting record. This creates a context update for analysis and review. Suggestions marked not sure leave the original value in place unless you choose to use them; you can take them back. Confirm and approve the correction before it becomes the current record.
+
+A correction can also fix words the transcript misheard, for meetings whose text is kept in version folders. Its **Transcript** section shows each change in its line, before and after. Approving writes the fixed text as a new version, made from the version the correction started on; the version before stays. If approving stops part way, the page says so: approve again to finish it.
+
+A follow-up can check the context for old values through the usual proposed-change workflow.
 
 ### Tasks that use meetings
 
