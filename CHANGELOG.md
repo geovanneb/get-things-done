@@ -11,7 +11,8 @@ minor versions may include breaking changes.
 ### Changed
 - **A reviewed meeting gets its own folder.** With meeting text kept, a meeting's transcripts and notes move
   out of `context-updates/` into `meetings/<id>/` once its review is done, listed with their SHA-256 in
-  `meeting.json`. `meetings/` is left out of git and out of agents' reach unless a task names the meeting.
+  `meeting.json`. `meetings/` is left out of git, and agents are told to read a meeting only when a task
+  names it (an instruction, not a lock: agents can read the whole workspace).
   Meetings kept before stay where they are and still open, play and search as before (#239).
 - **Kept recordings live with their meeting.** With Keep recordings on, a recording moves into its meeting's
   folder with its transcript once the review is done, instead of keeping every material of the digest.

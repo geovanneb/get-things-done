@@ -44,7 +44,13 @@ A meeting's files live in one of two places, and every reader asks `meetingFiles
   A folder of another update, or one whose `meeting.json` cannot be read, is never used.
 
 `meetings/` is private: git-ignored, never task input unless a task's pinned sources name a file
-in it, and never part of anything shared. There is no publisher yet; when one is added (Phase 3),
+in it, and never part of anything shared. "Task input" is what the dashboard packages and what the
+agent instructions allow; it is not read isolation. The agent permissions in `templates/ai/` allow
+reading the whole workspace (Claude Code's `Read(**)`, for example) and deny only edits under
+`meetings/`, and a run inherits them: an agent that does not follow its instructions can read any
+meeting. Treat transcripts as untrusted evidence, and do not describe pinned sources as a sandbox.
+Real isolation would need a run-specific reader or sandbox holding only the pinned files, with a
+test that an unmentioned meeting cannot be read. There is no publisher yet; when one is added (Phase 3),
 it must refuse every path under `meetings/` and `context-updates/` itself, not rely on git-ignore.
 Versions after `v1` are written by Transcribe again (`meetingVersions.ts`): the transcription job takes a
 request from `meeting.json` once no queued recording waits, and the result becomes `v2`, `v3`… (the other
@@ -137,10 +143,13 @@ Remaining engineering work should be separate, measured changes:
   integration coverage. Current boundary tests instantiate Express independently;
   smoke tests exercise the actual composition.
 - Profile large workspaces, then consider bounded scan concurrency and route-level
-  UI splitting. The current production entry chunk is about 551 KB minified and
-  triggers Vite's size warning; no startup latency claim has been measured.
-- Review the two moderate React Router advisories reported by npm audit. Their
-  suggested fix is a major-version upgrade, requiring a dedicated routing review.
+  UI splitting. As of 3 November 2026 (main at `630d9a5`) the production entry chunk is
+  about 345 KB minified (104 KB gzip); no startup latency claim has been measured.
+- Dependencies, as of the same date: the production audit (`npm audit --omit=dev`) reports
+  no advisories, and the React Router advisories noted earlier no longer apply. The full
+  audits of the root and of `desktop/` still report one moderate minimatch advisory
+  (GHSA-g3hv-75wg-m249) through lint and build tooling; update those chains after a
+  compatibility check rather than taking npm's suggested downgrades.
 
 This assessment is a targeted source review and regression pass, not a penetration
 test, exhaustive platform certification or a guarantee that all defects are absent.

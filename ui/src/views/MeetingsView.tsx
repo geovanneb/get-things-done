@@ -55,7 +55,7 @@ function KeepTextQuestion({ days, onAnswered }: { days: number; onAnswered: () =
           <li>Each meeting is kept {days} days from the day it took place or was imported, then moved to the trash. Change this in Routines &gt; System cleanup &gt; Meetings.</li>
           <li>Mark a meeting <strong>Keep this meeting</strong> to keep it longer, or delete it yourself at any time.</li>
           <li>The trash holds it 30 more days, so you can restore it. It stays on this computer until then.</li>
-          <li>Once its review is done, a meeting's text moves to its own folder under meetings/, which git leaves out. Agents read it only when a task names the meeting.</li>
+          <li>Once its review is done, a meeting's text moves to its own folder under meetings/, which git leaves out. Agents are told to read it only when a task names the meeting, but they can read every file in your workspace.</li>
         </ul>
         <span>Meetings reviewed before this version keep their confirmed records, but their transcripts were already deleted.</span>
         {error && <Notice tone="critical" title="Your choice was not saved.">{error} Try again.</Notice>}
