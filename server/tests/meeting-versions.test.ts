@@ -6,13 +6,15 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { MeetingHistoryService } from '../src/services/meetingHistoryService';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
 import { MeetingTranscriptionService } from '../src/services/meetingTranscription';
 import { readFolder } from '../src/services/meetingFolder';
-import { cancelTranscription, chooseVersion, recoverTranscriptions, requestTranscription } from '../src/services/meetingVersions';
+import { cancelTranscription, chooseVersion, claimTranscription, endTranscriptionJob, failTranscription, giveBackTranscription, recoverTranscriptions, requestIdentity, requestTranscription, speakerNamesHold, speakerNamesHoldForPin, waitingTranscriptions } from '../src/services/meetingVersions';
+import { TranscriptionEngine as Engine } from '../src/services/transcription/engine';
+import type { FolderManifest } from '../src/services/meetingFolder';
 import { renderSheet, syncTaskMeetings, checkTaskMeetings } from '../src/services/meetingSources';
 import { TaskService } from '../src/services/taskService';
 import { stringifyMarkdown } from '../src/utils/markdown';
@@ -55,7 +57,7 @@ const speaks = (texts: string[]): Transcribe => async (_wav, o) => {
 };
 
 /** A recorded meeting reviewed with Keep recordings on: its recording and its transcript in its own folder. */
-async function reviewed(ws: string): Promise<void> {
+async function reviewed(ws: string, speakers = false): Promise<void> {
   const id = 'CU-2026-0001';
   const dir = path.join(ws, 'context-updates', id);
   const files: Record<string, string> = { 'MQ-2026-0003-call.wav': WAV, 'MQ-2026-0003-call.transcript.md': FIRST, 'MQ-2026-0003-notes.md': 'Fictional notes' };
@@ -71,7 +73,10 @@ async function reviewed(ws: string): Promise<void> {
       recordings: [{ source: 'call.wav', source_sha256: sha(WAV), transcript: 'MQ-2026-0003-call.transcript.md', transcript_sha256: sha(FIRST), complete: true, file: 'MQ-2026-0003-call.wav' }],
     }],
     transcripts: [{ file: 'MQ-2026-0003-call.transcript.md', source: 'MQ-2026-0003-call.wav', source_sha256: sha(WAV), sha256: sha(FIRST), complete: true, kind: 'audio' }],
-    meeting_records: [{ id: 'M-01', title: 'Recorded call', meeting_date: '2026-10-27', meeting: 'MQ-2026-0003', source: 'MQ-2026-0003-call.transcript.md', attendees: [{ name: 'Jane Doe' }], decisions: [] }],
+    meeting_records: [{
+      id: 'M-01', title: 'Recorded call', meeting_date: '2026-10-27', meeting: 'MQ-2026-0003', source: 'MQ-2026-0003-call.transcript.md', attendees: [{ name: 'Jane Doe' }], decisions: [],
+      ...(speakers ? { speakers: [{ label: 'Speaker 1', source: 'MQ-2026-0003-call.transcript.md', person: { name: 'Jane Doe' }, reason: 'Named in the call.' }], confirmation: 'confirmed' } : {}),
+    }],
   }));
   await updates.close(id);
 }
@@ -160,7 +165,7 @@ test('a transcription left running by a dashboard that is gone goes back in line
   await fsp.mkdir(path.join(ws, 'meetings', 'MQ-2026-0003', 'v2'));
   await fsp.writeFile(path.join(ws, 'meetings', 'MQ-2026-0003', 'v2', 'MQ-2026-0003-call.transcript.md'), 'half');
 
-  await recoverTranscriptions(ws, null);
+  await recoverTranscriptions(ws);
   const m = await manifest(ws);
   assert.deepEqual([m.transcribe?.status, m.transcribe?.owner], ['pending', undefined]);
   assert.equal(await fsp.access(path.join(ws, 'meetings', 'MQ-2026-0003', 'v2')).then(() => true, () => false), false);
@@ -200,4 +205,131 @@ test('Transcribe again is refused for a model that is not a transcription model,
   const data = JSON.parse(await fsp.readFile(file, 'utf-8'));
   await fsp.writeFile(file, JSON.stringify({ ...data, transcribe: { file: '../../update.md', transcript: 'x.md', model: 'm', language: 'auto', speakers: false, status: 'pending', requested_at: 'x' } }));
   assert.equal((await manifest(ws)).transcribe, undefined);
+});
+
+test('a claim takes only the very request it chose: one stopped and asked for again meanwhile is left alone', async (t) => {
+  const ws = await workspace(t);
+  await reviewed(ws);
+  await ask(ws);
+  const [listed] = await waitingTranscriptions(ws);
+  // Another dashboard stops it and asks again, with another model, while this one checks its models.
+  await cancelTranscription(ws, 'MQ-2026-0003');
+  await ask(ws, 'sense-voice');
+  const job = { generation: randomUUID(), token: 't', model: 'whisper-large-v3-turbo', language: 'auto' };
+  assert.equal(await claimTranscription(ws, 'MQ-2026-0003', requestIdentity(listed!.request), job), null);
+  assert.deepEqual([(await manifest(ws)).transcribe?.status, (await manifest(ws)).transcribe?.model], ['pending', 'sense-voice'], 'the new request untouched');
+  const [now] = await waitingTranscriptions(ws);
+  const claimed = await claimTranscription(ws, 'MQ-2026-0003', requestIdentity(now!.request), job);
+  assert.equal(claimed?.status, 'running');
+  endTranscriptionJob(job.generation);
+});
+
+test('recovery never takes a job of this dashboard that runs for an orphan, and cleans up converted audio of jobs gone', async (t) => {
+  const ws = await workspace(t);
+  await reviewed(ws);
+  await ask(ws);
+  const [listed] = await waitingTranscriptions(ws);
+  const job = { generation: randomUUID(), token: 't', model: 'whisper-large-v3-turbo', language: 'auto' };
+  assert.ok(await claimTranscription(ws, 'MQ-2026-0003', requestIdentity(listed!.request), job));
+  const work = path.join(ws, 'meetings', 'MQ-2026-0003', '.transcribing');
+  await fsp.mkdir(work);
+  const mine = `${job.generation}-${process.pid}.wav`;
+  const dead = `${randomUUID()}-999999999.wav`;
+  const ended = `${randomUUID()}-${process.pid}.wav`;
+  for (const n of [mine, dead, ended]) await fsp.writeFile(path.join(work, n), 'wav');
+
+  // A recovery that began before the job: it still sees it running, here and now.
+  await recoverTranscriptions(ws);
+  assert.equal((await manifest(ws)).transcribe?.status, 'running');
+  assert.deepEqual((await fsp.readdir(work)).sort(), [mine], 'only the running job keeps its converted audio');
+
+  // Once the job has ended in this dashboard, a running request left on disk is an orphan.
+  endTranscriptionJob(job.generation);
+  await recoverTranscriptions(ws);
+  assert.equal((await manifest(ws)).transcribe?.status, 'pending');
+  assert.deepEqual(await fsp.readdir(work), []);
+});
+
+test('a failure or give-back that cannot be saved is an error, never taken as done; one no longer ours is not', async (t) => {
+  const ws = await workspace(t);
+  await reviewed(ws);
+  await ask(ws);
+  const [listed] = await waitingTranscriptions(ws);
+  const job = { generation: randomUUID(), token: 't', model: 'whisper-large-v3-turbo', language: 'auto' };
+  await claimTranscription(ws, 'MQ-2026-0003', requestIdentity(listed!.request), job);
+  const dir = path.join(ws, 'meetings', 'MQ-2026-0003');
+  await fsp.chmod(dir, 0o555);
+  try {
+    await assert.rejects(failTranscription(ws, 'MQ-2026-0003', job, 'Something failed.'));
+    await assert.rejects(giveBackTranscription(ws, 'MQ-2026-0003', job));
+  } finally { await fsp.chmod(dir, 0o755); }
+  assert.equal(await failTranscription(ws, 'MQ-2026-0003', { generation: 'other', token: 't' }, 'x'), false);
+  assert.equal(await giveBackTranscription(ws, 'MQ-2026-0003', job), true);
+  endTranscriptionJob(job.generation);
+});
+
+test('a Transcribe again stopped for a live recording goes back in line, never fails', async (t) => {
+  const ws = await workspace(t);
+  await reviewed(ws);
+  await ask(ws);
+  let started!: () => void;
+  const running = new Promise<void>((r) => { started = r; });
+  const waits: Transcribe = (_wav, o) => new Promise((_resolve, reject) => {
+    started();
+    o.signal?.addEventListener('abort', () => reject(new Error('Cancelled.')));
+  });
+  await new MeetingTranscriptionService(new MeetingDigestService(), models, engine(waits).engine).tick();
+  await running;
+  const release = await Engine.roomForLive();
+  await MeetingTranscriptionService.settled();
+  release();
+  const m = await manifest(ws);
+  assert.deepEqual([m.transcribe?.status, m.transcribe?.error, m.versions.length], ['pending', undefined, 1]);
+});
+
+test("a record's speaker names hold for the text they were confirmed on and corrections of its words, judged on the pinned text", () => {
+  const v = (id: string, made_from: 'review' | 'transcription' | 'correction', sha256: string, base?: string) => ({ id, at: '', made_from, files: [{ name: 'call.wav', sha256: `wav` }, { name: 'call.transcript.md', sha256 }], ...(base ? { base, correction: 'CU-2026-0009' } : {}) });
+  const m = (current: string, versions: ReturnType<typeof v>[]) => ({ current, versions } as unknown as FolderManifest);
+  const holds = (manifest: FolderManifest | null, pinned: string, confirmedOn?: string) => speakerNamesHold(manifest, 'call.transcript.md', pinned, confirmedOn);
+  const two = m('v1', [v('v1', 'review', 'a'), v('v2', 'transcription', 'b')]);
+  assert.equal(holds(null, 'a'), true, 'no folder: the reviewed text is the only one');
+  assert.equal(holds(two, 'a', 'a'), true, 'the text they were confirmed on');
+  assert.equal(holds(two, 'b', 'a'), false, 'a new transcription, numbered anew');
+  // Pinned v2 while another window chose v1 back: judged on the pinned text, never on which version is current.
+  assert.equal(holds(m('v1', [v('v1', 'review', 'a'), v('v2', 'transcription', 'b')]), 'b', 'a'), false);
+  // Words corrected: the labels stay, so the names hold; a correction of the new transcription does not bring them.
+  assert.equal(holds(m('v2', [v('v1', 'review', 'a'), v('v2', 'correction', 'c', 'v1')]), 'c', 'a'), true);
+  assert.equal(holds(m('v3', [v('v1', 'review', 'a'), v('v2', 'transcription', 'b'), v('v3', 'correction', 'c', 'v2')]), 'c', 'a'), false);
+  // Names confirmed again on v2 (a correction of the speakers): they hold for v2, and no longer for v1.
+  assert.equal(holds(two, 'b', 'b'), true);
+  assert.equal(holds(two, 'a', 'b'), false);
+  // A record confirmed before evidence was kept: taken at the reviewed text.
+  assert.equal(holds(two, 'a', undefined), true);
+  assert.equal(holds(two, 'b', undefined), false);
+  // A pin names its version; a WebVTT's readable copy is judged by the original in that version.
+  const vtt = m('v2', [{ id: 'v1', at: '', made_from: 'review', files: [{ name: 'call.vtt', sha256: 'x' }, { name: 'call.transcript.md', sha256: 'y' }] }, { id: 'v2', at: '', made_from: 'correction', base: 'v1', correction: 'CU-2026-0009', files: [{ name: 'call.vtt', sha256: 'x2' }, { name: 'call.transcript.md', sha256: 'y2' }] }] as unknown as FolderManifest['versions']);
+  assert.equal(speakerNamesHoldForPin(vtt, 'meetings/MQ-2026-0003/v2/call.transcript.md', 'call.vtt', 'x'), true);
+  assert.equal(speakerNamesHoldForPin(vtt, undefined, 'call.vtt', 'x'), false, 'nothing pinned: no text to pair names with');
+  // A folder that cannot be read after pinning: a pin in it is never judged as if the meeting had no folder.
+  assert.equal(speakerNamesHoldForPin(null, 'meetings/MQ-2026-0003/v2/call.transcript.md', 'call.vtt', 'x'), false);
+  assert.equal(speakerNamesHoldForPin(null, 'context-updates/CU-2026-0001/materials/call.transcript.md', 'call.vtt', 'x'), true, 'kept before folders: one text only');
+});
+
+test("a task pinned to a new transcription gets its speakers unnamed; one pinned to the reviewed text keeps the names", async (t) => {
+  const ws = await workspace(t);
+  await reviewed(ws, true);
+  const tasks = new TaskService();
+  const speakersOf = (sel: Awaited<ReturnType<typeof syncTaskMeetings>>) => sel!.selection!.meetings[0]!.record?.speakers;
+  const first = await tasks.getTask((await tasks.createTask({ title: 'Fictional summary', body: 'From [@Recorded call](/meetings/MQ-2026-0003).' })).id);
+  assert.deepEqual(speakersOf(await syncTaskMeetings(first.path!, async () => ['MQ-2026-0003'])), [{ label: 'Speaker 1', name: 'Jane Doe' }]);
+
+  await ask(ws);
+  await new MeetingTranscriptionService(new MeetingDigestService(), models, engine(speaks(['New words.'])).engine).tick();
+  await MeetingTranscriptionService.settled();
+  await chooseVersion(ws, 'MQ-2026-0003', 'v2');
+  const later = await tasks.getTask((await tasks.createTask({ title: 'Another summary', body: 'From [@Recorded call](/meetings/MQ-2026-0003).' })).id);
+  assert.deepEqual(speakersOf(await syncTaskMeetings(later.path!, async () => ['MQ-2026-0003'])), [{ label: 'Speaker 1', name: null }], 'numbered anew: not her any more');
+  // A record that cannot be read is never taken for one without evidence.
+  await assert.rejects(updates.confirmedSpeakerEvidence('CU-2026-0001', 'M-09'), /not in CU-2026-0001/);
+  await assert.rejects(updates.confirmedSpeakerEvidence('CU-2026-0099', 'M-01'));
 });

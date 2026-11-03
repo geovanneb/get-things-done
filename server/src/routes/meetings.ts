@@ -32,8 +32,8 @@ router.get('/:id', async (req: Request, res: Response) => {
   const id = meetingId(req);
   const detail = await service.detail(id);
   // How far a Transcribe again of this meeting got, when this dashboard runs it.
-  const progress = transcription.progress();
-  res.json({ ...detail, transcription_progress: detail.transcription?.status === 'running' && progress?.meeting === id ? progress : null });
+  const progress = transcription.folderProgress(id);
+  res.json({ ...detail, transcription_progress: detail.transcription?.status === 'running' ? progress : null });
 });
 
 // GET /api/meetings/:id/text/:file  a transcript or notes of the meeting, as text to read

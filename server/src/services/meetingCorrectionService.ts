@@ -2,6 +2,9 @@ import { actionItemKey, ContextUpdateService, FOLLOW_UP_KIND, withCorrectionsLoc
 import { correctionChain, recordDiff, type FieldChange } from './meetingCorrections';
 import { MeetingHistoryService } from './meetingHistoryService';
 import { renderSheet, resolveMeeting } from './meetingSources';
+import { readFolder } from './meetingFolder';
+import { speakerNamesHoldForPin } from './meetingVersions';
+import { WorkspaceService } from './workspace';
 
 const contextUpdates = new ContextUpdateService();
 const history = new MeetingHistoryService();
@@ -16,7 +19,7 @@ function quoted(text: string): string {
 }
 
 /** The record being corrected, as the analysis reads it: every field, quoted as data, with each action's slot. */
-export function renderTarget(record: MeetingRecord, env: CorrectionEnvelope): string {
+export function renderTarget(record: MeetingRecord, env: CorrectionEnvelope, namesHold: (source: string) => boolean = () => true): string {
   const lines = [
     '# The record to correct',
     '',
@@ -33,7 +36,7 @@ export function renderTarget(record: MeetingRecord, env: CorrectionEnvelope): st
   ];
   const list = (label: string, items: string[]) => lines.push(`- ${label}:`, ...(items.length ? items.map((t) => `  - ${quoted(t)}`) : ['  - (none)']));
   list('attendees', record.attendees.map((p) => (p.ref ? `${p.name} (${p.ref})` : p.name)));
-  list('speakers', record.speakers.map((s) => `${s.label} in ${s.source}: ${s.person ? (s.person.ref ? `${s.person.name} (${s.person.ref})` : s.person.name) : 'unknown'}${s.reason ? `, because ${s.reason}` : ''}`));
+  list('speakers', record.speakers.map((s) => `${s.label} in ${s.source}: ${s.person ? (s.person.ref ? `${s.person.name} (${s.person.ref})` : s.person.name) : 'unknown'}${s.reason ? `, because ${s.reason}` : ''}${namesHold(s.source) ? '' : ' (confirmed on an earlier transcript of this recording: the current one may number its speakers differently, so check before keeping it)'}`));
   list('decisions', record.decisions);
   list('open_questions', record.open_questions);
   list('action_items', record.action_items.map((a, i) => [`slot ${env.slots[i]?.slot ?? '?'}`, a.description, a.owner ? `owner ${a.owner.ref ? `${a.owner.name} (${a.owner.ref})` : a.owner.name}` : '', a.due_date ? `due ${a.due_date}` : ''].filter(Boolean).join(' · ')));
@@ -68,6 +71,14 @@ export async function startCorrection(meetingId: string): Promise<ContextUpdate>
       ? headUpdate.correction.slots
       : rootRecord.action_items.map((item, i) => ({ slot: `A-${String(i + 1).padStart(2, '0')}`, root_key: actionItemKey(item), root_index: i }));
     const pinned = await resolveMeeting(meetingId);
+    const kept = await readFolder(new WorkspaceService().getWorkspacePath(), meetingId).catch(() => null);
+    const manifest = kept?.state === 'ok' ? kept.manifest : null;
+    // The names of the current version, judged on the very transcripts this correction pins.
+    // Evidence that cannot be read: which text the names were confirmed on is unknown, so each is marked to check.
+    const evidence = await contextUpdates.confirmedSpeakerEvidence(chain.head.update_id, chain.head.record_id).catch(() => undefined);
+    // Any pin of this meeting's version names it: the speaker's own file is judged in that version.
+    const namesHold = (source: string) => evidence !== undefined
+      && speakerNamesHoldForPin(manifest, pinned.sources.find((p) => p.path.startsWith('meetings/'))?.path, source, evidence?.[source]);
     const env: CorrectionEnvelope = {
       meeting: meetingId,
       root,
@@ -82,7 +93,7 @@ export async function startCorrection(meetingId: string): Promise<ContextUpdate>
       notes: 'Opened from the meeting to correct its reviewed record: names, terms, people, the title or the date. See materials/correction-target.md.',
       correction: env,
       materials: [
-        { name: 'correction-target.md', content: renderTarget(chain.head_record, env) },
+        { name: 'correction-target.md', content: renderTarget(chain.head_record, env, namesHold) },
         { name: 'meeting-sources.md', content: sheet },
       ],
     });

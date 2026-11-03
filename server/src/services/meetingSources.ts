@@ -5,6 +5,7 @@ import { MeetingDigestService } from './meetingDigestService';
 import { MeetingHistoryService } from './meetingHistoryService';
 import { heldMeetings, isMeetingId, isMeetingText, QUEUED_MEETING_ID } from './meetingLibrary';
 import { MEETINGS_DIR, meetingFiles, readFolder } from './meetingFolder';
+import { speakerNamesHoldForPin } from './meetingVersions';
 import { WorkspaceService } from './workspace';
 import { atomicWrite } from '../utils/atomicWrite';
 import { hashFile } from '../utils/fileHash';
@@ -173,6 +174,20 @@ async function resolveHeld(id: string): Promise<PinnedMeeting> {
     await pin(abs, s.name, s.kind === 'transcript' ? 'transcript' : 'notes', sources, unavailable);
   }
   const r = detail.record;
+  // A speaker's name holds only for the transcript it was confirmed on (or corrections of its words), judged on the
+  // very file pinned here: never for a new transcription, which numbers its speakers anew.
+  const kept = await readFolder(workspace.getWorkspacePath(), id).catch(() => null);
+  const manifest = kept?.state === 'ok' ? kept.manifest : null;
+  const owner = detail.meeting.record_owner ?? (r ? { update_id: update.id, record_id: r.id } : null);
+  // Evidence that cannot be read: which text the names were confirmed on is unknown, so none is given.
+  const evidence = owner ? await contextUpdates.confirmedSpeakerEvidence(owner.update_id, owner.record_id).catch(() => undefined) : null;
+  // The pin of a speaker's transcript: the file itself, or its readable copy (what a task reads for a WebVTT original).
+  const namesHold = (source: string) => {
+    if (evidence === undefined) return false;
+    const copy = update.transcripts.find((t) => t.source === source)?.file;
+    const pinned = sources.find((p) => [source, copy].includes(path.posix.basename(p.path)));
+    return speakerNamesHoldForPin(manifest, pinned?.path, source, evidence?.[source]);
+  };
   return {
     id,
     title: detail.meeting.title,
@@ -181,7 +196,7 @@ async function resolveHeld(id: string): Promise<PinnedMeeting> {
     record: r && detail.meeting.record
       ? {
         id: r.id, title: r.title, decisions: r.decisions, open_questions: r.open_questions, action_items: r.action_items, attendees: r.attendees,
-        speakers: (r.speakers ?? []).map((s) => ({ label: s.label, name: s.person?.name ?? null })),
+        speakers: (r.speakers ?? []).map((s) => ({ label: s.label, name: namesHold(s.source) ? s.person?.name ?? null : null })),
         ...(r.unsure?.length ? { unsure: r.unsure } : {}),
         // Whose record this is: a correction's once one counts, while the files stay the original update's.
         update_id: detail.meeting.record_owner?.update_id ?? update.id, revision: detail.meeting.record.revision, confirmation: r.confirmation,
