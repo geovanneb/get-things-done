@@ -8,6 +8,12 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Changed
+- **A reviewed meeting gets its own folder.** With meeting text kept, a meeting's transcripts and notes move
+  out of `context-updates/` into `meetings/<id>/` once its review is done, listed with their SHA-256 in
+  `meeting.json`. `meetings/` is left out of git and out of agents' reach unless a task names the meeting.
+  Meetings kept before stay where they are and still open, play and search as before (#239).
+
 ## [0.8.0] - 2026-11-02
 
 Get Things Done now **records your meetings and turns them into memory**. Click **Record**, follow

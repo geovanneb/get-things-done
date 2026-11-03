@@ -45,6 +45,11 @@ router.get('/:id/audio/:file', async (req: Request, res: Response) => {
   sendFile(res, await service.audio(meetingId(req), param(req, 'file')), false);
 });
 
+// GET /api/meetings/:id/files/:file  a file of the meeting as it is, to open or (?download=1) save, wherever it is kept
+router.get('/:id/files/:file', async (req: Request, res: Response) => {
+  sendFile(res, await service.file(meetingId(req), param(req, 'file')), req.query['download'] === '1');
+});
+
 // POST /api/meetings/:id/corrections  starts a correction of the meeting's reviewed record: a context update to analyze
 router.post('/:id/corrections', async (req: Request, res: Response) => {
   res.status(201).json(await startCorrection(meetingId(req)));

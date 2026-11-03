@@ -20,6 +20,7 @@
       "Bash(git reset --hard*)",
       "Bash(rm -rf*)",
       "Edit(/.claude/**)",
+      "Edit(/meetings/**)",
       "Edit(/profile/**)",
       "Edit(/.schemas/**)"
     ]

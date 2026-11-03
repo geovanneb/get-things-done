@@ -3,7 +3,8 @@ import { promises as fsp } from 'fs';
 import { ContextUpdateService, DOUBT_FIELDS, type MeetingRecord, type RecordDoubt } from './contextUpdateService';
 import { MeetingDigestService } from './meetingDigestService';
 import { MeetingHistoryService } from './meetingHistoryService';
-import { isMeetingId, isMeetingText, QUEUED_MEETING_ID } from './meetingLibrary';
+import { heldMeetings, isMeetingId, isMeetingText, QUEUED_MEETING_ID } from './meetingLibrary';
+import { meetingFiles } from './meetingFolder';
 import { WorkspaceService } from './workspace';
 import { atomicWrite } from '../utils/atomicWrite';
 import { hashFile } from '../utils/fileHash';
@@ -156,7 +157,9 @@ async function resolveHeld(id: string): Promise<PinnedMeeting> {
     throw httpError(409, `The versions of this meeting's record ${state === 'conflict' ? 'conflict' : 'are broken'}: resolve it in Context > Updates before a task uses it`);
   }
   const update = await contextUpdates.get(detail.meeting.update_id);
-  const materials = path.join(workspace.getWorkspacePath(), 'context-updates', update.id, 'materials');
+  // Wherever its text is kept now: the meeting's own folder, or its update's materials for one kept before folders.
+  const held = heldMeetings(update).find((m) => m.id === id);
+  const where = held ? await meetingFiles(workspace.getWorkspacePath(), update, held) : null;
   const sources: PinnedSource[] = [];
   const unavailable: PinnedMeeting['unavailable'] = [];
   for (const s of detail.sources) {
@@ -164,7 +167,7 @@ async function resolveHeld(id: string): Promise<PinnedMeeting> {
     if (!s.present) { unavailable.push({ name: s.name, reason: s.missing ?? 'It is not here any more.' }); continue; }
     // A transcript is read as its readable copy when it has one: that is the text the dashboard shows too.
     const copy = update.transcripts.find((t) => t.source === s.file);
-    const abs = await fileInside(materials, copy?.file ?? s.file).catch(() => null);
+    const abs = where ? await where.path(copy?.file ?? s.file) : null;
     if (!abs) { unavailable.push({ name: s.name, reason: 'It is not here any more.' }); continue; }
     await pin(abs, s.name, s.kind === 'transcript' ? 'transcript' : 'notes', sources, unavailable);
   }

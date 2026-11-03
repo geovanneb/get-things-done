@@ -11,6 +11,7 @@ import { isDone } from './taskStatus';
 import { moveToTrash, trashDir, trashedAt } from './trash';
 import { reserveIds } from './idReservations';
 import { heldMeetings, ownFiles, retentionStart } from './meetingLibrary';
+import { folderFiles, folderOf, foldersOfUpdate } from './meetingFolder';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -519,7 +520,9 @@ export class SystemCleanupService {
           // Materials kept as a whole are the user's explicit choice, like a kept meeting.
           if (u.kept_meetings.includes(m.key) || u.keep_materials) continue;
           let present = false;
-          for (const f of ownFiles(u, m.key, gone)) if (await fsp.lstat(path.join(materials, f)).then((st) => st.isFile(), () => false)) present = true;
+          const folder = await folderOf(ws, u, m);
+          if (folder?.state === 'ok') present = (await folderFiles(folder)).size > 0;
+          else for (const f of ownFiles(u, m.key, gone)) if (await fsp.lstat(path.join(materials, f)).then((st) => st.isFile(), () => false)) present = true;
           if (!present) continue;
           add('meetings', m.id, m.title, materials, ageDays(when(`${retentionStart(m, u)}T00:00:00`), now));
         }
@@ -606,6 +609,13 @@ export class SystemCleanupService {
 
     // The id stays taken, so a new task or update never inherits links that pointed at this one.
     if (item.type === 'completed_tasks' || item.type === 'archived_tasks' || item.type === 'context_updates') await reserveIds([item.id]);
+    // Its meetings' folders are empty by now (checked above); they go with it, so none is left that no update lists.
+    if (item.type === 'context_updates') {
+      for (const f of await foldersOfUpdate(ws, item.id)) {
+        if (item.action === 'trash') await moveToTrash(ws, await workspaceEntry(ws, f.dir), now);
+        else await fsp.rm(await workspaceEntry(ws, f.dir), { recursive: true, force: true });
+      }
+    }
     if (item.action === 'trash' && item.type !== 'trash') {
       await moveToTrash(ws, full, now);
     } else {
@@ -763,6 +773,8 @@ export class SystemCleanupService {
 async function holdsMeetingText(ws: string, id: string, keepText: boolean, deleted: { trash?: unknown }[]): Promise<boolean> {
   if (deleted.some((d) => typeof d.trash === 'string' && d.trash)) return true;
   if (!keepText) return false;
+  // A meeting's own folder with text still in it: the Meetings rule removes it first.
+  if ((await foldersOfUpdate(ws, id)).some((f) => f.hasText)) return true;
   const entries = await fsp.readdir(path.join(ws, 'context-updates', id, 'materials')).catch(() => [] as string[]);
   return entries.length > 0;
 }

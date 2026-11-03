@@ -329,8 +329,10 @@ test('with meeting text kept, a reviewed update keeps only its meetings\' transc
   await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
   const done = await updates.close('CU-2026-0001');
   assert.equal(done.keep_meeting_text, true, 'said in update.md, so the apply command leaves materials/ alone');
-  const left = (await fsp.readdir(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials'))).sort();
-  assert.deepEqual(left, ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt', 'MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt'], 'no photo, no meetings.md');
+  // Each meeting's text left the update for its own folder; the photo and meetings.md went as before.
+  await assert.rejects(fsp.access(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials')));
+  assert.deepEqual((await fsp.readdir(path.join(ws, 'meetings', 'MQ-2026-0001', 'v1'))).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
+  assert.deepEqual((await fsp.readdir(path.join(ws, 'meetings', 'MQ-2026-0002', 'v1'))).sort(), ['MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt'], 'no photo, no meetings.md');
   // An approved update says so before the apply command runs.
   await digest(ws, 'CU-2026-0002', [record('M-01', { meeting: 'MQ-2026-0001', confirmation: null })], { proposals: [{ id: 'P-01', action: 'update', target: 'context/company/x/note.md', title: 'x', decision: 'accepted' }] });
   const approved = await updates.approve('CU-2026-0002');
@@ -343,10 +345,11 @@ test('one meeting is deleted to the trash, restored, and deleted for good; its r
   await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0001' })]);
   await assert.rejects(history.remove('MQ-2026-0001'), (err: { statusCode?: number }) => err.statusCode === 409, 'not before the review is done');
   await updates.close('CU-2026-0001');
-  const materials = path.join(ws, 'context-updates', 'CU-2026-0001', 'materials');
+  const materials = path.join(ws, 'meetings', 'MQ-2026-0001', 'v1');
 
   await history.remove('MQ-2026-0001');
-  assert.deepEqual((await fsp.readdir(materials)).sort(), ['MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt'], 'the other meeting stays');
+  assert.deepEqual(await fsp.readdir(materials), [], 'its folder stays, empty, with what it lists');
+  assert.deepEqual((await fsp.readdir(path.join(ws, 'meetings', 'MQ-2026-0002', 'v1'))).sort(), ['MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt'], 'the other meeting stays');
   const [entry] = await fsp.readdir(trashDir(ws));
   assert.deepEqual((await fsp.readdir(path.join(trashDir(ws), entry!))).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
   const deleted = (await history.list()).find((m) => m.id === 'MQ-2026-0001')!;
@@ -354,7 +357,8 @@ test('one meeting is deleted to the trash, restored, and deleted for good; its r
   await assert.rejects(history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), (err: { statusCode?: number }) => err.statusCode === 410);
 
   await history.restore('MQ-2026-0001');
-  assert.equal((await fsp.readdir(materials)).length, 4);
+  assert.deepEqual((await fsp.readdir(materials)).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt'], 'back in its folder');
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a');
   assert.deepEqual(await fsp.readdir(trashDir(ws)), []);
 
   await history.remove('MQ-2026-0001');

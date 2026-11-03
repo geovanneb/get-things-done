@@ -38,6 +38,8 @@ const BADGE: Record<StatusTone, string> = { critical: 'error', info: 'info', war
 const TEXT = /\.(vtt|txt|md|docx)$/i;
 /** A recording of a meeting, to play: the server sends only audio files of that meeting. */
 const audioUrl = (meeting: string, file: string) => `/api/meetings/${encodeURIComponent(meeting)}/audio/${encodeURIComponent(file)}`;
+/** A file of the meeting as it is, wherever it is kept now: in its own folder or still in its update. */
+const fileUrl = (meeting: string, file: string) => `/api/meetings/${encodeURIComponent(meeting)}/files/${encodeURIComponent(file)}`;
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 const longDate = (date: string) => {
   const [y, m, d] = date.split('-').map(Number);
@@ -438,7 +440,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{{ transcript: 'Transcript', recording: 'Recording', notes: 'Notes', file: 'File' }[s.kind]}</span>
               {s.playable && <Button size="sm" variant="secondary" onClick={() => { setPicked(s.file); setTab('transcript'); }}>Play</Button>}
               {s.present && (s.kind !== 'recording' || s.playable)
-                ? <a href={`/api/context-updates/${h.update_id}/materials/${encodeURIComponent(s.file)}`} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open</a>
+                ? <a href={fileUrl(h.id, s.file)} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open</a>
                 : s.present
                   ? <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Its audio is not kept. Its transcript is in the Transcript tab.</em>
                   : <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{s.missing}</em>}
