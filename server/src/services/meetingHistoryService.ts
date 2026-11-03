@@ -6,6 +6,8 @@ import { heldMeetings, importedParts, isMeetingId, isMeetingText, QUEUED_MEETING
 import { fileInside, topLevelName } from '../utils/files';
 import { correctionChain, type ChainState, type CorrectionChain } from './meetingCorrections';
 import { MAX_CONVERT_BYTES } from '../utils/transcript';
+import { meetingFiles } from './meetingFolder';
+import { WorkspaceService } from './workspace';
 import { MAX_QUERY, MIN_QUERY, queryWords, searchMeeting, type SearchHit } from './meetingSearch';
 
 /**
@@ -102,6 +104,7 @@ const SEARCH_CACHE_FILES = 300;
 
 const contextUpdates = new ContextUpdateService();
 const queue = new MeetingDigestService();
+const workspace = new WorkspaceService();
 
 /**
  * The chain of a meeting's record, when it has a final confirmed one: corrections can only build on that. Null for a
@@ -210,7 +213,9 @@ export class MeetingHistoryService {
     const meeting = heldMeetings(update).find((m) => m.id === id);
     if (!meeting) throw httpError(404, `Meeting not found: ${id}`);
     if (!meeting.linkable) throw httpError(409, `This meeting waits for the review of ${update.id}: open it in Context > Updates`);
-    const present = new Set(update.material_files.map((f) => f.name));
+    // Each file where it is now: the meeting's own folder once its text moved there, else the update's materials.
+    const where = await meetingFiles(workspace.getWorkspacePath(), update, meeting);
+    const present = where.present;
     const deleted = update.deleted_meetings.find((d) => d.meeting === meeting.key);
     const copies = new Map(update.transcripts.map((t) => [t.file, t]));
     const prefix = meeting.origin === 'digest' ? `${meeting.id}-` : '';
@@ -285,9 +290,10 @@ export class MeetingHistoryService {
     if (!file) throw httpError(404, 'No such file in this meeting');
     if (update.deleted_meetings.some((d) => d.meeting === meeting.key)) throw httpError(410, 'This meeting was deleted');
     const copy = update.transcripts.find((t) => t.source === file);
-    const shown = copy ? await contextUpdates.materialPath(update.id, copy.file).catch(() => null) : null;
+    const where = await meetingFiles(workspace.getWorkspacePath(), update, meeting);
+    const shown = copy ? await where.path(copy.file) : null;
     if (shown) return this.readAsText(shown, copy!.file);
-    const original = await contextUpdates.materialPath(update.id, file).catch(() => null);
+    const original = await where.path(file);
     if (!original) throw httpError(410, 'This file is no longer kept');
     return this.readAsText(original, file);
   }
@@ -312,8 +318,23 @@ export class MeetingHistoryService {
     const file = meeting.files.find((f) => f === asked);
     if (!file) throw httpError(404, 'No such recording in this meeting');
     if (update.deleted_meetings.some((d) => d.meeting === meeting.key)) throw httpError(410, 'This meeting was deleted');
-    const full = await contextUpdates.materialPath(update.id, file).catch(() => null);
+    const full = await (await meetingFiles(workspace.getWorkspacePath(), update, meeting)).path(file);
     if (!full) throw httpError(410, 'This recording is no longer kept');
+    return full;
+  }
+
+  /**
+   * A file of a meeting an update holds, to open as it is (an original transcript, notes, a photo): only a file of
+   * this meeting, wherever it is kept now, and never one of a deleted meeting.
+   */
+  async file(id: string, name: unknown): Promise<string> {
+    const asked = topLevelName(name as string);
+    const { update, meeting } = await this.held(id);
+    const file = meeting.files.find((f) => f === asked);
+    if (!file) throw httpError(404, 'No such file in this meeting');
+    if (update.deleted_meetings.some((d) => d.meeting === meeting.key)) throw httpError(410, 'This meeting was deleted');
+    const full = await (await meetingFiles(workspace.getWorkspacePath(), update, meeting)).path(file);
+    if (!full) throw httpError(410, 'This file is no longer kept');
     return full;
   }
 
@@ -350,9 +371,10 @@ export class MeetingHistoryService {
         const copies = new Map(u.transcripts.map((t) => [t.source, t.file]));
         // An original with a readable copy is read as that copy, named by the original, as the reader does.
         const files = m.files.filter((f) => !u.transcripts.some((t) => t.file === f && m.files.includes(t.source)));
+        const where = await meetingFiles(workspace.getWorkspacePath(), u, m);
         const texts = await this.searchTexts(files.flatMap((f) => {
           const read = copies.get(f) ?? f;
-          return isMeetingText(read) ? [{ file: f, read: () => contextUpdates.materialPath(u.id, read) }] : [];
+          return isMeetingText(read) ? [{ file: f, read: async () => (await where.path(read)) ?? Promise.reject(new Error('gone')) }] : [];
         }));
         if (!texts.length) continue;
         searched++;

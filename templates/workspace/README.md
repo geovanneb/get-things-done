@@ -33,6 +33,8 @@ context/                Background knowledge, by category
 outputs/templates/      Output templates: required sections + style guides
 context-updates/        Imported material (transcripts, slides...) and the
                         record of what it changed in the context
+meetings/               Reviewed meetings' transcripts and notes, kept while you
+                        keep meeting text (private: never in git, never context)
 kaizen/                 Kaizen notes: why a task needed rework (each opens a context update)
 routines/               Schedules that create recurring tasks (RT-NNNN.md)
 workflows/              Reserved for multi-step workflow definitions
@@ -78,7 +80,7 @@ This workspace is a plain folder of Markdown files, so it works well with git:
 git init && git add . && git commit -m "Initial workspace"
 ```
 
-A `.gitignore` is already in place for caches, logs and the trash folder.
+A `.gitignore` is already in place for caches, logs, the trash folder and meetings (the queue and `meetings/`).
 
 Bear in mind that stakeholder notes and deliverables are often confidential — use
 a private repository.

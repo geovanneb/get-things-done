@@ -566,7 +566,10 @@ try {
     const badRecord = await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'yes', revision } } });
     const staleRecord = await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'confirmed', revision: 'old' } } });
     await json('PUT', `/api/context-updates/${meeting.id}/meeting-records`, { records: { 'M-01': { confirmation: 'confirmed', revision } } });
+    // Meeting text kept for this one: once done, it moves out of context-updates/ into the meeting's own folder.
+    await json('PUT', '/api/routines/system-cleanup', { meetings: { keep_text: true } });
     const meetingDone = await (await json('POST', `/api/context-updates/${meeting.id}/approve`)).json();
+    await json('PUT', '/api/routines/system-cleanup', { meetings: { keep_text: null } });
     check('a confirmed meeting record alone finishes the update and stays as the record',
       badRecord.status === 400 && staleRecord.status === 409 && meetingDone.status === 'done' && meetingDone.meeting_records?.[0]?.confirmation === 'confirmed'
       && !fs.existsSync(path.join(meetingDir, 'materials')),
@@ -577,6 +580,15 @@ try {
       meetingDone.meeting_records?.[0]?.meeting_id === `${meeting.id}-M-01` && typeof meetingDone.meetings_linked_at === 'string'
       && meetingDone.meeting_records[0].confirmation === 'confirmed' && savedMeeting.status === 200,
       `meeting_id=${meetingDone.meeting_records?.[0]?.meeting_id} linked=${meetingDone.meetings_linked_at} detail=${savedMeeting.status}`);
+    const folderDir = path.join(ws, 'meetings', `${meeting.id}-M-01`);
+    const folderManifest = fs.existsSync(path.join(folderDir, 'meeting.json')) ? JSON.parse(fs.readFileSync(path.join(folderDir, 'meeting.json'), 'utf-8')) : null;
+    const keptName = folderManifest?.versions?.[0]?.files?.[0]?.name;
+    const keptOpen = keptName ? await fetch(`${base}/api/meetings/${meeting.id}-M-01/files/${encodeURIComponent(keptName)}`) : null;
+    check('a reviewed meeting\'s kept text moves to its own git-ignored folder and opens from there',
+      folderManifest?.update_id === meeting.id && folderManifest?.current === 'v1' && fs.existsSync(path.join(folderDir, 'v1', keptName ?? '-'))
+      && keptOpen?.status === 200 && (await keptOpen.text()).includes('Fictional transcript')
+      && fs.readFileSync(path.join(ws, '.gitignore'), 'utf-8').split('\n').includes('meetings/'),
+      `manifest=${JSON.stringify(folderManifest)?.slice(0, 200)} open=${keptOpen?.status}`);
     const vttForm = new FormData();
     vttForm.append('file', new Blob(['WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Fictional Speaker>Fictional words.</v>\n']), 'sync.vtt');
     const vttUpdate = await (await json('POST', '/api/context-updates', { title: 'Fictional sync' })).json();

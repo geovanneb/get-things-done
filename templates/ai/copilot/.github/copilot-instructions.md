@@ -12,6 +12,8 @@ This workspace is managed by Get Things Done. When working in this directory:
 - `outputs/templates/` — output format templates.
 - `context-updates/` — imported material waiting for review. Not context: never use it as a source for a task, except
   the meeting files a task's `sources/meetings.md` lists.
+- `meetings/` — reviewed meetings' transcripts and notes. Private and never context: never read, list or search it,
+  except the meeting files a task's `sources/meetings.md` lists.
 - `routines/`: RT-NNNN.md schedules that create recurring tasks. Tasks with `routine_ref` were created by a routine (`routines/RT-NNNN.md`, a schedule plus a task template). Work on them like any other task, and never change `routine_ref` or `routine_occurrence`: they stop the routine creating the same task twice. Create or edit a routine only when the user asks, following `.schemas/routine.schema.json`; the dashboard picks up the change on its next check. In a routine's task title, `{{date}}` is the scheduled run date and `{{due_date}}` the due date (both YYYY-MM-DD); the routine body is copied into each task as written. Tasks with `meeting_action` were made from a meeting's action item; never change it either: it stops the same item becoming a second task.
 
 ## Rules
@@ -141,11 +143,11 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    dashboard from a meeting to correct its reviewed record). Do steps 1 and 5 as usual; this
    replaces steps 2 to 4 (no context scan, no proposals). First check
    `materials/meeting-sources.md` against the frontmatter's `correction.sources`: the same files,
-   each under `context-updates/<correction.root.update_id>/materials/`, with the same SHA-256; if
+   each under `meetings/<correction.meeting>/` or `context-updates/<correction.root.update_id>/materials/`, with the same SHA-256; if
    they differ, stop, write nothing and tell the executive. Then read
    `materials/correction-target.md` (the record to correct) and only those files, each after
    checking its SHA-256 (leave out one that does not match, and say so), plus `stakeholders/` and
-   `context/glossary/`. Never other files of `context-updates/`. Write exactly one meeting record:
+   `context/glossary/`. Never other files of `context-updates/` or `meetings/`. Write exactly one meeting record:
    the target with your corrections applied (misheard names against the stakeholders, terms
    against the glossary, people, title, date, speakers' names), keeping `id`, `meeting`,
    `amends`, `source` and every action item's `slot` exactly as the target gives them, and the

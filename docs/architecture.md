@@ -27,6 +27,26 @@ user's workspace or home configuration, never in the source tree. Optional SQLit
 search is a derived index, not authoritative storage. Keep templates generic and
 update all three agent integrations together when changing workspace guidance.
 
+### Meeting files
+
+A meeting's files live in one of two places, and every reader asks `meetingFiles()` in
+`server/src/services/meetingFolder.ts` which one, file by file:
+
+- `context-updates/<CU id>/materials/`: while its update waits for review, and for meetings
+  kept before meeting folders (an update without `meeting_folders`).
+- `meetings/<meeting id>/v1/`: once the update is done and meeting text is kept. `meeting.json`
+  names the update, the current version and each file with its SHA-256. The folder is written
+  under a hidden draft name and renamed into place only when complete; the files leave
+  `materials/` only after that, so a crash leaves a copy in one place or both, never in neither.
+  A folder of another update, or one whose `meeting.json` cannot be read, is never used.
+
+`meetings/` is private: git-ignored, never task input unless a task's pinned sources name a file
+in it, and never part of anything shared. There is no publisher yet; when one is added (Phase 3),
+it must refuse every path under `meetings/` and `context-updates/` itself, not rely on git-ignore.
+Remaining risk: the move is coordinated with the update's own queue, not across two dashboards
+on the same workspace, and versions after `v1` (corrections to the words, transcribing again) are
+not written yet.
+
 ## Request and file flow
 
 1. The listener binds to loopback. The local request guard checks Host, Origin and

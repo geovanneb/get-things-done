@@ -18,6 +18,7 @@ import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown 
 import { TaskService } from './taskService';
 import { readManifest } from './scaffold';
 import { heldMeetings, isMeetingId, meetingLinks, meetingTextToKeep, ownFiles } from './meetingLibrary';
+import { folderFiles, folderOf, meetingFiles, moveMeetingText, trashFoldersOf } from './meetingFolder';
 import { meetingTextKept } from './meetingTextSetting';
 import type { Task } from '../types';
 
@@ -275,6 +276,11 @@ export interface ContextUpdate {
    * text of its meetings stays in materials/ (see meetingLibrary). Never set by an agent.
    */
   keep_meeting_text: boolean;
+  /**
+   * Set by the dashboard with keep_meeting_text from this version on: once done, the kept text of each meeting moves to
+   * its own folder under meetings/ (see meetingFolder). Absent on updates kept before, whose text stays in materials/.
+   */
+  meeting_folders: boolean;
   /** When the dashboard saved which meeting each record and file belongs to (see meetingLinks). Null before. */
   meetings_linked_at: string | null;
   /** Who opened this update: 'system-cleanup' for the memory review, null for an import by the user. */
@@ -549,11 +555,14 @@ function normalizeCorrection(raw: unknown): CorrectionEnvelope | null {
   for (const entry of Array.isArray(o['sources']) ? (o['sources'] as unknown[]).slice(0, 50) : []) {
     const x = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
     const p = x['path'];
-    // A path from the workspace root, POSIX, inside context-updates/ or the meeting queue: never anything else.
-    if (typeof p !== 'string' || !/^context-updates\/[^\\]+$/.test(p) || p.split('/').some((part) => part === '' || part === '.' || part === '..')
+    // A path from the workspace root, POSIX, inside context-updates/ or meetings/: never anything else.
+    if (typeof p !== 'string' || !/^(context-updates|meetings)\/[^\\]+$/.test(p) || p.split('/').some((part) => part === '' || part === '.' || part === '..')
       || [...p].some((c) => c.charCodeAt(0) < 0x20 || c === '`')) return null;
-    // Only the meeting's own files, which stay in the original update: never another update's material.
-    if (!p.startsWith(`context-updates/${root['update_id'] as string}/materials/`)) return null;
+    // Only the meeting's own files: in the original update's materials, or a version of the meeting's own folder once
+    // its text moved there. Never another update's material, nor another meeting's folder.
+    const inUpdate = p.startsWith(`context-updates/${root['update_id'] as string}/materials/`);
+    const inFolder = new RegExp(`^meetings/${o['meeting']}/v\\d{1,4}/[^/]+$`).test(p);
+    if (!inUpdate && !inFolder) return null;
     if (typeof x['name'] !== 'string' || (x['kind'] !== 'transcript' && x['kind'] !== 'notes') || typeof x['sha256'] !== 'string' || !/^[0-9a-f]{64}$/.test(x['sha256'])) return null;
     sources.push({ path: p, name: x['name'], kind: x['kind'], sha256: x['sha256'] });
   }
@@ -617,10 +626,18 @@ export function suggestionBlock(record: MeetingRecord, base: MeetingRecord | nul
   return null;
 }
 
-/** The pins of a correction that are not its meeting's own files, as its original update holds them. */
-function foreignPins(env: CorrectionEnvelope, all: ContextUpdate[]): string[] {
+/**
+ * The pins of a correction that are not its meeting's own files, as its original update holds them: in the update's
+ * materials, or in the meeting's own folder once its text moved there.
+ */
+async function foreignPins(env: CorrectionEnvelope, all: ContextUpdate[]): Promise<string[]> {
   const root = all.find((u) => u.id === env.root.update_id);
-  const own = new Set((root ? heldMeetings(root).find((m) => m.id === env.meeting)?.files ?? [] : []).map((f) => `context-updates/${env.root.update_id}/materials/${f}`));
+  const meeting = root ? heldMeetings(root).find((m) => m.id === env.meeting) : undefined;
+  const own = new Set<string>();
+  if (root && meeting) {
+    const where = await meetingFiles(workspaceService.getWorkspacePath(), root, meeting, new Set());
+    for (const f of meeting.files) own.add(`context-updates/${root.id}/materials/${f}`).add(where.relative(f));
+  }
   return env.sources.map((s) => s.path).filter((p) => !own.has(p));
 }
 
@@ -890,6 +907,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     transcript_problems: normalizePairs(data['transcript_problems'], 'source', 'reason'),
     keep_materials: data['keep_materials'] === true,
     keep_meeting_text: data['keep_meeting_text'] === true,
+    meeting_folders: data['meeting_folders'] === true,
     meetings_linked_at: nullableStr(data['meetings_linked_at']),
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
@@ -1183,7 +1201,7 @@ export class ContextUpdateService {
     }
     if (update.kind !== CORRECTION_KIND || command !== 'analyze') return;
     if (!update.correction) throw httpError(409, `${id} does not say what it corrects; delete it and start again from the meeting`);
-    const foreign = foreignPins(update.correction, await this.list());
+    const foreign = await foreignPins(update.correction, await this.list());
     if (foreign.length) throw httpError(409, `${id} pins ${foreign[0]}, which is not one of this meeting's files; delete it and start again from the meeting`);
   }
 
@@ -1431,7 +1449,7 @@ export class ContextUpdateService {
       }
     }
 
-    for (const pin of foreignPins(env, all)) blocked.push(`The correction pins ${pin}, which is not one of this meeting's files. Close this one and start again`);
+    for (const pin of await foreignPins(env, all)) blocked.push(`The correction pins ${pin}, which is not one of this meeting's files. Close this one and start again`);
 
     const speakersOf = (r: MeetingRecord) => JSON.stringify(r.speakers.map((sp) => [sp.label, sp.source, sp.person ? [sp.person.ref, sp.person.name] : null]).sort());
     let evidence: Record<string, string> | undefined;
@@ -1441,10 +1459,13 @@ export class ContextUpdateService {
       evidence = record.speakers.length ? (inherited && typeof inherited === 'object' ? inherited as Record<string, string> : {}) : undefined;
     } else if (record.speakers.length) {
       evidence = {};
-      const materials = path.join(this.updateDir(env.root.update_id), 'materials');
+      // The original's transcripts, where they are kept now: the meeting's own folder, or the original update's materials.
+      const root = all.find((u) => u.id === env.root.update_id);
+      const held = root ? heldMeetings(root).find((m) => m.id === env.meeting) : undefined;
+      const where = root && held ? await meetingFiles(workspaceService.getWorkspacePath(), root, held, new Set()) : null;
       for (const source of new Set(record.speakers.map((sp) => sp.source))) {
-        const pin = env.sources.find((x) => x.kind === 'transcript' && x.path === `context-updates/${env.root.update_id}/materials/${source}`);
-        const file = pin ? await fileInside(materials, source).catch(() => null) : null;
+        const pin = where ? env.sources.find((x) => x.kind === 'transcript' && x.path === where.relative(source)) : undefined;
+        const file = pin && where ? await where.path(source) : null;
         if (!pin || !file || (await hashFile(file)).sha256 !== pin.sha256) {
           blocked.push(`A speaker can be corrected only from a transcript this correction started with, kept unchanged: ${source} in ${env.root.update_id}`);
           continue;
@@ -2158,13 +2179,13 @@ export class ContextUpdateService {
       if (onlyRemovals) {
         const closed = proposals.map((raw, i) => normalizeProposal(raw, i).decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), outcome: 'skipped' });
         const keepText = await this.keepMeetingText(update);
-        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records, keep_meeting_text: keepText || undefined, ...this.linkPatch(update, data, records) });
-        await this.cleanup({ ...update, keep_meeting_text: keepText }, update.keep_materials);
+        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records, keep_meeting_text: keepText || undefined, meeting_folders: keepText || undefined, ...this.linkPatch(update, data, records) });
+        await this.cleanup({ ...update, status: 'done', keep_meeting_text: keepText, meeting_folders: keepText }, update.keep_materials);
         await this.finishRemovals(id);
       } else {
         // Said before the apply command runs: it then leaves materials/ for the dashboard to keep the meeting text.
         const keepText = await this.keepMeetingText(update);
-        await this.write(file, data, update.notes, { status: 'approved', approved_at: now, proposals: proposals, meeting_records: records, keep_meeting_text: keepText || undefined });
+        await this.write(file, data, update.notes, { status: 'approved', approved_at: now, proposals: proposals, meeting_records: records, keep_meeting_text: keepText || undefined, meeting_folders: keepText || undefined });
       }
       return (await this.read(id)).update;
     });
@@ -2216,8 +2237,10 @@ export class ContextUpdateService {
         ? this.clean(frozen.map((raw) => ({ ...(raw as Record<string, unknown>), confirmation: 'rejected', confirmed_at: undefined, confirmed_hash: undefined })))
         : frozen;
       const keepText = await this.keepMeetingText(update);
-      await this.cleanup({ ...update, keep_meeting_text: keepText }, update.keep_materials);
-      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined, ...this.linkPatch(update, data, records) });
+      // Done first, then cleaned up: a crash in between leaves a done update whose next read finishes the cleanup,
+      // never one still in review whose meeting text already left for meetings/.
+      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined, meeting_folders: keepText || undefined, ...this.linkPatch(update, data, records) });
+      await this.cleanup({ ...update, status: 'done', keep_meeting_text: keepText, meeting_folders: keepText }, update.keep_materials);
       return (await this.read(id)).update;
     });
   }
@@ -2267,12 +2290,7 @@ export class ContextUpdateService {
       if (!key || !heldMeetings(update).some((m) => m.key === key)) throw httpError(404, `No such meeting in ${updateId(id)}`);
       if (update.deleted_meetings.some((d) => d.meeting === key)) throw httpError(409, 'This meeting was already deleted');
       const ws = workspaceService.getWorkspacePath();
-      const materials = path.join(this.updateDir(id), 'materials');
-      const gone = new Set(update.deleted_meetings.map((d) => d.meeting));
-      const files: string[] = [];
-      for (const name of ownFiles(update, key, gone)) {
-        if (await fsp.lstat(path.join(materials, name)).then((st) => st.isFile(), () => false)) files.push(name);
-      }
+      const { dir: materials, files } = await this.meetingTextDir(update, key);
       if (!files.length) throw httpError(409, 'Nothing of this meeting is kept here, so there is nothing to delete');
       const trash = await moveFilesToTrash(ws, materials, files, `${updateId(id)}-${key}`, now);
       const kept = update.kept_meetings.filter((k) => k !== key);
@@ -2293,7 +2311,8 @@ export class ContextUpdateService {
       const ws = workspaceService.getWorkspacePath();
       const from = await trashEntry(ws, entry.trash);
       if (!from || !(await fsp.lstat(from).then((st) => st.isDirectory(), () => false))) throw httpError(410, 'This meeting is no longer in the trash');
-      const materials = await workspaceEntry(ws, path.join(this.updateDir(id), 'materials'), true);
+      // Back where it was taken from: its meeting's folder when it has one, else the update's materials.
+      const materials = await workspaceEntry(ws, (await this.meetingTextDir(update, key)).dir, true);
       for (const name of entry.files) {
         if (await fsp.lstat(path.join(materials, name)).then(() => true, () => false)) throw httpError(409, `${name} is there again, so nothing was restored`);
         if (!(await fsp.lstat(path.join(from, name)).then((st) => st.isFile(), () => false))) throw httpError(410, `${name} is no longer in the trash, so nothing was restored`);
@@ -2321,6 +2340,25 @@ export class ContextUpdateService {
     });
   }
 
+  /**
+   * Where one meeting's text is kept now, and the plain files of it there: its own folder under meetings/ (every file
+   * in it is its own), or, for a meeting kept before meeting folders, the update's materials (without the files it
+   * shares with another meeting there).
+   */
+  private async meetingTextDir(update: ContextUpdate, key: string): Promise<{ dir: string; files: string[] }> {
+    const ws = workspaceService.getWorkspacePath();
+    const meeting = heldMeetings(update).find((m) => m.key === key);
+    const folder = meeting ? await folderOf(ws, update, meeting) : null;
+    if (folder?.state === 'ok') return { dir: folder.versionDir, files: [...await folderFiles(folder)] };
+    const dir = path.join(this.updateDir(update.id), 'materials');
+    const gone = new Set(update.deleted_meetings.map((d) => d.meeting));
+    const files: string[] = [];
+    for (const name of ownFiles(update, key, gone)) {
+      if (await fsp.lstat(path.join(dir, name)).then((st) => st.isFile(), () => false)) files.push(name);
+    }
+    return { dir, files };
+  }
+
   /** Whether this update keeps its meeting text when done: the user keeps meeting text, and it holds meetings. */
   private async keepMeetingText(update: ContextUpdate): Promise<boolean> {
     if (update.keep_meeting_text) return true;
@@ -2336,6 +2374,12 @@ export class ContextUpdateService {
     if (!keepMaterials) {
       const materials = path.join(dir, 'materials');
       const keep = update.keep_meeting_text ? meetingTextToKeep(update, new Set(update.deleted_meetings.map((d) => d.meeting))) : new Set<string>();
+      if (keep.size && update.meeting_folders && update.status === 'done') {
+        // Reviewed meeting text leaves context-updates/ for its meeting's own folder. What did not move stays here.
+        const gone = new Set(update.deleted_meetings.map((d) => d.meeting));
+        const moved = await moveMeetingText(workspaceService.getWorkspacePath(), update, heldMeetings(update).filter((m) => !gone.has(m.key)), keep);
+        for (const name of moved) keep.delete(name);
+      }
       if (keep.size === 0) await fsp.rm(materials, { recursive: true, force: true });
       else {
         for (const entry of await fsp.readdir(materials, { withFileTypes: true }).catch(() => [])) {
@@ -2363,6 +2407,8 @@ export class ContextUpdateService {
       await this.requireNoRun(id, 'delete the update');
       const ws = workspaceService.getWorkspacePath();
       await reserveIds([id]);
+      // Its meetings' folders go with it: no update would list them any more.
+      await trashFoldersOf(ws, update, heldMeetings(update));
       await moveToTrash(ws, await workspaceEntry(ws, this.updateDir(id)));
     }));
   }
