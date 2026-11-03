@@ -86,7 +86,7 @@ export interface MeetingSelection {
 
 interface SelectionFile { selections: MeetingSelection[] }
 
-/** `ok`: the meeting still holds these bytes (`current_path` when it moved, from the queue into its digest). */
+/** `ok`: the meeting still holds these bytes (`current_path` when they moved: from the queue into its digest, or into its folder). */
 export type SourceState = 'ok' | 'changed' | 'missing';
 
 /** How a pinned selection stands now. */
@@ -460,7 +460,8 @@ async function checkSelection(selection: MeetingSelection | null, mentionedIds: 
       if (held) { sources.push({ meeting: m.id, path: s.path, state: 'ok', ...(held.path !== s.path ? { current_path: held.path } : {}) }); continue; }
       // A version of the meeting's text that is no longer the current one still holds what was pinned: what was made
       // from it stays valid, and says so. Never swapped for the newer text.
-      if (now && await inOlderVersion(m.id, s)) { sources.push({ meeting: m.id, path: s.path, state: 'ok', older_version: true }); continue; }
+      const older = now ? await inOlderVersion(m.id, s) : null;
+      if (older) { sources.push({ meeting: m.id, path: s.path, state: 'ok', older_version: true, ...(older !== s.path ? { current_path: older } : {}) }); continue; }
       const there = await fileInside(workspace.getWorkspacePath(), s.path).catch(() => null);
       sources.push({ meeting: m.id, path: s.path, state: there && now ? 'changed' : 'missing' });
     }
@@ -473,17 +474,28 @@ async function checkSelection(selection: MeetingSelection | null, mentionedIds: 
   return { selection, unpinned: [...new Set(mentionedIds)].filter((id) => !pinned.has(id)), sources, record_changed: recordChanged, review_changes: reviewChanges };
 }
 
-/** Whether a pinned file is in a version its meeting's folder still lists, with the pinned bytes. */
-async function inOlderVersion(id: string, s: PinnedSource): Promise<boolean> {
+/**
+ * Where a version its meeting's folder still lists holds the pinned bytes, from the workspace root; null when none does.
+ * A pin made in a version is looked for there first. A pin made before the meeting had a folder (in the queue, or in its
+ * update's materials while under review) is found by its bytes in whichever version kept them, since the text moved.
+ * Only the meeting's own folder is searched, and a file counts only when it still has the pinned bytes on disk.
+ */
+async function inOlderVersion(id: string, s: PinnedSource): Promise<string | null> {
   const ws = workspace.getWorkspacePath();
   const folder = await readFolder(ws, id).catch(() => null);
-  if (folder?.state !== 'ok') return false;
+  if (folder?.state !== 'ok') return null;
   const parts = s.path.split('/');
-  if (parts.length !== 4 || parts[0] !== MEETINGS_DIR || parts[1] !== id) return false;
-  const version = folder.manifest.versions.find((v) => v.id === parts[2]);
-  if (!version?.files.some((f) => f.name === parts[3] && f.sha256 === s.sha256)) return false;
-  const full = await fileInside(path.join(folder.dir, version.id), parts[3]!).catch(() => null);
-  return Boolean(full && (await hashFile(full)).sha256 === s.sha256);
+  const named = parts.length === 4 && parts[0] === MEETINGS_DIR && parts[1] === id ? { version: parts[2], name: parts[3] } : null;
+  if (parts[0] === MEETINGS_DIR && !named) return null;
+  const candidates = folder.manifest.versions.flatMap((v) => v.files.filter((f) => f.sha256 === s.sha256).map((f) => ({ version: v.id, name: f.name })))
+    .filter((c) => !named || (c.version === named.version && c.name === named.name))
+    // The same name as when pinned first, then the oldest version: the text as it was reviewed.
+    .sort((a, b) => Number(b.name === path.posix.basename(s.path)) - Number(a.name === path.posix.basename(s.path)));
+  for (const c of candidates) {
+    const full = await fileInside(path.join(folder.dir, c.version), c.name).catch(() => null);
+    if (full && (await hashFile(full)).sha256 === s.sha256) return `${MEETINGS_DIR}/${id}/${c.version}/${c.name}`;
+  }
+  return null;
 }
 
 /** How a meeting's record or review moved on since it was pinned, in words; null when it did not. */
@@ -531,7 +543,7 @@ export function renderSheet(selection: MeetingSelection | null, check?: Selectio
       const label = s.kind === 'transcript' ? 'Transcript' : 'Notes';
       if (state?.state === 'changed') lines.push(`- ${label}: ${code(s.path)}: changed since it was pinned. Do not read it.`);
       else if (state?.state === 'missing') lines.push(`- ${label}: ${code(s.path)}: no longer part of the meeting. Do not read it.`);
-      else if (state?.older_version) lines.push(`- ${label}: ${code(s.path)} (SHA-256 ${s.sha256}), from an older version of the meeting's text: say so in the deliverable's sources.`);
+      else if (state?.older_version) lines.push(`- ${label}: ${code(state.current_path ?? s.path)} (SHA-256 ${s.sha256}), from an older version of the meeting's text: say so in the deliverable's sources.`);
       else lines.push(`- ${label}: ${code(state?.current_path ?? s.path)} (SHA-256 ${s.sha256})`);
     }
     for (const u of m.unavailable) lines.push(`- Not available: ${quoted(u.name)}: ${quoted(u.reason)}`);

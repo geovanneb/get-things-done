@@ -57,7 +57,7 @@ const speaks = (texts: string[]): Transcribe => async (_wav, o) => {
 };
 
 /** A recorded meeting reviewed with Keep recordings on: its recording and its transcript in its own folder. */
-async function reviewed(ws: string, speakers = false): Promise<void> {
+async function reviewed(ws: string, speakers = false, close = true): Promise<void> {
   const id = 'CU-2026-0001';
   const dir = path.join(ws, 'context-updates', id);
   const files: Record<string, string> = { 'MQ-2026-0003-call.wav': WAV, 'MQ-2026-0003-call.transcript.md': FIRST, 'MQ-2026-0003-notes.md': 'Fictional notes' };
@@ -78,7 +78,7 @@ async function reviewed(ws: string, speakers = false): Promise<void> {
       ...(speakers ? { speakers: [{ label: 'Speaker 1', source: 'MQ-2026-0003-call.transcript.md', person: { name: 'Jane Doe' }, reason: 'Named in the call.' }], confirmation: 'confirmed' } : {}),
     }],
   }));
-  await updates.close(id);
+  if (close) await updates.close(id);
 }
 
 const ask = (ws: string, model = 'whisper-large-v3-turbo') => requestTranscription(ws, 'MQ-2026-0003', { file: 'MQ-2026-0003-call.wav', transcript: 'MQ-2026-0003-call.transcript.md', model, language: 'auto', speakers: false });
@@ -133,6 +133,37 @@ test('a task pinned to the reviewed text keeps it when another version becomes c
   const state = check.sources.find((s) => s.path === transcript.path)!;
   assert.deepEqual([state.state, state.older_version], ['ok', true], 'still valid, never swapped for the newer text');
   assert.match(renderSheet(check.selection, check), /from an older version of the meeting's text/);
+});
+
+test('a task pinned while the meeting was under review keeps its text after the move and a new version, at its new place', async (t) => {
+  const ws = await workspace(t);
+  await reviewed(ws, false, false);
+  const tasks = new TaskService();
+  const task = await tasks.getTask((await tasks.createTask({ title: 'Fictional summary', body: 'From [@Recorded call](/meetings/MQ-2026-0003).' })).id);
+  const pinned = (await syncTaskMeetings(task.path!, async () => ['MQ-2026-0003']))!.selection!;
+  const transcript = pinned.meetings[0]!.sources.find((s) => s.path.endsWith('call.transcript.md'))!;
+  assert.match(transcript.path, /^context-updates\/CU-2026-0001\/materials\//, 'pinned in the update under review');
+
+  await updates.close('CU-2026-0001');
+  const moved = (await checkTaskMeetings(task.path!, ['MQ-2026-0003'])).sources.find((s) => s.path === transcript.path)!;
+  assert.deepEqual([moved.state, moved.current_path], ['ok', 'meetings/MQ-2026-0003/v1/MQ-2026-0003-call.transcript.md'], 'followed into the folder');
+
+  await ask(ws);
+  await new MeetingTranscriptionService(new MeetingDigestService(), models, engine(speaks(['New words.'])).engine).tick();
+  await MeetingTranscriptionService.settled();
+  await chooseVersion(ws, 'MQ-2026-0003', 'v2');
+  const check = await checkTaskMeetings(task.path!, ['MQ-2026-0003']);
+  const state = check.sources.find((s) => s.path === transcript.path)!;
+  assert.deepEqual([state.state, state.older_version, state.current_path], ['ok', true, 'meetings/MQ-2026-0003/v1/MQ-2026-0003-call.transcript.md'], 'still the reviewed bytes, where v1 keeps them');
+  assert.equal(await fsp.readFile(path.join(ws, state.current_path!), 'utf-8'), FIRST);
+  const sheet = renderSheet(check.selection, check);
+  assert.ok(sheet.includes('`meetings/MQ-2026-0003/v1/MQ-2026-0003-call.transcript.md` (SHA-256'), 'the agent is sent where the bytes are');
+  assert.ok(!sheet.includes('`context-updates/CU-2026-0001/materials/MQ-2026-0003-call.transcript.md`'), 'never to where they were');
+
+  // Changed in v1 since: the pinned bytes are nowhere any more.
+  await fsp.writeFile(path.join(ws, state.current_path!), 'Changed by hand');
+  const after = (await checkTaskMeetings(task.path!, ['MQ-2026-0003'])).sources.find((s) => s.path === transcript.path)!;
+  assert.equal(after.state, 'missing');
 });
 
 test('a transcription with no words is not kept, and a stopped one leaves nothing', async (t) => {
