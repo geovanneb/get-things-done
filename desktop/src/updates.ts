@@ -58,6 +58,16 @@ export function startUpdateChecks(onReady: (version: string) => void, prepareFor
   return state;
 }
 
+/**
+ * What the dashboard's server is told about updating this app, so Settings can say how it updates: the desktop app,
+ * its release channel, and whether this build updates itself at all (unsigned and preview builds do not).
+ */
+export function updateEnvironment(): Record<string, string> {
+  const metadata = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'package.json'), 'utf8'));
+  const enabled = updatesEnabled(app.isPackaged, metadata.gtdSignedRelease, process.env['GTD_DISABLE_UPDATES']);
+  return { GTD_INSTALL: 'desktop', GTD_UPDATE_CHANNEL: metadata.gtdUpdateChannel ?? 'latest', GTD_UPDATES: enabled ? 'on' : 'off' };
+}
+
 /** Set while something must not be interrupted: an update waits and asks again later. */
 let holdUpdate: () => boolean = () => false;
 export function holdUpdatesWhile(check: () => boolean): void {

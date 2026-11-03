@@ -88,7 +88,7 @@ const env = { ...process.env, HOME: home, USERPROFILE: home };
 execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'init', '-y', '-d', ws,
   '--name', 'Alex Morgan', '--role', 'COO', '--org', 'Northwind Labs', '--ai', 'claude-code'], { env, stdio: 'pipe' });
 const server = spawn(process.execPath, [path.join(root, 'dist/server/index.js')], {
-  env: { ...env, ESB_WORKSPACE_PATH: ws, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production' },
+  env: { ...env, ESB_WORKSPACE_PATH: ws, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production', GTD_DISABLE_UPDATES: '1' },
   stdio: 'ignore',
 });
 

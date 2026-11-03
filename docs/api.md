@@ -813,6 +813,21 @@ GET /api/workspace/files/tasks/active/TASK-2026-0001/deliverables/speaker-notes.
 → 200 text/markdown
 ```
 
+## Updates
+
+The app's own version and whether a newer one is out. The check asks the npm registry (through the user's npm and its
+settings, with npm's own update notice off) or the desktop app's update feed for the newest version number, once a day
+while `auto_check` is on, and sends nothing from the workspace. State is shared by every dashboard of the user in
+`~/.gtd/updates.json`, changed under a lock; answers are kept per source (npm, or a desktop channel and system).
+`GTD_DISABLE_UPDATES=1` (and tests) keep every check off the network, "Check now" included.
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/api/app/update` | `current` (the app version, as in `/api/workspace`), `latest` (the newest found, or `null`), `newer` (strictly newer: never the same or an older version), `kind` (`desktop`, `npm` for a global install, `npm-local` for one in a project, `npx` or `source`), `channel`, `how` (`self`: the desktop app updates itself; `command`: run `commands`; `manual`: from `release_url` or the source), `notes_url`, `auto_check`, `dismissed`, `checked_at`, `checking`, `error` (why the last check failed, or that the saved settings could not be read: automatic checks are then off) and `busy` (a recording, transcription or AI tool run going now, or `null`) |
+| `POST` | `/api/app/update/check` | Asks now. Concurrent asks share one check, and a check a few seconds old is not repeated |
+| `PUT` | `/api/app/update/settings` | Body: `{ "auto_check": true \| false }` (default `true`) |
+| `POST` | `/api/app/update/dismiss` | Body: `{ "version": "<latest>" }`: "Later" for that version only. Any other version is refused (`400`) |
+
 ## First-run setup
 
 The dashboard shows a setup screen instead of its pages until a workspace is open. These two

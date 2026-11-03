@@ -18,6 +18,7 @@ import { useApi } from '@/hooks/useApi';
 import { cleanupSummary } from '@/components/routines/SystemCleanup';
 import WorkspaceAvatar from '@/components/layout/WorkspaceAvatar';
 import WorkspaceIconCrop from '@/components/layout/WorkspaceIconCrop';
+import UpdatesSettings from '@/components/settings/UpdatesSettings';
 import TranscriptionSettings from '@/components/settings/TranscriptionSettings';
 import SidebarSettings from '@/components/settings/SidebarSettings';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
@@ -923,6 +924,12 @@ export default function SettingsView() {
           />
         </div>
       </Card>
+
+      <div id="updates">
+        <Card title="Updates">
+          <UpdatesSettings />
+        </Card>
+      </div>
 
       {/* Section 5: About */}
       <Card title="About">
