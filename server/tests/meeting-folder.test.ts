@@ -198,19 +198,27 @@ test('a correction started after the move pins the meeting\'s folder, and its sp
   assert.ok(!review.blocked.some((b) => /not one of this meeting's files/.test(b)), review.blocked.join('; '));
 });
 
-test('deleting one meeting empties its folder into the trash; restoring puts it back; deleting the update takes the folders too', async (t) => {
+test('deleting one meeting moves its whole folder to the trash; restoring puts it back; deleting the update takes the folders too', async (t) => {
   const ws = await workspace(t);
   await cleanup.update({ meetings: { keep_text: true } });
   await digest(ws, 'CU-2026-0001');
   await updates.close('CU-2026-0001');
 
   await history.remove('MQ-2026-0001');
-  assert.deepEqual(await fsp.readdir(v1(ws, 'MQ-2026-0001')), []);
+  assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0001')), false);
   const [entry] = await fsp.readdir(trashDir(ws));
-  assert.deepEqual((await fsp.readdir(path.join(trashDir(ws), entry!))).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
+  assert.match(entry!, /-MQ-2026-0001$/);
+  assert.deepEqual((await fsp.readdir(path.join(trashDir(ws), entry!, 'v1'))).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
   assert.equal((await history.detail('MQ-2026-0001')).sources[0]!.state, 'unavailable');
+  await assert.rejects(history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), (err: { statusCode?: number }) => err.statusCode === 410);
+
+  // A folder of that meeting there again: restoring would overwrite it, so nothing is restored.
+  await fsp.mkdir(path.join(ws, 'meetings', 'MQ-2026-0001'));
+  await assert.rejects(history.restore('MQ-2026-0001'), (err: { statusCode?: number }) => err.statusCode === 409);
+  await fsp.rmdir(path.join(ws, 'meetings', 'MQ-2026-0001'));
   await history.restore('MQ-2026-0001');
   assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a budget');
+  assert.deepEqual(await fsp.readdir(trashDir(ws)), []);
 
   await updates.remove('CU-2026-0001');
   assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0001')), false);
@@ -219,7 +227,7 @@ test('deleting one meeting empties its folder into the trash; restoring puts it 
   assert.ok(trashed.some((n) => n.endsWith('-MQ-2026-0001')) && trashed.some((n) => n.endsWith('-MQ-2026-0002')) && trashed.some((n) => n.endsWith('-CU-2026-0001')));
 });
 
-test('System cleanup removes old meeting text from its folder, and the update only once its folders are empty', async (t) => {
+test('System cleanup moves old meetings\' folders to the trash, and removes the update only once they are gone', async (t) => {
   const ws = await workspace(t);
   await cleanup.update({ meetings: { keep_text: true } });
   await digest(ws, 'CU-2026-0001', { created_at: '2026-01-05T00:00:00.000Z' });
@@ -233,11 +241,69 @@ test('System cleanup removes old meeting text from its folder, and the update on
 
   await cleanup.update({ rules: { context_updates: { enabled: true, older_than_days: 1 } } });
   assert.equal((await cleanup.runNow(now)).status, 'ok');
-  assert.deepEqual(await fsp.readdir(v1(ws, 'MQ-2026-0001')), [], 'moved to the trash');
+  assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0001')), false, 'moved to the trash, whole');
   const later = new Date(now.getTime() + (MEETING_TRASH_DAYS + 1) * 86_400_000);
   await cleanup.runNow(later);
   await cleanup.runNow(later);
   assert.equal(await exists(path.join(ws, 'context-updates', 'CU-2026-0001')), false, 'then the update goes');
-  assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0001')), false, 'and its empty folders with it');
+  assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0001')), false, 'and no folder of it is left');
   assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0002')), false);
+});
+
+/** A digest of one recorded meeting made with Keep recordings on: its audio, its transcript, and a photo. */
+async function recordedDigest(ws: string, id: string, extra: Record<string, unknown> = {}): Promise<void> {
+  const dir = path.join(ws, 'context-updates', id);
+  const wav = 'RIFF fictional audio';
+  const transcript = '# Fictional recorded call\n\nSpeaker 1: Ask Dual Lane for a quote.\n';
+  const files: Record<string, string> = { 'meetings.md': '# Meetings', 'MQ-2026-0003-call.wav': wav, 'MQ-2026-0003-call.transcript.md': transcript, 'MQ-2026-0003-photo.png': 'png' };
+  await fsp.mkdir(path.join(dir, 'materials'), { recursive: true });
+  for (const [name, content] of Object.entries(files)) await fsp.writeFile(path.join(dir, 'materials', name), content);
+  await fsp.writeFile(path.join(dir, 'update.md'), stringifyMarkdown('', {
+    schema_version: '1.0', id, type: 'context-update', title: `Fictional ${id}`, status: 'in_review', source_date: '2026-10-27',
+    created_at: '2026-10-27T18:00:00.000Z', updated_at: '2026-10-28T09:00:00.000Z', origin: 'meetings', kind: 'daily-digest', keep_recordings: true,
+    materials: Object.keys(files).map((name) => ({ name, size: 1, type: 'text/plain' })),
+    digest_meetings: [{
+      id: 'MQ-2026-0003', title: 'Recorded call', meeting_date: '2026-10-27',
+      files: [{ source: 'call.wav', file: 'MQ-2026-0003-call.wav', sha256: sha(wav) }, { source: 'photo.png', file: 'MQ-2026-0003-photo.png', sha256: sha('png') }],
+      recordings: [{ source: 'call.wav', source_sha256: sha(wav), transcript: 'MQ-2026-0003-call.transcript.md', transcript_sha256: sha(transcript), complete: true, file: 'MQ-2026-0003-call.wav' }],
+    }],
+    transcripts: [{ file: 'MQ-2026-0003-call.transcript.md', source: 'MQ-2026-0003-call.wav', source_sha256: sha(wav), sha256: sha(transcript), complete: true, kind: 'audio' }],
+    meeting_records: [{ id: 'M-01', title: 'Recorded call', meeting_date: '2026-10-27', meeting: 'MQ-2026-0003', source: 'MQ-2026-0003-call.transcript.md', attendees: [{ name: 'Jane Doe' }], decisions: [] }],
+    ...extra,
+  }));
+}
+
+test('with Keep recordings, a reviewed meeting\'s recording moves to its folder with its transcript, and nothing else is kept', async (t) => {
+  const ws = await workspace(t);
+  // The user never chose to keep meeting text: kept recordings keep their meeting's text anyway, as kept materials did.
+  await recordedDigest(ws, 'CU-2026-0001');
+  const done = await updates.close('CU-2026-0001');
+  assert.deepEqual([done.keep_meeting_text, done.meeting_folders, done.keep_materials], [true, true, false], 'the apply command leaves materials/ alone');
+  assert.equal(await exists(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials')), false, 'no photo, no meetings.md left behind');
+  assert.deepEqual(await fsp.readdir(path.join(ws, 'meetings', 'MQ-2026-0003', 'audio')), ['MQ-2026-0003-call.wav']);
+  assert.deepEqual(await fsp.readdir(v1(ws, 'MQ-2026-0003')), ['MQ-2026-0003-call.transcript.md']);
+  const folder = await readFolder(ws, 'MQ-2026-0003');
+  assert.ok(folder.state === 'ok' && folder.manifest.audio[0]!.sha256 === sha('RIFF fictional audio'));
+
+  const detail = await history.detail('MQ-2026-0003');
+  const call = detail.sources.find((s) => s.name === 'call.wav')!;
+  assert.deepEqual([call.kind, call.state, call.playable, call.readable], ['recording', 'present', true, true]);
+  assert.match(await history.audio('MQ-2026-0003', 'MQ-2026-0003-call.wav'), /meetings[/\\]MQ-2026-0003[/\\]audio[/\\]MQ-2026-0003-call\.wav$/);
+  assert.match(await history.text('MQ-2026-0003', 'MQ-2026-0003-call.wav'), /Dual Lane/, 'read through its transcript');
+});
+
+test('the Meetings rule removes a kept recording with its meeting; a digest kept before stays as it was', async (t) => {
+  const ws = await workspace(t);
+  await recordedDigest(ws, 'CU-2026-0001', { created_at: '2026-01-05T00:00:00.000Z' });
+  await updates.close('CU-2026-0001');
+  // Kept by an earlier version: keep_materials, everything in the update, never removed by the Meetings rule.
+  await digest(ws, 'CU-2026-0002', { status: 'done', applied_at: '2026-01-06T00:00:00.000Z', created_at: '2026-01-05T00:00:00.000Z', keep_materials: true });
+
+  const now = new Date('2027-05-01T12:00:00');
+  const plan = await cleanup.plan(await cleanup.readSettings(), now);
+  assert.deepEqual(plan.items.filter((i) => i.type === 'meetings').map((i) => i.id), ['MQ-2026-0003']);
+  assert.equal((await cleanup.runNow(now)).status, 'ok');
+  assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0003')), false, 'recording and transcript went to the trash together');
+  assert.equal((await history.detail('MQ-2026-0003')).sources.find((s) => s.name === 'call.wav')!.state, 'unavailable');
+  assert.ok(await exists(path.join(ws, 'context-updates', 'CU-2026-0002', 'materials', 'MQ-2026-0001-a.vtt')));
 });

@@ -19,7 +19,7 @@ export const RULES: { type: CleanupRuleType; label: string; hint: string; action
   { type: 'completed_tasks', label: 'Finished tasks', hint: 'Done tasks still on the board.', actions: ['archive', 'trash', 'delete'], clock: 'since finished' },
   { type: 'archived_tasks', label: 'Archived tasks', hint: 'Insights stop counting removed tasks.', actions: ['trash', 'delete'], clock: 'since archived' },
   { type: 'context_updates', label: 'Finished context updates', hint: 'Records of done updates. Updates whose materials you kept, with a confirmed meeting record, or still holding kept meetings, are skipped.', actions: ['trash', 'delete'], clock: 'since finished' },
-  { type: 'meetings', label: 'Meetings', hint: 'Transcripts and notes kept after review, counted from the day the meeting took place or was imported. Meetings still waiting for a digest or a review, and meetings marked Keep this meeting, are skipped. Moved to the trash, a meeting is deleted for good 30 days later. Confirmed records stay with their update.', actions: ['trash', 'delete'], clock: 'since the meeting' },
+  { type: 'meetings', label: 'Meetings', hint: 'Transcripts, notes and kept recordings, after review, counted from the day the meeting took place or was imported. Meetings still waiting for a digest or a review, and meetings marked Keep this meeting, are skipped. Moved to the trash, a meeting is deleted for good 30 days later. Confirmed records stay with their update.', actions: ['trash', 'delete'], clock: 'since the meeting' },
   { type: 'kaizen', label: 'Finished Kaizen notes', hint: 'Notes already opened as a context update, and older ones applied or rejected. A note still waiting is never touched.', actions: ['trash', 'delete'], clock: 'since closed' },
   { type: 'trash', label: 'Empty the trash', hint: 'Removed and replaced files the app keeps in .situation-board/trash/.', actions: ['delete'], clock: 'in the trash' },
 ];
@@ -329,7 +329,7 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
                       <Checkbox checked={draft.meetings.keep_text === true}
                         onChange={(on) => { setDraft({ ...draft, meetings: { keep_text: on } }); setPreview(null); }}
                         label="Keep meeting transcripts and notes after review"
-                        description="Only the meeting text, not other materials, and not the audio (that follows Keep recordings in Settings > Transcription). Off: they are deleted when the review is done, as before." />
+                        description="Only the meeting text, not other materials. Recordings are kept with Keep recordings in Settings > Transcription. Off: they are deleted when the review is done, as before." />
                     </div>
                   )}
                 </div>

@@ -48,7 +48,7 @@ function KeepTextQuestion({ days, onAnswered }: { days: number; onAnswered: () =
           <Toggle id="keep-meeting-text" label="Keep meeting transcripts and notes" checked={keep} onChange={setKeep} />
           <label htmlFor="keep-meeting-text">
             <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>Keep meeting transcripts and notes</span><br />
-            Only the meeting text: not the other materials, and not the audio (that follows Keep recordings in Settings &gt; Transcription).
+            Only the meeting text, not the other materials. Recordings are kept with Keep recordings in Settings &gt; Transcription.
           </label>
         </div>
         <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>

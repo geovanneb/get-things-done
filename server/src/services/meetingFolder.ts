@@ -2,7 +2,7 @@ import * as path from 'path';
 import { promises as fsp } from 'fs';
 import { randomUUID } from 'crypto';
 import type { ContextUpdate } from './contextUpdateService';
-import { isMeetingId, isMeetingText, type HeldMeeting } from './meetingLibrary';
+import { isMeetingId, isMeetingText, recordedHash, type HeldMeeting } from './meetingLibrary';
 import { atomicWrite } from '../utils/atomicWrite';
 import { hashFile } from '../utils/fileHash';
 import { fileInside, workspaceEntry } from '../utils/files';
@@ -14,6 +14,7 @@ import { moveToTrash } from './trash';
  *
  *   meetings/<meeting id>/meeting.json   which update it belongs to, its versions and the current one
  *   meetings/<meeting id>/v1/            the text as the review saw it: transcripts, readable copies, notes
+ *   meetings/<meeting id>/audio/         its recordings, with Keep recordings on: evidence every version comes from
  *
  * The folder is private: git-ignored, never task input unless a task's pinned sources name a file in it, and never
  * part of anything shared. Its file names are the names the update records, so `heldMeetings` and the history's
@@ -31,6 +32,8 @@ const VERSION_ID = /^v\d{1,4}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** A folder being written that a crash left behind is removed after this long, never sooner: it may still be in use. */
 const STALE_DRAFT_MS = 10 * 60 * 1000;
+/** A linked file larger than this is not read again for its hash when the update recorded one. */
+const HASH_ON_LINK_MAX_BYTES = 64 * 1024 * 1024;
 
 export interface FolderVersion {
   id: string;
@@ -47,12 +50,14 @@ export interface FolderManifest {
   update_id: string;
   current: string;
   versions: FolderVersion[];
+  /** Its recordings, kept with Keep recordings on. Not versioned: a new version is new text from the same audio. */
+  audio: { name: string; sha256: string }[];
 }
 
 export type FolderState =
   | { state: 'none' }
   | { state: 'damaged'; reason: string }
-  | { state: 'ok'; manifest: FolderManifest; dir: string; version: FolderVersion; versionDir: string };
+  | { state: 'ok'; manifest: FolderManifest; dir: string; version: FolderVersion; versionDir: string; audioDir: string };
 
 export function meetingsRoot(ws: string): string {
   return path.join(ws, MEETINGS_DIR);
@@ -74,19 +79,28 @@ function parseManifest(raw: string, id: string): FolderManifest | string {
   const versions: FolderVersion[] = [];
   for (const entry of m['versions']) {
     const v = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
-    if (typeof v['id'] !== 'string' || !VERSION_ID.test(v['id']) || typeof v['at'] !== 'string' || !Array.isArray(v['files'])) return 'a version in meeting.json is damaged';
-    const files: FolderVersion['files'] = [];
-    for (const f of v['files']) {
-      const file = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
-      const name = file['name'];
-      if (typeof name !== 'string' || !name || path.basename(name) !== name || name.startsWith('.') || typeof file['sha256'] !== 'string' || !SHA256.test(file['sha256'])) return 'a file in meeting.json is damaged';
-      files.push({ name, sha256: file['sha256'] });
-    }
+    if (typeof v['id'] !== 'string' || !VERSION_ID.test(v['id']) || typeof v['at'] !== 'string') return 'a version in meeting.json is damaged';
+    const files = fileList(v['files']);
+    if (!files) return 'a file in meeting.json is damaged';
     versions.push({ id: v['id'], at: v['at'], made_from: 'review', files });
   }
+  const audio = m['audio'] === undefined ? [] : fileList(m['audio']);
+  if (!audio) return 'a recording in meeting.json is damaged';
   if (new Set(versions.map((v) => v.id)).size !== versions.length) return 'meeting.json lists a version twice';
   if (typeof m['current'] !== 'string' || !versions.some((v) => v.id === m['current'])) return 'meeting.json names no current version it lists';
-  return { schema: 1, id, update_id: m['update_id'], current: m['current'], versions };
+  return { schema: 1, id, update_id: m['update_id'], current: m['current'], versions, audio };
+}
+
+function fileList(raw: unknown): { name: string; sha256: string }[] | null {
+  if (!Array.isArray(raw)) return null;
+  const files: { name: string; sha256: string }[] = [];
+  for (const f of raw) {
+    const file = (f && typeof f === 'object' ? f : {}) as Record<string, unknown>;
+    const name = file['name'];
+    if (typeof name !== 'string' || !name || path.basename(name) !== name || name.startsWith('.') || typeof file['sha256'] !== 'string' || !SHA256.test(file['sha256'])) return null;
+    files.push({ name, sha256: file['sha256'] });
+  }
+  return files;
 }
 
 /** A meeting's folder as it is now. A folder that cannot be read as one is `damaged`, never guessed at. */
@@ -101,7 +115,7 @@ export async function readFolder(ws: string, id: string): Promise<FolderState> {
   const manifest = parseManifest(raw, id);
   if (typeof manifest === 'string') return { state: 'damaged', reason: manifest };
   const version = manifest.versions.find((v) => v.id === manifest.current)!;
-  return { state: 'ok', manifest, dir, version, versionDir: path.join(dir, version.id) };
+  return { state: 'ok', manifest, dir, version, versionDir: path.join(dir, version.id), audioDir: path.join(dir, 'audio') };
 }
 
 /**
@@ -118,11 +132,17 @@ export async function folderOf(ws: string, u: Pick<ContextUpdate, 'id'>, m: Pick
   return folder;
 }
 
-/** The plain files of the current version that are there now, by name. */
+/** Where a file the folder lists is: its recordings in audio/, its text in the current version. */
+function placeOf(folder: Extract<FolderState, { state: 'ok' }>, name: string): string | null {
+  if (folder.manifest.audio.some((f) => f.name === name)) return folder.audioDir;
+  return folder.version.files.some((f) => f.name === name) ? folder.versionDir : null;
+}
+
+/** The plain files the folder lists (the current version's text and the recordings) that are there now, by name. */
 export async function folderFiles(folder: Extract<FolderState, { state: 'ok' }>): Promise<Set<string>> {
   const present = new Set<string>();
-  for (const f of folder.version.files) {
-    if (await fsp.lstat(path.join(folder.versionDir, f.name)).then((st) => st.isFile(), () => false)) present.add(f.name);
+  for (const f of [...folder.version.files, ...folder.manifest.audio]) {
+    if (await fsp.lstat(path.join(placeOf(folder, f.name)!, f.name)).then((st) => st.isFile(), () => false)) present.add(f.name);
   }
   return present;
 }
@@ -147,12 +167,12 @@ export async function meetingFiles(ws: string, u: Pick<ContextUpdate, 'id'> & { 
   const folder = found && found.state === 'ok' ? found : null;
   const problem = found && found.state !== 'ok' ? found.reason : null;
   const inFolder = folder ? await folderFiles(folder) : new Set<string>();
-  const listed = new Set(folder?.version.files.map((f) => f.name) ?? []);
+  const listed = new Set(folder ? [...folder.version.files, ...folder.manifest.audio].map((f) => f.name) : []);
   const inMaterials = materialNames ?? new Set((u.material_files ?? []).map((f) => f.name));
   const present = new Set<string>();
   for (const f of m.files) if (inFolder.has(f) || (!listed.has(f) && inMaterials.has(f))) present.add(f);
   // A file the folder lists belongs to the folder: one of the same name left in materials/ is not read instead.
-  const where = (name: string) => (listed.has(name) ? folder!.versionDir : materials);
+  const where = (name: string) => (folder && listed.has(name) ? placeOf(folder, name)! : materials);
   return {
     folder, problem, present,
     path: (name) => (m.files.includes(name) ? fileInside(where(name), name).catch(() => null) : Promise.resolve(null)),
@@ -161,8 +181,9 @@ export async function meetingFiles(ws: string, u: Pick<ContextUpdate, 'id'> & { 
 }
 
 /**
- * Moves the text of a finished update's meetings into their own folders, and returns the names it may now remove from
- * materials/: a file whose every meeting has it in a complete folder. Anything not certain stays in materials/ as
+ * Moves what a finished update keeps of its meetings (their text, and their recordings with Keep recordings) into their
+ * own folders, and returns the names it may now remove from materials/: a file whose every meeting has it in a complete
+ * folder. Anything not certain stays in materials/ as
  * before (a folder of another update, a damaged one, a copy that did not match), so nothing is lost.
  *
  * Each folder is written under a hidden name and renamed into place only once every file is copied, checked and listed,
@@ -175,17 +196,18 @@ export async function moveMeetingText(ws: string, u: ContextUpdate, meetings: He
   const owners = new Map<string, string[]>();
   const done = new Set<string>();
   for (const m of meetings) {
-    const files = m.files.filter((f) => keep.has(f) && isMeetingText(f));
+    const files = m.files.filter((f) => keep.has(f));
     if (!files.length || !m.linkable) continue;
     for (const f of files) owners.set(f, [...(owners.get(f) ?? []), m.id]);
     const existing = await folderOf(ws, u, m);
     if (existing?.state === 'ok') {
       // Moved before: the folder is complete. A file it does not list stays where it is.
-      if (existing.version.id === FIRST_VERSION) for (const f of existing.version.files) if (files.includes(f.name)) done.add(`${m.id}\0${f.name}`);
+      const first = existing.manifest.versions.find((v) => v.id === FIRST_VERSION);
+      for (const f of [...first?.files ?? [], ...existing.manifest.audio]) if (files.includes(f.name)) done.add(`${m.id}\0${f.name}`);
       continue;
     }
     if (existing) continue;
-    const written = await writeFolder(ws, u, m, files, materials, now).catch(() => null);
+    const written = await writeFolder(ws, u, m, files, materials, now, (name) => recordedHash(u, name)).catch(() => null);
     if (written) for (const name of written) done.add(`${m.id}\0${name}`);
   }
   const removable = new Set<string>();
@@ -194,38 +216,56 @@ export async function moveMeetingText(ws: string, u: ContextUpdate, meetings: He
 }
 
 /** Writes one meeting's folder whole, or nothing. Returns the files it holds, or null when the folder was not made. */
-async function writeFolder(ws: string, u: ContextUpdate, m: HeldMeeting, files: string[], materials: string, now: Date): Promise<string[] | null> {
+async function writeFolder(ws: string, u: ContextUpdate, m: HeldMeeting, files: string[], materials: string, now: Date, recorded: (name: string) => string | null): Promise<string[] | null> {
   const root = meetingsRoot(ws);
   await fsp.mkdir(root, { recursive: true });
   await removeStaleDrafts(root, m.id, now);
   const draft = path.join(root, `.${m.id}.${randomUUID()}.draft`);
   try {
     await fsp.mkdir(path.join(draft, FIRST_VERSION), { recursive: true });
+    await fsp.mkdir(path.join(draft, 'audio'), { recursive: true });
     const listed: FolderVersion['files'] = [];
+    const audio: FolderManifest['audio'] = [];
     for (const name of files) {
       const from = path.join(materials, name);
       // Only a plain file of materials/, never a link or a folder with a kept name.
       if (!(await fsp.lstat(from).then((st) => st.isFile(), () => false))) continue;
-      const to = path.join(draft, FIRST_VERSION, name);
-      await fsp.copyFile(from, to);
-      const [a, b] = await Promise.all([hashFile(from), hashFile(to)]);
-      if (a.sha256 !== b.sha256 || a.size !== b.size) return null;
-      listed.push({ name, sha256: b.sha256 });
+      const text = isMeetingText(name);
+      const sha256 = await place(from, path.join(draft, text ? FIRST_VERSION : 'audio', name), recorded(name));
+      if (!sha256) return null;
+      (text ? listed : audio).push({ name, sha256 });
     }
-    if (!listed.length) return null;
+    if (!listed.length && !audio.length) return null;
     const manifest: FolderManifest = {
       schema: 1, id: m.id, update_id: u.id, current: FIRST_VERSION,
-      versions: [{ id: FIRST_VERSION, at: now.toISOString(), made_from: 'review', files: listed }],
+      versions: [{ id: FIRST_VERSION, at: now.toISOString(), made_from: 'review', files: listed }], audio,
     };
     await atomicWrite(path.join(draft, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
     // Fails when a folder of that name appeared meanwhile: that one is left as it is, and nothing is removed.
     await fsp.rename(draft, folderPath(ws, m.id));
-    return listed.map((f) => f.name);
+    return [...listed, ...audio].map((f) => f.name);
   } catch {
     return null;
   } finally {
     await fsp.rm(draft, { recursive: true, force: true });
   }
+}
+
+/**
+ * Puts one file into the draft and returns its SHA-256, or null when the copy is not certain. A hard link costs nothing
+ * (a recording can be gigabytes) and is the same bytes by construction: it is hashed once, except a large recording
+ * whose hash the update recorded. Where links are not possible, a copy is read back and compared with the original.
+ */
+async function place(from: string, to: string, recorded: string | null): Promise<string | null> {
+  const linked = await fsp.link(from, to).then(() => true, () => false);
+  if (linked) {
+    // Read it when that is cheap; a large recording keeps the hash the digest checked when it took the file.
+    const size = (await fsp.stat(to)).size;
+    return recorded && size > HASH_ON_LINK_MAX_BYTES ? recorded : (await hashFile(to)).sha256;
+  }
+  await fsp.copyFile(from, to);
+  const [a, b] = await Promise.all([hashFile(from), hashFile(to)]);
+  return a.sha256 === b.sha256 && a.size === b.size && (!recorded || recorded === a.sha256) ? b.sha256 : null;
 }
 
 async function removeStaleDrafts(root: string, id: string, now: Date): Promise<void> {

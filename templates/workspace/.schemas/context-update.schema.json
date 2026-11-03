@@ -124,6 +124,8 @@
     "keep_materials": {"type": "boolean", "description": "Set by the executive in the dashboard, never by an agent. When true, the apply step and closing keep materials/; only the executive releases it."},
     "meetings_linked_at": {"type": "string", "format": "date-time", "description": "Set by the dashboard when it saved which meeting each record and file belongs to. From then on those saved links are read as they are."},
     "keep_meeting_text": {"type": "boolean", "description": "Set by the dashboard, never by an agent. When true, the apply step leaves materials/ alone: the dashboard keeps the meetings' transcripts and notes and removes the rest."},
+    "meeting_folders": {"type": "boolean", "description": "Set by the dashboard, never by an agent. When true, once the update is done its meetings' kept text (and recordings) move to their folders under meetings/."},
+    "keep_recordings": {"type": "boolean", "description": "Set by the dashboard on a meeting digest made with Keep recordings on, never by an agent. Its recordings are kept after review, in each meeting's folder."},
     "kept_meetings": {"type": "array", "maxItems": 50, "items": {"type": "string"}, "description": "Set by the dashboard: meetings the executive keeps out of System cleanup."},
     "deleted_meetings": {"type": "array", "maxItems": 50, "items": {"type": "object"}, "description": "Set by the dashboard: meetings whose text was deleted, and the trash entry holding it until it is deleted for good."},
     "proposals": {"type": "array", "maxItems": 50, "items": {"$ref": "#/definitions/proposal"}},

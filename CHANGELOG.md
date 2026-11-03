@@ -13,6 +13,10 @@ minor versions may include breaking changes.
   out of `context-updates/` into `meetings/<id>/` once its review is done, listed with their SHA-256 in
   `meeting.json`. `meetings/` is left out of git and out of agents' reach unless a task names the meeting.
   Meetings kept before stay where they are and still open, play and search as before (#239).
+- **Kept recordings live with their meeting.** With Keep recordings on, a recording moves into its meeting's
+  folder with its transcript once the review is done, instead of keeping every material of the digest.
+  System cleanup's Meetings rule (180 days, "Keep this meeting") now covers recordings too, and deleting a
+  meeting moves its whole folder to the trash (#239).
 
 ## [0.8.0] - 2026-11-02
 

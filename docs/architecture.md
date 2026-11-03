@@ -35,8 +35,11 @@ A meeting's files live in one of two places, and every reader asks `meetingFiles
 - `context-updates/<CU id>/materials/`: while its update waits for review, and for meetings
   kept before meeting folders (an update without `meeting_folders`).
 - `meetings/<meeting id>/v1/`: once the update is done and meeting text is kept. `meeting.json`
-  names the update, the current version and each file with its SHA-256. The folder is written
-  under a hidden draft name and renamed into place only when complete; the files leave
+  names the update, the current version and each file with its SHA-256. With Keep recordings
+  (`keep_recordings` on the digest), the recordings go to `meetings/<meeting id>/audio/`, listed
+  the same way; digests kept before that set `keep_materials` and stay as they are. The folder is written
+  under a hidden draft name (files hard-linked, or copied and compared where links are not
+  possible) and renamed into place only when complete; the files leave
   `materials/` only after that, so a crash leaves a copy in one place or both, never in neither.
   A folder of another update, or one whose `meeting.json` cannot be read, is never used.
 

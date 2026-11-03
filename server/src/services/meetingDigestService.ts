@@ -598,7 +598,7 @@ interface MakePlan {
   broken: string[];
   brokenNote: string;
   problems: { id: string; reason: string }[];
-  keepMaterials: boolean | undefined;
+  keepsRecordings: boolean | undefined;
   unreadable: string;
   characters: number;
 }
@@ -1522,10 +1522,10 @@ export class MeetingDigestService {
           owner: { pid: process.pid, token },
         };
         await this.writeJson('meeting-digest-batch.json', batch);
-        return { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters, keepMaterials: keepRecordings && digestMeetings.some((m) => m.recordings?.length) };
+        return { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters, keepsRecordings: keepRecordings && digestMeetings.some((m) => m.recordings?.length) };
       });
       if ('status' in plan) return plan;
-      const { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters, keepMaterials } = plan;
+      const { batch, digestMeetings, files, chosen, queued, broken, brokenNote, problems, unreadable, characters, keepsRecordings } = plan;
         try {
           await contextUpdateService.createDigest({
             title: digestTitle(digestMeetings),
@@ -1534,7 +1534,7 @@ export class MeetingDigestService {
             meetingsText: meetingsMarkdown(digestMeetings, new Map(chosen.map((c) => [c.meeting.id, c.characters])), new Map(chosen.map((c) => [c.meeting.id, c.meeting.participants ?? []]))),
             meetings: digestMeetings,
             files,
-            ...(keepMaterials ? { keep_materials: true } : {}),
+            ...(keepsRecordings ? { keep_recordings: true } : {}),
           }, { origin: DIGEST_ORIGIN, kind: DIGEST_KIND }, (id) => this.asOwner(token, async () => {
             batch.update_id = id;
             await this.writeJson('meeting-digest-batch.json', batch);
