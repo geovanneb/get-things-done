@@ -57,6 +57,12 @@ against a numbered turn of a readable copy (`transcriptChanges.ts`). `before` mu
 turn, on one line; a WebVTT original changes in its one cue and its copy is made again from it, checked
 to differ only there. The new version becomes current, since approving the correction is the choice,
 and it is refused when the version it started from is no longer current.
+A correction's record carries them as `transcript_changes` (`correctionTranscript.ts`): the version they
+change is read from its pins (`meetings/<id>/vN/…`, one `vN`), never written by the agent. Only sure
+changes and the suggestions the executive used count, and those must each stand alone in the pinned turn
+(no two on the same text). Approving keeps `finishing` (the changes and their receipt) on the update
+before calling the writer, then marks it done with `transcript_version`; approving again after a stop
+finishes exactly that, and every other change to the correction waits under the corrections lock.
 Remaining risk: the first move is coordinated with the update's own queue, not across two dashboards
 on the same workspace. A WebVTT original saved in UTF-16 is written back in UTF-8 when corrected. The writer takes a receipt (its caller's hash of what is being finished) and records it on the version: finishing the same correction again returns the version already written, and another receipt for it is refused. Reading a version's files checks their hashes, so a file changed on disk is never corrected.
 

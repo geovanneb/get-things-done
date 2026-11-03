@@ -21,6 +21,10 @@ import { heldMeetings, isMeetingId, meetingLinks, meetingTextToKeep, ownFiles } 
 import { folderFiles, folderOf, meetingFiles, meetingsRoot, moveMeetingText, trashFoldersOf } from './meetingFolder';
 import { meetingTextKept } from './meetingTextSetting';
 import type { Task } from '../types';
+import { parseChange } from './transcriptChanges';
+import { effectiveChanges, effectiveProblems, suggestionProblem, transcriptBase, transcriptReview, writerChange, type TranscriptReview } from './correctionTranscript';
+import { readFolder } from './meetingFolder';
+import { writeCorrectedVersion } from './meetingVersions';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -178,6 +182,12 @@ export interface CorrectionEnvelope {
   sources: { path: string; name: string; kind: 'transcript' | 'notes'; sha256: string }[];
 }
 
+/** One word change as the writer applies it to a version of the meeting's text. */
+export interface TranscriptWordChange { file: string; turn: number; before: string; after: string }
+
+/** What finishing a correction writes: its changes, on the version it pinned, for the record as it was confirmed. */
+export interface CorrectionFinish { receipt: string; from_version: string; revision: string; changes: TranscriptWordChange[] }
+
 export const CORRECTION_KIND = 'meeting-correction';
 /** An ordinary update, opened from a finished correction, to find context and stakeholder notes that still use the old values. */
 export const FOLLOW_UP_KIND = 'correction-follow-up';
@@ -207,6 +217,12 @@ export interface RecordChange {
 
 export interface RecordDoubt { field: typeof DOUBT_FIELDS[number]; value: string; reason: string; suggestion: string }
 
+/**
+ * A correction of a transcript's words, as the analysis explains it: in `file` (a readable copy the correction pinned),
+ * turn `turn`, `before` becomes `after`. `sure: false` only suggests; `taken`: the executive used the suggestion.
+ */
+export interface RecordTranscriptChange { file: string; turn: number; before: string; after: string; reason: string; sure: boolean; taken?: true }
+
 export interface MeetingRecord {
   id: string;
   title: string;
@@ -228,6 +244,8 @@ export interface MeetingRecord {
    * out by comparing with the version corrected; an explanation never stands in for that.
    */
   corrections: RecordChange[];
+  /** In a `meeting-correction` update only: corrections of the transcript's words (see RecordTranscriptChange). */
+  transcript_changes: RecordTranscriptChange[];
   /**
    * What the analysis is not sure of, for the user to check before confirming: a field, the exact text it is about,
    * why, and what it may be instead. Never a reason to change the record by itself.
@@ -294,6 +312,16 @@ export interface ContextUpdate {
   kind: string | null;
   /** A `meeting-correction` only: what it corrects (see CorrectionEnvelope). Null otherwise, or when not valid. */
   correction: CorrectionEnvelope | null;
+  /**
+   * A correction only, while it is being finished: the new version of the meeting's text it is writing, and the receipt
+   * that version carries. Written by the dashboard before the version, removed once the correction is done; while it
+   * is there, approving again finishes exactly this and nothing else may change the correction. Null otherwise.
+   */
+  finishing: CorrectionFinish | null;
+  /** Whether a finish is under way at all, also when what it keeps cannot be read (then `finishing` is null). */
+  finish_pending: boolean;
+  /** A finished correction that changed transcript words: the version of the meeting's text it made. Dashboard only. */
+  transcript_version: { from: string; to: string; changes: TranscriptWordChange[] } | null;
   /** A `correction-follow-up` only: the correction it follows up. Written by the dashboard; null otherwise. */
   follows: string | null;
   /** For a meeting digest: which queued meeting each file came from. Written by the dashboard only; kept after the materials go. */
@@ -383,13 +411,50 @@ export interface ContextUpdateDetail extends ContextUpdate {
    * meeting's current record (`stale` when another correction finished first), why approving would be refused now
    * (`blocked`, empty once done), and what the record changes in it.
    */
-  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean; suggestions: SuggestionState[] };
+  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean; suggestions: SuggestionState[]; transcript: TranscriptReview | null; finishing: boolean };
   /** A `correction-follow-up` only, while not done: why its material no longer describes the current record (null when it does). */
   follow_up_problem?: string | null;
 }
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
+}
+
+const VERSION_ID = /^v\d{1,4}$/;
+
+function wordChanges(value: unknown): TranscriptWordChange[] | null {
+  if (!Array.isArray(value) || !value.length) return null;
+  const out: TranscriptWordChange[] = [];
+  for (const raw of value) {
+    const c = parseChange(raw);
+    if (typeof c === 'string') return null;
+    out.push(c);
+  }
+  return out;
+}
+
+/** A correction's finish under way, as the dashboard wrote it; null when absent or not whole. */
+function normalizeFinish(value: unknown): CorrectionFinish | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const o = value as Record<string, unknown>;
+  const changes = wordChanges(o['changes']);
+  if (typeof o['receipt'] !== 'string' || !/^[0-9a-f]{64}$/.test(o['receipt'])) return null;
+  if (typeof o['from_version'] !== 'string' || !VERSION_ID.test(o['from_version'])) return null;
+  if (typeof o['revision'] !== 'string' || !REVISION.test(o['revision']) || !changes) return null;
+  return { receipt: o['receipt'], from_version: o['from_version'], revision: o['revision'], changes };
+}
+
+function normalizeTranscriptVersion(value: unknown): ContextUpdate['transcript_version'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const o = value as Record<string, unknown>;
+  const changes = wordChanges(o['changes']);
+  if (typeof o['from'] !== 'string' || !VERSION_ID.test(o['from']) || typeof o['to'] !== 'string' || !VERSION_ID.test(o['to']) || !changes) return null;
+  return { from: o['from'], to: o['to'], changes };
+}
+
+/** What a correction's finish is bound to: the correction, the record confirmed, the version it corrects and the changes, in order. */
+export function finishReceipt(id: string, revision: string, fromVersion: string, changes: TranscriptWordChange[]): string {
+  return createHash('sha256').update(JSON.stringify([id, revision, fromVersion, changes.map((c) => [c.file, c.turn, c.before, c.after])])).digest('hex');
 }
 
 /** YAML turns unquoted dates into Date objects; everything shown in the dashboard is a string. */
@@ -658,7 +723,7 @@ function checkCorrectionRecords(update: Pick<ContextUpdate, 'kind' | 'correction
     return;
   }
   if (update.kind !== CORRECTION_KIND) {
-    for (const r of update.meeting_records) if (r.amends || r.corrections.length || r.action_items.some((a) => a.slot != null)) flag(r, 'only a correction says what a record amends');
+    for (const r of update.meeting_records) if (r.amends || r.corrections.length || r.transcript_changes.length || r.action_items.some((a) => a.slot != null)) flag(r, 'only a correction says what a record amends');
     return;
   }
   const env = update.correction;
@@ -689,6 +754,8 @@ function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' |
     ...(r.action_items.some((a) => a.slot != null) ? [['slots', r.action_items.map((a) => a.slot ?? null)]] : []),
     // A correction's explanations, as the user read them when confirming.
     ...(r.corrections.length ? [['corrections', r.corrections.map((c) => [c.field, c.before, c.after, c.reason, c.sure])]] : []),
+    // Corrections of the transcript's words, and which the executive used: only when there are any.
+    ...(r.transcript_changes.length ? [['transcript_changes', r.transcript_changes.map((c) => [c.file, c.turn, c.before, c.after, c.reason, c.sure, c.taken === true])]] : []),
     // Which suggestions the executive used: only when any is, so records confirmed before this keep their versions.
     ...(r.corrections.some((c) => c.taken) ? [['taken', r.corrections.flatMap((c, i) => (c.taken ? [i] : []))]] : []),
     // In a correction, what the dashboard wrote about it (meeting, original, version corrected, which original item each
@@ -715,6 +782,26 @@ function recordChanges(raw: unknown[], problems: string[]): RecordChange[] {
     if (o['taken'] !== undefined && o['taken'] !== true) problems.push(`${what} says it was used in a way the dashboard never writes`);
     if (o['taken'] === true && o['sure'] === true) problems.push(`${what} is marked sure and used at once`);
     return { field: field ?? 'title', before, after, reason, sure: o['sure'] === true, ...(o['taken'] === true ? { taken: true as const } : {}) };
+  });
+}
+
+/**
+ * A correction's changes to the transcript's words. The words are kept exactly as written (never trimmed): `before`
+ * must match the transcript. Part 1's own check of a change (`parseChange`) decides what a change may be.
+ */
+function recordTranscriptChanges(raw: unknown[], problems: string[]): RecordTranscriptChange[] {
+  return raw.map((entry, i) => {
+    const what = `transcript change ${i + 1}`;
+    const o = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>;
+    const change = parseChange(o);
+    if (typeof change === 'string') problems.push(`${what}: ${change}`);
+    const reason = recordText(o['reason'], `${what} reason`, problems);
+    if (!reason) problems.push(`${what} does not say why`);
+    if (typeof o['sure'] !== 'boolean') problems.push(`${what} does not say whether it is sure (true or false)`);
+    if (o['taken'] !== undefined && o['taken'] !== true) problems.push(`${what} says it was used in a way the dashboard never writes`);
+    if (o['taken'] === true && o['sure'] === true) problems.push(`${what} is marked sure and used at once`);
+    const ok = typeof change === 'string' ? { file: '', turn: 0, before: '', after: '' } : change;
+    return { ...ok, reason, sure: o['sure'] === true, ...(o['taken'] === true ? { taken: true as const } : {}) };
   });
 }
 
@@ -787,6 +874,7 @@ function normalizeRecords(raw: unknown, binding?: string): MeetingRecord[] {
       meeting_id: isMeetingId(r['meeting_id']) ? r['meeting_id'] : null,
       amends: r['amends'] == null ? null : recordVersion(r['amends']) ?? (problems.push('amends is not a record version (update_id, record_id, revision)'), null),
       corrections: r['corrections'] == null ? [] : recordChanges(recordList(r['corrections'], 'corrections', problems), problems),
+      transcript_changes: r['transcript_changes'] == null ? [] : recordTranscriptChanges(recordList(r['transcript_changes'], 'transcript_changes', problems), problems),
     };
     const revision = recordRevision(content, binding);
     const hash = typeof r['confirmed_hash'] === 'string' ? r['confirmed_hash'] : '';
@@ -923,6 +1011,9 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     proposals: Array.isArray(data['proposals']) ? (data['proposals'] as unknown[]).slice(0, MAX_PROPOSALS).map(normalizeProposal) : [],
     meeting_records: normalizeRecords(data['meeting_records'], correction ? correctionBinding(correction) : undefined),
     correction,
+    finishing: correction ? normalizeFinish(data['finishing']) : null,
+    finish_pending: correction !== null && data['finishing'] != null,
+    transcript_version: correction ? normalizeTranscriptVersion(data['transcript_version']) : null,
     follows: data['kind'] === FOLLOW_UP_KIND && typeof data['follows'] === 'string' && UPDATE_ID_PATTERN.test(data['follows']) ? data['follows'] : null,
     skipped: normalizePairs(data['skipped'], 'topic', 'reason'),
     unread: normalizePairs(data['unread'], 'name', 'reason'),
@@ -1214,6 +1305,7 @@ export class ContextUpdateService {
 
   /** The version a correction corrects, as confirmed, what its record changes in it, and why it cannot finish. Read only. */
   private async correctionReview(update: ContextUpdate): Promise<NonNullable<ContextUpdateDetail['correction_review']>> {
+    const ws = workspaceService.getWorkspacePath();
     const record = update.meeting_records.length === 1 ? update.meeting_records[0]! : null;
     const all = await this.list();
     // Once done, a correction is the current version itself (or a later one built on it): nothing left to check.
@@ -1224,9 +1316,20 @@ export class ContextUpdateService {
       // Still the meeting's current version: only then can it be followed up.
       const chain = correctionChain(env.meeting, env.root, all);
       const current = chain.state === 'corrected' && chain.head?.update_id === update.id;
-      return { base, stale: false, blocked: [], changes: base && record ? recordDiff(base, record) : [], doubts_dropped: base && record ? doubtsDropped(base, record) : [], current, suggestions: [] };
+      const made = update.transcript_version ? { from: update.transcript_version.from, to: update.transcript_version.to } : null;
+      const transcript = record && made ? await transcriptReview(ws, env, record, made, false) : null;
+      return { base, stale: false, blocked: [], changes: base && record ? recordDiff(base, record) : [], doubts_dropped: base && record ? doubtsDropped(base, record) : [], current, suggestions: [], transcript, finishing: false };
     }
-    if (!record) return { base: null, stale: false, blocked: [], changes: [], doubts_dropped: [], current: false, suggestions: [] };
+    if (!record) return { base: null, stale: false, blocked: [], changes: [], doubts_dropped: [], current: false, suggestions: [], transcript: null, finishing: update.finish_pending };
+    // Being finished: approving again completes it without the checks (its own new version may be in use by now), so
+    // none runs here either; the changes are shown as they were kept.
+    if (update.finish_pending) {
+      const env = update.correction!;
+      const found = all.find((u) => u.id === env.base.update_id)?.meeting_records.find((r) => r.id === env.base.record_id);
+      const base = found && found.revision === env.base.revision ? found : null;
+      return { base, stale: false, blocked: [], changes: base ? recordDiff(base, record) : [], doubts_dropped: base ? doubtsDropped(base, record) : [], current: false, suggestions: [],
+        transcript: await transcriptReview(ws, env, record, null, false, false), finishing: true };
+    }
     const check = await this.correctionCheck(update, record, all);
     const base = check.base;
     return { base, stale: check.stale, blocked: check.blocked, changes: base ? recordDiff(base, record) : [], doubts_dropped: base ? doubtsDropped(base, record) : [], current: false,
@@ -1234,7 +1337,9 @@ export class ContextUpdateService {
         if (c.sure) return [];
         const place = base ? suggestionPlace(base, c) : null;
         return [{ index, used: Boolean(c.taken), blocked: suggestionBlock(record, base, check.stale, index), unlinks: !c.taken && place !== null && linkAt(record as unknown as Record<string, unknown>, place) !== null }];
-      }) : [] };
+      }) : [],
+      transcript: await transcriptReview(ws, update.correction!, record, null, update.status === 'in_review'),
+      finishing: false };
   }
 
 
@@ -1390,9 +1495,9 @@ export class ContextUpdateService {
   /**
    * Before a correction is finished, under the corrections lock: it carries no proposals, its one record is confirmed,
    * and the check below finds nothing. The speakers' evidence is written onto the raw record here, so the finish
-   * carries it.
+   * carries it. Returns what finishing writes to the meeting's text, or null when it changes no transcript words.
    */
-  private async checkCorrection(update: ContextUpdate, data: Record<string, unknown>): Promise<void> {
+  private async checkCorrection(update: ContextUpdate, data: Record<string, unknown>): Promise<CorrectionFinish | null> {
     if (!update.correction) throw httpError(409, `${update.id} does not say what it corrects`);
     if (this.rawProposals(data).length) throw httpError(409, 'A correction finishes without proposals: changes to the context go through an ordinary update');
     const record = update.meeting_records[0];
@@ -1404,6 +1509,10 @@ export class ContextUpdateService {
     const raws = this.rawRecords(data);
     raws[0] = { ...(raws[0] as Record<string, unknown>), speakers_evidence: check.evidence };
     data['meeting_records'] = raws;
+    const changes = effectiveChanges(record).map((c) => writerChange(c.change));
+    const pinned = transcriptBase(update.correction);
+    if (!changes.length || 'problem' in pinned) return null;
+    return { receipt: finishReceipt(update.id, record.revision, pinned.version, changes), from_version: pinned.version, revision: record.revision, changes };
   }
 
   /**
@@ -1453,6 +1562,19 @@ export class ContextUpdateService {
       else used.forEach((c, i) => { expected = setAt(expected!, places[i]!, c.after); });
       if (!expected || JSON.stringify(fieldValues(expected as unknown as MeetingRecord)[field]) !== JSON.stringify(fieldValues(record)[field])) {
         blocked.push(`${field} has a change marked not sure, so it must stay as it was apart from the suggestions you used, yet it changed. Analyze again, or close this correction`);
+      }
+    }
+
+    // Transcript words: the changes that count, on the version of the meeting's text the correction pinned, which must
+    // still be the one in use. Unused suggestions are never applied, so they never stop the finish.
+    if (effectiveChanges(record).length) {
+      const pinned = transcriptBase(env);
+      if ('problem' in pinned) blocked.push(pinned.problem);
+      else {
+        const folder = await readFolder(workspaceService.getWorkspacePath(), env.meeting).catch(() => null);
+        const current = folder?.state === 'ok' ? folder.manifest.current : null;
+        if (current !== pinned.version) blocked.push(`This meeting's text changed since the correction started (${current ?? 'it cannot be read'} is in use now, not ${pinned.version}). Close this one and start again`);
+        else for (const [i, p] of await effectiveProblems(workspaceService.getWorkspacePath(), env, record, pinned.version)) blocked.push(`Transcript change ${i + 1}: ${p}. Analyze again, or close this correction`);
       }
     }
 
@@ -1511,9 +1633,10 @@ export class ContextUpdateService {
    * the record the user is looking at. It changes the record, so a confirmation given before it no longer counts.
    */
   async setSpeaker(id: string, recordId: string, input: unknown): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       await this.requireNoRun(id, 'change a speaker');
       const { update, data, file } = await this.read(id);
+      this.requireNotFinishing(data);
       this.requireStatus(update, ['in_review'], 'change a speaker');
       const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
       const matches = update.meeting_records.flatMap((r, i) => r.id === recordId ? [i] : []);
@@ -1556,9 +1679,10 @@ export class ContextUpdateService {
    * puts the version corrected's value back, with its stakeholder link.
    */
   async useSuggestion(id: string, recordId: string, index: number, input: unknown): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       await this.requireNoRun(id, 'use a suggestion');
       const { update, data, file } = await this.read(id);
+      this.requireNotFinishing(data);
       this.requireStatus(update, ['in_review'], 'use a suggestion');
       const env = update.correction;
       if (update.kind !== CORRECTION_KIND || !env) throw httpError(400, `${id} is not a correction of a meeting record`);
@@ -1596,6 +1720,51 @@ export class ContextUpdateService {
       }
       next = { ...next, corrections: rawChanges, confirmation: undefined, confirmed_at: undefined, confirmed_hash: undefined, speakers_evidence: undefined };
       // What is written must read as cleanly as what was there.
+      const [written] = normalizeRecords([next], correctionBinding(env));
+      if (!written || written.problems.length) throw httpError(409, `Using this suggestion would leave a problem in the record: ${written?.problems[0] ?? 'it cannot be read'}`);
+      raws[0] = next;
+      await this.write(file, data, update.notes, { meeting_records: this.clean(raws) });
+      return (await this.read(id)).update;
+    });
+  }
+
+  /**
+   * Uses a correction's transcript suggestion (a word change marked not sure), or takes it back. Only the suggestion
+   * says so (`taken`); the meeting's text is changed when the correction is finished, never here. Used only when it
+   * still stands on the pinned text together with the changes that count. The record is confirmed again afterwards.
+   */
+  async useTranscriptSuggestion(id: string, recordId: string, index: number, input: unknown): Promise<ContextUpdate> {
+    return this.changing(id, async () => {
+      await this.requireNoRun(id, 'use a suggestion');
+      const { update, data, file } = await this.read(id);
+      this.requireNotFinishing(data);
+      this.requireStatus(update, ['in_review'], 'use a suggestion');
+      const env = update.correction;
+      if (update.kind !== CORRECTION_KIND || !env) throw httpError(400, `${id} is not a correction of a meeting record`);
+      const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+      const record = update.meeting_records.length === 1 ? update.meeting_records[0]! : null;
+      if (!record || record.id !== recordId) throw httpError(400, `Invalid meeting record id: ${recordId}`);
+      if (body['revision'] !== record.revision) throw httpError(409, `Meeting record ${recordId} changed since you loaded it; review it again`);
+      if (!Number.isInteger(index) || index < 0 || index >= record.transcript_changes.length) throw httpError(400, 'Invalid suggestion');
+      if (typeof body['use'] !== 'boolean') throw httpError(400, 'Say whether to use the suggestion or take it back (use: true or false)');
+      if (record.problems.length) throw httpError(409, 'The record has problems; analyze it again before using a suggestion');
+      const c = record.transcript_changes[index]!;
+      if (c.sure) throw httpError(409, 'Only a change marked not sure can be used');
+      if (body['use'] && c.taken) throw httpError(409, 'This suggestion is already used');
+      if (!body['use'] && !c.taken) throw httpError(409, 'This suggestion is not used');
+      if (body['use']) {
+        const pinned = transcriptBase(env);
+        if ('problem' in pinned) throw httpError(409, pinned.problem);
+        const why = await suggestionProblem(workspaceService.getWorkspacePath(), env, record, pinned.version, index);
+        if (why) throw httpError(409, why);
+      }
+      const raws = this.rawRecords(data);
+      const raw = raws[0] as Record<string, unknown>;
+      const list = Array.isArray(raw['transcript_changes']) ? [...raw['transcript_changes'] as unknown[]] : [];
+      const entry = (list[index] && typeof list[index] === 'object' ? list[index] : {}) as Record<string, unknown>;
+      const { taken: _taken, ...rest } = entry;
+      list[index] = body['use'] ? { ...rest, taken: true } : rest;
+      const next = { ...raw, transcript_changes: list, confirmation: undefined, confirmed_at: undefined, confirmed_hash: undefined, speakers_evidence: undefined };
       const [written] = normalizeRecords([next], correctionBinding(env));
       if (!written || written.problems.length) throw httpError(409, `Using this suggestion would leave a problem in the record: ${written?.problems[0] ?? 'it cannot be read'}`);
       raws[0] = next;
@@ -2014,8 +2183,9 @@ export class ContextUpdateService {
 
   /** Saves the checkboxes and notes while the user reviews, so leaving the page loses nothing. */
   async saveDecisions(id: string, input: unknown): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       const { update, data, file } = await this.read(id);
+      this.requireNotFinishing(data);
       this.requireStatus(update, ['in_review'], 'change decisions');
       const decisions = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
       const known = new Set(update.proposals.map((p) => p.id));
@@ -2049,9 +2219,10 @@ export class ContextUpdateService {
    * The revision is the content the user saw: if the record changed since, the choice is refused (409).
    */
   async saveMeetingRecords(id: string, input: unknown): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       await this.requireNoRun(id, 'confirm meeting records');
       const { update, data, file } = await this.read(id);
+      this.requireNotFinishing(data);
       this.requireStatus(update, ['in_review'], 'confirm meeting records');
       const choices = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
       const byId = new Map(update.meeting_records.map((r) => [r.id, r] as const));
@@ -2181,7 +2352,9 @@ export class ContextUpdateService {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review'], 'approve');
       await this.requireNoRun(id, 'approve');
-      if (update.kind === CORRECTION_KIND) await this.checkCorrection(update, data);
+      let made: Record<string, unknown> = {};
+      // A record changed after it was confirmed stops the finish before anything is written.
+      if (update.kind === CORRECTION_KIND) { this.frozenRecords(update, data); made = await this.finishCorrection(update, data, file); }
       else await this.checkSpeakerEvidence(id, update, data);
       const records = this.frozenRecords(update, data);
       const confirmed = update.meeting_records.some((r) => r.confirmation === 'confirmed');
@@ -2199,7 +2372,7 @@ export class ContextUpdateService {
       if (onlyRemovals) {
         const closed = proposals.map((raw, i) => normalizeProposal(raw, i).decision === 'accepted' ? raw : { ...(raw as Record<string, unknown>), outcome: 'skipped' });
         const keepText = await this.keepMeetingText(update);
-        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records, keep_meeting_text: keepText || undefined, meeting_folders: keepText || undefined, ...this.linkPatch(update, data, records) });
+        await this.write(file, data, update.notes, { status: 'done', approved_at: now, applied_at: now, proposals: closed, meeting_records: records, keep_meeting_text: keepText || undefined, meeting_folders: keepText || undefined, ...this.linkPatch(update, data, records), ...made });
         await this.cleanup({ ...update, status: 'done', keep_meeting_text: keepText, meeting_folders: keepText }, update.keep_materials);
         await this.finishRemovals(id);
       } else {
@@ -2211,10 +2384,82 @@ export class ContextUpdateService {
     });
   }
 
+  /**
+   * A correction's checks and, when it changes transcript words, the new version of the meeting's text, written once:
+   * - first, what will be written is kept on the update (`finishing`), the update still in review;
+   * - then the version is written with a receipt of exactly that;
+   * - the caller then marks the correction done, with the version it made.
+   * Stopped anywhere, approving again finishes what was kept, without checking again (the new version may be in use
+   * by then, which the checks would refuse), and the receipt makes the writer return the version it already wrote.
+   * Returns what the done update says about the version. Under the corrections lock and the update's queue.
+   */
+  private async finishCorrection(update: ContextUpdate, data: Record<string, unknown>, file: string): Promise<Record<string, unknown>> {
+    const env = update.correction;
+    if (!env) throw httpError(409, `${update.id} does not say what it corrects`);
+    let finish = update.finishing;
+    // Close works while it wrote nothing; a version it wrote from something else only comes from editing files by hand.
+    const wayOut = 'close it and start again (if it already wrote a version of the meeting\'s text, that was changed by hand: restore it from a backup)';
+    if (data['finishing'] != null && !finish) throw httpError(409, `${update.id} was being finished, but what it was writing cannot be read: ${wayOut}`);
+    if (finish) {
+      const record = update.meeting_records[0];
+      if (!record || record.revision !== finish.revision || record.confirmation !== 'confirmed') throw httpError(409, `${update.id} changed while it was being finished: ${wayOut}`);
+    } else {
+      finish = await this.checkCorrection(update, data);
+      if (!finish) return {};
+      // Kept before anything is written, with the speakers' evidence just checked: a retry finishes exactly this.
+      await this.write(file, data, update.notes, { meeting_records: this.clean(this.rawRecords(data)), finishing: finish });
+    }
+    let to: string;
+    try {
+      to = await writeCorrectedVersion(workspaceService.getWorkspacePath(), env.meeting, { from_version: finish.from_version, correction: update.id, changes: finish.changes, receipt: finish.receipt });
+    } catch (err) {
+      // Refused after the writer found no version of this correction (under the folder lock): the correction is in
+      // review again. Any other failure (a lock not had, a damaged folder, a version written from something else)
+      // proves nothing, so the finish is kept for the next approval.
+      const refused = err as { statusCode?: number; written?: string; unwritten?: true };
+      if (refused.unwritten) {
+        const now = await this.read(update.id);
+        await this.write(now.file, now.data, now.update.notes, { finishing: undefined });
+      }
+      if (refused.written) throw httpError(409, `${update.id} already wrote ${refused.written} from other changes than these, so it cannot be finished; its files were changed by hand: restore them from a backup`);
+      throw err;
+    }
+    return { finishing: undefined, transcript_version: { from: finish.from_version, to, changes: finish.changes } };
+  }
+
+  /** Nothing changes a correction while it is being finished, apart from finishing it (or giving it up, below). */
+  private requireNotFinishing(data: Record<string, unknown>): void {
+    if (data['finishing'] != null) throw httpError(409, 'This correction was being finished when it stopped; approve it again to finish, or close it');
+  }
+
+  /**
+   * A correction being finished may still be closed, reopened or deleted while it has written no version of the
+   * meeting's text: a version it wrote is part of the meeting, so the correction can then only be finished. Under the
+   * corrections lock, so no finish (the only writer of its version) runs meanwhile.
+   */
+  private async requireCanGiveUp(update: ContextUpdate, data: Record<string, unknown>): Promise<void> {
+    if (data['finishing'] == null || !update.correction) return;
+    const folder = await readFolder(workspaceService.getWorkspacePath(), update.correction.meeting).catch(() => null);
+    if (folder?.state === 'none') return;
+    if (folder?.state !== 'ok') throw httpError(409, "This correction was being finished, and the meeting's text cannot be read now to check what it wrote; try again later");
+    const written = folder.manifest.versions.find((v) => v.made_from === 'correction' && v.correction === update.id);
+    if (written) throw httpError(409, `This correction already wrote ${written.id} of the meeting's text: approve it to finish`);
+  }
+
+  /**
+   * A change to a correction runs under the corrections lock, taken outside the update's queue like its finish, so the
+   * two never interleave across dashboards. Other updates are only queued.
+   */
+  private async changing<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const kind = (await this.read(id).catch(() => null))?.update.kind;
+    return kind === CORRECTION_KIND ? withCorrectionsLock(() => this.serialized(id, operation)) : this.serialized(id, operation);
+  }
+
   /** Back from approved to review, before the apply command has started. */
   async backToReview(id: string): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       const { update, data, file } = await this.read(id);
+      this.requireNotFinishing(data);
       this.requireStatus(update, ['approved'], 'go back to review');
       await this.write(file, data, update.notes, { status: 'in_review', approved_at: null });
       return (await this.read(id)).update;
@@ -2227,14 +2472,15 @@ export class ContextUpdateService {
    * all material at once, and a confirmation belongs to the record the user read.
    */
   async reopen(id: string): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       const { update, data, file } = await this.read(id);
+      await this.requireCanGiveUp(update, data);
       this.requireStatus(update, ['analyzing', 'in_review', 'approved'], 'reopen');
       await this.requireNoRun(id, 'reopen');
       await fsp.rm(path.join(this.updateDir(id), 'proposals'), { recursive: true, force: true });
       await this.write(file, data, update.notes, {
         status: 'ready', proposals: [], meeting_records: undefined, skipped: undefined, unread: undefined, summary: undefined,
-        analyzed_at: undefined, approved_at: undefined,
+        analyzed_at: undefined, approved_at: undefined, finishing: undefined,
       });
       return (await this.read(id)).update;
     });
@@ -2245,8 +2491,9 @@ export class ContextUpdateService {
    * they are kept. Confirmed meeting records stay confirmed: they change no context file.
    */
   async close(id: string): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       const { update, data, file } = await this.read(id);
+      await this.requireCanGiveUp(update, data);
       this.requireStatus(update, ['in_review', 'approved'], 'close');
       await this.requireNoRun(id, 'close');
       const proposals = this.rawProposals(data).map((raw) => ({ ...(raw as Record<string, unknown>), decision: 'rejected', outcome: 'skipped' }));
@@ -2259,7 +2506,7 @@ export class ContextUpdateService {
       const keepText = await this.keepMeetingText(update);
       // Done first, then cleaned up: a crash in between leaves a done update whose next read finishes the cleanup,
       // never one still in review whose meeting text already left for meetings/.
-      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined, meeting_folders: keepText || undefined, ...this.linkPatch(update, data, records) });
+      await this.write(file, data, update.notes, { status: 'done', applied_at: new Date().toISOString(), proposals, meeting_records: records, keep_meeting_text: keepText || undefined, meeting_folders: keepText || undefined, finishing: undefined, ...this.linkPatch(update, data, records) });
       await this.cleanup({ ...update, status: 'done', keep_meeting_text: keepText, meeting_folders: keepText }, update.keep_materials);
       return (await this.read(id)).update;
     });
@@ -2272,7 +2519,7 @@ export class ContextUpdateService {
    */
   async keepMaterials(id: string, keep: unknown): Promise<ContextUpdate> {
     if (typeof keep !== 'boolean') throw httpError(400, 'Invalid keep: use true or false');
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       const { update, data, file } = await this.read(id);
       // While applying, the agent may be deleting the folder; the choice must be made before or after.
       if (keep) this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved'], 'keep the materials');
@@ -2288,7 +2535,7 @@ export class ContextUpdateService {
   /** Keeps one meeting out of System cleanup's Meetings rule, or lets the rule remove it again. */
   async keepMeeting(id: string, key: string, keep: unknown): Promise<ContextUpdate> {
     if (typeof keep !== 'boolean') throw httpError(400, 'Invalid keep: use true or false');
-    return this.serialized(id, async () => {
+    return this.changing(id, async () => {
       const { update, data, file } = await this.read(id);
       if (!key || !heldMeetings(update).some((m) => m.key === key)) throw httpError(404, `No such meeting in ${updateId(id)}`);
       const kept = new Set(update.kept_meetings);
@@ -2303,11 +2550,15 @@ export class ContextUpdateService {
    * stays in the update: the context was built from it. A file the meeting shares with another one stays.
    */
   async trashMeeting(id: string, key: string, by: DeletedMeeting['by'] = 'user', now = new Date()): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    // Under the corrections lock, like finishing a correction: a meeting's folder never goes while one writes to it.
+    return withCorrectionsLock(() => this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       // Before the review is done, the analysis and the apply command still read these files.
       if (update.status !== 'done') throw httpError(409, 'This meeting is still being reviewed: finish its update first, or delete the whole update in Context > Updates');
-      if (!key || !heldMeetings(update).some((m) => m.key === key)) throw httpError(404, `No such meeting in ${updateId(id)}`);
+      const held = heldMeetings(update).find((m) => m.key === key);
+      if (!key || !held) throw httpError(404, `No such meeting in ${updateId(id)}`);
+      const finishing = (await this.list()).find((u) => u.kind === CORRECTION_KIND && u.correction?.meeting === held.id && u.finish_pending);
+      if (finishing) throw httpError(409, `${finishing.id}, a correction of this meeting, is being finished: approve or close it first`);
       if (update.deleted_meetings.some((d) => d.meeting === key)) throw httpError(409, 'This meeting was already deleted');
       const ws = workspaceService.getWorkspacePath();
       const { dir: materials, files, folder } = await this.meetingTextDir(update, key);
@@ -2322,12 +2573,13 @@ export class ContextUpdateService {
         kept_meetings: kept.length ? kept : undefined,
       });
       return (await this.read(id)).update;
-    });
+    }));
   }
 
   /** Puts a deleted meeting's text back where it was. Refused when a file of the same name is there again. */
   async restoreMeeting(id: string, key: string): Promise<ContextUpdate> {
-    return this.serialized(id, async () => {
+    // Under the corrections lock, like deleting it: a correction is never checked against a folder coming back.
+    return withCorrectionsLock(() => this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       const entry = update.deleted_meetings.find((d) => d.meeting === key);
       if (!entry?.trash) throw httpError(404, 'This meeting is not in the trash');
@@ -2358,7 +2610,7 @@ export class ContextUpdateService {
       const deleted = update.deleted_meetings.filter((d) => d.meeting !== key);
       await this.write(file, data, update.notes, { deleted_meetings: deleted.length ? deleted : undefined });
       return (await this.read(id)).update;
-    });
+    }));
   }
 
   /** Deletes a meeting's text from the trash for good. The note that it was deleted stays. */
@@ -2440,7 +2692,8 @@ export class ContextUpdateService {
     // Under the corrections lock (outside the update's queue), like starting and finishing a correction: a version
     // never goes while a correction is being checked against it.
     return withCorrectionsLock(() => this.serialized(id, async () => {
-      const { update } = await this.read(id);
+      const { update, data } = await this.read(id);
+      await this.requireCanGiveUp(update, data);
       // Applying may have written some files already; deleting the record would hide what happened.
       this.requireStatus(update, ['ready', 'analyzing', 'in_review', 'approved', 'done'], 'delete');
       await this.requireNoRun(id, 'delete the update');

@@ -4,6 +4,7 @@ import { MeetingHistoryService } from './meetingHistoryService';
 import { renderSheet, resolveMeeting } from './meetingSources';
 import { readFolder } from './meetingFolder';
 import { speakerNamesHoldForPin } from './meetingVersions';
+import { turnViews } from './correctionTranscript';
 import { WorkspaceService } from './workspace';
 
 const contextUpdates = new ContextUpdateService();
@@ -95,6 +96,8 @@ export async function startCorrection(meetingId: string): Promise<ContextUpdate>
       materials: [
         { name: 'correction-target.md', content: renderTarget(chain.head_record, env, namesHold) },
         { name: 'meeting-sources.md', content: sheet },
+        // Each pinned transcript with its turns numbered, so the analysis can name the turn of a misheard word.
+        ...await turnViews(new WorkspaceService().getWorkspacePath(), env),
       ],
     });
   });
@@ -104,7 +107,7 @@ export async function startCorrection(meetingId: string): Promise<ContextUpdate>
  * The follow-up's material: what the correction changed, as the dashboard works it out from the two versions, with the
  * analysis's reasons as unverified notes. The changes, never the notes, say what was corrected.
  */
-export function renderChanges(input: { meeting: string; meetingDate: string; correction: string; correctedAt: string | null; base: string; changes: FieldChange[]; notes: MeetingRecord['corrections'] }): string {
+export function renderChanges(input: { meeting: string; meetingDate: string; correction: string; correctedAt: string | null; base: string; changes: FieldChange[]; notes: MeetingRecord['corrections']; transcript?: ContextUpdate['transcript_version'] }): string {
   const lines = [
     '# What the correction changed',
     '',
@@ -120,6 +123,10 @@ export function renderChanges(input: { meeting: string; meetingDate: string; cor
   ];
   for (const c of input.changes) {
     lines.push('', `### ${c.field}`, '', '- before:', ...(c.before.length ? c.before.map((x) => `  - ${quoted(x)}`) : ['  - (none)']), '- after:', ...(c.after.length ? c.after.map((x) => `  - ${quoted(x)}`) : ['  - (none)']));
+  }
+  if (input.transcript) {
+    lines.push('', `## Words corrected in the transcript (${quoted(input.transcript.from)} to ${quoted(input.transcript.to)})`, '');
+    lines.push(...input.transcript.changes.map((c) => `- ${quoted(c.file)}, turn ${c.turn}: "${quoted(c.before)}" to "${quoted(c.after)}"`));
   }
   lines.push('', '## The analysis\'s notes (not verified; the changes above are what counts)', '');
   lines.push(...(input.notes.length ? input.notes.map((n) => `- ${n.field}: "${quoted(n.before)}" to "${quoted(n.after)}"${n.sure ? '' : ' (not sure, not applied)'}: ${quoted(n.reason)}`) : ['- (none)']));
@@ -151,8 +158,8 @@ export async function startFollowUp(correctionId: string): Promise<ContextUpdate
     if (!base || base.revision !== env.base.revision || base.confirmation !== 'confirmed') throw httpError(409, 'The version this correction changed is no longer there, so what changed cannot be shown');
     const record = chain.head_record;
     const changes = recordDiff(base, record);
-    if (!changes.length) throw httpError(409, 'This correction changed nothing in the record, so there is nothing to follow up');
-    const content = renderChanges({ meeting: env.meeting, meetingDate: record.meeting_date, correction: correctionId, correctedAt: update.applied_at, base: `${env.base.update_id} ${env.base.record_id}`, changes, notes: record.corrections });
+    if (!changes.length && !update.transcript_version) throw httpError(409, 'This correction changed nothing in the record or the transcript, so there is nothing to follow up');
+    const content = renderChanges({ meeting: env.meeting, meetingDate: record.meeting_date, correction: correctionId, correctedAt: update.applied_at, base: `${env.base.update_id} ${env.base.record_id}`, changes, notes: record.corrections, transcript: update.transcript_version });
     return contextUpdates.createFollowUp({
       title: `Follow-up: ${record.title || env.meeting}`,
       meeting_date: record.meeting_date,

@@ -102,7 +102,8 @@ export function correctionChain(meeting: string, root: { update_id: string; reco
     const p = next[0]!;
     reached.add(p.update.id);
     head = { update_id: p.update.id, record_id: p.record.id, revision: p.record.revision, at: p.update.applied_at ?? p.update.updated_at ?? null };
-    headChanged = recordDiff(headRecord, p.record).length > 0;
+    // Words corrected in the transcript count too: notes may hold the misheard ones.
+    headChanged = recordDiff(headRecord, p.record).length > 0 || p.update.transcript_version != null;
     headRecord = p.record;
     links.push(head);
     state = 'corrected';

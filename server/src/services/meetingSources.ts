@@ -171,7 +171,8 @@ async function resolveHeld(id: string): Promise<PinnedMeeting> {
     const copy = update.transcripts.find((t) => t.source === s.file);
     const abs = where ? await where.path(copy?.file ?? s.file) : null;
     if (!abs) { unavailable.push({ name: s.name, reason: 'It is not here any more.' }); continue; }
-    await pin(abs, s.name, s.kind === 'transcript' ? 'transcript' : 'notes', sources, unavailable);
+    // A recording is read as its transcript (its readable copy): a transcript, never notes.
+    await pin(abs, s.name, s.kind === 'transcript' || s.kind === 'recording' ? 'transcript' : 'notes', sources, unavailable);
   }
   const r = detail.record;
   // A speaker's name holds only for the transcript it was confirmed on (or corrections of its words), judged on the
