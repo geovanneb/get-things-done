@@ -3,6 +3,7 @@
  */
 import { streamTracker } from './liveEvents';
 import { initialState, reducer } from '../store';
+import { scopeForPath } from '../hooks/useLiveEvents';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -28,6 +29,11 @@ const after = reducer(initialState, { type: 'ALL_DATA_CHANGED' }).dataVersions;
 const scopes = Object.keys(before) as (keyof typeof before)[];
 check('catching up bumps every data slice once', scopes.every((s) => after[s] === before[s] + 1), JSON.stringify(after));
 check('the context update count is among them', after['context-updates'] === before['context-updates'] + 1);
+
+// Choosing a meeting's version in another dashboard writes only its meeting.json: open meeting views must read again.
+check('a meeting\'s meeting.json refreshes the meeting views', scopeForPath('/home/demo/northwind/meetings/MQ-2026-0003/meeting.json') === 'context-updates');
+check('with Windows separators too', scopeForPath('C:\\Users\\demo\\Northwind\\meetings\\MQ-2026-0003\\meeting.json') === 'context-updates');
+check('a file inside a version is not a meeting change', scopeForPath('/home/demo/northwind/meetings/MQ-2026-0003/v1/notes.md') === 'other');
 
 // An update action now also tells the shared count, not only its own page.
 const deleted = reducer(initialState, { type: 'DATA_CHANGED', payload: 'context-updates' }).dataVersions;
