@@ -431,14 +431,14 @@ test('a complete transcript goes into the digest and the recording goes with the
   assert.equal(JSON.parse(receipts.trim().split('\n')[0]!).recordings[0].source_sha256, wavHash);
   await updates.remove(done.id);
 
-  // "Keep recordings" on: the audio stays with the digest, and its materials are kept after review.
+  // "Keep recordings" on: the audio stays with the digest, and is kept after review in its meeting's folder.
   await new TranscriptionModelService().updateSettings({ keep_recordings: true });
   const second = await queueRecording(queue, 'Kept', [['kept.wav', silentWav(2)]]);
   await job.tick();
   await MeetingTranscriptionService.settled();
   const kept = await digest();
   assert.ok(kept.material_files.some((f) => f.name === `${second}-kept.wav`));
-  assert.equal(kept.keep_materials, true);
+  assert.deepEqual([kept.keep_recordings, kept.keep_materials], [true, false], 'the recordings are kept, not every material');
   assert.deepEqual(kept.transcripts.map((c) => [c.source, c.source_removed, c.current]), [[`${second}-kept.wav`, undefined, true]]);
   await updates.remove(kept.id);
 

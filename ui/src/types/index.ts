@@ -570,8 +570,12 @@ export interface ContextUpdate {
   transcript_problems: { source: string; reason: string }[];
   /** The user keeps materials/ after the update is done, until they release it. */
   keep_materials: boolean;
-  /** Set by the dashboard: once done, only the text of its meetings stays in materials/. */
+  /** Set by the dashboard: once done, only the text of its meetings is kept. */
   keep_meeting_text?: boolean;
+  /** Set by the dashboard: once done, its meetings' kept text (and recordings) live in their folders under meetings/. */
+  meeting_folders?: boolean;
+  /** Set by the dashboard on a digest made with Keep recordings on. */
+  keep_recordings?: boolean;
   /** Who opened it: 'system-cleanup' for the weekly memory review, null for an import. */
   origin: string | null;
   kind: string | null;

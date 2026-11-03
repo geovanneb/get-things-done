@@ -736,12 +736,13 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     const msg = u.status === 'done'
       ? `Delete this record? Context changes it made stay; only the record goes${records.some((r) => r.confirmation === 'confirmed') ? ', including its confirmed meeting records' : ''}.`
       : `Delete this update and its materials${confirmedCount > 0 ? ', including the meeting records you confirmed' : ''}? Nothing in your context has changed yet.`;
-    // A digest's meetings left the queue when it was made, so its folder is their only copy.
+    // A digest's meetings left the queue when it was made, so its folder (or, once done, their own folders, which go
+    // with it) is their only copy.
     const meetings = u.digest_meetings?.length ?? 0;
-    const onlyCopy = u.origin === 'meetings' && meetings > 0 && (u.status !== 'done' || u.keep_materials)
+    const onlyCopy = u.origin === 'meetings' && meetings > 0 && (u.status !== 'done' || u.keep_materials || u.meeting_folders)
       ? ` ${meetings === 1 ? 'Its meeting already left' : `Its ${meetings} meetings already left`} the queue, so this is the only copy of their recordings, transcripts and speaker names.`
       : '';
-    if (!(await confirm({ title: u.status === 'done' ? 'Delete this record?' : 'Delete this update?', message: `${msg}${onlyCopy} The update's folder goes to the trash (.situation-board/trash/), where you can still get the files back.`, confirmLabel: u.status === 'done' ? 'Delete record' : 'Delete update', tone: 'danger' }))) return;
+    if (!(await confirm({ title: u.status === 'done' ? 'Delete this record?' : 'Delete this update?', message: `${msg}${onlyCopy} The update's folder${u.meeting_folders ? ' and its meetings\' folders go' : ' goes'} to the trash (.situation-board/trash/), where you can still get the files back.`, confirmLabel: u.status === 'done' ? 'Delete record' : 'Delete update', tone: 'danger' }))) return;
     void (async () => {
       try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update moved to the trash.'); onBack(); changed(); } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Could not delete.');

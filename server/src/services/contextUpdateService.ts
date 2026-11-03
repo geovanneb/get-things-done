@@ -18,7 +18,7 @@ import { decodeText, MAX_CONVERT_BYTES, parseWebVtt, sha256, transcriptMarkdown 
 import { TaskService } from './taskService';
 import { readManifest } from './scaffold';
 import { heldMeetings, isMeetingId, meetingLinks, meetingTextToKeep, ownFiles } from './meetingLibrary';
-import { folderFiles, folderOf, meetingFiles, moveMeetingText, trashFoldersOf } from './meetingFolder';
+import { folderFiles, folderOf, meetingFiles, meetingsRoot, moveMeetingText, trashFoldersOf } from './meetingFolder';
 import { meetingTextKept } from './meetingTextSetting';
 import type { Task } from '../types';
 
@@ -281,6 +281,11 @@ export interface ContextUpdate {
    * its own folder under meetings/ (see meetingFolder). Absent on updates kept before, whose text stays in materials/.
    */
   meeting_folders: boolean;
+  /**
+   * Set by the dashboard on a digest made with Keep recordings on: its recordings and their meetings' text are kept
+   * after review, in each meeting's folder (see meetingFolder). Digests before this set keep_materials instead.
+   */
+  keep_recordings: boolean;
   /** When the dashboard saved which meeting each record and file belongs to (see meetingLinks). Null before. */
   meetings_linked_at: string | null;
   /** Who opened this update: 'system-cleanup' for the memory review, null for an import by the user. */
@@ -306,7 +311,8 @@ export interface ContextUpdate {
 }
 
 /** A meeting's text moved out of an update: `trash` is the trash entry holding `files`, null once deleted for good. */
-export interface DeletedMeeting { meeting: string; at: string; files: string[]; trash: string | null; by: 'user' | 'system-cleanup' }
+/** `folder`: its whole folder under meetings/ went to the trash (text and recordings), not files of the update. */
+export interface DeletedMeeting { meeting: string; at: string; files: string[]; trash: string | null; by: 'user' | 'system-cleanup'; folder?: true }
 
 /** One meeting a digest was made from, as it was queued, and the files it brought. */
 export interface DigestMeeting {
@@ -908,6 +914,7 @@ function normalize(data: Record<string, unknown>, body: string, folderId: string
     keep_materials: data['keep_materials'] === true,
     keep_meeting_text: data['keep_meeting_text'] === true,
     meeting_folders: data['meeting_folders'] === true,
+    keep_recordings: data['keep_recordings'] === true,
     meetings_linked_at: nullableStr(data['meetings_linked_at']),
     origin: nullableStr(data['origin']),
     kind: nullableStr(data['kind']),
@@ -937,7 +944,7 @@ function normalizeDeletedMeetings(value: unknown): DeletedMeeting[] {
     const files = Array.isArray(o['files']) ? (o['files'] as unknown[]).filter((f): f is string => typeof f === 'string' && path.basename(f) === f && f !== '..' && f !== '.') : [];
     // Only a trash entry's own name: a hand-edited value never points restore elsewhere.
     const trash = typeof o['trash'] === 'string' && path.basename(o['trash']) === o['trash'] ? o['trash'] : null;
-    return [{ meeting: o['meeting'], at: str(o['at']), files, trash, by: o['by'] === 'system-cleanup' ? 'system-cleanup' as const : 'user' as const }];
+    return [{ meeting: o['meeting'], at: str(o['at']), files, trash, by: o['by'] === 'system-cleanup' ? 'system-cleanup' as const : 'user' as const, ...(o['folder'] === true ? { folder: true as const } : {}) }];
   });
 }
 
@@ -1761,7 +1768,7 @@ export class ContextUpdateService {
    * the caller makes unique; transcripts get their readable copies as in an upload.
    */
   async createDigest(
-    input: { title: string; source_date: string; notes: string; meetingsText: string; meetings: DigestMeeting[]; files: { name: string; from: string; sha256: string }[]; keep_materials?: boolean },
+    input: { title: string; source_date: string; notes: string; meetingsText: string; meetings: DigestMeeting[]; files: { name: string; from: string; sha256: string }[]; keep_recordings?: boolean },
     system: { origin: string; kind: string },
     onReserved: (id: string) => Promise<void>,
   ): Promise<ContextUpdate> {
@@ -1837,7 +1844,7 @@ export class ContextUpdateService {
       digest_meetings: input.meetings,
       proposals: [],
     };
-    await this.write(path.join(dir, 'update.md'), data, input.notes, input.keep_materials ? { keep_materials: true } : {});
+    await this.write(path.join(dir, 'update.md'), data, input.notes, input.keep_recordings ? { keep_recordings: true } : {});
     return (await this.read(id)).update;
   }
 
@@ -2290,12 +2297,15 @@ export class ContextUpdateService {
       if (!key || !heldMeetings(update).some((m) => m.key === key)) throw httpError(404, `No such meeting in ${updateId(id)}`);
       if (update.deleted_meetings.some((d) => d.meeting === key)) throw httpError(409, 'This meeting was already deleted');
       const ws = workspaceService.getWorkspacePath();
-      const { dir: materials, files } = await this.meetingTextDir(update, key);
+      const { dir: materials, files, folder } = await this.meetingTextDir(update, key);
       if (!files.length) throw httpError(409, 'Nothing of this meeting is kept here, so there is nothing to delete');
-      const trash = await moveFilesToTrash(ws, materials, files, `${updateId(id)}-${key}`, now);
+      // A meeting's own folder goes whole, its versions and recordings together; older text goes file by file.
+      const trash = folder
+        ? path.basename(await moveToTrash(ws, await workspaceEntry(ws, folder), now))
+        : await moveFilesToTrash(ws, materials, files, `${updateId(id)}-${key}`, now);
       const kept = update.kept_meetings.filter((k) => k !== key);
       await this.write(file, data, update.notes, {
-        deleted_meetings: [...update.deleted_meetings, { meeting: key, at: now.toISOString(), files, trash, by }],
+        deleted_meetings: [...update.deleted_meetings, { meeting: key, at: now.toISOString(), files, trash, by, ...(folder ? { folder: true as const } : {}) }],
         kept_meetings: kept.length ? kept : undefined,
       });
       return (await this.read(id)).update;
@@ -2311,6 +2321,18 @@ export class ContextUpdateService {
       const ws = workspaceService.getWorkspacePath();
       const from = await trashEntry(ws, entry.trash);
       if (!from || !(await fsp.lstat(from).then((st) => st.isDirectory(), () => false))) throw httpError(410, 'This meeting is no longer in the trash');
+      if (entry.folder) {
+        // Its whole folder, back under meetings/: refused when a folder of that meeting is there again.
+        const meeting = heldMeetings(update).find((m) => m.key === key);
+        if (!meeting || !isMeetingId(meeting.id)) throw httpError(404, `No such meeting in ${updateId(id)}`);
+        const to = await workspaceEntry(ws, path.join(meetingsRoot(ws), meeting.id), true);
+        if (await fsp.lstat(to).then(() => true, () => false)) throw httpError(409, `A folder of ${meeting.id} is there again, so nothing was restored`);
+        await fsp.mkdir(path.dirname(to), { recursive: true });
+        await fsp.rename(from, to);
+        const rest = update.deleted_meetings.filter((d) => d.meeting !== key);
+        await this.write(file, data, update.notes, { deleted_meetings: rest.length ? rest : undefined });
+        return (await this.read(id)).update;
+      }
       // Back where it was taken from: its meeting's folder when it has one, else the update's materials.
       const materials = await workspaceEntry(ws, (await this.meetingTextDir(update, key)).dir, true);
       for (const name of entry.files) {
@@ -2345,23 +2367,24 @@ export class ContextUpdateService {
    * in it is its own), or, for a meeting kept before meeting folders, the update's materials (without the files it
    * shares with another meeting there).
    */
-  private async meetingTextDir(update: ContextUpdate, key: string): Promise<{ dir: string; files: string[] }> {
+  private async meetingTextDir(update: ContextUpdate, key: string): Promise<{ dir: string; files: string[]; folder: string | null }> {
     const ws = workspaceService.getWorkspacePath();
     const meeting = heldMeetings(update).find((m) => m.key === key);
     const folder = meeting ? await folderOf(ws, update, meeting) : null;
-    if (folder?.state === 'ok') return { dir: folder.versionDir, files: [...await folderFiles(folder)] };
+    if (folder?.state === 'ok') return { dir: folder.versionDir, files: [...await folderFiles(folder)], folder: folder.dir };
     const dir = path.join(this.updateDir(update.id), 'materials');
     const gone = new Set(update.deleted_meetings.map((d) => d.meeting));
     const files: string[] = [];
     for (const name of ownFiles(update, key, gone)) {
       if (await fsp.lstat(path.join(dir, name)).then((st) => st.isFile(), () => false)) files.push(name);
     }
-    return { dir, files };
+    return { dir, files, folder: null };
   }
 
   /** Whether this update keeps its meeting text when done: the user keeps meeting text, and it holds meetings. */
   private async keepMeetingText(update: ContextUpdate): Promise<boolean> {
-    if (update.keep_meeting_text) return true;
+    // Kept recordings keep their meetings' text too, as kept materials did: a recording is read through its transcript.
+    if (update.keep_meeting_text || update.keep_recordings) return true;
     return heldMeetings(update).length > 0 && await meetingTextKept();
   }
 
@@ -2373,10 +2396,13 @@ export class ContextUpdateService {
     const dir = this.updateDir(update.id);
     if (!keepMaterials) {
       const materials = path.join(dir, 'materials');
-      const keep = update.keep_meeting_text ? meetingTextToKeep(update, new Set(update.deleted_meetings.map((d) => d.meeting))) : new Set<string>();
+      const gone = new Set(update.deleted_meetings.map((d) => d.meeting));
+      const keep = update.keep_meeting_text ? meetingTextToKeep(update, gone) : new Set<string>();
+      // With Keep recordings, the recordings of its meetings stay too, and go to their folders with the text.
+      if (update.keep_recordings) for (const m of heldMeetings(update)) if (!gone.has(m.key)) for (const f of m.files) if (AUDIO_EXTENSIONS.has(path.extname(f).toLowerCase())) keep.add(f);
       if (keep.size && update.meeting_folders && update.status === 'done') {
-        // Reviewed meeting text leaves context-updates/ for its meeting's own folder. What did not move stays here.
-        const gone = new Set(update.deleted_meetings.map((d) => d.meeting));
+        // Reviewed meeting text (and kept recordings) leave context-updates/ for each meeting's own folder. What did
+        // not move stays here.
         const moved = await moveMeetingText(workspaceService.getWorkspacePath(), update, heldMeetings(update).filter((m) => !gone.has(m.key)), keep);
         for (const name of moved) keep.delete(name);
       }

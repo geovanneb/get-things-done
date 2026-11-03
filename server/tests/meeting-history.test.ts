@@ -348,10 +348,10 @@ test('one meeting is deleted to the trash, restored, and deleted for good; its r
   const materials = path.join(ws, 'meetings', 'MQ-2026-0001', 'v1');
 
   await history.remove('MQ-2026-0001');
-  assert.deepEqual(await fsp.readdir(materials), [], 'its folder stays, empty, with what it lists');
+  assert.equal(await fsp.access(materials).then(() => true, () => false), false, 'its whole folder went');
   assert.deepEqual((await fsp.readdir(path.join(ws, 'meetings', 'MQ-2026-0002', 'v1'))).sort(), ['MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt'], 'the other meeting stays');
   const [entry] = await fsp.readdir(trashDir(ws));
-  assert.deepEqual((await fsp.readdir(path.join(trashDir(ws), entry!))).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
+  assert.deepEqual((await fsp.readdir(path.join(trashDir(ws), entry!, 'v1'))).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
   const deleted = (await history.list()).find((m) => m.id === 'MQ-2026-0001')!;
   assert.deepEqual([deleted.deleted?.in_trash, deleted.record?.id], [true, 'M-01']);
   await assert.rejects(history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), (err: { statusCode?: number }) => err.statusCode === 410);

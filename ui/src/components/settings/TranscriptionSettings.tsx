@@ -330,8 +330,9 @@ export default function TranscriptionSettings() {
           Keep recordings after transcription
         </span>
         <span style={hintStyle}>
-          Off: a recording is removed once its complete transcript is safely in a digest. On: it stays with the digest&apos;s
-          materials, which are kept after review. A partial transcript always keeps its recording until the digest is done.
+          Off: a recording is removed once its complete transcript is safely in a digest. On: after review it is kept with
+          its meeting&apos;s transcript in the meeting&apos;s folder, until the Meetings rule in System cleanup removes it or
+          you delete the meeting. A partial transcript always keeps its recording until the digest is done.
         </span>
       </label>
       {notice && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{notice}</p>}
