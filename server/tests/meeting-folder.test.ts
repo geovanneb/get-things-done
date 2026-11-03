@@ -174,6 +174,44 @@ test('a folder of another update, or a damaged one, is never used: the text stay
   assert.equal(await history.text('MQ-2026-0002', 'MQ-2026-0002-b.vtt'), 'copy b pilot');
 });
 
+test('a version or recordings folder that is a link is never read as the meeting\'s, current or older', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001');
+  await updates.close('CU-2026-0001');
+  const dir = path.join(ws, 'meetings', 'MQ-2026-0001');
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(outside, 'MQ-2026-0001-a.transcript.md'), 'FICTIONAL OUTSIDE MARKER');
+  await fsp.writeFile(path.join(outside, 'MQ-2026-0001-a.vtt'), 'FICTIONAL OUTSIDE MARKER');
+  const swap = async (sub: string) => {
+    await fsp.rename(path.join(dir, sub), path.join(ws, `saved-${sub}`));
+    // A junction on Windows, which needs no extra rights; a plain folder link elsewhere.
+    await fsp.symlink(outside, path.join(dir, sub), 'junction');
+    return async () => { await fsp.unlink(path.join(dir, sub)); await fsp.rename(path.join(ws, `saved-${sub}`), path.join(dir, sub)); };
+  };
+
+  const back = await swap('v1');
+  const folder = await readFolder(ws, 'MQ-2026-0001');
+  assert.deepEqual([folder.state, folder.state === 'damaged' && folder.reason], ['damaged', 'its v1 folder is a link, or not a folder']);
+  await assert.rejects(history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'));
+  await back();
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a budget');
+
+  // An older version, not the current one, and the recordings folder: the same.
+  const manifest = JSON.parse(await fsp.readFile(path.join(dir, 'meeting.json'), 'utf-8'));
+  await fsp.cp(path.join(dir, 'v1'), path.join(dir, 'v2'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'meeting.json'), JSON.stringify({ ...manifest, current: 'v2', versions: [...manifest.versions, { ...manifest.versions[0], id: 'v2' }] }));
+  assert.equal((await readFolder(ws, 'MQ-2026-0001')).state, 'ok');
+  const older = await swap('v1');
+  assert.equal((await readFolder(ws, 'MQ-2026-0001')).state, 'damaged');
+  await older();
+  const audio = await swap('audio');
+  assert.equal((await readFolder(ws, 'MQ-2026-0001')).state, 'damaged');
+  await audio();
+  assert.equal((await readFolder(ws, 'MQ-2026-0001')).state, 'ok');
+});
+
 test('a task pinned before the review follows its meeting\'s text into the folder by its bytes', async (t) => {
   const ws = await workspace(t);
   await cleanup.update({ meetings: { keep_text: true } });

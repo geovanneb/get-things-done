@@ -173,7 +173,10 @@ function fileList(raw: unknown): { name: string; sha256: string }[] | null {
 
 /** A meeting's folder as it is now. A folder that cannot be read as one is `damaged`, never guessed at. */
 export async function readFolder(ws: string, id: string): Promise<FolderState> {
-  const dir = folderPath(ws, id);
+  // isMeetingId already refuses separators and dots; checked again here in the form static analysis recognizes.
+  const root = path.resolve(meetingsRoot(ws));
+  const dir = path.resolve(folderPath(ws, id));
+  if (!dir.startsWith(root + path.sep)) throw new Error('Invalid path traversal');
   const safe = await workspaceEntry(ws, dir).catch((err: NodeJS.ErrnoException) => (err.code === 'ENOENT' ? null : err));
   if (safe === null) return { state: 'none' };
   if (safe instanceof Error) return { state: 'damaged', reason: 'its folder is a link, or cannot be read' };
@@ -182,6 +185,12 @@ export async function readFolder(ws: string, id: string): Promise<FolderState> {
   if (raw === null) return { state: 'damaged', reason: 'meeting.json is missing' };
   const manifest = parseManifest(raw, id);
   if (typeof manifest === 'string') return { state: 'damaged', reason: manifest };
+  // Every folder it lists is checked, not only the meeting's own: a version or audio folder that is a link (to anywhere,
+  // inside the workspace or out) would have its files read as this meeting's, wherever the link points.
+  for (const sub of [...manifest.versions.map((v) => v.id), 'audio']) {
+    const st = await fsp.lstat(path.join(dir, sub)).catch(() => null);
+    if (st && (st.isSymbolicLink() || !st.isDirectory())) return { state: 'damaged', reason: `its ${sub} folder is a link, or not a folder` };
+  }
   const version = manifest.versions.find((v) => v.id === manifest.current)!;
   return { state: 'ok', manifest, dir, version, versionDir: path.join(dir, version.id), audioDir: path.join(dir, 'audio') };
 }
