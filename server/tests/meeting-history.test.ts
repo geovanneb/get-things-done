@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { MeetingHistoryService } from '../src/services/meetingHistoryService';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
@@ -30,6 +31,7 @@ const updates = new ContextUpdateService();
 const history = new MeetingHistoryService();
 const cleanup = new SystemCleanupService();
 
+const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const vtt = (who: string, words: string) => `WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n<v ${who}>${words}</v>\n`;
 
 /** Writes a context update by hand, as an analysis and review leave it, with its material files. */
@@ -47,20 +49,23 @@ async function update(ws: string, id: string, data: Record<string, unknown>, fil
 const record = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: `Meeting ${id}`, meeting_date: '2026-10-27', attendees: [{ name: 'Jane Doe' }], decisions: ['Fictional decision'], source: '', ...extra });
 const transcript = (file: string, source: string) => ({ file, source, source_sha256: 'x', sha256: 'y', complete: true, kind: 'webvtt' });
 
-/** A digest of two queued meetings: MQ-2026-0001 (a transcript) and MQ-2026-0002 (a transcript and a photo). */
+/** A digest of two queued meetings: MQ-2026-0001 (a transcript) and MQ-2026-0002 (a transcript and a photo), with the hashes a digest records. */
 async function digest(ws: string, id: string, records: Record<string, unknown>[], extra: Record<string, unknown> = {}): Promise<void> {
+  const files: Record<string, string> = {
+    'meetings.md': '# Meetings in this digest', 'MQ-2026-0001-a.vtt': vtt('Jane Doe', 'Budget next week.'), 'MQ-2026-0001-a.transcript.md': 'copy a',
+    'MQ-2026-0002-b.vtt': vtt('Taro Yamada', 'Pilot on track.'), 'MQ-2026-0002-b.transcript.md': 'copy b', 'MQ-2026-0002-board.png': 'png',
+  };
+  const hash = (name: string) => sha(files[name]!);
+  const copy = (file: string, source: string) => ({ ...transcript(file, source), source_sha256: hash(source), sha256: hash(file) });
   await update(ws, id, {
     origin: 'meetings', kind: 'daily-digest',
     digest_meetings: [
-      { id: 'MQ-2026-0001', title: 'Weekly sync', meeting_date: '2026-10-27', files: [{ source: 'a.vtt', file: 'MQ-2026-0001-a.vtt', sha256: '1' }] },
-      { id: 'MQ-2026-0002', title: 'Pilot review', meeting_date: '2026-10-27', files: [{ source: 'b.vtt', file: 'MQ-2026-0002-b.vtt', sha256: '2' }, { source: 'board.png', file: 'MQ-2026-0002-board.png', sha256: '3' }] },
+      { id: 'MQ-2026-0001', title: 'Weekly sync', meeting_date: '2026-10-27', files: [{ source: 'a.vtt', file: 'MQ-2026-0001-a.vtt', sha256: hash('MQ-2026-0001-a.vtt') }] },
+      { id: 'MQ-2026-0002', title: 'Pilot review', meeting_date: '2026-10-27', files: [{ source: 'b.vtt', file: 'MQ-2026-0002-b.vtt', sha256: hash('MQ-2026-0002-b.vtt') }, { source: 'board.png', file: 'MQ-2026-0002-board.png', sha256: hash('MQ-2026-0002-board.png') }] },
     ],
-    transcripts: [transcript('MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt'), transcript('MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt')],
+    transcripts: [copy('MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt'), copy('MQ-2026-0002-b.transcript.md', 'MQ-2026-0002-b.vtt')],
     meeting_records: records, ...extra,
-  }, {
-    'meetings.md': '# Meetings in this digest', 'MQ-2026-0001-a.vtt': vtt('Jane Doe', 'Budget next week.'), 'MQ-2026-0001-a.transcript.md': 'copy a',
-    'MQ-2026-0002-b.vtt': vtt('Taro Yamada', 'Pilot on track.'), 'MQ-2026-0002-b.transcript.md': 'copy b', 'MQ-2026-0002-board.png': 'png',
-  });
+  }, files);
 }
 
 test('the history lists digest meetings by queue id, imported records by update and record, and nothing else', async (t) => {
@@ -120,7 +125,7 @@ test('a meeting says its record version, each file\'s hash and state, and an unc
   const linked = await history.detail('MQ-2026-0002');
   assert.equal(linked.meeting.record_state, 'linked');
   assert.match(linked.meeting.record?.revision ?? '', /^[0-9a-f]{16}$/);
-  assert.deepEqual(linked.sources.map((s) => [s.name, s.sha256, s.state]), [['b.vtt', '2', 'present'], ['board.png', '3', 'present']]);
+  assert.deepEqual(linked.sources.map((s) => [s.name, s.sha256, s.state]), [['b.vtt', sha(vtt('Taro Yamada', 'Pilot on track.')), 'present'], ['board.png', sha('png'), 'present']]);
   // Two records left for one meeting: which is its own is not certain, so none is shown.
   const unclear = await history.detail('MQ-2026-0001');
   assert.deepEqual([unclear.meeting.record_state, unclear.record], ['ambiguous', null]);

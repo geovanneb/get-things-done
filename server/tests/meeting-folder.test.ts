@@ -9,7 +9,7 @@ import { MeetingHistoryService } from '../src/services/meetingHistoryService';
 import { SystemCleanupService, parseSettings, MEETING_TRASH_DAYS } from '../src/services/systemCleanupService';
 import { resolveMeeting } from '../src/services/meetingSources';
 import { startCorrection } from '../src/services/meetingCorrectionService';
-import { readFolder } from '../src/services/meetingFolder';
+import { place, readFolder } from '../src/services/meetingFolder';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
 import { trashDir } from '../src/services/trash';
 
@@ -102,6 +102,26 @@ test('once its review is done, each meeting\'s kept text moves to its own folder
   await assert.rejects(history.file('MQ-2026-0001', '../meeting.json'), /Invalid file name/);
   const found = await history.search('pilot');
   assert.deepEqual(found.results.map((r) => r.id), ['MQ-2026-0002']);
+});
+
+test('a file is placed only with the bytes its update recorded, copied or linked alike', async (t) => {
+  const ws = await workspace(t);
+  const from = path.join(ws, 'changed.md');
+  await fsp.writeFile(from, 'changed fictional text');
+  for (const how of ['copy', 'link'] as const) {
+    assert.equal(await place(from, path.join(ws, `wrong-${how}.md`), sha('original fictional text'), how), null, `${how}: never relabelled as the recorded text`);
+    assert.equal(await place(from, path.join(ws, `right-${how}.md`), sha('changed fictional text'), how), sha('changed fictional text'));
+  }
+  assert.notEqual((await fsp.stat(path.join(ws, 'right-copy.md'))).ino, (await fsp.stat(from)).ino, 'text is its own copy');
+
+  // A transcript changed in materials/ after the update recorded it: its meeting keeps its text where it was.
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001');
+  await fsp.writeFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials', 'MQ-2026-0001-a.transcript.md'), 'changed after the review');
+  await updates.close('CU-2026-0001');
+  assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0001')), false, 'no folder holds the changed text as the reviewed one');
+  assert.equal(await fsp.readFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'materials', 'MQ-2026-0001-a.transcript.md'), 'utf-8'), 'changed after the review', 'left in materials/');
+  assert.equal((await readFolder(ws, 'MQ-2026-0002')).state, 'ok', 'the other meeting moves as usual');
 });
 
 test('a meeting kept before meeting folders stays in its update and is read there', async (t) => {

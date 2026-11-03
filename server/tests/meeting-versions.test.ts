@@ -115,6 +115,23 @@ test('Transcribe again adds a new version; the reviewed one stays current until 
   assert.deepEqual(unhandled, []);
 });
 
+test('versions never share a file: editing one version\'s file in place leaves the others as they were', async (t) => {
+  const ws = await workspace(t);
+  await reviewed(ws);
+  await ask(ws);
+  await new MeetingTranscriptionService(new MeetingDigestService(), models, engine(speaks(['New words.'])).engine).tick();
+  await MeetingTranscriptionService.settled();
+  const dir = path.join(ws, 'meetings', 'MQ-2026-0003');
+  const notes = (v: string) => path.join(dir, v, 'MQ-2026-0003-notes.md');
+  assert.notEqual((await fsp.stat(notes('v1'))).ino, (await fsp.stat(notes('v2'))).ino);
+  // An ordinary editor writing in place, not the app's atomic replacement.
+  const handle = await fsp.open(notes('v2'), 'r+');
+  await handle.write('Edited fictional notes', 0);
+  await handle.close();
+  assert.equal(await fsp.readFile(notes('v1'), 'utf-8'), 'Fictional notes', 'v1 keeps the bytes it lists');
+  assert.equal((await manifest(ws)).versions[0]!.files.find((f) => f.name === 'MQ-2026-0003-notes.md')!.sha256, sha('Fictional notes'));
+});
+
 test('a task pinned to the reviewed text keeps it when another version becomes current, and says so', async (t) => {
   const ws = await workspace(t);
   await reviewed(ws);

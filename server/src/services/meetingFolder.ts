@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { promises as fsp } from 'fs';
+import { constants as fsConstants, promises as fsp } from 'fs';
 import { randomUUID } from 'crypto';
 import type { ContextUpdate } from './contextUpdateService';
 import { isMeetingId, isMeetingText, recordedHash, type HeldMeeting } from './meetingLibrary';
@@ -32,8 +32,6 @@ const VERSION_ID = /^v\d{1,4}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** A folder being written that a crash left behind is removed after this long, never sooner: it may still be in use. */
 const STALE_DRAFT_MS = 10 * 60 * 1000;
-/** A linked file larger than this is not read again for its hash when the update recorded one. */
-const HASH_ON_LINK_MAX_BYTES = 64 * 1024 * 1024;
 
 export interface FolderVersion {
   id: string;
@@ -301,7 +299,7 @@ async function writeFolder(ws: string, u: ContextUpdate, m: HeldMeeting, files: 
       // Only a plain file of materials/, never a link or a folder with a kept name.
       if (!(await fsp.lstat(from).then((st) => st.isFile(), () => false))) continue;
       const text = isMeetingText(name);
-      const sha256 = await place(from, path.join(draft, text ? FIRST_VERSION : 'audio', name), recorded(name));
+      const sha256 = await place(from, path.join(draft, text ? FIRST_VERSION : 'audio', name), recorded(name), text ? 'copy' : 'link');
       if (!sha256) return null;
       (text ? listed : audio).push({ name, sha256 });
     }
@@ -322,18 +320,21 @@ async function writeFolder(ws: string, u: ContextUpdate, m: HeldMeeting, files: 
 }
 
 /**
- * Puts one file into the draft and returns its SHA-256, or null when the copy is not certain. A hard link costs nothing
- * (a recording can be gigabytes) and is the same bytes by construction: it is hashed once, except a large recording
- * whose hash the update recorded. Where links are not possible, a copy is read back and compared with the original.
+ * Puts one file into the draft and returns its SHA-256, or null when the bytes are not certain: they differ from the
+ * hash recorded for them (`recorded`), or a copy does not read back the same.
+ *
+ * Text is always its own copy (a copy-on-write clone where the disk can make one, so still cheap): versions of a
+ * meeting must never share a file, or editing one version's file in place would change every other version too. Only a
+ * recording may be hard-linked (`link`), when it moves out of materials/: it can be gigabytes, it is not versioned, and
+ * its link in materials/ is removed once the folder is complete. Either way the bytes are hashed, and checked against
+ * the recorded hash when there is one.
  */
-export async function place(from: string, to: string, recorded: string | null): Promise<string | null> {
-  const linked = await fsp.link(from, to).then(() => true, () => false);
-  if (linked) {
-    // Read it when that is cheap; a large recording keeps the hash the digest checked when it took the file.
-    const size = (await fsp.stat(to)).size;
-    return recorded && size > HASH_ON_LINK_MAX_BYTES ? recorded : (await hashFile(to)).sha256;
+export async function place(from: string, to: string, recorded: string | null, how: 'copy' | 'link' = 'copy'): Promise<string | null> {
+  if (how === 'link' && await fsp.link(from, to).then(() => true, () => false)) {
+    const { sha256 } = await hashFile(to);
+    return !recorded || recorded === sha256 ? sha256 : null;
   }
-  await fsp.copyFile(from, to);
+  await fsp.copyFile(from, to, fsConstants.COPYFILE_EXCL | fsConstants.COPYFILE_FICLONE);
   const [a, b] = await Promise.all([hashFile(from), hashFile(to)]);
   return a.sha256 === b.sha256 && a.size === b.size && (!recorded || recorded === a.sha256) ? b.sha256 : null;
 }
