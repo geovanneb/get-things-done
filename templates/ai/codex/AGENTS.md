@@ -193,7 +193,8 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    value in the record and give the change with `sure: false`, as a suggestion; it is not
    applied, and that field then stays exactly as it was (no other change in it). Never translate or romanize names, never guess, and write `proposals: []`. Nothing to
    correct: the record unchanged with `corrections: []`. In step 5, leave every `confirmation`
-   unset. Never change `origin`, `kind` or `correction`. A correction is never applied: it
+   unset. Never change `origin`, `kind` or `correction`, and never write `taken` (the executive's
+   choice in the dashboard). A correction is never applied: it
    finishes when the executive approves it in the dashboard.
 10. **Correction follow-up** (`origin: meetings`, `kind: correction-follow-up`, opened by the
    dashboard from a finished correction). Do steps 1, 4 and 5 as usual (the drafts, then the

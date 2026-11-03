@@ -712,3 +712,155 @@ test('task notices: a conflict is said before an older task\'s ambiguous item', 
   }
   assert.equal((await actionNotice({ meeting_action: `CU-2026-0001/M-01/${key}` })).state, 'conflict');
 });
+
+test('use a suggestion: several in one field, each once, taken back with its link, and approval checks exactly that', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  await change(ws, 'CU-2026-0001', (d) => {
+    const r = (d['meeting_records'] as Record<string, unknown>[])[0]!;
+    r['attendees'] = [{ name: 'Jane Doe', ref: 'STK-0001' }, 'Kim Parker'];
+  });
+  const rev = (await service.get('CU-2026-0001')).meeting_records[0]!.revision;
+  await change(ws, 'CU-2026-0001', (d) => { (d['meeting_records'] as Record<string, unknown>[])[0]!['confirmed_hash'] = rev; });
+  const c = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c.id, (r) => {
+    r['attendees'] = [{ name: 'Jane Doe', ref: 'STK-0001' }, { name: 'Kim Parker' }];
+    (r['action_items'] as Record<string, unknown>[])[0]!['description'] = 'Call Dual Line';
+    r['corrections'] = [
+      { field: 'decisions', before: 'Ask Dual Line for a quote', after: 'Ask Dual Lane for a quote', reason: 'Glossary.', sure: true },
+      { field: 'attendees', before: 'Jane Doe', after: 'Jane Dow', reason: 'Only a first name was said.', sure: false },
+      { field: 'attendees', before: 'Kim Parker', after: 'Kim Park', reason: 'As in the stakeholders.', sure: false },
+      { field: 'attendees', before: 'Jane Doe', after: 'Jane Doh', reason: 'Or this spelling.', sure: false },
+      { field: 'action_items', before: 'Jane Doe', after: 'Kim Park', reason: 'Maybe Kim owns it.', sure: false },
+      { field: 'title', before: 'Weekly sync', after: '2026-13-40', reason: 'Odd.', sure: false },
+    ];
+  });
+  const use = async (index: number, on = true) => service.useSuggestion(c.id, 'M-01', index, { revision: (await service.get(c.id)).meeting_records[0]!.revision, use: on });
+  const review = async () => (await service.get(c.id)).correction_review!;
+  const attendees = async () => (await service.get(c.id)).meeting_records[0]!.attendees.map((p) => [p.name, p.ref]);
+
+  let r = await review();
+  assert.deepEqual(r.suggestions.map((s) => [s.index, s.used, s.blocked, s.unlinks]),
+    [[1, false, null, true], [2, false, null, false], [3, false, null, true], [4, false, null, false], [5, false, null, false]]);
+  assert.deepEqual(r.blocked, []);
+
+  // Two in one field, one after the other; the other choice for the same value is then refused.
+  await use(2);
+  await confirm(c.id);
+  await use(1);
+  assert.equal((await service.get(c.id)).meeting_records[0]!.confirmation, null, 'confirmed again after a change');
+  assert.deepEqual(await attendees(), [['Jane Dow', null], ['Kim Park', null]], 'the link goes with the old name');
+  r = await review();
+  assert.deepEqual(r.blocked, []);
+  assert.equal(r.suggestions.find((s) => s.index === 3)!.blocked, 'Another choice for this value is used');
+  await assert.rejects(use(3), /Another choice/);
+  await assert.rejects(use(1), /already used/);
+  await assert.rejects(use(0), /Only a change marked not sure/);
+  await assert.rejects(service.useSuggestion(c.id, 'M-01', 2, { revision: 'ffffffffffffffff', use: false }), /changed since you loaded it/);
+
+  // Taken back: the version corrected's value, with its link.
+  await use(1, false);
+  assert.deepEqual(await attendees(), [['Jane Doe', 'STK-0001'], ['Kim Park', null]]);
+  await use(3);
+  assert.deepEqual(await attendees(), [['Jane Doh', null], ['Kim Park', null]]);
+
+  // An owner of an action item; a value that cannot be a date where a title is is fine as text.
+  await use(4);
+  assert.equal((await service.get(c.id)).meeting_records[0]!.action_items[0]!.owner?.name, 'Kim Park');
+  await use(5);
+  assert.equal((await service.get(c.id)).meeting_records[0]!.title, '2026-13-40');
+  assert.deepEqual((await review()).blocked, []);
+
+  // Anything else changed by hand in a field with a suggestion: approval refuses, as before.
+  await change(ws, c.id, (d) => { ((d['meeting_records'] as Record<string, unknown>[])[0]!['attendees'] as unknown[]).push('Someone else'); });
+  assert.ok((await review()).blocked.some((b) => /apart from the suggestions you used/.test(b)));
+  await change(ws, c.id, (d) => { ((d['meeting_records'] as Record<string, unknown>[])[0]!['attendees'] as unknown[]).pop(); });
+
+  // Confirmed and approved: what was used stays said.
+  await confirm(c.id);
+  const done = await service.approve(c.id);
+  assert.equal(done.status, 'done');
+  assert.deepEqual(done.meeting_records[0]!.corrections.map((x) => Boolean(x.taken)), [false, false, true, true, true, true]);
+});
+
+test('use a suggestion: a date must be a date, the value must stand once, and only while in review', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const c = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c.id, (r) => {
+    r['corrections'] = [
+      { field: 'decisions', before: 'Ask Dual Line for a quote', after: 'Ask Dual Lane for a quote', reason: 'Glossary.', sure: true },
+      { field: 'meeting_date', before: '2026-10-27', after: '2026-02-30', reason: 'Maybe.', sure: false },
+      { field: 'meeting_date', before: '2026-10-27', after: '2026-10-26', reason: 'Or the day before.', sure: false },
+    ];
+  });
+  const rev = async () => (await service.get(c.id)).meeting_records[0]!.revision;
+  assert.match((await service.get(c.id)).correction_review!.suggestions[0]!.blocked ?? '', /not a date/);
+  await assert.rejects(service.useSuggestion(c.id, 'M-01', 1, { revision: await rev(), use: true }), /not a date/);
+  await service.useSuggestion(c.id, 'M-01', 2, { revision: await rev(), use: true });
+  assert.equal((await service.get(c.id)).meeting_records[0]!.meeting_date, '2026-10-26');
+  await assert.rejects(service.useSuggestion(c.id, 'M-01', 9, { revision: await rev(), use: true }), /Invalid suggestion/);
+  await assert.rejects(service.useSuggestion(c.id, 'M-01', 2, { revision: await rev() }), /use: true or false/);
+  await service.close(c.id);
+  await assert.rejects(service.useSuggestion(c.id, 'M-01', 2, { revision: await rev(), use: false }), /Cannot use a suggestion/);
+});
+
+test('use a suggestion: each has one place in the version corrected, so the order of use and undo never matters', async (t) => {
+  for (const order of [[1, 2], [2, 1]]) {
+    const ws = await workspace(t);
+    await reviewedMeeting(ws);
+    await change(ws, 'CU-2026-0001', (d) => { (d['meeting_records'] as Record<string, unknown>[])[0]!['decisions'] = ['Alpha', 'Beta']; });
+    const rev = (await service.get('CU-2026-0001')).meeting_records[0]!.revision;
+    await change(ws, 'CU-2026-0001', (d) => { (d['meeting_records'] as Record<string, unknown>[])[0]!['confirmed_hash'] = rev; });
+    const c = await startCorrection('MQ-2026-0001');
+    await analyzed(ws, c.id, (r) => {
+      // An empty entry in the file before them: never shown, never counted.
+      r['decisions'] = ['', 'Alpha', 'Beta'];
+      (r['action_items'] as Record<string, unknown>[])[0]!['description'] = 'Call Dual Line';
+      r['corrections'] = [
+        { field: 'title', before: 'Weekly sync', after: 'Weekly logistics sync', reason: 'The invite.', sure: true },
+        { field: 'decisions', before: 'Alpha', after: 'Beta', reason: 'Maybe.', sure: false },
+        { field: 'decisions', before: 'Beta', after: 'Gamma', reason: 'Maybe.', sure: false },
+      ];
+      r['title'] = 'Weekly logistics sync';
+    });
+    const use = async (index: number, on = true) => service.useSuggestion(c.id, 'M-01', index, { revision: (await service.get(c.id)).meeting_records[0]!.revision, use: on });
+    const decisions = async () => (await service.get(c.id)).meeting_records[0]!.decisions;
+
+    await use(order[0]!);
+    await use(order[1]!);
+    assert.deepEqual(await decisions(), ['Beta', 'Gamma'], `order ${order}`);
+    assert.deepEqual((await service.get(c.id)).correction_review!.blocked, [], `approvable in order ${order}`);
+    // Taken back right away, though the field now holds the same text twice: by its place, not its text.
+    await use(1, false);
+    assert.deepEqual(await decisions(), ['Alpha', 'Gamma']);
+    await use(1);
+    const raw = parseMarkdown(await fsp.readFile(path.join(ws, 'context-updates', c.id, 'update.md'), 'utf-8')).data;
+    assert.deepEqual(((raw['meeting_records'] as Record<string, unknown>[])[0]!['decisions']), ['', 'Beta', 'Gamma'], 'written at the right entry in the file');
+    await confirm(c.id);
+    assert.equal((await service.approve(c.id)).status, 'done');
+  }
+});
+
+test('use a suggestion: a correction that is no longer current refuses, and nothing is written', async (t) => {
+  const ws = await workspace(t);
+  await reviewedMeeting(ws);
+  const c = await startCorrection('MQ-2026-0001');
+  await analyzed(ws, c.id, (r) => {
+    r['corrections'] = [
+      { field: 'decisions', before: 'Ask Dual Line for a quote', after: 'Ask Dual Lane for a quote', reason: 'Glossary.', sure: true },
+      { field: 'title', before: 'Weekly sync', after: 'Weekly logistics sync', reason: 'Maybe.', sure: false },
+    ];
+  });
+  // Another correction of the same version finishes first.
+  const sibling = await service.createCorrection({ title: 'Sibling', meeting_date: '2026-10-27', notes: '', correction: c.correction!, materials: [] });
+  await analyzed(ws, sibling.id);
+  await confirm(sibling.id);
+  await change(ws, sibling.id, (d) => { d['status'] = 'done'; });
+  const file = path.join(ws, 'context-updates', c.id, 'update.md');
+  const before = await fsp.readFile(file, 'utf-8');
+  const state = (await service.get(c.id)).correction_review!.suggestions[0]!;
+  assert.match(state.blocked ?? '', /no longer current/);
+  await assert.rejects(service.useSuggestion(c.id, 'M-01', 1, { revision: (await service.get(c.id)).meeting_records[0]!.revision, use: true }), /no longer current/);
+  assert.equal(await fsp.readFile(file, 'utf-8'), before);
+});

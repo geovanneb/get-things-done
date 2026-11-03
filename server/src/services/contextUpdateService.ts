@@ -8,7 +8,8 @@ import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
 import { lock, unlock } from '../utils/fileLock';
-import { correctionChain, doubtsDropped, fieldTexts, recordDiff, rootActionIdentity, type FieldChange } from './meetingCorrections';
+import { correctionChain, doubtsDropped, fieldTexts, fieldValues, recordDiff, rootActionIdentity, type FieldChange } from './meetingCorrections';
+import { fits, inFile, linkAt, locate, samePlace, setAt, valueAt, type ValueAt } from './meetingSuggestions';
 import { moveFilesToTrash, moveToTrash, trashEntry } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
@@ -197,7 +198,11 @@ export interface MeetingSpeaker { label: string; person: MeetingPerson | null; r
 /** A field of a record the analysis could be wrong about. */
 export const DOUBT_FIELDS = ['title', 'meeting_date', 'attendees', 'speakers', 'decisions', 'open_questions', 'action_items'] as const;
 /** One change a correction made, as the analysis explains it. `sure: false` keeps the old value; it only suggests. */
-export interface RecordChange { field: typeof DOUBT_FIELDS[number]; before: string; after: string; reason: string; sure: boolean }
+export interface RecordChange {
+  field: typeof DOUBT_FIELDS[number]; before: string; after: string; reason: string; sure: boolean;
+  /** A change marked not sure that the executive used in the dashboard. Set by the dashboard only. */
+  taken?: true;
+}
 
 export interface RecordDoubt { field: typeof DOUBT_FIELDS[number]; value: string; reason: string; suggestion: string }
 
@@ -355,6 +360,9 @@ export interface ProposalDetail extends UpdateProposal {
   app_provided: boolean;
 }
 
+/** A suggestion of a correction (a change marked not sure) as the review offers it: used, or why it cannot be used. */
+export interface SuggestionState { index: number; used: boolean; blocked: string | null; unlinks: boolean }
+
 export interface ContextUpdateDetail extends ContextUpdate {
   proposals: ProposalDetail[];
   material_files: FolderFile[];
@@ -363,7 +371,7 @@ export interface ContextUpdateDetail extends ContextUpdate {
    * meeting's current record (`stale` when another correction finished first), why approving would be refused now
    * (`blocked`, empty once done), and what the record changes in it.
    */
-  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean };
+  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean; suggestions: SuggestionState[] };
   /** A `correction-follow-up` only, while not done: why its material no longer describes the current record (null when it does). */
   follow_up_problem?: string | null;
 }
@@ -572,6 +580,43 @@ export function followUpProblem(update: Pick<ContextUpdate, 'follows'>, all: Con
   return null;
 }
 
+/**
+ * Where a suggestion points: its old value's one place in the version corrected, or null when that value is not there
+ * exactly once. Fixed for the life of the correction, so using, taking back and checking a suggestion all mean the same
+ * entry, whatever order suggestions are used in.
+ */
+export function suggestionPlace(base: MeetingRecord, c: RecordChange): ValueAt | null {
+  const at = locate(base as unknown as Record<string, unknown>, c.field, c.before);
+  return at.length === 1 ? at[0]! : null;
+}
+
+/**
+ * Why a correction's suggestion (a change marked not sure, at `index`) cannot be used now, or taken back when it is
+ * used; null when it can. It needs a correction that is still current, its old value once in the version corrected,
+ * that place still holding the old value (or, to take it back, the new one), no other choice in use for it, and a new
+ * value that fits there.
+ */
+export function suggestionBlock(record: MeetingRecord, base: MeetingRecord | null, stale: boolean, index: number): string | null {
+  const c = record.corrections[index];
+  if (!c || c.sure) return 'Only a change marked not sure can be used';
+  if (stale || !base) return 'This correction is no longer current: close it, and start again from the meeting';
+  const place = suggestionPlace(base, c);
+  if (!place) {
+    return locate(base as unknown as Record<string, unknown>, c.field, c.before).length
+      ? 'This value appears more than once in the record, so it is not clear which one is meant. Analyze again with a note'
+      : 'This value is not in the version corrected';
+  }
+  const now = valueAt(record as unknown as Record<string, unknown>, place);
+  if (c.taken) return now === c.after ? null : 'This value changed again after you used it, so it cannot be taken back here. Analyze again';
+  if (!c.after || c.after === c.before) return 'This suggestion has no new value to use';
+  if (record.corrections.some((o, i) => i !== index && !o.sure && o.taken && o.field === c.field && (() => { const p = suggestionPlace(base, o); return p !== null && samePlace(p, place); })())) {
+    return 'Another choice for this value is used';
+  }
+  if (now !== c.before) return 'This value is no longer what the version corrected said';
+  if (!fits(place, c.after)) return place.field === 'meeting_date' || place.prop === 'due_date' ? 'The suggested value is not a date (YYYY-MM-DD)' : 'This suggestion has no new value to use';
+  return null;
+}
+
 /** The pins of a correction that are not its meeting's own files, as its original update holds them. */
 function foreignPins(env: CorrectionEnvelope, all: ContextUpdate[]): string[] {
   const root = all.find((u) => u.id === env.root.update_id);
@@ -621,6 +666,8 @@ function recordRevision(r: Omit<MeetingRecord, 'confirmation' | 'confirmed_at' |
     ...(r.action_items.some((a) => a.slot != null) ? [['slots', r.action_items.map((a) => a.slot ?? null)]] : []),
     // A correction's explanations, as the user read them when confirming.
     ...(r.corrections.length ? [['corrections', r.corrections.map((c) => [c.field, c.before, c.after, c.reason, c.sure])]] : []),
+    // Which suggestions the executive used: only when any is, so records confirmed before this keep their versions.
+    ...(r.corrections.some((c) => c.taken) ? [['taken', r.corrections.flatMap((c, i) => (c.taken ? [i] : []))]] : []),
     // In a correction, what the dashboard wrote about it (meeting, original, version corrected, which original item each
     // slot is): an edit to it after confirming takes the confirmation away too.
     ...(binding ? [['correction', binding]] : [])];
@@ -641,7 +688,10 @@ function recordChanges(raw: unknown[], problems: string[]): RecordChange[] {
     const reason = recordText(o['reason'], `${what} reason`, problems);
     if (!reason) problems.push(`${what} does not say why`);
     if (typeof o['sure'] !== 'boolean') problems.push(`${what} does not say whether it is sure (true or false)`);
-    return { field: field ?? 'title', before, after, reason, sure: o['sure'] === true };
+    // Used by the executive: only ever on a change marked not sure, and only ever `true`.
+    if (o['taken'] !== undefined && o['taken'] !== true) problems.push(`${what} says it was used in a way the dashboard never writes`);
+    if (o['taken'] === true && o['sure'] === true) problems.push(`${what} is marked sure and used at once`);
+    return { field: field ?? 'title', before, after, reason, sure: o['sure'] === true, ...(o['taken'] === true ? { taken: true as const } : {}) };
   });
 }
 
@@ -1149,12 +1199,17 @@ export class ContextUpdateService {
       // Still the meeting's current version: only then can it be followed up.
       const chain = correctionChain(env.meeting, env.root, all);
       const current = chain.state === 'corrected' && chain.head?.update_id === update.id;
-      return { base, stale: false, blocked: [], changes: base && record ? recordDiff(base, record) : [], doubts_dropped: base && record ? doubtsDropped(base, record) : [], current };
+      return { base, stale: false, blocked: [], changes: base && record ? recordDiff(base, record) : [], doubts_dropped: base && record ? doubtsDropped(base, record) : [], current, suggestions: [] };
     }
-    if (!record) return { base: null, stale: false, blocked: [], changes: [], doubts_dropped: [], current: false };
+    if (!record) return { base: null, stale: false, blocked: [], changes: [], doubts_dropped: [], current: false, suggestions: [] };
     const check = await this.correctionCheck(update, record, all);
     const base = check.base;
-    return { base, stale: check.stale, blocked: check.blocked, changes: base ? recordDiff(base, record) : [], doubts_dropped: base ? doubtsDropped(base, record) : [], current: false };
+    return { base, stale: check.stale, blocked: check.blocked, changes: base ? recordDiff(base, record) : [], doubts_dropped: base ? doubtsDropped(base, record) : [], current: false,
+      suggestions: update.status === 'in_review' ? record.corrections.flatMap((c, index) => {
+        if (c.sure) return [];
+        const place = base ? suggestionPlace(base, c) : null;
+        return [{ index, used: Boolean(c.taken), blocked: suggestionBlock(record, base, check.stale, index), unlinks: !c.taken && place !== null && linkAt(record as unknown as Record<string, unknown>, place) !== null }];
+      }) : [] };
   }
 
 
@@ -1357,13 +1412,23 @@ export class ContextUpdateService {
       : rootRecord ? rootRecord.action_items.map((item, i) => ({ slot: `A-${String(i + 1).padStart(2, '0')}`, root_key: actionItemKey(item), root_index: i })) : null;
     if (!expected || JSON.stringify(expected) !== JSON.stringify(env.slots)) blocked.push('The action items no longer say which original item each one is. Close this one and start again');
 
-    // A field with a change marked not sure stays exactly as it was, so the suggestion is never applied in part: one
-    // that changed anyway (an owner swapped between items, a longer title, a deletion) is refused. The old value must
-    // be quoted exactly, so the suggestion says what it is about.
-    const changed = new Set(recordDiff(base, record).map((c) => c.field));
-    for (const c of record.corrections.filter((x) => !x.sure)) {
+    // A field with a change marked not sure stays exactly as it was, apart from the suggestions the executive used, each
+    // applied once to the version corrected: nothing else in it may change (an owner swapped between items, a longer
+    // title, a deletion), so a suggestion is never applied in part. The old value must be quoted exactly.
+    const unsure = record.corrections.filter((x) => !x.sure);
+    for (const c of unsure) {
       if (!fieldTexts(base)[c.field].includes(c.before)) blocked.push(`A change marked not sure must quote a value of ${c.field} exactly: "${c.before}". Analyze again, or close this correction`);
-      else if (changed.has(c.field)) blocked.push(`${c.field} has a change marked not sure, so it must stay as it was, yet it changed. Analyze again, or close this correction`);
+    }
+    for (const field of new Set(unsure.map((c) => c.field))) {
+      // Each used suggestion at its own place in the version corrected: no two at one place, the order of use never matters.
+      const used = unsure.filter((c) => c.field === field && c.taken);
+      const places = used.map((c) => suggestionPlace(base, c));
+      let expected: Record<string, unknown> | null = base as unknown as Record<string, unknown>;
+      if (places.some((p, i) => !p || !fits(p, used[i]!.after) || places.some((q, k) => k !== i && q && samePlace(p, q)))) expected = null;
+      else used.forEach((c, i) => { expected = setAt(expected!, places[i]!, c.after); });
+      if (!expected || JSON.stringify(fieldValues(expected as unknown as MeetingRecord)[field]) !== JSON.stringify(fieldValues(record)[field])) {
+        blocked.push(`${field} has a change marked not sure, so it must stay as it was apart from the suggestions you used, yet it changed. Analyze again, or close this correction`);
+      }
     }
 
     for (const pin of foreignPins(env, all)) blocked.push(`The correction pins ${pin}, which is not one of this meeting's files. Close this one and start again`);
@@ -1438,6 +1503,61 @@ export class ContextUpdateService {
       if (at < 0) throw httpError(400, 'Invalid speaker');
       speakers[at] = { ...speakers[at], person: person ? { ...(person.ref ? { ref: person.ref } : {}), name: person.name } : null, reason: 'Set by you' };
       raws[index] = { ...raw, speakers, confirmation: undefined, confirmed_at: undefined, confirmed_hash: undefined, speakers_evidence: undefined };
+      await this.write(file, data, update.notes, { meeting_records: this.clean(raws) });
+      return (await this.read(id)).update;
+    });
+  }
+
+  /**
+   * Uses a correction's suggestion (a change marked not sure), or takes it back: the one value it names is replaced in
+   * the record as the agent wrote it, nothing else, and the suggestion says it was used. Like changing a speaker: while
+   * no run is going, for the record as the page showed it, and the record is confirmed again afterwards. Taking it back
+   * puts the version corrected's value back, with its stakeholder link.
+   */
+  async useSuggestion(id: string, recordId: string, index: number, input: unknown): Promise<ContextUpdate> {
+    return this.serialized(id, async () => {
+      await this.requireNoRun(id, 'use a suggestion');
+      const { update, data, file } = await this.read(id);
+      this.requireStatus(update, ['in_review'], 'use a suggestion');
+      const env = update.correction;
+      if (update.kind !== CORRECTION_KIND || !env) throw httpError(400, `${id} is not a correction of a meeting record`);
+      const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+      const record = update.meeting_records.length === 1 ? update.meeting_records[0]! : null;
+      if (!record || record.id !== recordId) throw httpError(400, `Invalid meeting record id: ${recordId}`);
+      if (body['revision'] !== record.revision) throw httpError(409, `Meeting record ${recordId} changed since you loaded it; review it again`);
+      if (!Number.isInteger(index) || index < 0 || index >= record.corrections.length) throw httpError(400, 'Invalid suggestion');
+      if (typeof body['use'] !== 'boolean') throw httpError(400, 'Say whether to use the suggestion or take it back (use: true or false)');
+      if (record.problems.length) throw httpError(409, 'The record has problems; analyze it again before using a suggestion');
+      const c = record.corrections[index]!;
+      if (c.sure) throw httpError(409, 'Only a change marked not sure can be used');
+      if (body['use'] && c.taken) throw httpError(409, 'This suggestion is already used');
+      if (!body['use'] && !c.taken) throw httpError(409, 'This suggestion is not used');
+      // The same check the review shows: a current correction, the suggestion's one place, what that place holds now.
+      const check = await this.correctionCheck(update, record, await this.list());
+      const why = suggestionBlock(record, check.base, check.stale, index);
+      if (why) throw httpError(409, why);
+      const place = suggestionPlace(check.base!, c)!;
+      const raws = this.rawRecords(data);
+      const raw = raws[0] as Record<string, unknown>;
+      const at = inFile(raw, place);
+      if (!at || valueAt(raw, at) !== (body['use'] ? c.before : c.after)) throw httpError(409, `Meeting record ${recordId} changed since you loaded it; review it again`);
+      const rawChanges = Array.isArray(raw['corrections']) ? [...raw['corrections'] as unknown[]] : [];
+      const entry = (rawChanges[index] && typeof rawChanges[index] === 'object' ? rawChanges[index] : {}) as Record<string, unknown>;
+      let next: Record<string, unknown>;
+      if (body['use']) {
+        next = setAt(raw, at, c.after);
+        rawChanges[index] = { ...entry, taken: true };
+      } else {
+        // The version corrected's own value at that place, with its link: what the record said before.
+        next = setAt(raw, at, c.before, linkAt(check.base as unknown as Record<string, unknown>, place));
+        const { taken: _taken, ...rest } = entry;
+        rawChanges[index] = rest;
+      }
+      next = { ...next, corrections: rawChanges, confirmation: undefined, confirmed_at: undefined, confirmed_hash: undefined, speakers_evidence: undefined };
+      // What is written must read as cleanly as what was there.
+      const [written] = normalizeRecords([next], correctionBinding(env));
+      if (!written || written.problems.length) throw httpError(409, `Using this suggestion would leave a problem in the record: ${written?.problems[0] ?? 'it cannot be read'}`);
+      raws[0] = next;
       await this.write(file, data, update.notes, { meeting_records: this.clean(raws) });
       return (await this.read(id)).update;
     });

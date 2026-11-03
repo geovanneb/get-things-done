@@ -156,7 +156,7 @@ export function recordDiff(before: MeetingRecord, after: MeetingRecord): FieldCh
   return DOUBT_FIELDS.filter((f) => JSON.stringify(x[f]) !== JSON.stringify(y[f])).map((field) => ({ field, before: a[field], after: b[field] }));
 }
 
-const personValue = (p: MeetingPerson | null) => (p ? [p.ref, p.name] : null);
+const personValue = (p: MeetingPerson | null) => (p ? [p.ref ?? null, p.name] : null);
 
 /**
  * Each field of a record as the single values the analysis can quote: a title, a name, a decision, an item's
@@ -182,7 +182,7 @@ export function doubtsDropped(before: MeetingRecord, after: MeetingRecord): Meet
 }
 
 /** Each field of a record as values: what decides whether a correction changed it. */
-function fieldValues(r: MeetingRecord): Record<RecordChange['field'], unknown> {
+export function fieldValues(r: MeetingRecord): Record<RecordChange['field'], unknown> {
   return {
     title: r.title,
     meeting_date: r.meeting_date,
