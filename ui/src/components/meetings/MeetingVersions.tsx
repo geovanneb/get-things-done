@@ -95,7 +95,7 @@ export function VersionsSection({ detail, names, busy, onChoose }: {
       </ul>
       {detail.versions.find((v) => v.current)?.id !== 'v1' && (
         <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          The record was confirmed from the reviewed version. Tasks made from it keep what they used.
+          The record stays the account of the reviewed version. Tasks made from it keep what they used.
         </p>
       )}
     </section>

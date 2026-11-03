@@ -138,7 +138,7 @@ test('a transcription with no words is not kept, and a stopped one leaves nothin
   await MeetingTranscriptionService.settled();
   const failed = await manifest(ws);
   assert.deepEqual([failed.transcribe?.status, failed.versions.length], ['failed', 1]);
-  assert.match(failed.transcribe!.error!, /^Not kept:/);
+  assert.match(failed.transcribe!.error!, /speech/);
   assert.equal((await history.detail('MQ-2026-0003')).transcription?.status, 'failed');
 
   // Asked again after a failure, then stopped while it waits.

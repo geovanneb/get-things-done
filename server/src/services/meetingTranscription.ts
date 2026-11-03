@@ -669,7 +669,7 @@ export class MeetingTranscriptionService {
     const complete = !error && hasWords(segments.map((x) => x.text));
     if (!complete) {
       const why = error ? error.message : seconds > EMPTY_AUDIO_SECONDS ? noWords(model, segments.length) : 'No speech was found in the recording.';
-      await failTranscription(ws, job.meeting, job, `Not kept: ${why}`);
+      await failTranscription(ws, job.meeting, job, why);
       return;
     }
     // The recording's hash as the folder lists it: publishing checks the bytes still match, under the folder's lock.
