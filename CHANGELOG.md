@@ -18,6 +18,12 @@ minor versions may include breaking changes.
   System cleanup's Meetings rule (180 days, "Keep this meeting") now covers recordings too, and deleting a
   meeting moves its whole folder to the trash (#239).
 
+### Added
+- **Transcribe again.** A reviewed meeting whose recording is kept can be transcribed again with another
+  model, from its Files tab. The result is added as a new version: the transcript you reviewed stays in use
+  until you choose the new one in the side panel, the record stays as it was confirmed, and tasks keep what
+  they used (#239).
+
 ## [0.8.0] - 2026-11-02
 
 Get Things Done now **records your meetings and turns them into memory**. Click **Record**, follow

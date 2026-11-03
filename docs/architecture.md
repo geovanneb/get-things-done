@@ -46,9 +46,13 @@ A meeting's files live in one of two places, and every reader asks `meetingFiles
 `meetings/` is private: git-ignored, never task input unless a task's pinned sources name a file
 in it, and never part of anything shared. There is no publisher yet; when one is added (Phase 3),
 it must refuse every path under `meetings/` and `context-updates/` itself, not rely on git-ignore.
-Remaining risk: the move is coordinated with the update's own queue, not across two dashboards
-on the same workspace, and versions after `v1` (corrections to the words, transcribing again) are
-not written yet.
+Versions after `v1` are written by Transcribe again (`meetingVersions.ts`): the transcription job takes a
+request from `meeting.json` once no queued recording waits, and the result becomes `v2`, `v3`… (the other
+files linked, the transcript replaced), listed only when complete. Nothing switches the current version
+by itself, and a task's pins on an older version stay valid. Every change to `meeting.json` after the
+folder is made holds that meeting's lock (`meetings/.<id>.lock`).
+Remaining risk: the first move is coordinated with the update's own queue, not across two dashboards
+on the same workspace, and corrections to the words (5b) are not written yet.
 
 ## Request and file flow
 

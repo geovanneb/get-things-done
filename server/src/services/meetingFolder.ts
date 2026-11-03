@@ -38,9 +38,30 @@ const HASH_ON_LINK_MAX_BYTES = 64 * 1024 * 1024;
 export interface FolderVersion {
   id: string;
   at: string;
-  /** What made it: `review`, the text its update was reviewed with. */
-  made_from: 'review';
+  /** What made it: `review`, the text its update was reviewed with; `transcription`, Transcribe again. */
+  made_from: 'review' | 'transcription';
   files: { name: string; sha256: string }[];
+  /** A transcription only: the model and language it was made with, and the recording it was made from. */
+  model?: string;
+  language?: string;
+  from?: { name: string; sha256: string };
+}
+
+/** Transcribe again: one recording of the meeting, waiting, being transcribed, or failed. At most one at a time. */
+export interface TranscribeRequest {
+  /** The recording, as the folder's audio lists it. */
+  file: string;
+  /** The transcript it replaces in the new version (the recording's readable copy). */
+  transcript: string;
+  model: string;
+  language: string;
+  speakers: boolean;
+  status: 'pending' | 'running' | 'failed';
+  requested_at: string;
+  generation?: string;
+  owner?: { pid: number; token: string };
+  started_at?: string;
+  error?: string;
 }
 
 export interface FolderManifest {
@@ -52,6 +73,8 @@ export interface FolderManifest {
   versions: FolderVersion[];
   /** Its recordings, kept with Keep recordings on. Not versioned: a new version is new text from the same audio. */
   audio: { name: string; sha256: string }[];
+  /** A Transcribe again under way or failed; absent otherwise. */
+  transcribe?: TranscribeRequest;
 }
 
 export type FolderState =
@@ -82,13 +105,42 @@ function parseManifest(raw: string, id: string): FolderManifest | string {
     if (typeof v['id'] !== 'string' || !VERSION_ID.test(v['id']) || typeof v['at'] !== 'string') return 'a version in meeting.json is damaged';
     const files = fileList(v['files']);
     if (!files) return 'a file in meeting.json is damaged';
-    versions.push({ id: v['id'], at: v['at'], made_from: 'review', files });
+    if (v['made_from'] === 'transcription') {
+      const from = fileList([v['from']]);
+      if (!from || typeof v['model'] !== 'string' || typeof v['language'] !== 'string') return 'a version in meeting.json is damaged';
+      versions.push({ id: v['id'], at: v['at'], made_from: 'transcription', files, model: v['model'], language: v['language'], from: from[0]! });
+    } else versions.push({ id: v['id'], at: v['at'], made_from: 'review', files });
   }
   const audio = m['audio'] === undefined ? [] : fileList(m['audio']);
   if (!audio) return 'a recording in meeting.json is damaged';
   if (new Set(versions.map((v) => v.id)).size !== versions.length) return 'meeting.json lists a version twice';
   if (typeof m['current'] !== 'string' || !versions.some((v) => v.id === m['current'])) return 'meeting.json names no current version it lists';
-  return { schema: 1, id, update_id: m['update_id'], current: m['current'], versions, audio };
+  const transcribe = parseRequest(m['transcribe'], audio);
+  return { schema: 1, id, update_id: m['update_id'], current: m['current'], versions, audio, ...(transcribe ? { transcribe } : {}) };
+}
+
+/** A request that cannot be read is left out: it is only work to do, never the meeting's text. */
+function parseRequest(raw: unknown, audio: { name: string }[]): TranscribeRequest | null {
+  const o = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null) as Record<string, unknown> | null;
+  if (!o) return null;
+  const str = (k: string) => (typeof o[k] === 'string' ? o[k] as string : null);
+  const file = str('file'); const transcript = str('transcript'); const model = str('model'); const language = str('language'); const at = str('requested_at');
+  const status = o['status'];
+  if (!file || !audio.some((a) => a.name === file) || !transcript || path.basename(transcript) !== transcript || transcript.startsWith('.') || !isMeetingText(transcript)
+    || !model || !language || !at || typeof o['speakers'] !== 'boolean' || (status !== 'pending' && status !== 'running' && status !== 'failed')) return null;
+  const owner = o['owner'] && typeof o['owner'] === 'object' ? o['owner'] as Record<string, unknown> : null;
+  return {
+    file, transcript, model, language, speakers: o['speakers'], status, requested_at: at,
+    ...(str('generation') ? { generation: str('generation')! } : {}),
+    ...(owner && typeof owner['pid'] === 'number' && typeof owner['token'] === 'string' ? { owner: { pid: owner['pid'], token: owner['token'] } } : {}),
+    ...(str('started_at') ? { started_at: str('started_at')! } : {}),
+    ...(str('error') ? { error: str('error')! } : {}),
+  };
+}
+
+/** Writes meeting.json whole, as one file: readers see the old or the new one. */
+export async function writeManifest(folder: Extract<FolderState, { state: 'ok' }>, manifest: FolderManifest): Promise<void> {
+  await atomicWrite(path.join(folder.dir, MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 function fileList(raw: unknown): { name: string; sha256: string }[] | null {
@@ -256,7 +308,7 @@ async function writeFolder(ws: string, u: ContextUpdate, m: HeldMeeting, files: 
  * (a recording can be gigabytes) and is the same bytes by construction: it is hashed once, except a large recording
  * whose hash the update recorded. Where links are not possible, a copy is read back and compared with the original.
  */
-async function place(from: string, to: string, recorded: string | null): Promise<string | null> {
+export async function place(from: string, to: string, recorded: string | null): Promise<string | null> {
   const linked = await fsp.link(from, to).then(() => true, () => false);
   if (linked) {
     // Read it when that is cheap; a large recording keeps the hash the digest checked when it took the file.

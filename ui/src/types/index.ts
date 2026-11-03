@@ -917,6 +917,12 @@ export interface MeetingDetail {
   record: MeetingRecord | null;
   update_records: { id: string; title: string; meeting_date: string; confirmation: MeetingRecord['confirmation'] }[];
   sources: MeetingSource[];
+  /** The versions of its text, when it has a folder of its own: the reviewed one (`v1`) and any made by Transcribe again. */
+  versions: { id: string; at: string; made_from: 'review' | 'transcription'; model: string | null; current: boolean }[];
+  /** Transcribe again: waiting, running or failed; null when none. */
+  transcription: { file: string; model: string; status: 'pending' | 'running' | 'failed'; error: string | null; started_at: string | null } | null;
+  /** How far it got, when this dashboard runs it. */
+  transcription_progress?: { done: number; total: number } | null;
 }
 
 /** For a task made from a meeting action item: what the record says about it now, versus when the task was made. */
@@ -943,7 +949,7 @@ export interface PinnedMeeting {
 export interface MeetingSourcesCheck {
   selection: { id: string; at: string; meetings: PinnedMeeting[]; problems: { id: string; reason: string }[] } | null;
   unpinned: string[];
-  sources: { meeting: string; path: string; state: 'ok' | 'changed' | 'missing'; current_path?: string }[];
+  sources: { meeting: string; path: string; state: 'ok' | 'changed' | 'missing'; current_path?: string; older_version?: true }[];
   record_changed: string[];
   review_changes: { meeting: string; change: string }[];
 }
