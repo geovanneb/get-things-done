@@ -8,25 +8,121 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
-### Changed
-- **A reviewed meeting gets its own folder.** With meeting text kept, a meeting's transcripts and notes move
-  out of `context-updates/` into `meetings/<id>/` once its review is done, listed with their SHA-256 in
-  `meeting.json`. `meetings/` is left out of git, and agents are told to read a meeting only when a task
-  names it (an instruction, not a lock: agents can read the whole workspace).
-  Meetings kept before stay where they are and still open, play and search as before (#239).
-- **Kept recordings live with their meeting.** With Keep recordings on, a recording moves into its meeting's
-  folder with its transcript once the review is done, instead of keeping every material of the digest.
-  System cleanup's Meetings rule (180 days, "Keep this meeting") now covers recordings too, and deleting a
-  meeting moves its whole folder to the trash (#239).
+## [0.9.0] - 2026-11-03
+
+Get Things Done now **keeps your meetings as a memory you can search, correct and build on**. Every
+meeting, recorded or imported, has a page of its own: read and search what was said, play the
+recording from any line, and see the record you confirmed. When the record or the transcript got
+something wrong, suggest a correction and review it like any other change; the version before always
+stays. Tasks can use one or several meetings as sources, and keep exactly the text they were given.
+
+Meeting text is kept only if you choose to keep it, stays on your computer, and is left out of git.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.9.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.9.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.9.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.9.0`.
 
 ### Added
-- **Numbered turns in transcripts.** Readable copies of WebVTT transcripts and recordings made from now on
-  number each turn (`#12 [00:14:03 → 00:14:21] Speaker 2`), so a correction can name exactly where a word
-  changes. Copies made before are read the same way (#239).
-- **Transcribe again.** A reviewed meeting whose recording is kept can be transcribed again with another
-  model, from its Files tab. The result is added as a new version: the transcript you reviewed stays in use
-  until you choose the new one in the side panel, the record stays as it was confirmed, and tasks keep what
-  they used (#239).
+
+#### Meeting history
+
+- **Every meeting in one list.** The Meetings page lists queued and reviewed meetings together, newest
+  first, with filters for what needs you, what is in progress and what is reviewed. Each meeting opens
+  in its own dialog with **Transcript**, **Record**, **Tasks** and **Files** tabs and the steps it
+  went through, from recorded to reviewed. A record still under review is shown as provisional. (#244)
+- **Keep meeting transcripts and notes.** Until now a meeting's text was deleted once its review was
+  done. You now choose: keep it, and System cleanup's new **Meetings** rule moves each meeting to the
+  trash 180 days after it took place (change it in Routines > System cleanup). **Keep this meeting**
+  keeps one longer, and you can delete one yourself at any time. The trash holds it 30 more days, so
+  it can be restored. Confirmed records stay even when the text goes, and each record keeps the id of
+  its meeting once its update is done, so links never move later. (#244, #247)
+- **Find a meeting by what was said in it.** The Meetings search also looks inside transcripts and
+  notes: every word, any case, full-width and half-width alike, Japanese included. Results show the
+  best place with the words marked, and opening one goes straight to that line. (#253)
+- **Play a recording from its transcript.** With **Keep recordings after transcription** on, the
+  Transcript tab has a player: click a time to play from there, and the line being heard is marked.
+  (#250)
+- **Transcribe again.** A reviewed meeting whose recording is kept can be transcribed again with
+  another downloaded model, from its **Files** tab. The result is added as a new version: the
+  transcript you reviewed stays in use until you choose **Use this version**, and the confirmed record
+  does not change by itself. Queued recordings always go first. (#269, #271)
+- **Numbered turns.** Transcripts made from now on number each turn
+  (`#12 [00:14:03 → 00:14:21] Speaker 2`), so a correction can point at exactly where a word changes.
+  Older transcripts are read the same way. (#270)
+
+#### Correcting what a meeting says
+
+- **The analysis says what it is not sure of.** A meeting record can list its doubts: a name that
+  sounds like a stakeholder's but is spelled differently, a term that may be in your glossary. The
+  review shows a **Not sure** badge next to each, with the reason and a suggestion, before you
+  confirm. (#248)
+- **Suggest corrections** on a confirmed meeting record. It opens a correction for your AI tool to
+  analyze, from the meeting's own pinned files, your stakeholders and glossary. You review it like any
+  context update; approving it makes the corrected record the current one, and the original stays.
+  (#249, #252)
+- **Use a suggestion, or take it back.** Changes the analysis was not sure of are no longer only
+  listed: use the right ones with **Use suggestion**, and **Undo** puts the old value back. (#266)
+- **Fix misheard words in the transcript too.** A correction can also change words in the meeting's
+  transcript (never a speaker or a time). Its Transcript section shows each change in its line,
+  before and after. Approving writes the fixed text as a new version; the version before stays one
+  click away. (#270, #273, #275)
+- **Check the context for old values.** After a correction, **Check the context** opens a follow-up
+  for your AI tool to find notes in `context/` and `stakeholders/` that still use the old name or
+  term, and propose fixes you review as usual. (#265)
+
+#### Tasks that use meetings
+
+- **Make a task from meetings.** Mention a meeting in a task with `@` (a new **Meetings** tab), or
+  tick several meetings in the list and choose **Create deliverable**. When the task is saved, the
+  dashboard pins which transcripts and notes the agent may read, with their SHA-256, and the record
+  as it was. The task page shows when a source or the record changed since; **Refresh sources** pins
+  again and keeps the earlier selection. Each run reads its own sheet, so a later refresh never
+  changes what an earlier run used. (#245)
+- **A task from a meeting action knows where it came from**, and says when the meeting record has
+  been corrected since, without changing the task. (#254)
+
+### Changed
+
+- **A reviewed meeting gets its own folder.** With meeting text kept, a meeting's transcripts and
+  notes move out of `context-updates/` into `meetings/<id>/` once its review is done, listed with
+  their SHA-256 in `meeting.json`. `meetings/` is left out of git. Meetings kept before stay where they
+  are and still open, play and search as before. (#267)
+- **Kept recordings live with their meeting.** With Keep recordings on, a recording moves into its
+  meeting's folder with its transcript once the review is done, instead of keeping every material of
+  the digest. The Meetings rule now covers recordings too, and deleting a meeting moves its whole
+  folder to the trash. (#268)
+- **Clear words about what agents can read.** Agents are told to read a meeting only when a task
+  names it, and the sources sheet lists exactly which files. That is an instruction, not a lock: an
+  agent can read any file in your workspace. The Meetings page and the docs now say so. (#280)
+- **One look for controls and headings** across tasks, stakeholders, settings and meetings. (#251)
+- **The README** now explains Get Things Done as work memory for your AI tools, with new screenshots
+  and a full [user guide](docs/user-guide.md). (#274)
+- Dependencies: Electron 45.2.0 (#258), electron-builder 26.18.0 (#257), electron-updater 6.8.11
+  (#259), eslint 10.14.0, express-rate-limit 8.7.2, react-router-dom 7.18.5 (#263),
+  @inquirer/prompts 8.7.5 (#264).
+
+### Fixed
+
+- **One task per action item, even from two dashboards at once.** Two dashboards could both see "no
+  task yet" and each make one. (#249)
+- **Deleting a meeting always leaves a way to restore it**, even when saving that it was deleted
+  fails, or the app stops half way. (#276)
+- **A task keeps its meeting text after a new version is chosen**, also when it was made while the
+  meeting was still under review. (#277)
+- **Versions of a meeting never share a file**, so editing one version's file leaves the others as
+  they were, and every file kept is checked against the hash recorded for it. (#278)
+- **A meeting folder holding a link to another folder is never read.** (#279)
+- **Choosing a meeting's version updates every open dashboard**, not only the one you clicked in.
+  (#281)
+- **Transcribe again never mixes up two requests**, loses a running job, or drops a finished
+  transcript it could not save at once. (#271)
+- **A review choice saved just before an approval is never overtaken by it.** (#282)
+- For contributors: steadier timing in the GPU helper test (#272); `actions/download-artifact` 8
+  (#255).
 
 ## [0.8.0] - 2026-11-02
 
@@ -656,7 +752,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/geovanneb/get-things-done/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/geovanneb/get-things-done/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/geovanneb/get-things-done/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/geovanneb/get-things-done/compare/v0.5.0...v0.6.0
