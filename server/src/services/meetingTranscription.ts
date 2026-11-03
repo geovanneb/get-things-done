@@ -18,7 +18,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { clock } from '../utils/transcript';
 import { fileInside } from '../utils/files';
 import { readFolder } from './meetingFolder';
-import { cancelTranscription, claimTranscription, failTranscription, giveBackTranscription, publishTranscription, recoverTranscriptions, stillTranscribing, waitingTranscriptions } from './meetingVersions';
+import { cancelTranscription, claimTranscription, endTranscriptionJob, failTranscription, giveBackTranscription, publishTranscription, recoverTranscriptions, requestIdentity, stillTranscribing, waitingTranscriptions } from './meetingVersions';
 
 /**
  * Transcribes the recordings in the meeting queue, one at a time, on this computer.
@@ -70,6 +70,8 @@ interface Job { meeting: string; file: string; generation: string; token: string
   frees: number;
   /** Its result could not be saved. */
   unsaved?: boolean;
+  /** A Transcribe again stopped for a recording that needed the engine: it goes back in line, never fails. */
+  yielded?: boolean;
   /** The workspace it belongs to: a recording may start in another one, after a switch. */
   workspace: string;
   /**
@@ -179,7 +181,12 @@ export class MeetingTranscriptionService {
         // The queue first: a meeting waiting for its digest matters more than a reviewed one transcribed again.
         job = await this.claim(settings.model, settings.language, speakers, held) ?? await this.claimFolder(held);
         if (job && heldForLive > 0) {
-          await this.giveBack(job).catch((err: Error) => console.error(`[transcription] ${job!.meeting}/${job!.file}: ${err.message}`));
+          await this.giveBack(job).catch((err: Error) => {
+            // Not given back: recovery puts it back later; meanwhile it waits a while, so nothing loops on it.
+            if (job!.folder) setAside.set(path.join(job!.folder.dir, job!.file), Date.now() + SET_ASIDE_MS);
+            console.error(`[transcription] ${job!.meeting}/${job!.file}: ${err.message}`);
+          });
+          if (job.folder) endTranscriptionJob(job.generation);
           job = null;
         }
       } finally {
@@ -204,6 +211,7 @@ export class MeetingTranscriptionService {
         console.error(`[transcription] ${claimed.meeting}/${claimed.file}: ${(err as Error).message}`);
       } finally {
         if (active === claimed) active = null;
+        if (claimed.folder) endTranscriptionJob(claimed.generation);
         // Counted as busy until the next start is under way, so the queue never looks idle in between.
         ticking++;
         try {
@@ -226,13 +234,19 @@ export class MeetingTranscriptionService {
 
   /** Stops `job` for a recording that needs the engine: its recording goes back in line, as it was before it started. */
   async yieldTo(job: Job): Promise<void> {
+    if (job.folder) {
+      // Stopped either way: a give-back that could not be saved is tried again when the job ends, never turned into a failure.
+      job.yielded = true;
+      try { await this.giveBack(job); } finally { if (active === job) job.abort.abort(); }
+      return;
+    }
     await this.giveBack(job);
     if (active === job) job.abort.abort();
   }
 
   /** Puts `job`'s recording back in line, in its own workspace, if it is still this job's. */
   private async giveBack(job: Job): Promise<void> {
-    if (job.folder) return giveBackTranscription(job.workspace, job.meeting, job);
+    if (job.folder) { await giveBackTranscription(job.workspace, job.meeting, job); return; }
     await withWorkspacePath(job.workspace, () => this.change(job.meeting, job.file, (r) => {
       // Already done, stopped or taken by another job: nothing to give back.
       if (r.status !== 'running' || r.generation !== job.generation || r.owner?.token !== job.token) return r;
@@ -376,8 +390,7 @@ export class MeetingTranscriptionService {
    * each is named after its job and the dashboard that runs it, which keeps it while that dashboard lives.
    */
   private async recover(): Promise<void> {
-    const ws = new WorkspaceService().getWorkspacePath();
-    await recoverTranscriptions(ws, active?.folder && active.workspace === ws ? active.generation : null)
+    await recoverTranscriptions(new WorkspaceService().getWorkspacePath())
       .catch((err: Error) => console.error(`[transcription] Recovery of meeting folders: ${err.message}`));
     await this.queue.withQueue(async () => {
       const reserved = await this.queue.reserved().catch(() => null);
@@ -471,22 +484,34 @@ export class MeetingTranscriptionService {
     for (const w of await waitingTranscriptions(ws)) {
       // One whose result could not be saved waits a while, so the others go first.
       if ((setAside.get(path.join(w.dir, w.request.file)) ?? 0) > Date.now()) continue;
+      // The very request listed: one stopped and asked for again meanwhile is not claimed on this one's behalf.
+      const identity = requestIdentity(w.request);
       const model = await runnableModel(w.request.model);
       const generation = randomUUID();
       const token = randomUUID();
       if (!await this.models.installedPath(model)) {
-        if (await claimTranscription(ws, w.id, { generation, token, model, language: w.request.language })) {
-          await failTranscription(ws, w.id, { generation, token }, 'The model chosen for it is not downloaded: download it in Settings > Transcription, then try again.');
+        if (await claimTranscription(ws, w.id, identity, { generation, token, model, language: w.request.language })) {
+          try {
+            await failTranscription(ws, w.id, { generation, token }, 'The model chosen for it is not downloaded: download it in Settings > Transcription, then try again.');
+          } catch (err) {
+            // Not saved: recovery puts it back later; meanwhile it waits a while, and the others go on.
+            setAside.set(path.join(w.dir, w.request.file), Date.now() + SET_ASIDE_MS);
+            console.error(`[transcription] ${w.id}/${w.request.file}: ${(err as Error).message}`);
+          } finally { endTranscriptionJob(generation); }
         }
         continue;
       }
-      const speakers = w.request.speakers && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
       const use = { model, ...languagesFor(model, w.request.language) };
-      if (!await claimTranscription(ws, w.id, { generation, token, model: use.model, language: use.language })) continue;
+      const claimed = await claimTranscription(ws, w.id, identity, { generation, token, model: use.model, language: use.language });
+      if (!claimed) continue;
+      // What runs is what was claimed: its recording, the transcript it replaces, whether speakers were asked for.
+      const speakerModel = Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
       return {
-        meeting: w.id, file: w.request.file, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes, speakers, frees,
-        workspace: ws, folder: { dir: w.dir, audio: w.audio, transcript: w.request.transcript },
-        progress: { meeting: w.id, file: w.request.file, done: 0, total: 0, started_at: new Date().toISOString() },
+        meeting: w.id, file: claimed.file, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes,
+        speakers: claimed.speakers && speakerModel, frees, workspace: ws,
+        ...(claimed.speakers && !speakerModel ? { speakerNote: 'the speaker model is not downloaded' } : {}),
+        folder: { dir: w.dir, audio: path.join(path.dirname(w.audio), claimed.file), transcript: claimed.transcript },
+        progress: { meeting: w.id, file: claimed.file, done: 0, total: 0, started_at: new Date().toISOString() },
       };
     }
     return null;
@@ -494,8 +519,18 @@ export class MeetingTranscriptionService {
 
   /** Stops a Transcribe again of a reviewed meeting, or clears one that failed. Nothing it made is kept. */
   async stopFolder(meetingId: string): Promise<void> {
-    await cancelTranscription(new WorkspaceService().getWorkspacePath(), meetingId);
-    if (active?.folder && active.meeting === meetingId) active.abort.abort();
+    // Only the job of this workspace's meeting, as it was when asked: never one of the same id elsewhere, nor a job
+    // that started after.
+    const ws = new WorkspaceService().getWorkspacePath();
+    const job = active?.folder && active.workspace === ws && active.meeting === meetingId ? active : null;
+    await cancelTranscription(ws, meetingId);
+    if (job && active === job) job.abort.abort();
+  }
+
+  /** How far the Transcribe again of this workspace's `meetingId` got, when this dashboard runs it. */
+  folderProgress(meetingId: string): TranscriptionProgress | null {
+    const job = active;
+    return job?.folder && job.meeting === meetingId && job.workspace === new WorkspaceService().getWorkspacePath() ? { ...job.progress } : null;
   }
 
   /** Puts a Transcribe again in line and starts it when the engine is free. */
@@ -567,7 +602,7 @@ export class MeetingTranscriptionService {
         used = cpu.id;
         result = await attempt(used);
       }
-      job.speakerNote = result.speaker_note ?? undefined;
+      job.speakerNote = result.speaker_note ?? job.speakerNote;
       seconds = result.seconds;
     } catch (err) {
       error = err as Error;
@@ -661,8 +696,10 @@ export class MeetingTranscriptionService {
    */
   private async publishFolder(job: Job, model: string, language: string, segments: Segment[], seconds: number, error: Error | null): Promise<void> {
     const ws = job.workspace;
-    if (error && segments.length === 0 && (error as { engineBusy?: boolean }).engineBusy) {
-      job.engineBusy = true;
+    // Stopped for a recording, or the engine was taken: back in line. A give-back that cannot be saved is an error, so
+    // the job is set aside and recovery puts it back later, never a failure the user sees.
+    if (job.yielded || (error && segments.length === 0 && (error as { engineBusy?: boolean }).engineBusy)) {
+      if (!job.yielded) job.engineBusy = true;
       await giveBackTranscription(ws, job.meeting, job);
       return;
     }
@@ -675,7 +712,8 @@ export class MeetingTranscriptionService {
     // The recording's hash as the folder lists it: publishing checks the bytes still match, under the folder's lock.
     const folder = await readFolder(ws, job.meeting);
     const sha = folder.state === 'ok' ? folder.manifest.audio.find((a) => a.name === job.file)?.sha256 : undefined;
-    if (!sha) return;
+    // Unreadable for a moment: not saved, so the job is set aside and the transcription runs again later; never dropped.
+    if (!sha) throw new Error('The meeting\'s folder could not be read to save the new version');
     const content = Buffer.from(audioTranscriptMarkdown(job.file, sha, model, language, seconds, segments, true, job.changes, false, job.speakerNote ?? null, job.engineNote ?? null), 'utf-8');
     await publishTranscription(ws, job.meeting, job, { content, model, language });
   }

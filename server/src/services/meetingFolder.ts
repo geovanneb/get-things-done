@@ -64,6 +64,8 @@ export interface TranscribeRequest {
   speakers: boolean;
   status: 'pending' | 'running' | 'failed';
   requested_at: string;
+  /** Names this request among others of the meeting: a claim must find the very one it chose. Absent on older ones. */
+  request_id?: string;
   generation?: string;
   owner?: { pid: number; token: string };
   started_at?: string;
@@ -140,6 +142,7 @@ function parseRequest(raw: unknown, audio: { name: string }[]): TranscribeReques
   const owner = o['owner'] && typeof o['owner'] === 'object' ? o['owner'] as Record<string, unknown> : null;
   return {
     file, transcript, model, language, speakers: o['speakers'], status, requested_at: at,
+    ...(str('request_id') ? { request_id: str('request_id')! } : {}),
     ...(str('generation') ? { generation: str('generation')! } : {}),
     ...(owner && typeof owner['pid'] === 'number' && typeof owner['token'] === 'string' ? { owner: { pid: owner['pid'], token: owner['token'] } } : {}),
     ...(str('started_at') ? { started_at: str('started_at')! } : {}),

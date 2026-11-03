@@ -1537,6 +1537,19 @@ export class ContextUpdateService {
   }
 
   /**
+   * The hash of each transcript a confirmed record's speakers were confirmed on (`speakers_evidence`); null for a record
+   * read whole that has none (confirmed before it was kept). Throws when the update or the record cannot be read, so a
+   * caller never takes a failed read for a record without evidence.
+   */
+  async confirmedSpeakerEvidence(updateId: string, recordId: string): Promise<Record<string, string> | null> {
+    const { data } = await this.read(updateId);
+    const raw = this.rawRecords(data).find((r) => (r as Record<string, unknown>)?.['id'] === recordId) as Record<string, unknown> | undefined;
+    if (!raw) throw httpError(404, `Meeting record ${recordId} is not in ${updateId}`);
+    const ev = raw['speakers_evidence'];
+    return ev && typeof ev === 'object' && !Array.isArray(ev) ? ev as Record<string, string> : null;
+  }
+
+  /**
    * Uses a correction's suggestion (a change marked not sure), or takes it back: the one value it names is replaced in
    * the record as the agent wrote it, nothing else, and the suggestion says it was used. Like changing a speaker: while
    * no run is going, for the record as the page showed it, and the record is confirmed again afterwards. Taking it back

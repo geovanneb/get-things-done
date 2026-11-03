@@ -52,6 +52,20 @@ async function withFolder<T>(ws: string, id: string, fn: (folder: Folder) => Pro
   try { return await run; } finally { if (chains.get(key) === run) chains.delete(key); }
 }
 
+/** A request's identity: its id, or for one asked before requests had ids, when it was asked and for what. */
+export const requestIdentity = (t: TranscribeRequest) => t.request_id ?? `${t.requested_at}|${t.file}|${t.transcript}`;
+
+/**
+ * The transcriptions this process runs now, from the moment one is claimed until its job ends: recovery under a
+ * meeting's lock reads it, so a job started while another recovery was scanning is never taken for an orphan.
+ */
+const runningHere = new Set<string>();
+
+/** The job of `generation` has ended in this process: from now on, a running request of it left on disk is an orphan. */
+export function endTranscriptionJob(generation: string): void {
+  runningHere.delete(generation);
+}
+
 const nextVersionId = (m: FolderManifest) => `v${Math.max(...m.versions.map((v) => Number(v.id.slice(1)))) + 1}`;
 
 /** Asks for one recording of the meeting to be transcribed again. Refused while another one waits or runs. */
@@ -64,7 +78,7 @@ export async function requestTranscription(ws: string, id: string, input: Omit<T
     if (!audio) throw httpError(404, 'No such recording kept in this meeting');
     const full = await fileInside(folder.audioDir, audio.name).catch(() => null);
     if (!full) throw httpError(410, 'This recording is no longer kept');
-    const next: FolderManifest = { ...m, transcribe: { ...input, status: 'pending', requested_at: new Date().toISOString() } };
+    const next: FolderManifest = { ...m, transcribe: { ...input, status: 'pending', requested_at: new Date().toISOString(), request_id: randomUUID() } };
     await writeManifest(folder, next);
     return next;
   });
@@ -106,23 +120,37 @@ export async function waitingTranscriptions(ws: string): Promise<{ id: string; r
   return out.sort((a, b) => a.request.requested_at.localeCompare(b.request.requested_at));
 }
 
-/** Marks a waiting transcription as this job's. False when it no longer waits (stopped, taken by another dashboard). */
-export async function claimTranscription(ws: string, id: string, job: { generation: string; token: string; model: string; language: string }): Promise<boolean> {
+/**
+ * Marks a waiting transcription as this job's, if it is still the very request chosen (`identity`): one stopped and
+ * asked for again in between is another request, never claimed on the first one's behalf. Returns the request as
+ * claimed, which the job is built from; null when it no longer waits.
+ */
+export async function claimTranscription(ws: string, id: string, identity: string, job: { generation: string; token: string; model: string; language: string }): Promise<TranscribeRequest | null> {
   return withFolder(ws, id, async (folder) => {
     const t = folder.manifest.transcribe;
-    if (t?.status !== 'pending') return false;
+    if (t?.status !== 'pending' || requestIdentity(t) !== identity) return null;
     // The recording must still be the one kept: a changed one fails on its own, the others go on.
     const audio = folder.manifest.audio.find((a) => a.name === t.file);
     const full = audio ? await fileInside(folder.audioDir, audio.name).catch(() => null) : null;
     const sha = full ? (await hashFile(full).catch(() => null))?.sha256 : null;
     if (!audio || sha !== audio.sha256) {
       await writeManifest(folder, { ...folder.manifest, transcribe: { ...t, status: 'failed', error: 'The recording changed or went missing since it was kept.' } });
-      return false;
+      return null;
     }
-    await writeManifest(folder, { ...folder.manifest, transcribe: { ...t, status: 'running', model: job.model, language: job.language, generation: job.generation, owner: { pid: process.pid, token: job.token }, started_at: new Date().toISOString() } });
-    return true;
-  }).catch(() => false);
+    const claimed: TranscribeRequest = { ...t, status: 'running', model: job.model, language: job.language, generation: job.generation, owner: { pid: process.pid, token: job.token }, started_at: new Date().toISOString() };
+    runningHere.add(job.generation);
+    try {
+      await writeManifest(folder, { ...folder.manifest, transcribe: claimed });
+    } catch (err) {
+      runningHere.delete(job.generation);
+      throw err;
+    }
+    return claimed;
+  }).catch(() => null);
 }
+
+/** A folder that is gone (the meeting deleted) means the job is no longer its: nothing to write, not an error. */
+const unlessGone = (err: { statusCode?: number }) => { if (err.statusCode === 404) return false; throw err; };
 
 const ours = (t: TranscribeRequest | undefined, job: { generation: string; token: string }) =>
   t?.status === 'running' && t.generation === job.generation && t.owner?.token === job.token;
@@ -134,24 +162,32 @@ export async function stillTranscribing(ws: string, id: string, job: { generatio
   return folder.state === 'ok' && ours(folder.manifest.transcribe, job);
 }
 
-/** Puts this job's transcription back in line, as it was before it started (the engine was needed elsewhere). */
-export async function giveBackTranscription(ws: string, id: string, job: { generation: string; token: string }): Promise<void> {
-  await withFolder(ws, id, async (folder) => {
+/**
+ * Puts this job's transcription back in line, as it was before it started (the engine was needed elsewhere). False
+ * when it is no longer this job's; an error when that could not be saved, so the caller never takes it as done.
+ */
+export async function giveBackTranscription(ws: string, id: string, job: { generation: string; token: string }): Promise<boolean> {
+  return withFolder(ws, id, async (folder) => {
     const t = folder.manifest.transcribe;
-    if (!t || !ours(t, job)) return;
+    if (!t || !ours(t, job)) return false;
     const { generation: _g, owner: _o, started_at: _s, ...rest } = t;
     await writeManifest(folder, { ...folder.manifest, transcribe: { ...rest, status: 'pending' } });
-  }).catch(() => {});
+    return true;
+  }).catch(unlessGone);
 }
 
-/** Records why this job's transcription failed, if it is still this job's. */
-export async function failTranscription(ws: string, id: string, job: { generation: string; token: string }, error: string): Promise<void> {
-  await withFolder(ws, id, async (folder) => {
+/**
+ * Records why this job's transcription failed, if it is still this job's. False when it is not; an error when that
+ * could not be saved (the folder locked or unwritable), so the job is set aside instead of tried again at once.
+ */
+export async function failTranscription(ws: string, id: string, job: { generation: string; token: string }, error: string): Promise<boolean> {
+  return withFolder(ws, id, async (folder) => {
     const t = folder.manifest.transcribe;
-    if (!t || !ours(t, job)) return;
+    if (!t || !ours(t, job)) return false;
     const { generation: _g, owner: _o, ...rest } = t;
     await writeManifest(folder, { ...folder.manifest, transcribe: { ...rest, status: 'failed', error } });
-  }).catch(() => {});
+    return true;
+  }).catch(unlessGone);
 }
 
 /**
@@ -201,10 +237,13 @@ export async function publishTranscription(ws: string, id: string, job: { genera
 }
 
 /**
- * After a crash or another dashboard's end: a transcription left running by nobody goes back in line, and drafts and
- * version folders the manifest does not list are removed. `active` says which generation this process runs now.
+ * After a crash or another dashboard's end: a transcription left running by nobody goes back in line, and drafts,
+ * version folders the manifest does not list and converted audio of jobs that are gone are removed. Whether a job of
+ * this process still runs is read when the meeting's lock is held, never from a value taken earlier.
  */
-export async function recoverTranscriptions(ws: string, active: string | null): Promise<void> {
+export async function recoverTranscriptions(ws: string): Promise<void> {
+  const orphaned = (t: TranscribeRequest | undefined) => t?.status === 'running'
+    && (t.owner?.pid === process.pid ? !(t.generation && runningHere.has(t.generation)) : !(t.owner && processAlive(t.owner.pid)));
   const root = await workspaceEntry(ws, meetingsRoot(ws)).catch(() => null);
   if (!root) return;
   for (const name of await fsp.readdir(root).catch(() => [] as string[])) {
@@ -215,14 +254,24 @@ export async function recoverTranscriptions(ws: string, active: string | null): 
     const listed = new Set(folder.manifest.versions.map((v) => v.id));
     const leftovers = (await fsp.readdir(folder.dir).catch(() => [] as string[])).filter((n) => /^v\d{1,4}$/.test(n) && !listed.has(n));
     const drafts = (await fsp.readdir(folder.dir).catch(() => [] as string[])).filter((n) => /^\.v\d{1,4}\..+\.draft$/.test(n));
-    const orphan = t?.status === 'running' && (t.owner?.pid === process.pid ? active !== t.generation : !(t.owner && processAlive(t.owner.pid)));
-    if (!orphan && !leftovers.length && !drafts.length) continue;
+    const converted = await fsp.readdir(path.join(folder.dir, '.transcribing')).catch(() => [] as string[]);
+    if (!orphaned(t) && !leftovers.length && !drafts.length && !converted.length) continue;
     await withFolder(ws, name, async (now) => {
       const r = now.manifest.transcribe;
-      const stillOrphan = r?.status === 'running' && (r.owner?.pid === process.pid ? active !== r.generation : !(r.owner && processAlive(r.owner.pid)));
-      if (stillOrphan) {
-        const { generation: _g, owner: _o, started_at: _s, ...rest } = r;
+      if (orphaned(r)) {
+        const { generation: _g, owner: _o, started_at: _s, ...rest } = r!;
         await writeManifest(now, { ...now.manifest, transcribe: { ...rest, status: 'pending' } });
+      }
+      // Converted audio of a job that is no longer running anywhere (as the queue's recovery does for its own).
+      const work = path.join(now.dir, '.transcribing');
+      const st = await fsp.lstat(work).catch(() => null);
+      if (st?.isDirectory() && !st.isSymbolicLink()) {
+        for (const n of await fsp.readdir(work)) {
+          const m = /^([0-9a-f-]{36})-(\d+)\.wav$/.exec(n);
+          const pid = m ? Number(m[2]) : 0;
+          const running = pid === process.pid ? runningHere.has(m![1]!) : pid > 0 && processAlive(pid);
+          if (!running) await fsp.rm(path.join(work, n), { force: true });
+        }
       }
       const known = new Set(now.manifest.versions.map((v) => v.id));
       for (const n of await fsp.readdir(now.dir)) {
@@ -301,4 +350,43 @@ export async function writeCorrectedVersion(ws: string, id: string, input: { fro
       await fsp.rm(draft, { recursive: true, force: true }).catch(() => {});
     }
   });
+}
+
+/**
+ * Whether a record's speaker names hold for a transcript as it was pinned (`pinned`, its SHA-256). The names were
+ * confirmed on one transcript, whose hash the record keeps (`confirmedOn`, from `speakers_evidence`): they hold for
+ * that very text, and for a version made from it by correcting words (which keeps the speaker labels), never for a
+ * new transcription, which numbers its speakers anew. Decided by hashes, not by which version is current, so another
+ * window choosing a version meanwhile changes nothing; listed versions never change. A meeting with no folder never
+ * had other versions; a record with no evidence (confirmed before it was kept) is taken at the reviewed text.
+ */
+export function speakerNamesHold(manifest: FolderManifest | null, file: string, pinned: string, confirmedOn: string | undefined): boolean {
+  if (confirmedOn !== undefined && pinned === confirmedOn) return true;
+  if (!manifest) return confirmedOn === undefined;
+  const sha = (v: FolderVersion | undefined) => v?.files.find((f) => f.name === file)?.sha256;
+  const byId = new Map(manifest.versions.map((v) => [v.id, v]));
+  const confirmed = (v: FolderVersion) => (confirmedOn !== undefined ? sha(v) === confirmedOn : v.made_from === 'review');
+  // From each version holding the pinned text, back through corrections only, to the text the names were confirmed on.
+  return manifest.versions.filter((v) => sha(v) === pinned).some((start) => {
+    const seen = new Set<string>();
+    for (let v: FolderVersion | undefined = start; v && !seen.has(v.id); v = v.made_from === 'correction' && v.base ? byId.get(v.base) : undefined) {
+      seen.add(v.id);
+      if (confirmed(v)) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Whether a record's speaker names hold for its speakers' transcript `source` in the version a pin came from: the
+ * pin's path names the version (`meetings/<id>/vN/…`); that version's own hash of `source` is what is judged, so a
+ * readable copy pinned for a WebVTT original is judged by the original. True for a meeting with no folder.
+ */
+export function speakerNamesHoldForPin(manifest: FolderManifest | null, pinPath: string | undefined, source: string, confirmedOn: string | undefined): boolean {
+  // A pin in a meeting's folder needs that folder to judge it: one that could not be read never takes the no-folder way.
+  if (!manifest) return !pinPath?.startsWith('meetings/');
+  const versionId = pinPath ? /^meetings\/[^/]+\/(v\d{1,4})\//.exec(pinPath)?.[1] : undefined;
+  const version = versionId ? manifest.versions.find((v) => v.id === versionId) : undefined;
+  const sha = version?.files.find((f) => f.name === source)?.sha256;
+  return sha !== undefined && speakerNamesHold(manifest, source, sha, confirmedOn);
 }
