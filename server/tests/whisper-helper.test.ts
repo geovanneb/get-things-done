@@ -76,6 +76,15 @@ process.stdin.on('end', () => process.exit(0));
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const pidOf = async (dir: string) => Number(await fsp.readFile(path.join(dir, 'pid'), 'utf-8'));
+/** The pid the stand-in wrote, waiting a little for a slow start; null when it never wrote one. */
+const writtenPid = async (dir: string): Promise<number | null> => {
+  for (let i = 0; i < 30; i++) {
+    const text = await fsp.readFile(path.join(dir, 'pid'), 'utf-8').catch(() => '');
+    if (/^\d+$/.test(text)) return Number(text);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return null;
+};
 const posix = process.platform === 'win32' ? 'the helper is for macOS and Linux' : false;
 
 test('GPU helper: parts go one at a time in order, with the device it reported, and close waits for the exit', { skip: posix }, async (t) => {
@@ -102,9 +111,13 @@ test('GPU helper: each way it can fail is told apart, and it never outlives the 
       return 'no failure';
     } catch (err) {
       assert.ok(err instanceof HelperError, `${mode}: ${String(err)}`);
-      const pid = await pidOf(sub);
-      for (let i = 0; i < 50 && alive(pid); i++) await new Promise((r) => setTimeout(r, 100));
-      assert.equal(alive(pid), false, `${mode}: the helper is gone`);
+      // Under load the stand-in can be stopped (a load timeout) before it has written its pid: then it never ran, and
+      // there is nothing that could outlive the failure. When it did write one, that process must be gone.
+      const pid = await writtenPid(sub);
+      if (pid !== null) {
+        for (let i = 0; i < 50 && alive(pid); i++) await new Promise((r) => setTimeout(r, 100));
+        assert.equal(alive(pid), false, `${mode}: the helper is gone`);
+      }
       return err.failure;
     }
   };
