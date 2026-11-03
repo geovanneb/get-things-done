@@ -59,21 +59,31 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
   const running = d?.status === 'downloading' || d?.status === 'verifying';
   const queued = d?.status === 'queued';
   const percent = d && d.total ? Math.floor((d.received / d.total) * 100) : 0;
+  // The graphics-chip model can be chosen only after a speed test shows it runs there: said at the top, never only in a tooltip.
+  const blocked = Boolean(model.gpu) && !model.gpu_ready && !chosen;
+  const blockedWhy = !blocked ? null
+    : !model.installed ? 'Download it, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'
+      : model.speed ? 'The test ran, but not on the graphics chip: it cannot be chosen on this Mac.'
+        : vadMissing ? 'Download the voice-activity model below, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'
+          : 'Press Test speed below first: it can be chosen once the test shows it runs on the graphics chip.';
+  const whyId = `model-${model.id}-why`;
   return (
     <div style={{
       border: `1px solid ${chosen ? 'var(--color-accent)' : 'var(--color-border)'}`, borderRadius: 'var(--radius-md)', padding: 14,
       background: chosen ? 'var(--color-accent-subtle)' : 'transparent', display: 'flex', flexDirection: 'column', gap: 8,
     }}>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
-        <input type="radio" name="transcription-model" checked={chosen} onChange={onChoose} disabled={saving || (Boolean(model.gpu) && !model.gpu_ready && !chosen)} style={{ marginTop: 4 }}
-          title={model.gpu && !model.gpu_ready ? 'Download it and press Test speed: it can be chosen once the test shows it runs on the graphics chip' : undefined} />
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: blocked ? 'not-allowed' : 'pointer' }}>
+        <input type="radio" name="transcription-model" checked={chosen} onChange={onChoose} disabled={saving || blocked} style={{ marginTop: 4, ...(blocked ? { opacity: 0.45 } : {}) }}
+          {...(blockedWhy ? { 'aria-describedby': whyId } : {})} />
         <span style={{ flex: 1 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 'var(--text-sm)' }}>{model.name}</strong>
             {model.installed ? <Badge size="sm" variant="success">Downloaded</Badge> : null}
             {chosen ? <Badge size="sm" variant="info">Used for transcription</Badge> : null}
+            {blocked && model.installed ? <Badge size="sm" variant="warning">{model.speed ? 'Not available on this Mac' : 'Test speed to use it'}</Badge> : null}
           </span>
           <span style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{model.summary}</span>
+          {blockedWhy && <span id={whyId} style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--color-warning)', marginTop: 4 }}>{blockedWhy}</span>}
         </span>
       </label>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, fontSize: 'var(--text-xs)' }}>
@@ -106,13 +116,9 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
             : describeSpeed(model.speed.realtime_x).line}
         </p>
       )}
-      {model.gpu && !speedTest.running && (
-        <p role="status" style={{ ...hintStyle, color: model.gpu_ready ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-          {model.gpu_ready
-            ? 'Runs on this Mac\'s graphics chip. It can also make the live transcript (choose it below): Whisper quality as people speak. With this model for both the live and the after-meeting transcript, and speaker detection off, a complete live transcript is used when you stop (catching up can take a moment); otherwise the recording is still transcribed after the meeting. If it ever fails on the graphics chip, the recording is transcribed with Whisper Turbo on the CPU instead.'
-            : model.installed
-              ? (model.speed ? 'The test ran, but not on the graphics chip: it cannot be chosen.' : 'Press Test speed: it can be chosen once the test shows it runs on the graphics chip.')
-              : 'Download it, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'}
+      {model.gpu && model.gpu_ready && !speedTest.running && (
+        <p role="status" style={{ ...hintStyle, color: 'var(--color-success)' }}>
+          Runs on this Mac&apos;s graphics chip. It can also make the live transcript (choose it below): Whisper quality as people speak. With this model for both the live and the after-meeting transcript, and speaker detection off, a complete live transcript is used when you stop (catching up can take a moment); otherwise the recording is still transcribed after the meeting. If it ever fails on the graphics chip, the recording is transcribed with Whisper Turbo on the CPU instead.
         </p>
       )}
       {speedTest.running && <p role="status" style={hintStyle}>Testing on a minute of speech… {model.memory_gb > 2 ? 'This one can take a minute or two.' : ''}</p>}
@@ -120,14 +126,15 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
       {check.message && (
         <p role={check.ok ? 'status' : 'alert'} style={{ ...hintStyle, color: check.ok ? 'var(--color-success)' : 'var(--color-critical)' }}>{check.message}</p>
       )}
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {running || queued
           ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
           : model.installed
             ? <>
-              {vadMissing && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
+              {model.gpu && model.gpu_ready && !chosen && <Button size="sm" variant="primary" disabled={saving} onClick={onChoose}>Use it for transcription</Button>}
+              {vadMissing && <Button size="sm" variant={blocked ? 'primary' : 'secondary'} disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
               {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={check.running} onClick={() => void runCheck()}>Check</Button>}
-              {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={speedTest.running} onClick={() => void runSpeedTest()}>{model.speed ? 'Test speed again' : 'Test speed'}</Button>}
+              {!vadMissing && <Button size="sm" variant={blocked && !model.speed ? 'primary' : 'secondary'} disabled={busy || check.running || speedTest.running} loading={speedTest.running} onClick={() => void runSpeedTest()}>{model.speed ? 'Test speed again' : 'Test speed'}</Button>}
               <Button size="sm" variant="ghost" disabled={busy || check.running || speedTest.running} onClick={() => onAction('delete')}
                 title={busy || check.running || speedTest.running ? 'Not while a download, check or speed test is running' : undefined}>Delete</Button>
             </>
