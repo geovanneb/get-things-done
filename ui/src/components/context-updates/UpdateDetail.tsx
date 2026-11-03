@@ -256,9 +256,17 @@ function ChangeSide({ label, lines, other, tone }: { label: string; lines: strin
  * A correction, as the executive judges it: each field the server found changed, before and after, with the agent's
  * reason. Changes the agent was not sure of are listed apart: the record keeps the old value for those.
  */
-function CorrectionCard({ review, explanations, open, rejected }: { review: NonNullable<ContextUpdate['correction_review']>; explanations: RecordChange[]; open: boolean; rejected: boolean }) {
+function CorrectionCard({ review, explanations, open, rejected, onUse, busy = false }: {
+  review: NonNullable<ContextUpdate['correction_review']>; explanations: RecordChange[]; open: boolean; rejected: boolean;
+  /** Set while the correction is in review: use a suggestion (by its place among the explanations), or take it back. */
+  onUse?: (index: number, use: boolean) => void;
+  busy?: boolean;
+}) {
   const sure = explanations.filter((c) => c.sure);
-  const suggestions = explanations.filter((c) => !c.sure);
+  // Each with its place among the explanations: what the server knows it by.
+  const used = explanations.map((c, index) => ({ c, index })).filter((x) => !x.c.sure && x.c.taken);
+  const suggestions = explanations.map((c, index) => ({ c, index })).filter((x) => !x.c.sure && !x.c.taken);
+  const stateOf = (index: number) => review.suggestions.find((s) => s.index === index);
   return (
     <section aria-label="What the correction changes" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <h4 style={{ ...sectionLabel, margin: 0 }}>{open ? 'What changes in the record' : rejected ? 'What this correction suggested (rejected, not applied)' : 'What changed in the record'}</h4>
@@ -274,11 +282,12 @@ function CorrectionCard({ review, explanations, open, rejected }: { review: NonN
       )}
       {review.base && review.changes.length === 0 && (
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          {open ? 'Nothing: the agent found nothing to correct. Close this correction to keep the record as it is.' : 'Nothing changed.'}
+          {!open ? 'Nothing changed.' : suggestions.length ? 'No changes applied yet: the agent was not sure of these. Use the ones that are right, or close this correction.' : 'Nothing: the agent found nothing to correct. Close this correction to keep the record as it is.'}
         </p>
       )}
       {review.changes.map((c: FieldChange) => {
         const why = sure.filter((x) => x.field === c.field);
+        const chosen = used.filter((x) => x.c.field === c.field);
         return (
           <div key={c.field} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid var(--color-border)' }}>
             <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{FIELD_LABELS[c.field]}</div>
@@ -286,8 +295,13 @@ function CorrectionCard({ review, explanations, open, rejected }: { review: NonN
               <ChangeSide label="Before" lines={c.before} other={c.after} tone="before" />
               <ChangeSide label="After" lines={c.after} other={c.before} tone="after" />
             </div>
-            {why.length > 0
-              ? <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{why.map((x, i) => <li key={i}><strong>Why:</strong> {x.reason}</li>)}</ul>
+            {why.length + chosen.length > 0
+              ? (
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
+                  {why.map((x, i) => <li key={`w${i}`}><strong>Why:</strong> {x.reason}</li>)}
+                  {chosen.map((x) => <li key={`c${x.index}`}><strong>Selected by you:</strong> "{x.c.before}" to "{x.c.after}". {x.c.reason}</li>)}
+                </ul>
+              )
               : <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>The agent did not explain this change. Check it against the transcript.</div>}
           </div>
         );
@@ -298,12 +312,44 @@ function CorrectionCard({ review, explanations, open, rejected }: { review: NonN
           The version before had these doubts; the corrected record does not. Check that the correction really settles them.
         </HelpBox>
       )}
+      {used.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Used by you</div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-sm)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {used.map(({ c, index }) => (
+              <li key={index}>
+                {FIELD_LABELS[c.field] ?? c.field}: "{c.before}" to "{c.after}".{' '}
+                {onUse && <Button size="sm" variant="secondary" disabled={busy || Boolean(stateOf(index)?.blocked)} onClick={() => onUse(index, false)} aria-label={`Undo: ${FIELD_LABELS[c.field] ?? c.field} "${c.before}" to "${c.after}"`}>Undo</Button>}
+                {onUse && stateOf(index)?.blocked && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}> {stateOf(index)!.blocked}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {suggestions.length > 0 && (
         <HelpBox tone="warning" title="Not sure: suggested, not applied">
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
-            {suggestions.map((x, i) => <li key={i}>{FIELD_LABELS[x.field] ?? x.field}: "{x.before}" may be "{x.after}". {x.reason}</li>)}
+          <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {suggestions.map(({ c, index }) => {
+              const state = stateOf(index);
+              return (
+                <li key={index}>
+                  {FIELD_LABELS[c.field] ?? c.field}: "{c.before}" may be "{c.after}". {c.reason}
+                  {onUse && state && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                      <Button size="sm" variant="secondary" disabled={busy || Boolean(state.blocked)} onClick={() => onUse(index, true)}
+                        aria-label={`Use suggestion: ${FIELD_LABELS[c.field] ?? c.field} "${c.before}" to "${c.after}"`}>Use suggestion</Button>
+                      {state.blocked
+                        ? <span style={{ fontSize: 'var(--text-xs)' }}>{state.blocked}</span>
+                        : state.unlinks && <span style={{ fontSize: 'var(--text-xs)' }}>The stakeholder link of "{c.before}" is removed.</span>}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-          The record keeps the current value for these{open ? ', and approving does not change them' : ''}. Check them in the transcript.
+          {onUse
+            ? 'Using a suggestion updates this draft record. Confirm it again and approve to publish.'
+            : `The record keeps the current value for these${open ? ', and approving does not change them' : ''}. Check them in the transcript.`}
         </HelpBox>
       )}
     </section>
@@ -611,6 +657,23 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     }
   };
 
+  // A correction's suggestion used or taken back: a change to the record, saved like a speaker, then confirmed again.
+  const applySuggestion = async (record: MeetingRecord, index: number, use: boolean) => {
+    const ticket = pendingRecords.current.start(record.id);
+    updateSaving();
+    try {
+      await apiPost(`/api/context-updates/${u.id}/meeting-records/${record.id}/suggestions/${index}`, { revision: record.revision, use });
+      setConfirmations((c) => ({ ...c, [record.id]: null }));
+      await refetch();
+    } catch (err) {
+      notify('error', err instanceof Error ? err.message : 'Could not change the record.');
+      await refetch();
+    } finally {
+      pendingRecords.current.finish(record.id, ticket);
+      updateSaving();
+    }
+  };
+
   const chooseRecord = async (record: MeetingRecord, value: MeetingRecord['confirmation']) => {
     const rid = record.id;
     const previous = recordChoice(record);
@@ -847,7 +910,8 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             {records.length > 0 && (
               <section aria-label="Meeting records" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <h4 style={{ ...sectionLabel, margin: 0 }}>Meetings · {records.length}</h4>
-                {isCorrection && u.correction_review && <CorrectionCard review={u.correction_review} explanations={records[0]?.corrections ?? []} open={u.status !== 'done'} rejected={records[0]?.confirmation === 'rejected'} />}
+                {isCorrection && u.correction_review && <CorrectionCard review={u.correction_review} explanations={records[0]?.corrections ?? []} open={u.status !== 'done'} rejected={records[0]?.confirmation === 'rejected'}
+                  busy={saving > 0} {...(reviewing && records[0] ? { onUse: (index: number, use: boolean) => void applySuggestion(records[0]!, index, use) } : {})} />}
                 {isCorrection && u.status === 'done' && u.correction_review?.current && u.correction_review.changes.length > 0 && records[0]?.confirmation === 'confirmed' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                     <Button size="sm" variant="secondary" loading={busy === 'follow'} onClick={() => void followUp()}>Check the context</Button>

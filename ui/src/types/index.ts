@@ -509,7 +509,10 @@ export interface MeetingRecord {
 
 export interface RecordVersion { update_id: string; record_id: string; revision: string }
 
-export interface RecordChange { field: RecordDoubt['field']; before: string; after: string; reason: string; sure: boolean }
+export interface RecordChange { field: RecordDoubt['field']; before: string; after: string; reason: string; sure: boolean; /** A change marked not sure that the executive used. */ taken?: true }
+
+/** A correction's suggestion as the review offers it: used, or why it cannot be used. */
+export interface SuggestionState { index: number; used: boolean; blocked: string | null; unlinks: boolean }
 
 /** A field a correction changed, worked out by the server from the two records. */
 export interface FieldChange { field: RecordDoubt['field']; before: string[]; after: string[] }
@@ -583,7 +586,7 @@ export interface ContextUpdate {
   /** Detail of a follow-up not done yet: why its material no longer describes the meeting's current record, or null. */
   follow_up_problem?: string | null;
   /** Detail of a correction only: the version corrected, whether it is still current, and what changed in it. */
-  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean };
+  correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean; suggestions: SuggestionState[] };
   proposals: ContextUpdateProposal[];
   meeting_records: MeetingRecord[];
   skipped: { topic: string; reason: string }[];
