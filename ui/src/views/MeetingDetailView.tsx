@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
@@ -12,6 +12,7 @@ import { Tabs } from '@/components/common/Tabs';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { MeetingRecordCard } from '@/components/context-updates/UpdateDetail';
 import { MeetingText } from '@/components/meetings/MeetingText';
+import { TranscribeAgainDialog, TranscriptionNotice, VersionsSection } from '@/components/meetings/MeetingVersions';
 import { QueuedMeetingActions, recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
@@ -248,7 +249,15 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   const found = params.get('find') ?? '';
   const [picked, setPicked] = useState(() => params.get('file') ?? '');
   const [busy, setBusy] = useState(false);
+  const [again, setAgain] = useState<string | null>(null);
   const navigate = useNavigate();
+  // While a Transcribe again waits or runs, look again every few seconds: its progress, and its new version.
+  const transcribing = data?.transcription && data.transcription.status !== 'failed';
+  useEffect(() => {
+    if (!transcribing) return;
+    const timer = window.setInterval(refetch, 3000);
+    return () => window.clearInterval(timer);
+  }, [transcribing, refetch]);
 
   if (error && !data) {
     const message = (() => { try { return (JSON.parse(error) as { message?: string }).message ?? error; } catch { return error; } })();
@@ -333,13 +342,16 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
     </Notice>
   );
 
+  const modelNames = outlet.job?.model_names ?? {};
   const main = (
     <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
       {trashNotice}
+      <TranscriptionNotice detail={data} names={modelNames} busy={busy}
+        onStop={() => void run(() => apiDelete(`/api/meetings/${encodeURIComponent(h.id)}/transcriptions`), data.transcription?.status === 'failed' ? 'Dismissed.' : 'Stopped. Nothing of it was kept.', 'Could not stop it. Try again.')} />
       {tab === 'transcript' && (shown ? (
         <>
           <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.kind === 'recording' ? `${s.name}, transcript` : s.name }))} value={shown.file} onChange={setPicked} />
-          <MeetingText key={shown.file} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} initialFind={found}
+          <MeetingText key={`${shown.file}:${data.versions.find((v) => v.current)?.id ?? ''}`} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} initialFind={found}
             {...(shown.playable ? { audio: { url: audioUrl(h.id, shown.file), label: `Recording ${shown.name}` } } : {})} />
           {shown.kind === 'recording' && !shown.playable && (
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
@@ -439,6 +451,9 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
               <span className="mono truncate" style={{ flex: '1 1 200px', minWidth: 0 }}>{s.name}</span>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{{ transcript: 'Transcript', recording: 'Recording', notes: 'Notes', file: 'File' }[s.kind]}</span>
               {s.playable && <Button size="sm" variant="secondary" onClick={() => { setPicked(s.file); setTab('transcript'); }}>Play</Button>}
+              {s.playable && data.versions.length > 0 && !h.deleted && (
+                <Button size="sm" variant="ghost" disabled={busy || Boolean(transcribing)} onClick={() => setAgain(s.file)}>Transcribe again…</Button>
+              )}
               {s.present && (s.kind !== 'recording' || s.playable)
                 ? <a href={fileUrl(h.id, s.file)} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open</a>
                 : s.present
@@ -468,6 +483,8 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
           state: reviewed ? 'done' : h.update.status === 'in_review' ? 'now' : done ? 'done' : 'later' },
         { label: done ? (h.update.context_changed ? 'Context updated' : 'No context changes') : 'Context updated', detail: day(h.update.applied_at) || undefined, state: done ? 'done' : 'later' },
       ]} />
+      <VersionsSection detail={data} names={modelNames} busy={busy}
+        onChoose={(version) => void run(() => apiPut(`/api/meetings/${encodeURIComponent(h.id)}/version`, { version }).then(() => undefined), version === 'v1' ? 'The reviewed transcript is in use again.' : `Version ${version.slice(1)} is in use.`, 'Could not change the version. Try again.')} />
       {done && h.has_text && !h.deleted && (
         <section aria-label="Keep" style={{ marginBottom: 'var(--space-5)' }}>
           <Checkbox checked={h.kept} disabled={busy} label="Keep this meeting"
@@ -493,6 +510,14 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
           <IconButton label="Close meeting" icon={icons.close} onClick={onClose} />
         </>} />
       <Body tab={tab} setTab={setTab} counts={{ tasks: items.filter((a) => a.task_ref).length, files: sources.length }} main={main} aside={aside} />
+      <TranscribeAgainDialog key={again ?? ''} file={again} job={outlet.job} onClose={() => setAgain(null)}
+        onStart={async (file, model) => {
+          try {
+            await apiPost(`/api/meetings/${encodeURIComponent(h.id)}/transcriptions`, { file, model });
+            notify.success('It will be transcribed again. The reviewed transcript stays in use until you choose the new one.');
+            changed();
+          } catch (err) { notify.error(err, 'Could not start the transcription. Try again.'); throw err; }
+        }} />
     </>,
     h.title,
   )}</>;

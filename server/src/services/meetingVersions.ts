@@ -1,0 +1,236 @@
+import * as path from 'path';
+import { promises as fsp } from 'fs';
+import { randomUUID } from 'crypto';
+import { meetingsRoot, place, readFolder, writeManifest, type FolderManifest, type FolderState, type FolderVersion, type TranscribeRequest } from './meetingFolder';
+import { isMeetingId } from './meetingLibrary';
+import { hashFile } from '../utils/fileHash';
+import { fileInside, workspaceEntry } from '../utils/files';
+import { lock, unlock } from '../utils/fileLock';
+import { processAlive } from './runState';
+
+/**
+ * The versions of a meeting's text in its folder, and Transcribe again: everything that changes meeting.json after
+ * the folder was made goes through here, one change at a time per meeting, across dashboards
+ * (`meetings/.<id>.lock`).
+ *
+ * The rules, the same as for record corrections:
+ * - a version counts only once it is written whole and listed in meeting.json (a folder `v3/` it does not list is a
+ *   leftover of a crash, removed by recovery);
+ * - nothing switches the current version by itself: a new transcription is added, and the user chooses it;
+ * - an older version stays as it was, so what was made from it (a task's pinned sources, a correction) still holds.
+ */
+
+type Folder = Extract<FolderState, { state: 'ok' }>;
+const LOCK_WAIT_MS = 5000;
+const STALE_DRAFT_MS = 10 * 60 * 1000;
+
+function httpError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { statusCode: status });
+}
+
+/** One change to a meeting's folder at a time, in this process and across dashboards. */
+const chains = new Map<string, Promise<unknown>>();
+async function withFolder<T>(ws: string, id: string, fn: (folder: Folder) => Promise<T>): Promise<T> {
+  if (!isMeetingId(id)) throw httpError(400, 'Invalid meeting id');
+  const key = path.join(meetingsRoot(ws), id);
+  const before = chains.get(key) ?? Promise.resolve();
+  const run = before.catch(() => {}).then(async () => {
+    const root = await workspaceEntry(ws, meetingsRoot(ws));
+    const held = await lock(path.join(root, `.${id}.lock`), LOCK_WAIT_MS, () => httpError(409, 'This meeting is being changed in another window; try again'));
+    try {
+      const folder = await readFolder(ws, id);
+      if (folder.state === 'none') throw httpError(404, 'This meeting has no folder of its own: only meetings reviewed with their text kept have one');
+      if (folder.state === 'damaged') throw httpError(409, `This meeting's folder cannot be used: ${folder.reason}`);
+      return await fn(folder);
+    } finally {
+      await unlock(held);
+    }
+  });
+  chains.set(key, run);
+  try { return await run; } finally { if (chains.get(key) === run) chains.delete(key); }
+}
+
+const nextVersionId = (m: FolderManifest) => `v${Math.max(...m.versions.map((v) => Number(v.id.slice(1)))) + 1}`;
+
+/** Asks for one recording of the meeting to be transcribed again. Refused while another one waits or runs. */
+export async function requestTranscription(ws: string, id: string, input: Omit<TranscribeRequest, 'status' | 'requested_at'>): Promise<FolderManifest> {
+  return withFolder(ws, id, async (folder) => {
+    const m = folder.manifest;
+    const t = m.transcribe;
+    if (t && t.status !== 'failed') throw httpError(409, 'A transcription of this meeting already waits or runs: stop it first');
+    const audio = m.audio.find((a) => a.name === input.file);
+    if (!audio) throw httpError(404, 'No such recording kept in this meeting');
+    const full = await fileInside(folder.audioDir, audio.name).catch(() => null);
+    if (!full) throw httpError(410, 'This recording is no longer kept');
+    const next: FolderManifest = { ...m, transcribe: { ...input, status: 'pending', requested_at: new Date().toISOString() } };
+    await writeManifest(folder, next);
+    return next;
+  });
+}
+
+/** Stops a transcription that waits or runs, or clears one that failed. Nothing it made is kept. */
+export async function cancelTranscription(ws: string, id: string): Promise<FolderManifest> {
+  return withFolder(ws, id, async (folder) => {
+    if (!folder.manifest.transcribe) throw httpError(409, 'No transcription of this meeting waits or runs');
+    const { transcribe: _gone, ...rest } = folder.manifest;
+    await writeManifest(folder, rest);
+    return rest;
+  });
+}
+
+/** Makes `version` the meeting's current text. Only a version it lists; the record stays as it was reviewed. */
+export async function chooseVersion(ws: string, id: string, version: unknown): Promise<FolderManifest> {
+  if (typeof version !== 'string') throw httpError(400, 'Invalid version: use one the meeting lists, like v2');
+  return withFolder(ws, id, async (folder) => {
+    if (!folder.manifest.versions.some((v) => v.id === version)) throw httpError(404, `This meeting has no version ${version}`);
+    const next = { ...folder.manifest, current: version };
+    await writeManifest(folder, next);
+    return next;
+  });
+}
+
+/** The meetings with a transcription waiting, oldest first. A folder that cannot be read is left out. */
+export async function waitingTranscriptions(ws: string): Promise<{ id: string; request: TranscribeRequest; audio: string; dir: string }[]> {
+  const root = await workspaceEntry(ws, meetingsRoot(ws)).catch(() => null);
+  if (!root) return [];
+  const out: { id: string; request: TranscribeRequest; audio: string; dir: string }[] = [];
+  for (const name of await fsp.readdir(root).catch(() => [] as string[])) {
+    if (!isMeetingId(name)) continue;
+    const folder = await readFolder(ws, name);
+    if (folder.state === 'ok' && folder.manifest.transcribe?.status === 'pending') {
+      out.push({ id: name, request: folder.manifest.transcribe, audio: path.join(folder.audioDir, folder.manifest.transcribe.file), dir: folder.dir });
+    }
+  }
+  return out.sort((a, b) => a.request.requested_at.localeCompare(b.request.requested_at));
+}
+
+/** Marks a waiting transcription as this job's. False when it no longer waits (stopped, taken by another dashboard). */
+export async function claimTranscription(ws: string, id: string, job: { generation: string; token: string; model: string; language: string }): Promise<boolean> {
+  return withFolder(ws, id, async (folder) => {
+    const t = folder.manifest.transcribe;
+    if (t?.status !== 'pending') return false;
+    // The recording must still be the one kept: a changed one fails on its own, the others go on.
+    const audio = folder.manifest.audio.find((a) => a.name === t.file);
+    const full = audio ? await fileInside(folder.audioDir, audio.name).catch(() => null) : null;
+    const sha = full ? (await hashFile(full).catch(() => null))?.sha256 : null;
+    if (!audio || sha !== audio.sha256) {
+      await writeManifest(folder, { ...folder.manifest, transcribe: { ...t, status: 'failed', error: 'The recording changed or went missing since it was kept.' } });
+      return false;
+    }
+    await writeManifest(folder, { ...folder.manifest, transcribe: { ...t, status: 'running', model: job.model, language: job.language, generation: job.generation, owner: { pid: process.pid, token: job.token }, started_at: new Date().toISOString() } });
+    return true;
+  }).catch(() => false);
+}
+
+const ours = (t: TranscribeRequest | undefined, job: { generation: string; token: string }) =>
+  t?.status === 'running' && t.generation === job.generation && t.owner?.token === job.token;
+
+/** False once the transcription is no longer this job's: stopped, or the meeting deleted. */
+export async function stillTranscribing(ws: string, id: string, job: { generation: string; token: string }): Promise<boolean> {
+  const folder = await readFolder(ws, id).catch(() => null);
+  if (!folder) return true; // unreadable for a moment: keep going, publishing checks again
+  return folder.state === 'ok' && ours(folder.manifest.transcribe, job);
+}
+
+/** Puts this job's transcription back in line, as it was before it started (the engine was needed elsewhere). */
+export async function giveBackTranscription(ws: string, id: string, job: { generation: string; token: string }): Promise<void> {
+  await withFolder(ws, id, async (folder) => {
+    const t = folder.manifest.transcribe;
+    if (!t || !ours(t, job)) return;
+    const { generation: _g, owner: _o, started_at: _s, ...rest } = t;
+    await writeManifest(folder, { ...folder.manifest, transcribe: { ...rest, status: 'pending' } });
+  }).catch(() => {});
+}
+
+/** Records why this job's transcription failed, if it is still this job's. */
+export async function failTranscription(ws: string, id: string, job: { generation: string; token: string }, error: string): Promise<void> {
+  await withFolder(ws, id, async (folder) => {
+    const t = folder.manifest.transcribe;
+    if (!t || !ours(t, job)) return;
+    const { generation: _g, owner: _o, ...rest } = t;
+    await writeManifest(folder, { ...folder.manifest, transcribe: { ...rest, status: 'failed', error } });
+  }).catch(() => {});
+}
+
+/**
+ * Adds the new transcript as the meeting's next version, if the transcription is still this job's and the recording is
+ * unchanged: the current version's other files (linked, not copied) and the new transcript in place of the old one.
+ * Written under a draft name and renamed into place, then listed; the current version stays as it is.
+ */
+export async function publishTranscription(ws: string, id: string, job: { generation: string; token: string }, result: { content: Buffer; model: string; language: string }): Promise<string | null> {
+  return withFolder(ws, id, async (folder) => {
+    const m = folder.manifest;
+    const t = m.transcribe;
+    if (!t || !ours(t, job)) return null;
+    const audio = m.audio.find((a) => a.name === t.file);
+    const full = audio ? await fileInside(folder.audioDir, audio.name).catch(() => null) : null;
+    if (!audio || !full || (await hashFile(full)).sha256 !== audio.sha256) {
+      await writeManifest(folder, { ...m, transcribe: { ...t, status: 'failed', error: 'The recording changed or went missing while it was being transcribed.' } });
+      return null;
+    }
+    const base = m.versions.find((v) => v.id === m.current)!;
+    const id_ = nextVersionId(m);
+    const draft = path.join(folder.dir, `.${id_}.${randomUUID()}.draft`);
+    try {
+      await fsp.mkdir(draft);
+      const files: FolderVersion['files'] = [];
+      for (const f of base.files) {
+        if (f.name === t.transcript) continue;
+        const sha = await place(path.join(folder.versionDir, f.name), path.join(draft, f.name), f.sha256);
+        if (!sha) throw new Error(`${f.name} could not be carried over to the new version`);
+        files.push({ name: f.name, sha256: sha });
+      }
+      await fsp.writeFile(path.join(draft, t.transcript), result.content, { flag: 'wx' });
+      files.push({ name: t.transcript, sha256: (await hashFile(path.join(draft, t.transcript))).sha256 });
+      // A folder of that name the manifest does not list is a leftover of a crash: it never counts, and goes now.
+      const target = path.join(folder.dir, id_);
+      await fsp.rm(target, { recursive: true, force: true });
+      await fsp.rename(draft, target);
+      const { transcribe: _done, ...rest } = m;
+      await writeManifest(folder, {
+        ...rest,
+        versions: [...m.versions, { id: id_, at: new Date().toISOString(), made_from: 'transcription', model: result.model, language: result.language, from: { name: audio.name, sha256: audio.sha256 }, files }],
+      });
+      return id_;
+    } finally {
+      await fsp.rm(draft, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+}
+
+/**
+ * After a crash or another dashboard's end: a transcription left running by nobody goes back in line, and drafts and
+ * version folders the manifest does not list are removed. `active` says which generation this process runs now.
+ */
+export async function recoverTranscriptions(ws: string, active: string | null): Promise<void> {
+  const root = await workspaceEntry(ws, meetingsRoot(ws)).catch(() => null);
+  if (!root) return;
+  for (const name of await fsp.readdir(root).catch(() => [] as string[])) {
+    if (!isMeetingId(name)) continue;
+    const folder = await readFolder(ws, name);
+    if (folder.state !== 'ok') continue;
+    const t = folder.manifest.transcribe;
+    const listed = new Set(folder.manifest.versions.map((v) => v.id));
+    const leftovers = (await fsp.readdir(folder.dir).catch(() => [] as string[])).filter((n) => /^v\d{1,4}$/.test(n) && !listed.has(n));
+    const drafts = (await fsp.readdir(folder.dir).catch(() => [] as string[])).filter((n) => /^\.v\d{1,4}\..+\.draft$/.test(n));
+    const orphan = t?.status === 'running' && (t.owner?.pid === process.pid ? active !== t.generation : !(t.owner && processAlive(t.owner.pid)));
+    if (!orphan && !leftovers.length && !drafts.length) continue;
+    await withFolder(ws, name, async (now) => {
+      const r = now.manifest.transcribe;
+      const stillOrphan = r?.status === 'running' && (r.owner?.pid === process.pid ? active !== r.generation : !(r.owner && processAlive(r.owner.pid)));
+      if (stillOrphan) {
+        const { generation: _g, owner: _o, started_at: _s, ...rest } = r;
+        await writeManifest(now, { ...now.manifest, transcribe: { ...rest, status: 'pending' } });
+      }
+      const known = new Set(now.manifest.versions.map((v) => v.id));
+      for (const n of await fsp.readdir(now.dir)) {
+        const full = path.join(now.dir, n);
+        if (/^v\d{1,4}$/.test(n) && !known.has(n)) await fsp.rm(full, { recursive: true, force: true });
+        else if (/^\.v\d{1,4}\..+\.draft$/.test(n)) {
+          const st = await fsp.lstat(full).catch(() => null);
+          if (st && Date.now() - st.mtimeMs > STALE_DRAFT_MS) await fsp.rm(full, { recursive: true, force: true });
+        }
+      }
+    }).catch(() => {});
+  }
+}

@@ -589,6 +589,15 @@ try {
       && keptOpen?.status === 200 && (await keptOpen.text()).includes('Fictional transcript')
       && fs.readFileSync(path.join(ws, '.gitignore'), 'utf-8').split('\n').includes('meetings/'),
       `manifest=${JSON.stringify(folderManifest)?.slice(0, 200)} open=${keptOpen?.status}`);
+    // Its versions: only the reviewed one. It has no recording, so Transcribe again is refused; a bad model or version too.
+    const withVersions = await (await fetch(`${base}/api/meetings/${meeting.id}-M-01`)).json();
+    const againBadModel = await json('POST', `/api/meetings/${meeting.id}-M-01/transcriptions`, { file: keptName ?? 'x', model: 'not-a-model' });
+    const againNoAudio = await json('POST', `/api/meetings/${meeting.id}-M-01/transcriptions`, { file: keptName ?? 'x', model: 'whisper-large-v3-turbo' });
+    const badVersion = await json('PUT', `/api/meetings/${meeting.id}-M-01/version`, { version: 'v9' });
+    check('a reviewed meeting lists its versions, and Transcribe again and choosing a version refuse what does not fit',
+      JSON.stringify(withVersions.versions?.map((v) => [v.id, v.current])) === '[["v1",true]]' && withVersions.transcription === null
+      && againBadModel.status === 400 && [404, 409].includes(againNoAudio.status) && badVersion.status === 404,
+      `versions=${JSON.stringify(withVersions.versions)} model=${againBadModel.status} audio=${againNoAudio.status} version=${badVersion.status}`);
     const vttForm = new FormData();
     vttForm.append('file', new Blob(['WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Fictional Speaker>Fictional words.</v>\n']), 'sync.vtt');
     const vttUpdate = await (await json('POST', '/api/context-updates', { title: 'Fictional sync' })).json();

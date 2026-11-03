@@ -7,6 +7,8 @@ import { fileInside, topLevelName } from '../utils/files';
 import { correctionChain, type ChainState, type CorrectionChain } from './meetingCorrections';
 import { MAX_CONVERT_BYTES } from '../utils/transcript';
 import { meetingFiles } from './meetingFolder';
+import { chooseVersion, requestTranscription } from './meetingVersions';
+import { CATALOG, runnableModel, TranscriptionModelService } from './transcriptionModels';
 import { WorkspaceService } from './workspace';
 import { MAX_QUERY, MIN_QUERY, queryWords, searchMeeting, type SearchHit } from './meetingSearch';
 
@@ -89,6 +91,13 @@ export interface MeetingDetail {
   /** The update's records when none is linked to this meeting: shown with a note instead of guessing. */
   update_records: { id: string; title: string; meeting_date: string; confirmation: MeetingRecord['confirmation'] }[];
   sources: MeetingSource[];
+  /**
+   * The versions of its text, when it has a folder of its own: the reviewed one (`v1`) and any made by Transcribe
+   * again, with the current one marked. Its record always stays the account of the version it was reviewed from.
+   */
+  versions: { id: string; at: string; made_from: 'review' | 'transcription'; model: string | null; current: boolean }[];
+  /** Transcribe again: waiting, running or failed; null when none. */
+  transcription: { file: string; model: string; status: 'pending' | 'running' | 'failed'; error: string | null; started_at: string | null } | null;
 }
 
 function httpError(status: number, message: string): Error {
@@ -215,6 +224,7 @@ export class MeetingHistoryService {
     if (!meeting.linkable) throw httpError(409, `This meeting waits for the review of ${update.id}: open it in Context > Updates`);
     // Each file where it is now: the meeting's own folder once its text moved there, else the update's materials.
     const where = await meetingFiles(workspace.getWorkspacePath(), update, meeting);
+    const folder = where.folder;
     const present = where.present;
     const deleted = update.deleted_meetings.find((d) => d.meeting === meeting.key);
     const copies = new Map(update.transcripts.map((t) => [t.file, t]));
@@ -266,7 +276,42 @@ export class MeetingHistoryService {
       record,
       update_records: record ? [] : update.meeting_records.filter((r) => !linked.has(r.id)).map((r) => ({ id: r.id, title: r.title, meeting_date: r.meeting_date, confirmation: r.confirmation })),
       sources,
+      versions: folder ? folder.manifest.versions.map((v) => ({ id: v.id, at: v.at, made_from: v.made_from, model: v.model ?? null, current: v.id === folder.manifest.current })) : [],
+      transcription: folder?.manifest.transcribe
+        ? { file: folder.manifest.transcribe.file, model: folder.manifest.transcribe.model, status: folder.manifest.transcribe.status, error: folder.manifest.transcribe.error ?? null, started_at: folder.manifest.transcribe.started_at ?? null }
+        : null,
     };
+  }
+
+  // ---- versions and Transcribe again ------------------------------------------------------------------------------
+
+  /**
+   * Asks for a kept recording of a reviewed meeting to be transcribed again with `model` (a downloaded one), in the
+   * language and with the speaker setting of Settings > Transcription. The result becomes a new version; the current
+   * one stays until the user chooses.
+   */
+  async transcribeAgain(id: string, input: unknown): Promise<void> {
+    const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+    const asked = topLevelName(body['file'] as string);
+    const model = body['model'];
+    if (typeof model !== 'string' || !CATALOG.some((m) => m.id === model)) throw httpError(400, 'Invalid model: use one of Settings > Transcription');
+    const models = new TranscriptionModelService();
+    const use = await runnableModel(model);
+    if (use !== model) throw httpError(409, 'That GPU model is not verified here: run its speed test first');
+    if (!await models.installedPath(use)) throw httpError(409, 'That model is not downloaded: download it in Settings > Transcription first');
+    const { update, meeting } = await this.held(id);
+    if (update.deleted_meetings.some((d) => d.meeting === meeting.key)) throw httpError(410, 'This meeting was deleted');
+    if (!meeting.files.includes(asked) || !AUDIO_EXTENSIONS.has(path.extname(asked).toLowerCase())) throw httpError(404, 'No such recording in this meeting');
+    const settings = await models.readSettings();
+    // The new transcript takes the place of this recording's readable copy, under the same name.
+    const transcript = update.transcripts.find((t) => t.source === asked)?.file ?? `${asked.replace(/\.[^.]+$/, '')}.transcript.md`;
+    await requestTranscription(workspace.getWorkspacePath(), id, { file: asked, transcript, model: use, language: settings.language, speakers: settings.speakers === true });
+  }
+
+  async chooseVersion(id: string, version: unknown): Promise<void> {
+    const { update, meeting } = await this.held(id);
+    if (update.deleted_meetings.some((d) => d.meeting === meeting.key)) throw httpError(410, 'This meeting was deleted');
+    await chooseVersion(workspace.getWorkspacePath(), id, version);
   }
 
   /**

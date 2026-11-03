@@ -4,7 +4,7 @@ import { ContextUpdateService, DOUBT_FIELDS, type MeetingRecord, type RecordDoub
 import { MeetingDigestService } from './meetingDigestService';
 import { MeetingHistoryService } from './meetingHistoryService';
 import { heldMeetings, isMeetingId, isMeetingText, QUEUED_MEETING_ID } from './meetingLibrary';
-import { meetingFiles } from './meetingFolder';
+import { MEETINGS_DIR, meetingFiles, readFolder } from './meetingFolder';
 import { WorkspaceService } from './workspace';
 import { atomicWrite } from '../utils/atomicWrite';
 import { hashFile } from '../utils/fileHash';
@@ -93,7 +93,8 @@ export interface SelectionCheck {
   selection: MeetingSelection | null;
   /** Meetings the Objective mentions that the selection does not hold yet. */
   unpinned: string[];
-  sources: { meeting: string; path: string; state: SourceState; current_path?: string }[];
+  /** `older_version`: the bytes are in an older version of the meeting's text, not the current one (still valid). */
+  sources: { meeting: string; path: string; state: SourceState; current_path?: string; older_version?: true }[];
   /** Meetings whose record or review moved on since they were pinned, and how. The pin itself stays as it was. */
   record_changed: string[];
   review_changes: { meeting: string; change: string }[];
@@ -441,6 +442,9 @@ async function checkSelection(selection: MeetingSelection | null, mentionedIds: 
     for (const s of m.sources) {
       const held = now?.sources.find((c) => c.sha256 === s.sha256);
       if (held) { sources.push({ meeting: m.id, path: s.path, state: 'ok', ...(held.path !== s.path ? { current_path: held.path } : {}) }); continue; }
+      // A version of the meeting's text that is no longer the current one still holds what was pinned: what was made
+      // from it stays valid, and says so. Never swapped for the newer text.
+      if (now && await inOlderVersion(m.id, s)) { sources.push({ meeting: m.id, path: s.path, state: 'ok', older_version: true }); continue; }
       const there = await fileInside(workspace.getWorkspacePath(), s.path).catch(() => null);
       sources.push({ meeting: m.id, path: s.path, state: there && now ? 'changed' : 'missing' });
     }
@@ -451,6 +455,19 @@ async function checkSelection(selection: MeetingSelection | null, mentionedIds: 
     }
   }
   return { selection, unpinned: [...new Set(mentionedIds)].filter((id) => !pinned.has(id)), sources, record_changed: recordChanged, review_changes: reviewChanges };
+}
+
+/** Whether a pinned file is in a version its meeting's folder still lists, with the pinned bytes. */
+async function inOlderVersion(id: string, s: PinnedSource): Promise<boolean> {
+  const ws = workspace.getWorkspacePath();
+  const folder = await readFolder(ws, id).catch(() => null);
+  if (folder?.state !== 'ok') return false;
+  const parts = s.path.split('/');
+  if (parts.length !== 4 || parts[0] !== MEETINGS_DIR || parts[1] !== id) return false;
+  const version = folder.manifest.versions.find((v) => v.id === parts[2]);
+  if (!version?.files.some((f) => f.name === parts[3] && f.sha256 === s.sha256)) return false;
+  const full = await fileInside(path.join(folder.dir, version.id), parts[3]!).catch(() => null);
+  return Boolean(full && (await hashFile(full)).sha256 === s.sha256);
 }
 
 /** How a meeting's record or review moved on since it was pinned, in words; null when it did not. */
@@ -498,6 +515,7 @@ export function renderSheet(selection: MeetingSelection | null, check?: Selectio
       const label = s.kind === 'transcript' ? 'Transcript' : 'Notes';
       if (state?.state === 'changed') lines.push(`- ${label}: ${code(s.path)}: changed since it was pinned. Do not read it.`);
       else if (state?.state === 'missing') lines.push(`- ${label}: ${code(s.path)}: no longer part of the meeting. Do not read it.`);
+      else if (state?.older_version) lines.push(`- ${label}: ${code(s.path)} (SHA-256 ${s.sha256}), from an older version of the meeting's text: say so in the deliverable's sources.`);
       else lines.push(`- ${label}: ${code(state?.current_path ?? s.path)} (SHA-256 ${s.sha256})`);
     }
     for (const u of m.unavailable) lines.push(`- Not available: ${quoted(u.name)}: ${quoted(u.reason)}`);

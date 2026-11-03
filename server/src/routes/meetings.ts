@@ -4,9 +4,11 @@ import { MeetingHistoryService } from '../services/meetingHistoryService';
 import { isMeetingId } from '../services/meetingLibrary';
 import { sendFile } from '../utils/files';
 import { startCorrection } from '../services/meetingCorrectionService';
+import { MeetingTranscriptionService } from '../services/meetingTranscription';
 
 const router = Router();
 const service = new MeetingHistoryService();
+const transcription = new MeetingTranscriptionService();
 
 /** A meeting id from the path, checked before it reaches a service: MQ-…, CU-… or CU-…-M-01. */
 function meetingId(req: Request): string {
@@ -27,7 +29,11 @@ router.get('/search', async (req: Request, res: Response) => {
 
 // GET /api/meetings/:id  one meeting held by an update: its record, its files and where it stands
 router.get('/:id', async (req: Request, res: Response) => {
-  res.json(await service.detail(meetingId(req)));
+  const id = meetingId(req);
+  const detail = await service.detail(id);
+  // How far a Transcribe again of this meeting got, when this dashboard runs it.
+  const progress = transcription.progress();
+  res.json({ ...detail, transcription_progress: detail.transcription?.status === 'running' && progress?.meeting === id ? progress : null });
 });
 
 // GET /api/meetings/:id/text/:file  a transcript or notes of the meeting, as text to read
@@ -48,6 +54,29 @@ router.get('/:id/audio/:file', async (req: Request, res: Response) => {
 // GET /api/meetings/:id/files/:file  a file of the meeting as it is, to open or (?download=1) save, wherever it is kept
 router.get('/:id/files/:file', async (req: Request, res: Response) => {
   sendFile(res, await service.file(meetingId(req), param(req, 'file')), req.query['download'] === '1');
+});
+
+// POST /api/meetings/:id/transcriptions  { file, model }  transcribes a kept recording again; the result is a new version
+router.post('/:id/transcriptions', async (req: Request, res: Response) => {
+  const id = meetingId(req);
+  await service.transcribeAgain(id, req.body);
+  void transcription.tick().catch(() => {});
+  res.status(202).json(await service.detail(id));
+});
+
+// DELETE /api/meetings/:id/transcriptions  stops a transcription that waits or runs, or clears one that failed
+router.delete('/:id/transcriptions', async (req: Request, res: Response) => {
+  const id = meetingId(req);
+  await service.detail(id);
+  await transcription.stopFolder(id);
+  res.status(204).send();
+});
+
+// PUT /api/meetings/:id/version  { version }  makes a version of its text the current one
+router.put('/:id/version', async (req: Request, res: Response) => {
+  const id = meetingId(req);
+  await service.chooseVersion(id, (req.body as { version?: unknown } | undefined)?.version);
+  res.json(await service.detail(id));
 });
 
 // POST /api/meetings/:id/corrections  starts a correction of the meeting's reviewed record: a context update to analyze

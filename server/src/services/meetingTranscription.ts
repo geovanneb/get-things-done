@@ -17,6 +17,8 @@ import { WorkspaceService, withWorkspacePath } from './workspace';
 import { atomicWrite } from '../utils/atomicWrite';
 import { clock } from '../utils/transcript';
 import { fileInside } from '../utils/files';
+import { readFolder } from './meetingFolder';
+import { cancelTranscription, claimTranscription, failTranscription, giveBackTranscription, publishTranscription, recoverTranscriptions, stillTranscribing, waitingTranscriptions } from './meetingVersions';
 
 /**
  * Transcribes the recordings in the meeting queue, one at a time, on this computer.
@@ -69,7 +71,12 @@ interface Job { meeting: string; file: string; generation: string; token: string
   /** Its result could not be saved. */
   unsaved?: boolean;
   /** The workspace it belongs to: a recording may start in another one, after a switch. */
-  workspace: string }
+  workspace: string;
+  /**
+   * Transcribe again of a reviewed meeting: its recording in the meeting's folder, and the transcript the new version
+   * replaces. Absent for a recording in the queue.
+   */
+  folder?: { dir: string; audio: string; transcript: string } }
 /** The job this dashboard runs; null when none. */
 let active: Job | null = null;
 /** Checks still choosing a job; tests wait for them too. */
@@ -169,7 +176,8 @@ export class MeetingTranscriptionService {
       if (typeof held === 'string') return;
       try {
         const speakers = settings.speakers === true && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
-        job = await this.claim(settings.model, settings.language, speakers, held);
+        // The queue first: a meeting waiting for its digest matters more than a reviewed one transcribed again.
+        job = await this.claim(settings.model, settings.language, speakers, held) ?? await this.claimFolder(held);
         if (job && heldForLive > 0) {
           await this.giveBack(job).catch((err: Error) => console.error(`[transcription] ${job!.meeting}/${job!.file}: ${err.message}`));
           job = null;
@@ -224,6 +232,7 @@ export class MeetingTranscriptionService {
 
   /** Puts `job`'s recording back in line, in its own workspace, if it is still this job's. */
   private async giveBack(job: Job): Promise<void> {
+    if (job.folder) return giveBackTranscription(job.workspace, job.meeting, job);
     await withWorkspacePath(job.workspace, () => this.change(job.meeting, job.file, (r) => {
       // Already done, stopped or taken by another job: nothing to give back.
       if (r.status !== 'running' || r.generation !== job.generation || r.owner?.token !== job.token) return r;
@@ -367,6 +376,9 @@ export class MeetingTranscriptionService {
    * each is named after its job and the dashboard that runs it, which keeps it while that dashboard lives.
    */
   private async recover(): Promise<void> {
+    const ws = new WorkspaceService().getWorkspacePath();
+    await recoverTranscriptions(ws, active?.folder && active.workspace === ws ? active.generation : null)
+      .catch((err: Error) => console.error(`[transcription] Recovery of meeting folders: ${err.message}`));
     await this.queue.withQueue(async () => {
       const reserved = await this.queue.reserved().catch(() => null);
       if (reserved === null) return; // a damaged batch: change nothing until it is resolved
@@ -450,6 +462,47 @@ export class MeetingTranscriptionService {
     });
   }
 
+  /**
+   * Picks the oldest Transcribe again that waits in a meeting's folder and marks it running for this job. Its model
+   * was chosen when it was asked for; one that is not downloaded (any more) fails at once, so the next can go.
+   */
+  private async claimFolder(lock: HeldLock): Promise<Job | null> {
+    const ws = new WorkspaceService().getWorkspacePath();
+    for (const w of await waitingTranscriptions(ws)) {
+      // One whose result could not be saved waits a while, so the others go first.
+      if ((setAside.get(path.join(w.dir, w.request.file)) ?? 0) > Date.now()) continue;
+      const model = await runnableModel(w.request.model);
+      const generation = randomUUID();
+      const token = randomUUID();
+      if (!await this.models.installedPath(model)) {
+        if (await claimTranscription(ws, w.id, { generation, token, model, language: w.request.language })) {
+          await failTranscription(ws, w.id, { generation, token }, 'The model chosen for it is not downloaded: download it in Settings > Transcription, then try again.');
+        }
+        continue;
+      }
+      const speakers = w.request.speakers && Boolean(await this.models.installedPath(SPEAKER_MODEL.id).catch(() => null));
+      const use = { model, ...languagesFor(model, w.request.language) };
+      if (!await claimTranscription(ws, w.id, { generation, token, model: use.model, language: use.language })) continue;
+      return {
+        meeting: w.id, file: w.request.file, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes, speakers, frees,
+        workspace: ws, folder: { dir: w.dir, audio: w.audio, transcript: w.request.transcript },
+        progress: { meeting: w.id, file: w.request.file, done: 0, total: 0, started_at: new Date().toISOString() },
+      };
+    }
+    return null;
+  }
+
+  /** Stops a Transcribe again of a reviewed meeting, or clears one that failed. Nothing it made is kept. */
+  async stopFolder(meetingId: string): Promise<void> {
+    await cancelTranscription(new WorkspaceService().getWorkspacePath(), meetingId);
+    if (active?.folder && active.meeting === meetingId) active.abort.abort();
+  }
+
+  /** Puts a Transcribe again in line and starts it when the engine is free. */
+  async startFolder(): Promise<void> {
+    this.kick();
+  }
+
   /** Converts and transcribes outside the lock, then publishes or records the failure. */
   private async run(job: Job, model: string, language: string): Promise<void> {
     let wav: string | null = null;
@@ -466,8 +519,8 @@ export class MeetingTranscriptionService {
       this.stillOurs(job).then((ours) => { if (!ours) job.abort.abort(); }, () => {});
     }, transcriptionTimings.ownerCheckMs);
     try {
-      const folder = await this.queue.meetingFolder(job.meeting);
-      const source = await fileInside(folder, job.file);
+      const folder = job.folder ? job.folder.dir : await this.queue.meetingFolder(job.meeting);
+      const source = job.folder ? await fileInside(path.dirname(job.folder.audio), job.file) : await fileInside(folder, job.file);
       wav = source;
       if (path.extname(job.file).toLowerCase() !== '.wav') {
         converted = true;
@@ -528,7 +581,7 @@ export class MeetingTranscriptionService {
     } catch (err) {
       // Left running on disk: recovery puts it back in line, and it waits a while so the others go first.
       job.unsaved = true;
-      const folder = await this.queue.meetingFolder(job.meeting).catch(() => null);
+      const folder = job.folder ? job.folder.dir : await this.queue.meetingFolder(job.meeting).catch(() => null);
       if (folder) setAside.set(path.join(folder, job.file), Date.now() + SET_ASIDE_MS);
       console.error(`[transcription] ${job.meeting}/${job.file}: ${(err as Error).message}`);
     }
@@ -536,6 +589,7 @@ export class MeetingTranscriptionService {
 
   /** False once the recording is no longer this job's: stopped or removed, possibly from another dashboard. */
   private async stillOurs(job: Job): Promise<boolean> {
+    if (job.folder) return stillTranscribing(job.workspace, job.meeting, job);
     const meeting = await this.queue.loadMeeting(job.meeting).catch((err: { statusCode?: number }) => (err.statusCode === 404 ? null : undefined));
     if (meeting === undefined) return true; // unreadable for a moment: keep going, publish checks again
     const r = meeting?.files.find((f) => f.name === job.file)?.recording;
@@ -544,6 +598,7 @@ export class MeetingTranscriptionService {
 
   /** Keeps the result only if the recording is still this job's; otherwise it is dropped. */
   private async publish(job: Job, model: string, language: string, segments: Segment[], seconds: number, error: Error | null): Promise<void> {
+    if (job.folder) return this.publishFolder(job, model, language, segments, seconds, error);
     await this.queue.withQueue(async () => {
       if ((await this.queue.reserved()).includes(job.meeting)) return;
       const meeting = await this.queue.loadMeeting(job.meeting).catch(() => null);
@@ -598,6 +653,31 @@ export class MeetingTranscriptionService {
       // Saved: from here on nothing may undo it. The old draft goes now, or with the next recovery.
       if (replaced) await this.removeUnnamed(job.meeting, [replaced]).catch(() => {});
     });
+  }
+
+  /**
+   * A Transcribe again: only a complete transcript becomes the meeting's next version. A partial one, or none, is not
+   * kept: the reviewed text is still there, and it can be tried again with another model.
+   */
+  private async publishFolder(job: Job, model: string, language: string, segments: Segment[], seconds: number, error: Error | null): Promise<void> {
+    const ws = job.workspace;
+    if (error && segments.length === 0 && (error as { engineBusy?: boolean }).engineBusy) {
+      job.engineBusy = true;
+      await giveBackTranscription(ws, job.meeting, job);
+      return;
+    }
+    const complete = !error && hasWords(segments.map((x) => x.text));
+    if (!complete) {
+      const why = error ? error.message : seconds > EMPTY_AUDIO_SECONDS ? noWords(model, segments.length) : 'No speech was found in the recording.';
+      await failTranscription(ws, job.meeting, job, why);
+      return;
+    }
+    // The recording's hash as the folder lists it: publishing checks the bytes still match, under the folder's lock.
+    const folder = await readFolder(ws, job.meeting);
+    const sha = folder.state === 'ok' ? folder.manifest.audio.find((a) => a.name === job.file)?.sha256 : undefined;
+    if (!sha) return;
+    const content = Buffer.from(audioTranscriptMarkdown(job.file, sha, model, language, seconds, segments, true, job.changes, false, job.speakerNote ?? null, job.engineNote ?? null), 'utf-8');
+    await publishTranscription(ws, job.meeting, job, { content, model, language });
   }
 
   /** Removes files of a meeting that its manifest no longer names; call under the queue lock, after saving it. */
