@@ -175,7 +175,10 @@ function fileList(raw: unknown): { name: string; sha256: string }[] | null {
 
 /** A meeting's folder as it is now. A folder that cannot be read as one is `damaged`, never guessed at. */
 export async function readFolder(ws: string, id: string): Promise<FolderState> {
-  const dir = folderPath(ws, id);
+  // isMeetingId already refuses separators and dots; checked again here in the form static analysis recognizes.
+  const root = path.resolve(meetingsRoot(ws));
+  const dir = path.resolve(folderPath(ws, id));
+  if (!dir.startsWith(root + path.sep)) throw new Error('Invalid path traversal');
   const safe = await workspaceEntry(ws, dir).catch((err: NodeJS.ErrnoException) => (err.code === 'ENOENT' ? null : err));
   if (safe === null) return { state: 'none' };
   if (safe instanceof Error) return { state: 'damaged', reason: 'its folder is a link, or cannot be read' };
