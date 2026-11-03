@@ -38,8 +38,8 @@ A meeting's files live in one of two places, and every reader asks `meetingFiles
   names the update, the current version and each file with its SHA-256. With Keep recordings
   (`keep_recordings` on the digest), the recordings go to `meetings/<meeting id>/audio/`, listed
   the same way; digests kept before that set `keep_materials` and stay as they are. The folder is written
-  under a hidden draft name (files hard-linked, or copied and compared where links are not
-  possible) and renamed into place only when complete; the files leave
+  under a hidden draft name (text copied, recordings hard-linked where possible; every file hashed
+  and checked against the hash the update recorded) and renamed into place only when complete; the files leave
   `materials/` only after that, so a crash leaves a copy in one place or both, never in neither.
   A folder of another update, or one whose `meeting.json` cannot be read, is never used.
 
@@ -48,7 +48,8 @@ in it, and never part of anything shared. There is no publisher yet; when one is
 it must refuse every path under `meetings/` and `context-updates/` itself, not rely on git-ignore.
 Versions after `v1` are written by Transcribe again (`meetingVersions.ts`): the transcription job takes a
 request from `meeting.json` once no queued recording waits, and the result becomes `v2`, `v3`… (the other
-files linked, the transcript replaced), listed only when complete. Nothing switches the current version
+files copied, the transcript replaced), listed only when complete. Versions never share a file: editing one
+version's file in place leaves every other version as it was. Nothing switches the current version
 by itself, and a task's pins on an older version stay valid. Every change to `meeting.json` after the
 folder is made holds that meeting's lock (`meetings/.<id>.lock`).
 Corrections to the words go through the same writer: `checkTranscriptChanges` (read only, for the

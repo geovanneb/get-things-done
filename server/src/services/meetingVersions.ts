@@ -192,7 +192,7 @@ export async function failTranscription(ws: string, id: string, job: { generatio
 
 /**
  * Adds the new transcript as the meeting's next version, if the transcription is still this job's and the recording is
- * unchanged: the current version's other files (linked, not copied) and the new transcript in place of the old one.
+ * unchanged: copies of the current version's other files and the new transcript in place of the old one.
  * Written under a draft name and renamed into place, then listed; the current version stays as it is.
  */
 export async function publishTranscription(ws: string, id: string, job: { generation: string; token: string }, result: { content: Buffer; model: string; language: string }): Promise<string | null> {

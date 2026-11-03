@@ -108,7 +108,7 @@ test('a finished correction writes the next version with the original and its co
   assert.equal(await fsp.readFile(path.join(f.dir, 'v2', 'sync.transcript.md'), 'utf-8'), copyOf(vtt));
   assert.equal(v2.files.find((x) => x.name === 'sync.vtt')!.sha256, sha(vtt));
   assert.equal(await fsp.readFile(path.join(f.dir, 'v1', 'sync.vtt'), 'utf-8'), VTT, 'the reviewed version stays as it was');
-  assert.equal((await fsp.stat(path.join(f.dir, 'v2', 'notes.md'))).ino, (await fsp.stat(path.join(f.dir, 'v1', 'notes.md'))).ino, 'unchanged files are linked, not copied');
+  assert.notEqual((await fsp.stat(path.join(f.dir, 'v2', 'notes.md'))).ino, (await fsp.stat(path.join(f.dir, 'v1', 'notes.md'))).ino, 'unchanged files are copied, never shared with the version before');
 });
 
 test('a correction is refused, with nothing written, when the text moved on or a change no longer fits', async (t) => {
