@@ -13,23 +13,30 @@ export function trashDir(workspacePath: string): string {
   return path.join(workspacePath, '.situation-board', 'trash');
 }
 
-/** Moves a file or folder into the trash. Returns the trash entry's workspace-relative path. */
-export async function moveToTrash(workspacePath: string, target: string, now = new Date()): Promise<string> {
+/**
+ * A new trash entry's name for `label`, in the format below. Chosen before anything moves when a record of the move
+ * must be written first, so the record can name the entry.
+ */
+export function trashName(label: string, now = new Date()): string {
+  return `${now.toISOString().replace(/[:.]/g, '-')}-${crypto.randomUUID()}-${path.basename(label)}`;
+}
+
+/** Moves a file or folder into the trash, as `name` when given. Returns the trash entry's workspace-relative path. */
+export async function moveToTrash(workspacePath: string, target: string, now = new Date(), name?: string): Promise<string> {
   await workspaceEntry(workspacePath, target);
   const dir = await workspaceEntry(workspacePath, trashDir(workspacePath), true);
   await fsp.mkdir(dir, { recursive: true });
-  const stamp = now.toISOString().replace(/[:.]/g, '-');
-  const dest = path.join(dir, `${stamp}-${crypto.randomUUID()}-${path.basename(target)}`);
+  const dest = path.join(dir, name !== undefined && trashedAt(name) ? name : trashName(path.basename(target), now));
   await fsp.rename(target, dest);
   return path.relative(workspacePath, dest).split(path.sep).join('/');
 }
 
 /**
- * Moves some plain files of one folder into a new trash folder named after `label`, so they can be restored together.
- * Returns the trash entry's name. A file that is not a plain file in `dir` (a link, a folder) is refused before anything
- * moves.
+ * Moves some plain files of one folder into a new trash folder named after `label` (or `name`, when given), so they can
+ * be restored together. Returns the trash entry's name. A file that is not a plain file in `dir` (a link, a folder) is
+ * refused before anything moves.
  */
-export async function moveFilesToTrash(workspacePath: string, dir: string, files: string[], label: string, now = new Date()): Promise<string> {
+export async function moveFilesToTrash(workspacePath: string, dir: string, files: string[], label: string, now = new Date(), name?: string): Promise<string> {
   const from = await workspaceEntry(workspacePath, dir);
   for (const name of files) {
     if (path.basename(name) !== name) throw new Error('Invalid path traversal');
@@ -38,11 +45,11 @@ export async function moveFilesToTrash(workspacePath: string, dir: string, files
   }
   const trash = await workspaceEntry(workspacePath, trashDir(workspacePath), true);
   await fsp.mkdir(trash, { recursive: true });
-  const name = `${now.toISOString().replace(/[:.]/g, '-')}-${crypto.randomUUID()}-${path.basename(label)}`;
-  const entry = path.join(trash, name);
+  const entryName = name !== undefined && trashedAt(name) ? name : trashName(label, now);
+  const entry = path.join(trash, entryName);
   await fsp.mkdir(entry);
   for (const file of files) await fsp.rename(path.join(from, file), path.join(entry, file));
-  return name;
+  return entryName;
 }
 
 /** The full path of a trash entry this app named, or null for any other name. */

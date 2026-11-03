@@ -10,7 +10,7 @@ import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileNa
 import { lock, unlock } from '../utils/fileLock';
 import { correctionChain, doubtsDropped, fieldTexts, fieldValues, recordDiff, rootActionIdentity, type FieldChange } from './meetingCorrections';
 import { fits, inFile, linkAt, locate, samePlace, setAt, valueAt, type ValueAt } from './meetingSuggestions';
-import { moveFilesToTrash, moveToTrash, trashEntry } from './trash';
+import { moveFilesToTrash, moveToTrash, trashEntry, trashName } from './trash';
 import { isAnalysisRunning } from './runState';
 import { docxMarkdown, docxText, PICTURES } from '../utils/docx';
 import { hashFile } from '../utils/fileHash';
@@ -2548,6 +2548,9 @@ export class ContextUpdateService {
   /**
    * Moves one meeting's text out of a finished update into the trash, where it can be restored. Its confirmed record
    * stays in the update: the context was built from it. A file the meeting shares with another one stays.
+   *
+   * The note that it was deleted, naming its trash entry, is written before anything moves: a move that fails or stops
+   * halfway always leaves a note that restore can follow. A move that fails is undone, and its note goes again.
    */
   async trashMeeting(id: string, key: string, by: DeletedMeeting['by'] = 'user', now = new Date()): Promise<ContextUpdate> {
     // Under the corrections lock, like finishing a correction: a meeting's folder never goes while one writes to it.
@@ -2563,15 +2566,22 @@ export class ContextUpdateService {
       const ws = workspaceService.getWorkspacePath();
       const { dir: materials, files, folder } = await this.meetingTextDir(update, key);
       if (!files.length) throw httpError(409, 'Nothing of this meeting is kept here, so there is nothing to delete');
-      // A meeting's own folder goes whole, its versions and recordings together; older text goes file by file.
-      const trash = folder
-        ? path.basename(await moveToTrash(ws, await workspaceEntry(ws, folder), now))
-        : await moveFilesToTrash(ws, materials, files, `${updateId(id)}-${key}`, now);
+      const label = folder ? path.basename(folder) : `${updateId(id)}-${key}`;
+      const entry: DeletedMeeting = { meeting: key, at: now.toISOString(), files, trash: trashName(label, now), by, ...(folder ? { folder: true as const } : {}) };
       const kept = update.kept_meetings.filter((k) => k !== key);
       await this.write(file, data, update.notes, {
-        deleted_meetings: [...update.deleted_meetings, { meeting: key, at: now.toISOString(), files, trash, by, ...(folder ? { folder: true as const } : {}) }],
+        deleted_meetings: [...update.deleted_meetings, entry],
         kept_meetings: kept.length ? kept : undefined,
       });
+      try {
+        // A meeting's own folder goes whole, its versions and recordings together; older text goes file by file.
+        if (folder) await moveToTrash(ws, await workspaceEntry(ws, folder), now, entry.trash!);
+        else await moveFilesToTrash(ws, materials, files, label, now, entry.trash!);
+      } catch (err) {
+        // Whatever moved comes back and the note goes. Should that fail too, the note stays for restore to finish.
+        await this.read(id).then((fresh) => this.putBack(fresh.update, fresh.data, fresh.file, entry), () => {});
+        throw err;
+      }
       return (await this.read(id)).update;
     }));
   }
@@ -2583,48 +2593,93 @@ export class ContextUpdateService {
       const { update, data, file } = await this.read(id);
       const entry = update.deleted_meetings.find((d) => d.meeting === key);
       if (!entry?.trash) throw httpError(404, 'This meeting is not in the trash');
-      const ws = workspaceService.getWorkspacePath();
-      const from = await trashEntry(ws, entry.trash);
-      if (!from || !(await fsp.lstat(from).then((st) => st.isDirectory(), () => false))) throw httpError(410, 'This meeting is no longer in the trash');
-      if (entry.folder) {
-        // Its whole folder, back under meetings/: refused when a folder of that meeting is there again.
-        const meeting = heldMeetings(update).find((m) => m.key === key);
-        if (!meeting || !isMeetingId(meeting.id)) throw httpError(404, `No such meeting in ${updateId(id)}`);
-        const to = await workspaceEntry(ws, path.join(meetingsRoot(ws), meeting.id), true);
-        if (await fsp.lstat(to).then(() => true, () => false)) throw httpError(409, `A folder of ${meeting.id} is there again, so nothing was restored`);
-        await fsp.mkdir(path.dirname(to), { recursive: true });
-        await fsp.rename(from, to);
-        const rest = update.deleted_meetings.filter((d) => d.meeting !== key);
-        await this.write(file, data, update.notes, { deleted_meetings: rest.length ? rest : undefined });
-        return (await this.read(id)).update;
-      }
-      // Back where it was taken from: its meeting's folder when it has one, else the update's materials.
-      const materials = await workspaceEntry(ws, (await this.meetingTextDir(update, key)).dir, true);
-      for (const name of entry.files) {
-        if (await fsp.lstat(path.join(materials, name)).then(() => true, () => false)) throw httpError(409, `${name} is there again, so nothing was restored`);
-        if (!(await fsp.lstat(path.join(from, name)).then((st) => st.isFile(), () => false))) throw httpError(410, `${name} is no longer in the trash, so nothing was restored`);
-      }
-      await fsp.mkdir(materials, { recursive: true });
-      for (const name of entry.files) await fsp.rename(path.join(from, name), path.join(materials, name));
-      await fsp.rm(from, { recursive: true, force: true });
-      const deleted = update.deleted_meetings.filter((d) => d.meeting !== key);
-      await this.write(file, data, update.notes, { deleted_meetings: deleted.length ? deleted : undefined });
+      await this.putBack(update, data, file, entry);
       return (await this.read(id)).update;
     }));
   }
 
-  /** Deletes a meeting's text from the trash for good. The note that it was deleted stays. */
+  /**
+   * Moves what of a deleted meeting is in its trash entry back, and removes the note that it was deleted. What never
+   * reached the trash (a move that failed or stopped halfway) is already where it belongs and stays. Nothing moves when
+   * something of the same name is both back in place and in the trash, or is in neither.
+   */
+  private async putBack(update: ContextUpdate, data: Record<string, unknown>, file: string, entry: DeletedMeeting): Promise<void> {
+    const ws = workspaceService.getWorkspacePath();
+    const from = entry.trash ? await trashEntry(ws, entry.trash) : null;
+    const inTrash = from !== null && await fsp.lstat(from).then((st) => st.isDirectory(), () => false);
+    const forget = async () => {
+      const rest = update.deleted_meetings.filter((d) => d.meeting !== entry.meeting);
+      await this.write(file, data, update.notes, { deleted_meetings: rest.length ? rest : undefined });
+    };
+    if (entry.folder) {
+      // Its whole folder, back under meetings/: refused when a folder of that meeting is there again.
+      const meeting = heldMeetings(update).find((m) => m.key === entry.meeting);
+      if (!meeting || !isMeetingId(meeting.id)) throw httpError(404, `No such meeting in ${updateId(update.id)}`);
+      const to = await workspaceEntry(ws, path.join(meetingsRoot(ws), meeting.id), true);
+      const there = await fsp.lstat(to).then(() => true, () => false);
+      if (inTrash && there) throw httpError(409, `A folder of ${meeting.id} is there again, so nothing was restored`);
+      if (!inTrash) {
+        // Never moved: only its own folder, still in place, makes this a restore.
+        if ((await folderOf(ws, update, meeting))?.state !== 'ok') throw httpError(410, 'This meeting is no longer in the trash');
+        return forget();
+      }
+      await fsp.mkdir(path.dirname(to), { recursive: true });
+      await fsp.rename(from!, to);
+      return forget();
+    }
+    // Back where it was taken from: its meeting's folder when it has one, else the update's materials.
+    const materials = await workspaceEntry(ws, (await this.meetingTextDir(update, entry.meeting)).dir, true);
+    const moving: string[] = [];
+    for (const name of entry.files) {
+      const back = await fsp.lstat(path.join(materials, name)).then(() => true, () => false);
+      const trashed = inTrash && await fsp.lstat(path.join(from!, name)).then((st) => st.isFile(), () => false);
+      if (back && trashed) throw httpError(409, `${name} is there again, so nothing was restored`);
+      if (!back && !trashed) throw httpError(410, `${name} is no longer in the trash, so nothing was restored`);
+      if (trashed) moving.push(name);
+    }
+    await fsp.mkdir(materials, { recursive: true });
+    for (const name of moving) await fsp.rename(path.join(from!, name), path.join(materials, name));
+    if (inTrash) await fsp.rm(from!, { recursive: true, force: true });
+    return forget();
+  }
+
+  /**
+   * Deletes a meeting's text from the trash for good. The note that it was deleted stays. A meeting whose text never
+   * fully reached the trash (a move that failed or stopped halfway) is restored instead: nothing outside the trash is
+   * deleted for good, and it can be deleted again.
+   */
   async purgeMeeting(id: string, key: string): Promise<ContextUpdate> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);
       const entry = update.deleted_meetings.find((d) => d.meeting === key);
       if (!entry?.trash) throw httpError(404, 'This meeting is not in the trash');
+      if (await this.stillInPlace(update, entry)) {
+        await this.putBack(update, data, file, entry);
+        return (await this.read(id)).update;
+      }
       const from = await trashEntry(workspaceService.getWorkspacePath(), entry.trash);
       if (from) await fsp.rm(from, { recursive: true, force: true });
       const deleted = update.deleted_meetings.map((d) => (d.meeting === key ? { meeting: d.meeting, at: d.at, files: d.files, by: d.by } : d));
       await this.write(file, data, update.notes, { deleted_meetings: deleted });
       return (await this.read(id)).update;
     });
+  }
+
+  /** Whether some of a deleted meeting's text is still where it was taken from: its move to the trash did not finish. */
+  private async stillInPlace(update: ContextUpdate, entry: DeletedMeeting): Promise<boolean> {
+    const ws = workspaceService.getWorkspacePath();
+    const from = entry.trash ? await trashEntry(ws, entry.trash) : null;
+    const inTrash = from !== null && await fsp.lstat(from).then((st) => st.isDirectory(), () => false);
+    if (entry.folder) {
+      const meeting = heldMeetings(update).find((m) => m.key === entry.meeting);
+      return !inTrash && meeting !== undefined && (await folderOf(ws, update, meeting))?.state === 'ok';
+    }
+    const { dir } = await this.meetingTextDir(update, entry.meeting);
+    for (const name of entry.files) {
+      const trashed = inTrash && await fsp.lstat(path.join(from!, name)).then((st) => st.isFile(), () => false);
+      if (!trashed && await fsp.lstat(path.join(dir, name)).then((st) => st.isFile(), () => false)) return true;
+    }
+    return false;
   }
 
   /**

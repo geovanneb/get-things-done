@@ -227,6 +227,90 @@ test('deleting one meeting moves its whole folder to the trash; restoring puts i
   assert.ok(trashed.some((n) => n.endsWith('-MQ-2026-0001')) && trashed.some((n) => n.endsWith('-MQ-2026-0002')) && trashed.some((n) => n.endsWith('-CU-2026-0001')));
 });
 
+test('deleting a meeting writes its restore note before anything moves, and a failed move is undone', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001');
+  await updates.close('CU-2026-0001');
+  const folder = path.join(ws, 'meetings', 'MQ-2026-0001');
+  const notes = async () => ((parseMarkdown(await fsp.readFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md'), 'utf-8')).data as Record<string, unknown>)['deleted_meetings'] ?? []) as { trash: string }[];
+
+  // The note cannot be written: nothing moves.
+  // Every instance's writer: the history deletes through its own instance of the service.
+  const service = ContextUpdateService.prototype as unknown as { write: (...args: unknown[]) => Promise<void> };
+  const write = service.write;
+  service.write = async () => { throw new Error('Fictional write failure'); };
+  try {
+    await assert.rejects(history.remove('MQ-2026-0001'), /Fictional write failure/);
+  } finally {
+    service.write = write;
+  }
+  assert.equal((await readFolder(ws, 'MQ-2026-0001')).state, 'ok', 'still in its folder');
+  assert.deepEqual(await fsp.readdir(trashDir(ws)), []);
+
+  // The move fails after the note was written: the note goes again and the folder stays.
+  await fsp.rm(trashDir(ws), { recursive: true });
+  await fsp.writeFile(trashDir(ws), 'not a folder');
+  await assert.rejects(history.remove('MQ-2026-0001'));
+  assert.deepEqual(await notes(), []);
+  assert.equal((await readFolder(ws, 'MQ-2026-0001')).state, 'ok');
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a budget');
+  await fsp.rm(trashDir(ws));
+  await fsp.mkdir(trashDir(ws));
+
+  // Moved: the note names the very trash entry.
+  await history.remove('MQ-2026-0001');
+  const [entry] = await fsp.readdir(trashDir(ws));
+  assert.deepEqual((await notes()).map((n) => n.trash), [entry]);
+  assert.equal(await exists(folder), false);
+  await history.restore('MQ-2026-0001');
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a budget');
+});
+
+test('a meeting whose move to the trash stopped after its note is restored, never deleted for good, and can be deleted again', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001');
+  await updates.close('CU-2026-0001');
+  // As a crash between the note and the move leaves it: the note names an entry that was never made.
+  const trash = `${new Date('2026-10-29T10:00:00.000Z').toISOString().replace(/[:.]/g, '-')}-00000000-0000-4000-8000-000000000001-MQ-2026-0001`;
+  await change(ws, 'CU-2026-0001', (d) => { d['deleted_meetings'] = [{ meeting: 'MQ-2026-0001', at: '2026-10-29T10:00:00.000Z', files: ['MQ-2026-0001-a.vtt'], trash, by: 'user', folder: true }]; });
+  assert.equal((await history.list()).find((m) => m.id === 'MQ-2026-0001')!.deleted?.in_trash, true, 'shown as deleted, with Restore');
+
+  await history.purge('MQ-2026-0001');
+  assert.equal((await history.list()).find((m) => m.id === 'MQ-2026-0001')!.deleted, null, 'deleting for good what never reached the trash restores it instead');
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a budget');
+
+  await change(ws, 'CU-2026-0001', (d) => { d['deleted_meetings'] = [{ meeting: 'MQ-2026-0001', at: '2026-10-29T10:00:00.000Z', files: ['MQ-2026-0001-a.vtt'], trash, by: 'user', folder: true }]; });
+  await history.restore('MQ-2026-0001');
+  assert.equal(await history.text('MQ-2026-0001', 'MQ-2026-0001-a.vtt'), 'copy a budget');
+  await history.remove('MQ-2026-0001');
+  assert.equal(await exists(path.join(ws, 'meetings', 'MQ-2026-0001')), false, 'and it can be deleted again');
+});
+
+test('a meeting kept in its update\'s materials whose files moved halfway is restored whole', async (t) => {
+  const ws = await workspace(t);
+  await cleanup.update({ meetings: { keep_text: true } });
+  await digest(ws, 'CU-2026-0001');
+  await updates.close('CU-2026-0001');
+  // Kept before meeting folders: its text is in materials/, and goes to the trash file by file.
+  const materials = path.join(ws, 'context-updates', 'CU-2026-0001', 'materials');
+  await fsp.mkdir(materials, { recursive: true });
+  for (const name of await fsp.readdir(v1(ws, 'MQ-2026-0001'))) await fsp.copyFile(path.join(v1(ws, 'MQ-2026-0001'), name), path.join(materials, name));
+  await fsp.rm(path.join(ws, 'meetings', 'MQ-2026-0001'), { recursive: true });
+  // One file reached the trash entry, the other did not: a crash in the middle of the move.
+  const trash = `${new Date('2026-10-29T10:00:00.000Z').toISOString().replace(/[:.]/g, '-')}-00000000-0000-4000-8000-000000000002-CU-2026-0001-MQ-2026-0001`;
+  await fsp.mkdir(path.join(trashDir(ws), trash));
+  await fsp.rename(path.join(materials, 'MQ-2026-0001-a.vtt'), path.join(trashDir(ws), trash, 'MQ-2026-0001-a.vtt'));
+  const key = (await history.list()).find((m) => m.id === 'MQ-2026-0001')!;
+  assert.ok(key);
+  await change(ws, 'CU-2026-0001', (d) => { d['deleted_meetings'] = [{ meeting: 'MQ-2026-0001', at: '2026-10-29T10:00:00.000Z', files: ['MQ-2026-0001-a.vtt', 'MQ-2026-0001-a.transcript.md'], trash, by: 'user' }]; });
+
+  await history.restore('MQ-2026-0001');
+  assert.deepEqual((await fsp.readdir(materials)).filter((n) => n.startsWith('MQ-2026-0001')).sort(), ['MQ-2026-0001-a.transcript.md', 'MQ-2026-0001-a.vtt']);
+  assert.deepEqual(await fsp.readdir(trashDir(ws)), []);
+});
+
 test('System cleanup moves old meetings\' folders to the trash, and removes the update only once they are gone', async (t) => {
   const ws = await workspace(t);
   await cleanup.update({ meetings: { keep_text: true } });
