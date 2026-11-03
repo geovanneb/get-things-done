@@ -51,6 +51,11 @@ export interface FolderVersion {
   /** A correction only: the correction update that changed it, and the version it changed. */
   correction?: string;
   base?: string;
+  /**
+   * A correction only: the receipt of what was finished (a hash its caller makes of the confirmed record, the base and
+   * the changes), so finishing again after a crash finds this version instead of writing another. Absent on older ones.
+   */
+  receipt?: string;
 }
 
 /** Transcribe again: one recording of the meeting, waiting, being transcribed, or failed. At most one at a time. */
@@ -119,7 +124,8 @@ function parseManifest(raw: string, id: string): FolderManifest | string {
       versions.push({ id: v['id'], at: v['at'], made_from: 'transcription', files, model: v['model'], language: v['language'], from: from[0]! });
     } else if (v['made_from'] === 'correction') {
       if (typeof v['correction'] !== 'string' || !/^CU-\d{4}-\d{4}$/.test(v['correction']) || typeof v['base'] !== 'string' || !VERSION_ID.test(v['base'])) return 'a version in meeting.json is damaged';
-      versions.push({ id: v['id'], at: v['at'], made_from: 'correction', files, correction: v['correction'], base: v['base'] });
+      if (v['receipt'] !== undefined && (typeof v['receipt'] !== 'string' || !/^[0-9a-f]{64}$/.test(v['receipt']))) return 'a version in meeting.json is damaged';
+      versions.push({ id: v['id'], at: v['at'], made_from: 'correction', files, correction: v['correction'], base: v['base'], ...(typeof v['receipt'] === 'string' ? { receipt: v['receipt'] } : {}) });
     } else versions.push({ id: v['id'], at: v['at'], made_from: 'review', files });
   }
   const audio = m['audio'] === undefined ? [] : fileList(m['audio']);
