@@ -50,7 +50,7 @@ export function textUnits(markdown: string): Unit[] {
   if (close > open) {
     const turns: Unit[] = [];
     for (const line of lines.slice(open + 1, close)) {
-      const turn = /^\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\](?: (.+))?$/.exec(line);
+      const turn = /^(?:#\d+ )?\[(\d\d:\d\d:\d\d) → \d\d:\d\d:\d\d\](?: (.+))?$/.exec(line);
       const last = turns[turns.length - 1];
       if (turn) {
         const who = turn[2]?.trim();

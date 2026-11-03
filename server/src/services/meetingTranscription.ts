@@ -110,7 +110,7 @@ const languageLine = (language: string, changes: LanguageChange[]) =>
 
 /** A readable transcript of a recording, in the same shape as the copies of WebVTT transcripts. */
 export function audioTranscriptMarkdown(source: string, hash: string, model: string, language: string, seconds: number, segments: Segment[], complete: boolean, changes: LanguageChange[] = [], changesLate = false, speakerNote: string | null = null, engineNote: string | null = null): string {
-  const body = segments.map((s) => `[${clock(s.start)} → ${clock(s.end)}]${s.speaker ? ` Speaker ${s.speaker}` : ''}\n  ${s.text.replace(/\n+/g, ' ')}`).join('\n\n');
+  const body = segments.map((s, i) => `#${i + 1} [${clock(s.start)} → ${clock(s.end)}]${s.speaker ? ` Speaker ${s.speaker}` : ''}\n  ${s.text.replace(/\n+/g, ' ')}`).join('\n\n');
   const voices = new Set(segments.map((s) => s.speaker).filter(Boolean)).size;
   let longest = 2;
   for (const m of body.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
@@ -130,7 +130,7 @@ export function audioTranscriptMarkdown(source: string, hash: string, model: str
       ? '**Complete.** Every part of the recording with speech is below.'
       : '**Partial.** The transcription stopped part way, or found little speech. Listen to the recording for what is missing.',
     '',
-    'Each part starts with a line `[start → end]`; what was said follows, indented by two spaces.',
+    'Each part starts with a line `#number [start → end]`; what was said follows, indented by two spaces.',
     '',
     `${fence}text`,
     body,

@@ -260,9 +260,9 @@ export function parseSpeakerNames(value: unknown): SpeakerName[] {
   }).slice(0, MAX_SPEAKER_NAMES);
 }
 
-/** The speaker labels a transcript really has: those on its `[start → end] Speaker 2` lines, never words someone said. */
+/** The speaker labels a transcript really has: those on its `#3 [start → end] Speaker 2` lines, never words someone said. */
 export function transcriptSpeakers(markdown: string): Set<string> {
-  return new Set([...markdown.matchAll(/^\[\d\d:\d\d:\d\d → \d\d:\d\d:\d\d\] (Speaker \d{1,3})$/gm)].map((m) => m[1]!));
+  return new Set([...markdown.matchAll(/^(?:#\d+ )?\[\d\d:\d\d:\d\d → \d\d:\d\d:\d\d\] (Speaker \d{1,3})$/gm)].map((m) => m[1]!));
 }
 
 /** The names, when they are for this transcript: a transcript made again starts without. */

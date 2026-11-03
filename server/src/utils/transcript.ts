@@ -178,15 +178,15 @@ export function sha256(buffer: Buffer | string): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-interface Turn { start: number; end: number; lastStart: number; speaker: string | null; lines: string[] }
+interface Turn { start: number; end: number; lastStart: number; speaker: string | null; lines: string[]; cues: number[] }
 
 /**
  * Consecutive cues become one turn only for the same named speaker, when the next starts after the last
  * one ended (no overlap, which would hide its time) and within MAX_TURN_GAP seconds.
  */
-function turns(cues: TranscriptCue[]): Turn[] {
+export function turns(cues: TranscriptCue[]): Turn[] {
   const out: Turn[] = [];
-  for (const c of cues) {
+  for (const [index, c] of cues.entries()) {
     const last = out[out.length - 1];
     const sameTurn = last && c.speaker !== null && last.speaker === c.speaker
       && c.start >= last.end && c.start - last.end <= MAX_TURN_GAP;
@@ -194,8 +194,9 @@ function turns(cues: TranscriptCue[]): Turn[] {
       for (const line of c.text.split('\n')) last.lines.push(line);
       last.end = Math.max(last.end, c.end);
       last.lastStart = c.start;
+      last.cues.push(index);
     } else {
-      out.push({ start: c.start, end: c.end, lastStart: c.start, speaker: c.speaker, lines: c.text.split('\n') });
+      out.push({ start: c.start, end: c.end, lastStart: c.start, speaker: c.speaker, lines: c.text.split('\n'), cues: [index] });
     }
   }
   return out;
@@ -203,11 +204,12 @@ function turns(cues: TranscriptCue[]): Turn[] {
 
 /**
  * The readable transcript. The speech sits in a fenced block, so nothing in it is read as Markdown, and every
- * spoken line is indented, so no line of speech can look like a turn line "[start → end] speaker".
+ * spoken line is indented, so no line of speech can look like a turn line "#12 [start → end] speaker". Turns are
+ * numbered in order: a correction names a turn by its number (see copyTurns).
  */
 export function transcriptMarkdown(source: string, hash: string, parsed: ParsedTranscript): string {
   const list = turns(parsed.cues);
-  const body = list.map((t) => [`[${clock(t.start)} → ${clock(t.end)}] ${t.speaker ?? '(no speaker label)'}`, ...t.lines.map((l) => `  ${l}`)].join('\n')).join('\n\n');
+  const body = list.map((t, i) => [`#${i + 1} [${clock(t.start)} → ${clock(t.end)}] ${t.speaker ?? '(no speaker label)'}`, ...t.lines.map((l) => `  ${l}`)].join('\n')).join('\n\n');
   // A loop, not Math.max(...runs): a transcript can hold more runs than a function takes arguments.
   let longest = 2;
   for (const m of body.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
@@ -230,11 +232,40 @@ export function transcriptMarkdown(source: string, hash: string, parsed: ParsedT
     '',
     ...status,
     '',
-    'Each turn starts with a line `[start → end] speaker`; what was said follows, indented by two spaces.',
+    'Each turn starts with a line `#number [start → end] speaker`; what was said follows, indented by two spaces.',
     '',
     `${fence}text`,
     body,
     fence,
     '',
   ].join('\n');
+}
+
+/** A turn line of a readable copy: `#12 [00:14:03 → 00:14:21] Speaker 2`. Copies made before turns were numbered lack `#12 `. */
+export const TURN_LINE = /^(?:#(\d+) )?\[(\d\d:\d\d:\d\d) → (\d\d:\d\d:\d\d)\](?: (.+))?$/;
+
+/** One turn of a readable copy: its number (its place among the turns, from 1), its heading and its lines of speech. */
+export interface CopyTurn { number: number; heading: string; speaker: string | null; lines: string[]; at: number }
+
+/**
+ * The turns of a readable copy (of a WebVTT file or a recording), inside its text fence. A turn's number is its place
+ * in order, whether the copy prints it or not, so copies made before numbering are read the same way. Null when the
+ * text is not a readable copy, or a printed number does not match the turn's place.
+ */
+export function copyTurns(markdown: string): { lines: string[]; turns: CopyTurn[] } | null {
+  const lines = markdown.split('\n');
+  const open = lines.findIndex((line) => /^`{3,}text$/.test(line));
+  const close = open < 0 ? -1 : lines.indexOf(lines[open]!.slice(0, -'text'.length), open + 1);
+  if (close <= open) return null;
+  const out: CopyTurn[] = [];
+  for (let i = open + 1; i < close; i++) {
+    const line = lines[i]!;
+    const m = TURN_LINE.exec(line);
+    if (m) {
+      if (m[1] !== undefined && Number(m[1]) !== out.length + 1) return null;
+      out.push({ number: out.length + 1, heading: line, speaker: m[4] ?? null, lines: [], at: i });
+    } else if (line.startsWith('  ') && out.length) out[out.length - 1]!.lines.push(line.slice(2));
+    else if (line.trim() !== '') return null;
+  }
+  return out.length ? { lines, turns: out } : null;
 }

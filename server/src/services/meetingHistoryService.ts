@@ -95,7 +95,7 @@ export interface MeetingDetail {
    * The versions of its text, when it has a folder of its own: the reviewed one (`v1`) and any made by Transcribe
    * again, with the current one marked. Its record always stays the account of the version it was reviewed from.
    */
-  versions: { id: string; at: string; made_from: 'review' | 'transcription'; model: string | null; current: boolean }[];
+  versions: { id: string; at: string; made_from: 'review' | 'transcription' | 'correction'; model: string | null; correction: string | null; current: boolean }[];
   /** Transcribe again: waiting, running or failed; null when none. */
   transcription: { file: string; model: string; status: 'pending' | 'running' | 'failed'; error: string | null; started_at: string | null } | null;
 }
@@ -276,7 +276,7 @@ export class MeetingHistoryService {
       record,
       update_records: record ? [] : update.meeting_records.filter((r) => !linked.has(r.id)).map((r) => ({ id: r.id, title: r.title, meeting_date: r.meeting_date, confirmation: r.confirmation })),
       sources,
-      versions: folder ? folder.manifest.versions.map((v) => ({ id: v.id, at: v.at, made_from: v.made_from, model: v.model ?? null, current: v.id === folder.manifest.current })) : [],
+      versions: folder ? folder.manifest.versions.map((v) => ({ id: v.id, at: v.at, made_from: v.made_from, model: v.model ?? null, correction: v.correction ?? null, current: v.id === folder.manifest.current })) : [],
       transcription: folder?.manifest.transcribe
         ? { file: folder.manifest.transcribe.file, model: folder.manifest.transcribe.model, status: folder.manifest.transcribe.status, error: folder.manifest.transcribe.error ?? null, started_at: folder.manifest.transcribe.started_at ?? null }
         : null,

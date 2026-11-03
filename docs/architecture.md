@@ -51,8 +51,14 @@ request from `meeting.json` once no queued recording waits, and the result becom
 files linked, the transcript replaced), listed only when complete. Nothing switches the current version
 by itself, and a task's pins on an older version stay valid. Every change to `meeting.json` after the
 folder is made holds that meeting's lock (`meetings/.<id>.lock`).
+Corrections to the words go through the same writer: `checkTranscriptChanges` (read only, for the
+review) and `writeCorrectedVersion` in `meetingVersions.ts` take changes `{ file, turn, before, after }`
+against a numbered turn of a readable copy (`transcriptChanges.ts`). `before` must stand once in that
+turn, on one line; a WebVTT original changes in its one cue and its copy is made again from it, checked
+to differ only there. The new version becomes current, since approving the correction is the choice,
+and it is refused when the version it started from is no longer current.
 Remaining risk: the first move is coordinated with the update's own queue, not across two dashboards
-on the same workspace, and corrections to the words (5b) are not written yet.
+on the same workspace. A WebVTT original saved in UTF-16 is written back in UTF-8 when corrected.
 
 ## Request and file flow
 
