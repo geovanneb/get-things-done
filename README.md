@@ -2,1104 +2,178 @@
 
 # Get Things Done
 
-**Your executive workload, as plain Markdown files your AI can actually work with.**
+**AI memory that grows with your work.**
+
+Record meetings. Review what changed. Give your AI the context to deliver.
 
 [![npm](https://img.shields.io/npm/v/@bertonha/getthingsdone.svg)](https://www.npmjs.com/package/@bertonha/getthingsdone)
 [![CI](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml/badge.svg)](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![node](https://img.shields.io/badge/node-%3E%3D20.19-brightgreen.svg)](https://nodejs.org)
 
-[![Get Things Done demo](https://img.youtube.com/vi/v0GaoY16CU0/maxresdefault.jpg)](https://youtu.be/v0GaoY16CU0)
-
-<sub>Watch the 40-second demo on YouTube.</sub>
-
-<img src="docs/screenshots/board.png" alt="The Get Things Done kanban board with tasks in Backlog, In Progress, Needs Review and Done" width="900">
-
-<sub>All names, companies and numbers in this video and these screenshots are fictional.</sub>
+[Get started](#get-started) · [How it works](#from-meetings-to-memory-to-finished-work) · [User guide](docs/user-guide.md) · [40-second demo](https://youtu.be/v0GaoY16CU0)
 
 </div>
 
----
+Get Things Done is an open-source, local-first work memory and task workspace for **Claude Code, Codex and GitHub Copilot**. It keeps your projects, decisions, stakeholders and preferred output formats in files your agent can read.
 
-## The pitch
+**Meetings feed the memory.** Record a conversation, transcribe it on your computer, and collect it into a digest. An AI agent proposes updates to your context and stakeholder notes. You review the changes before they become the background for your next task.
 
-You are an executive. Your day is tasks, people, context and deliverables, and all
-four live in different places: a task in your head, the political situation in your
-memory, the strategy in a deck somewhere, the actual document due tomorrow in a tab
-you have not opened yet.
+Less time explaining your work from scratch. More context for the first draft.
 
-AI assistants should fix this. Mostly they do not, because every conversation starts
-from nothing. You re-explain who your CFO is, how your CEO likes to be briefed, what
-last quarter's decision was, what your house style looks like. By the time the
-context is loaded, you could have written the thing yourself.
+<img src="docs/screenshots/meeting-transcript.png" alt="A meeting transcript in Get Things Done, with named speakers, timestamps and the steps from meeting to reviewed context" width="900">
 
-**Get Things Done gives your AI a memory of your job.**
+*Current dashboard, using fictional demo data. The transcript shown is an imported example, not a live recording. The [video](https://youtu.be/v0GaoY16CU0) shows an earlier dashboard.*
 
-It turns a folder on your machine into a structured executive workspace: your
-profile, your stakeholders, your context library, your output templates and your
-tasks. A local kanban dashboard lets you run it like a board. And because everything
-is plain Markdown in a folder you own, Claude Code, GitHub Copilot and Codex read the
-exact same files you do.
+## Get started
 
-Ask for a board memo and the agent already knows who the board is, how you write,
-which strategy note applies, and what a finished memo looks like. It writes the
-deliverable into the task folder, logs what it did and what it assumed, and marks it
-for your review. It never marks its own work done. That stays your call.
+### Desktop app
 
-**Nothing leaves your machine.** The server binds to `127.0.0.1`. Your content is a
-folder of Markdown files you can back up, move, or put in a private git repo. No
-account, no cloud, no telemetry.
+[**Download for macOS or Windows →**](https://github.com/geovanneb/get-things-done/releases/latest)
+
+Choose the installer for your platform in the release assets. macOS builds are signed and notarized. Windows is currently an unsigned preview; see the release notes before installing. The desktop app includes Git and can capture your microphone and the computer's audio.
+
+### CLI and browser
+
+Requires **Node.js 20.19+**; Node 22 or 24 is recommended.
 
 ```bash
 npm install -g @bertonha/getthingsdone
-mkdir my-workspace && cd my-workspace
+mkdir work-memory && cd work-memory
 gtd init
 gtd start
 ```
 
-Prefer clicking to typing? Run `gtd start` without `gtd init`: the dashboard opens a short setup
-screen that creates the workspace for you.
+Choose your AI tool during setup. The local dashboard opens in your browser. You can also run `gtd start` first and create a workspace through the setup screen.
 
----
+**Try the loop:** add one person you work with, write a few lines about your project, then record or import a meeting. Download a speech model in **Settings → Transcription** before transcribing audio. Review the resulting context update and create a task that uses it.
 
-## Why it is different
+The workspace and offline transcription need no Get Things Done account. AI analysis and task execution use the AI tool you bring; that tool may require its own account or subscription.
 
-<div align="center">
-<img src="docs/images/why-get-things-done.png" alt="Typical AI memory keeps facts about you in a vendor's cloud, leaves your stakeholders out and gives a different shape every run. Get Things Done keeps your profile, your stakeholders' expectations, your context and your output templates in a folder on your machine, works with Claude Code, Codex, Copilot or a local model, and produces the same structure every run for you to review." width="900">
-</div>
+> **New in 0.9.0:** searchable meeting history, reviewed corrections, tasks with pinned meeting sources, and retained recordings with transcript versions. [See what changed](CHANGELOG.md).
 
-AI memory is everywhere now. Chat apps remember your conversations. Memory layers
-remember facts about your users. Note tools plugged in over MCP hand your notes to an
-agent. Every one of them answers the same question: **who are you?**
+## From meetings to memory to finished work
 
-That is only half of the job. Your work is not judged by you. It is judged by a CEO
-who hates surprises, a CFO who wants the number in the first line, and a board that
-reads for risk. An assistant that only knows you writes a good memo for you, and the
-wrong memo for them.
+### 1. Capture the conversation
 
-Get Things Done is built around the other half.
+Record a meeting from the dashboard or desktop menu. Follow a live transcript with a configured live model, or let the app transcribe after the meeting. You can also import transcripts and recordings.
 
-**It knows who your work is for.** Every stakeholder has a file: their role, their
-influence and what actually matters to them. Org charts show who reports to whom.
-Before an agent writes anything, it reads every person on the task and pitches the
-result at the most senior reader. No mainstream memory tool models this, and it is
-the part that decides whether your work lands.
+- **Offline speech-to-text:** Whisper and SenseVoice run on your computer after a one-time model download.
+- **Microphone and call audio:** desktop captures both on supported systems; Chrome and Edge capture the microphone.
+- **Language and speakers:** choose the spoken language and optionally separate voices, then give speaker labels names.
+- **A digest when you need it:** collect queued meetings on a schedule or choose **Make digest now**.
 
-**It knows what "finished" looks like.** Ask an AI the same thing twice and you get
-two different shapes. That is fine for brainstorming and painful for real work.
-Output templates fix the format, the sections and the style of the things you deliver
-again and again. Your weekly update looks like your weekly update, every week, no
-matter which agent wrote it.
+Tell everyone before recording; the app asks you to confirm each time. Desktop system audio is supported on Windows and macOS 14.2+.
 
-**Your memory stays yours.** Everything is plain Markdown in a folder on your disk:
-not in a vendor's account, not behind an API, not quietly rewritten in the background.
-You choose the agent and the model: Claude Code, Codex, Copilot, or a local model so
-nothing leaves your machine at all. Switch tomorrow and you lose nothing.
+<img src="docs/screenshots/meetings.png" alt="Meetings dashboard with the recording entry point, a queue of fictional meetings and the Make digest now action" width="900">
 
-**You stay in charge.** The agent never marks its own work done. It logs what it did
-and what it assumed, and it leaves a clear placeholder instead of inventing a number.
-When a meeting changes the facts, the update arrives as a diff you accept or reject,
-never as a silent edit.
+### 2. Review what should become memory
 
-| | Chat app memory | Memory layers | Notes over MCP | **Get Things Done** |
-|---|:---:|:---:|:---:|:---:|
-| Remembers you and your context | ✅ | ✅ | ✅ | ✅ |
-| Knows what each stakeholder expects | ❌ | ❌ | ❌ | ✅ |
-| Defines what a finished deliverable looks like | ❌ | ❌ | ❌ | ✅ |
-| Memory is readable files on your disk | ❌ | ❌ | ✅ | ✅ |
-| Works with any agent, including local models | ❌ | Via SDK | Via MCP | ✅ No plugin |
-| You approve every change to memory | ❌ | ❌ | ❌ | ✅ |
+An agent compares the meeting material with what the workspace already knows. It proposes changes to decisions, risks, project context, terminology and stakeholder information. You inspect the evidence and accept or reject the changes.
 
-<sub>Chat app memory: ChatGPT, Claude.ai. Memory layers: Mem0, Zep, Letta.
-Notes over MCP: Basic Memory, Obsidian MCP servers. Based on their public
-documentation as of October 2026; corrections are welcome.</sub>
+A conversation can introduce a new deadline, explain what a colleague expects, or change a decision. Those details become useful context for later work **after review**. This is saved context, not model training or automatic fact verification.
 
-> Other tools give your AI a memory. Get Things Done gives it a job description, a
-> list of people to win over, and a definition of done.
+Claude Code can analyze and apply updates from the dashboard using your installed CLI and supported sign-in. Optional automatic digest analysis prepares proposals; it does not approve them. Codex and Copilot use the workspace's instructions and files through their own interfaces.
 
-When you use a cloud model, the agent sends what a task needs to that provider while
-it runs, as any AI tool does. Your workspace itself never moves: no sync, no account,
-no telemetry.
+<img src="docs/screenshots/context-review.png" alt="Reviewing a fictional meeting's proposed context changes, with evidence and controls to accept or reject them" width="900">
 
----
+**Keep the evidence useful.** Search meetings by what was said, play retained recordings and jump from transcript timestamps to the audio. Correct a reviewed record through another review. Transcribe a kept recording again with a different model, then choose which transcript version to use. Retention settings let you keep selected meetings longer or move them to the trash.
 
-## Why files, not another app
+### 3. Give your agent a task with the background already there
 
-Every SaaS task tool is a walled garden with an API you have to beg for. This is a
-folder.
+A task connects an objective to the people involved, relevant context and the format you expect. The agent can read how you communicate, what the recipients care about, previous decisions and what a finished deliverable should contain.
 
-- **Your AI reads it natively.** No plugin, no MCP server, no integration. Point
-  Claude Code at the folder and it works.
-- **It outlives the tool.** Markdown and YAML frontmatter will open in thirty years.
-- **You own the backup story.** `git init`, Time Machine, Dropbox, whatever you already trust.
-- **You can grep it.** Because sometimes that is genuinely the fastest thing.
+For example: *“Draft the project update for the customer, using the latest decision and our weekly update template.”*
 
-The dashboard is a convenience over the files, not a prison around them. Delete the
-app and you still have everything.
+With Claude Code, open the workspace and run:
 
----
-
-## A quick tour
-
-**Situation** is your morning view: what is overdue, blocked or due soon, what you
-are focused on, and what changed in the workspace.
-
-<img src="docs/screenshots/situation.png" alt="Situation view with overdue, due soon and blocked counts, a needs-attention list and upcoming commitments" width="900">
-
-**Tasks** carry the objective, the stakeholders, the deliverables and the output
-template they follow. Copy the `/gtd-task` command and hand it to your AI agent.
-
-<img src="docs/screenshots/task-detail.png" alt="Task detail with objective, deliverables linked to output templates, stakeholders and the slash command" width="900">
-
-**Stakeholders** record who people are and what matters to them, so agents write to a
-CFO differently than to a partner.
-
-<img src="docs/screenshots/stakeholders.png" alt="Stakeholder list with roles, organizations and what matters to each person" width="900">
-
-**Context updates** keep your context true as things change. Drop in a meeting
-transcript, a deck or a photo of a whiteboard; an agent proposes only the changes that
-matter, and you accept or reject each one as a before and after diff.
-[How it works](#keeping-context-up-to-date).
-
-**Insights** show what is waiting on you, how long work takes, and who your work is
-really for.
-
-<img src="docs/screenshots/insights.png" alt="Insights view with turnaround, first-pass rate, attention list and work per stakeholder" width="900">
-
-**Agent Floor** is an optional pixel-art view of your agents picking up, working on
-and handing in tasks. Turn it on under Settings.
-
-<img src="docs/screenshots/agent-floor.png" alt="Pixel-art Agent Floor showing agents moving between the backlog, review and done desks" width="900">
-
-Light and dark themes are built in.
-
-<img src="docs/screenshots/board-dark.png" alt="The board in dark mode" width="900">
-
----
-
-## Table of contents
-
-- [A quick tour](#a-quick-tour)
-- [Install](#install)
-- [Your first workspace](#your-first-workspace)
-- [Core concepts](#core-concepts)
-- [Running a task with an AI agent](#running-a-task-with-an-ai-agent)
-- [Keeping context up to date](#keeping-context-up-to-date)
-- [Command reference](#command-reference)
-- [Workspace layout](#workspace-layout)
-- [What is yours and what is the app's](#what-is-yours-and-what-is-the-apps)
-- [Upgrading](#upgrading)
-- [Version control and privacy](#version-control-and-privacy)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Contributing](#contributing)
-- [License](#license)
-
----
-
-## Install
-
-Requires **Node.js 20.19 or newer** (22 or 24 recommended).
-
-```bash
-npm install -g @bertonha/getthingsdone
-```
-
-This installs the `gtd` command globally. The application lives in your global
-`node_modules`; your workspaces hold only your content.
-
-Verify:
-
-```bash
-gtd --version
-```
-
----
-
-## Your first workspace
-
-Create a folder and initialize it:
-
-```bash
-mkdir ~/executive-workspace
-cd ~/executive-workspace
-gtd init
-```
-
-`gtd init` asks five questions:
-
-| Question | What it is used for |
-|---|---|
-| Workspace name | Shown in the dashboard header |
-| Your name | Written into your executive profile |
-| Your role/title | Helps agents calibrate tone and altitude |
-| Organization | Interpolated into agent instruction files |
-| AI tools | Which assistant integrations to install |
-
-Then start the dashboard:
-
-```bash
-gtd start
-```
-
-It opens <http://localhost:3001> in your browser and keeps running in the
-background. Close the terminal; it stays up. `gtd stop` when you are done.
-
-### Scripted setup
-
-For dotfiles, containers or CI, skip the prompts entirely:
-
-```bash
-gtd init --yes \
-  --name "Jane Doe" \
-  --role "Chief Technology Officer" \
-  --org "Acme Corp" \
-  --workspace-name "Acme Executive Workspace" \
-  --ai claude-code,codex
-```
-
-`--yes` also engages automatically when stdin is not a TTY.
-
----
-
-## Core concepts
-
-Five things make up the system. Get these right and the AI output gets dramatically
-better.
-
-### 1. Your profile — `profile/executive-profile.md`
-
-Who you are and how you communicate. Every agent reads this before writing anything.
-Fill in the sections honestly: **Responsibilities**, **Communication Style**,
-**Decision Making**, **Language Preferences**, **Recurring Expectations**,
-**Principles**.
-
-This is the single highest-leverage file in the workspace. "Direct, no hedging, lead
-with the ask, never use em dashes, Japanese business context so use -san" produces
-visibly different output than an empty profile.
-
-### 2. Stakeholders — `stakeholders/people/`
-
-One file per person: their role, organization, influence level, and what actually
-matters to them. Influence level drives how agents write to them:
-
-| Influence | How agents adapt |
-|---|---|
-| `decision_maker` | Brief, direct, leads with the ask, one page |
-| `influencer` | Acknowledges their perspective first, invites input |
-| `informed` | Summary only, no unrequested detail |
-| `executor` | Clear action, timeline, owner, no ambiguity |
-
-**Org charts** (`stakeholders/org-charts/`) map who reports to whom inside a company or
-organization. Build them in **Stakeholders → Org charts** by dragging people onto their
-manager. Agents read the charts for every stakeholder on a task, so a deliverable is
-pitched at the most senior person involved and names the right escalation path.
-
-**Prepare meeting** on a person's page opens the New task form already filled in: the
-person as stakeholder, a **Meeting brief** output and the `meeting-prep` agent (when the
-workspace has them). Add the other attendees, the meeting date and your goal, then save.
-Nothing runs until you start the task.
-
-### 3. Context — `context/`
-
-Your background knowledge library, filed by category: `company/`, `organization/`,
-`strategy/`, `programs/`, `decisions/`, `risks/`, `glossary/`, `situation/`.
-
-Agents scan the whole library, not just what a task lists. Put the strategy deck
-summary, the risk register, the org chart, the acronyms your company invented. This
-is the memory you stop having to repeat.
-
-Context goes stale as things change. Instead of editing notes by hand after every
-meeting, import the material and let an agent propose the updates for you to review.
-See [Keeping context up to date](#keeping-context-up-to-date).
-
-### 4. Output templates — `outputs/templates/`
-
-What "finished" looks like. Each template declares a format, required sections and a
-style guide. Four ship by default: **Plain text message**, **Executive document**,
-**Executive deck** and **Meeting brief**. Create your own for the artifacts you produce over and over —
-your weekly update, your steering committee pack, your board memo.
-
-### 5. Tasks — `tasks/active/`
-
-The unit of work. A task links the other four together:
-
-```
-tasks/active/TASK-2026-0001/
-  task.md            objective, stakeholders, contexts, deliverables
-  deliverables/      what the agent produces
-  executions/        what it did, what it assumed, what it could not find
-  attachments/       source material you provide
-  notes/
-```
-
-Tasks move `backlog` → `in_progress` → `in_review` → `done`. Agents set
-`in_progress` when they pick work up and `in_review` when they finish. **Only you set
-`done`**, and only after reading the output.
-
----
-
-## Running a task with an AI agent
-
-Create a task in the dashboard, attach the stakeholders and contexts that matter,
-pick an output template. Then from your workspace folder:
-
-```bash
-claude
-```
-
-Claude Code loads `CLAUDE.md` automatically. Run the task:
-
-```
+```text
 /gtd-task TASK-2026-0001
 ```
 
-The agent will, in order:
+Mention one or several meetings in a task to pin its sources and record the evidence it uses. The task can flag when the meeting record changes later.
 
-1. Set the task to `in_progress`
-2. Read your executive profile
-3. Read the task definition
-4. Read every stakeholder listed on it
-5. Scan the full context library for anything relevant
-6. Read the output template for each deliverable
-7. Produce the deliverable into `deliverables/`
-8. Set the task to `in_review`
-9. Write an execution log recording decisions, sources and any placeholders
+The agent writes the deliverable and an execution log, then hands it back for review. **You decide when it is done.** Better context helps the first draft; it does not guarantee an accurate or complete result in one attempt.
 
-Where data is missing, agents insert explicit placeholders rather than inventing
-figures:
+<img src="docs/screenshots/task-detail.png" alt="A task linking its objective, stakeholders, deliverables and output templates, ready to run with an AI agent" width="900">
 
-```
-[PLACEHOLDER: Q3 revenue from Finance - owner: Sam Rivera - by: 2026-09-05]
-```
+## What your AI can remember
 
-A complete structure with marked gaps beats a partial document.
+| Memory | Why it helps |
+| --- | --- |
+| **Your working style** | Tone, language, responsibilities and recurring expectations |
+| **People and relationships** | Who is involved, what matters to them and how to communicate with them |
+| **Projects and decisions** | Current plans, risks, agreements and the reasons behind them |
+| **Meeting context** | Searchable transcripts, confirmed records and reviewed corrections, with retention you control |
+| **Output templates** | The structure and style of updates, briefs, documents and decks you deliver repeatedly |
+| **Task history** | Deliverables, sources, assumptions and feedback from earlier work |
 
-### Specialist agents
+Useful for developers coordinating projects, consultants working with clients, founders, project leads and anyone whose work depends on remembering what people agreed to.
 
-Four ship with the Claude Code integration and are selected via a task's
-`preferred_agent` field:
+## Files you own, tools you choose
 
-| Agent | Use for |
-|---|---|
-| `executive-report-writer` | Reports, decks, memos, strategic documents |
-| `stakeholder-advisor` | Sensitive comms, influence mapping, politics |
-| `context-researcher` | Research and context notes (writes context, not deliverables) |
-| `meeting-prep` | Briefs, talking points, likely questions, red lines |
+The workspace is a folder of Markdown and YAML frontmatter, with attachments and recordings alongside it. There is **no database service to set up**. An optional local SQLite search index is derived from the files; the files remain the source of truth.
 
-### Skills
-
-Five curated skills ship by default: `decision-brief`, `financial-analysis`,
-`presentations`, `risk-analysis`, `stakeholder-communication`. More can be installed
-from the Anthropic skills marketplace inside the dashboard's Agents view.
-
-### Other assistants
-
-Selecting `copilot` or `codex` at init writes `.github/copilot-instructions.md` or
-`AGENTS.md` with equivalent guidance. Same files, same conventions.
-
----
-
-## Keeping context up to date
-
-Your context is only useful while it is true. A reorg announced in a meeting, a new
-target on a slide, a decision made in a hallway: each one makes some note out of date,
-and every task produced from that note gets a little worse.
-
-**Context updates** turn that raw material into a few reviewed changes. You bring the
-material, an agent does the reading and comparing, and you decide what goes in.
-
-The rule behind the whole feature: **never change just to change.** The agent distils
-the material into the few edits that keep your context true. One meeting usually
-justifies one or two changes, and "nothing worth changing" is a normal result.
-
-### How it works
-
-| Step | Who | What happens |
-|---|---|---|
-| 1. Collect | You | Upload files or paste a transcript in the dashboard |
-| 2. Analyze | Agent | `/gtd-context-analyze CU-…` reads the material against your whole context and proposes changes |
-| 3. Review | You | Accept or reject each proposal, shown as a before and after diff |
-| 4. Apply | Agent | `/gtd-context-apply CU-…` writes only what you accepted, then cleans up |
-
-Nothing in `context/` or `stakeholders/` changes until step 4, and only for the
-proposals you ticked.
-
-### 1. Collect
-
-Open **Context** and click **Import update** (or **Import & review** in the sidebar,
-under the categories). Then add:
-
-- **Files**, as many as you like, in any format: transcripts, slides, PDFs,
-  spreadsheets, photos, screenshots. Up to 50 MB each.
-- **Pasted text**, for a transcript copied from your meeting tool, notes or an email
-  thread. It is saved as a file with the rest.
-
-A **WebVTT transcript** (`.vtt`, the export of Teams, Zoom or Meet, uploaded or pasted)
-also gets a readable copy next to it, `<name>.transcript.md`: each turn with its start
-and end time and the speaker as the file labels it, every word kept. Anything the
-dashboard cannot read is listed in the copy, which then says it is incomplete. The
-original stays, and the update records which file is a copy of which, so the agent
-reads the copy and removing an original removes its unchanged copy. If the original or
-the copy is edited afterwards, the copy is marked outdated and the agent reads the
-original. To make a copy
-again, remove the original and add it again. The same file twice in one update is
-refused.
-
-A **Word document** (`.docx`, for example the Word export of a Teams transcript) gets a
-readable text copy, `<name>.text.md`: the paragraphs of its body as written, speaker
-names included as they appear. Tracked deletions and field instructions are left out
-(a field shows its result), and headers, footers, comments and footnotes are not part
-of the body. Only plain text is taken as complete: a document with tables, pictures,
-embedded objects, text boxes, symbols, alternative or imported content, or anything
-else the reader does not know gets a copy marked incomplete, naming what is missing,
-so the agent reads the original as well. A damaged or ambiguous package or malformed
-XML gets no copy, and an encrypted file (for example one with a sensitivity label) is
-not read: either is saved alone, with the reason shown.
-- **Date of the material**: when the meeting happened or the deck was shared, not
-  today. The agent uses it to tell newer facts from older ones, so an old deck never
-  overwrites something more recent.
-- **Notes for the agent** (optional): what this is, who was there, what to trust or
-  ignore. For example: "Budget figures are a first draft."
-
-Save, and the update gets an ID such as `CU-2026-0001` and the command to run next.
-Put everything about one event (the transcript, the deck and the follow-up email) in
-one update, so the agent reads them together.
-
-### 2. Analyze
-
-From your workspace folder, start your agent and paste the command the dashboard
-shows:
-
-```
-/gtd-context-analyze CU-2026-0001
+```text
+work-memory/
+├── profile/          Your working style and preferences
+├── stakeholders/     People, organizations and expectations
+├── context/          Projects, decisions, risks and terminology
+├── context-updates/  Material and proposed memory changes
+├── meetings/         Retained recordings and transcript versions
+├── outputs/          Reusable deliverable templates
+└── tasks/            Objectives, deliverables and execution logs
 ```
 
-The agent reads every file, then your whole context library, your stakeholders and
-org charts, and your profile. A fact becomes a proposal only when it is:
+| Tool | Integration |
+| --- | --- |
+| **Claude Code** | Workspace instructions, commands and specialist agents; dashboard analysis/apply runner |
+| **Codex** | `AGENTS.md` with the workspace conventions |
+| **GitHub Copilot** | `.github/copilot-instructions.md` with equivalent guidance |
+| **Other agents** | Read the files and follow the conventions; compatibility depends on the tool |
 
-- **Durable:** still true and useful in a few weeks. Meeting logistics and small talk
-  are not.
-- **Consequential:** a deliverable written next week would be wrong or weaker
-  without it.
-- **New or different:** not already in your context in substance. Rewording is not a
-  change.
-- **Grounded:** it can point to where the fact appears in the material. Rumours are
-  skipped, or recorded clearly as unconfirmed.
-- **Not older than what is there:** older material only fills real gaps.
+The app does not require an MCP server or proprietary memory API. You can inspect the files, edit them, back them up and change agents. The dashboard adds a task board, meeting workflow, search, review and insights over the same workspace.
 
-It prefers updating an existing note to creating a new one, makes one proposal per
-file, and keeps edits small: your structure, headings and wording stay. Every proposal
-comes with a reason, evidence (for example "transcript.txt, around 00:14" or
-"deck.pptx, slide 6") and a confidence level. Contradictions with your current
-context are called out, never silently overwritten.
+<details>
+<summary>See the task board, stakeholders and progress views</summary>
 
-When the material is from meetings, it also drafts a short **meeting record** per
-meeting: the date, who attended (linked to your stakeholders where it is sure, the
-name as written otherwise), decisions, open questions and action items. A record is
-not a context change, so it does not need a file.
+<img src="docs/screenshots/board.png" alt="Task board in light mode, with Backlog, In Progress, Needs Review and Done columns" width="900">
 
-It also lists what it **considered but did not propose**, with the reason, so you can
-see the filter at work. Files it could not read (audio, video, encrypted files) are
-listed too, instead of being guessed at.
+<img src="docs/screenshots/stakeholders.png" alt="Fictional stakeholders with their roles, organizations and expectations" width="900">
 
-The dashboard updates by itself while the agent works.
+<img src="docs/screenshots/situation.png" alt="Situation dashboard showing work that needs attention and upcoming commitments" width="900">
 
-**Or run it from the dashboard.** If Claude Code is installed and signed in with your
-Claude account, a ready update has **Run analysis with Claude Code**. The dashboard runs
-the same command in the background, with your Claude Code and your Claude plan (no API
-key), under this workspace's own permission rules, as when you run it yourself: with the
-rules the app installs it can write into `context-updates/` and `tasks/`, never into
-`context/`, `stakeholders/` or your profile. Your personal Claude Code settings, hooks
-and MCP servers are left out of the run. Before it starts, the dashboard checks that
-Claude Code is signed in with a Claude plan (not an API account), that the workspace sets
-no API key, and that Claude Code trusts the workspace folder: the first time, open a
-terminal in the workspace folder, run `claude` once and accept "trust this folder". One
-analysis runs at a time, the update is locked while it runs, and **Stop** ends it with
-everything it started.
+<img src="docs/screenshots/insights.png" alt="Insights dashboard summarizing work, turnaround and stakeholder activity" width="900">
 
-### 3. Review
+<img src="docs/screenshots/board-dark.png" alt="The same task board in dark mode" width="900">
 
-Open the update. Each proposal shows:
+The optional **Agent Floor** visualizes agents working through tasks:
 
-- the file it creates or changes, and whether it is a new file or an update
-- why it matters, the evidence and the confidence
-- a diff of the file as it is now and as it would become: **+ green** lines are
-  added, **− red** lines are removed
+<img src="docs/screenshots/agent-floor.png" alt="Optional pixel-art Agent Floor showing task activity" width="900">
 
-Tick the proposals you accept. Your choices are saved as you go, so you can leave and
-come back. If a proposal is almost right, accept it and add a **note for the agent**,
-such as "keep the old title" or "say this is still a draft".
+All people, organizations, conversations and numbers in these screenshots are fictional.
 
-Meeting records are reviewed on their own: **Confirm** a record that is right, or
-**Reject** it. A confirmation is for the exact text you saw: if the record changes
-afterwards, it needs confirming again before you can approve or close. A record that
-is malformed or too long to show in full says why, and can only be rejected until the
-agent fixes it.
+</details>
 
-Once the update is done, each action item of a confirmed record has **Create task**: it
-opens the New task form filled in from the item (title, where it comes from, the due
-date, and the owner as stakeholder when the record's name is that stakeholder's name).
-Nothing is created until you save. Saving creates the task and links the item to it in
-one step, so the same item never becomes two tasks, even from two windows. Agents never
-create tasks from action items themselves. You can confirm a meeting that changes nothing in your context, and an
-update with only confirmed records finishes as soon as you approve it. Confirmed
-records stay with the update after it is done, and System cleanup never removes an
-update that has one. A record you did not confirm is rejected when you approve or
-close.
+## Privacy and control
 
-When you are done, click **Approve N selected**. Anything left unticked is rejected and
-your selection is locked. Changed your mind before applying? **Change my selection**
-takes you back. If nothing is worth taking, **Close without changes** finishes the
-update without touching any file.
+- **Local storage and transcription.** The dashboard binds to `127.0.0.1`; audio transcription happens on your computer after downloading models.
+- **Cloud agents have their own data boundary.** When you run a task or analysis with a cloud AI tool, material that tool reads can be sent to its provider. Automatic digest analysis, if enabled, also invokes that tool.
+- **Review before applying.** Proposed memory changes need your approval. Agents hand deliverables back for review.
+- **Network access is explicit in the workflow.** Model and sample downloads, skill installation and desktop update checks use the network. The app has no telemetry service.
+- **Back up your workspace.** Retention settings can remove recordings and transcripts. Use a private repository for work notes, and a separate backup for files excluded from Git.
 
-If a file was edited after the analysis, the proposal says so. The diff is then shown
-against the current version, and when applying the agent merges instead of
-overwriting the newer edits.
+See the [user guide](docs/user-guide.md#version-control-and-privacy) and [security policy](SECURITY.md) for details. Local storage is not encryption or an agent sandbox.
 
-### 4. Apply
+## Documentation and contributing
 
-Run the second command the dashboard shows:
+- [User guide](docs/user-guide.md): setup, recording, transcription, context review and task execution
+- [CLI commands](docs/user-guide.md#command-reference) · [Workspace layout](docs/user-guide.md#workspace-layout) · [Upgrading](docs/user-guide.md#upgrading)
+- [HTTP API](docs/api.md) · [Architecture](docs/architecture.md) · [Desktop development](desktop/README.md)
+- [Changelog](CHANGELOG.md) · [Troubleshooting](docs/user-guide.md#troubleshooting)
+- [Contributing](CONTRIBUTING.md) · [Discussions](https://github.com/geovanneb/get-things-done/discussions) · [Report a bug](https://github.com/geovanneb/get-things-done/issues)
 
-```
-/gtd-context-apply CU-2026-0001
-```
+Contributions to agent integrations, meeting workflows, documentation and accessibility are welcome. Use fictional data in issues and examples. Report security issues privately through [SECURITY.md](SECURITY.md).
 
-The agent writes only the accepted proposals, following your notes, and records an
-outcome for each one: applied, merged with newer edits, or failed with a reason. Then
-the update is **Done**. Its record stays (the summary, the list of materials, every
-proposal with your decision and its outcome), while the uploaded files and drafts are
-deleted, so the workspace does not grow over time.
+**If this fits how you want to work with AI, star the repository to find it again.** Try a small workspace and tell us what helped—or what context was still missing.
 
-**Or apply from the dashboard.** An approved update has **Apply with Claude Code**: the
-same command, run in the background with your Claude Code and your Claude plan. The
-workspace asks before any write to `context/`, `stakeholders/` and `outputs/`, and the
-dashboard answers for you, file by file: yes only for the files you accepted (and the
-update's own folder), no for everything else it is asked about, including commands.
-Writes the workspace allows without asking (with the rules the app installs:
-`context-updates/` and `tasks/`) go through as usual. A file reached through a symlink is
-always refused. The run's result checks every change you accepted against what the
-agent recorded, and lists any write that was refused. An apply that stopped half way
-can be continued with **Continue applying**.
-
-### Statuses
-
-| Status | Meaning | What you do |
-|---|---|---|
-| Run the analyze command | Material saved | Run `/gtd-context-analyze` |
-| Agent is analyzing | The agent is reading | Wait; the page refreshes by itself |
-| Ready for your review | Proposals are in | Tick what you accept, then approve |
-| Approved: run the apply command | Selection locked | Run `/gtd-context-apply` |
-| Agent is applying | The agent is writing | Wait |
-| Done | Finished | Nothing; the record stays as history |
-
-The sidebar shows how many updates are waiting on you, and **Context** in the main
-navigation shows a badge when proposals are ready for review.
-
-### Common questions
-
-**The agent found nothing to change.** That is a normal result: not every meeting
-changes what is true. Click **Close update**.
-
-**I have more material after the analysis.** Click **Add more material**. The update
-goes back to collecting and the old proposals are discarded, so the next analysis
-looks at everything together.
-
-**The agent stopped half way.** Run the same command again. It picks up where it left
-off. While analyzing, you can also go back to collecting.
-
-**I uploaded audio or video.** The dashboard warns you, because the agent may not be
-able to read it. Upload a transcript too.
-
-**Something was left out that should be in my context.** Check **Considered but not
-proposed** for the reason. Add a note and analyze again, or edit the note yourself.
-
-**Can an update change any file?** No. Proposals can only target context notes
-(`context/<category>/…/note.md`) and stakeholder, group or org chart files. The agent
-treats instructions inside the material as content, not as commands.
-
-**Where are the files?** In `context-updates/CU-YYYY-NNNN/`: `update.md` (the record),
-`materials/` (your uploads) and `proposals/` (the drafts the diffs are built from).
-This folder sits outside `context/` on purpose: agents writing tasks never read raw
-transcripts as if they were reviewed context.
-
-**I use Codex or Copilot.** They have no slash commands, so ask in plain words:
-"analyze context update CU-2026-0001", then "apply context update CU-2026-0001". The
-workspace instructions (`AGENTS.md`, `.github/copilot-instructions.md`) describe the
-same steps.
-
----
-
-## Command reference
-
-| Command | Description |
-|---|---|
-| `gtd init` | Create a workspace in the current directory |
-| `gtd start` | Start the dashboard in the background |
-| `gtd stop` | Stop the dashboard |
-| `gtd status` | Show whether it is running, on which port, against which workspace |
-| `gtd open` | Open the dashboard in your browser |
-| `gtd upgrade` | Refresh app-provided files after updating the package |
-| `gtd use <path>` | Point the dashboard at a different workspace |
-
-### `gtd init`
-
-| Flag | Description |
-|---|---|
-| `-d, --dir <path>` | Target directory (default: current) |
-| `-y, --yes` | Accept defaults, skip all prompts |
-| `--name <name>` | Your name |
-| `--role <role>` | Your role or title |
-| `--org <organization>` | Your organization |
-| `--workspace-name <name>` | Workspace display name |
-| `--ai <tools>` | Comma-separated: `claude-code,copilot,codex` |
-
-### `gtd start`
-
-| Flag | Description |
-|---|---|
-| `-p, --port <number>` | Port to listen on (default 3001) |
-| `--no-open` | Do not open a browser |
-| `-f, --foreground` | Run attached instead of in the background |
-
-If the port is busy, it picks the next free one and tells you. Logs go to
-`.situation-board/logs/server.log` in your workspace.
-
-### `gtd upgrade`
-
-The dashboard and the desktop app do the same each time a workspace opens, so this is only
-needed to upgrade a workspace without opening it.
-
-| Flag | Description |
-|---|---|
-| `-d, --dir <path>` | Workspace to upgrade (default: the configured one) |
-
----
-
-## Workspace layout
-
-```
-my-workspace/
-├── CLAUDE.md                  Instructions your AI agent reads first
-├── README.md                  This workspace's own quick reference
-├── workspace.yaml             Name, settings, path map
-├── .gitignore
-│
-├── .claude/                   Claude Code integration
-│   ├── agents/                4 specialist agents
-│   ├── commands/              /gtd-task, /gtd-context-analyze, /gtd-context-apply
-│   ├── skills/                5 curated skills
-│   └── settings.json          Tool permissions (read-wide, write-narrow)
-│
-├── .schemas/                  JSON Schemas for every file type
-├── .situation-board/          App state: cache, logs, trash, manifest
-│
-├── profile/
-│   └── executive-profile.md   Your voice and preferences
-│
-├── stakeholders/
-│   ├── people/                STK-NNNN.md
-│   └── groups/                GRP-NNNN.md
-│
-├── tasks/
-│   ├── active/                One folder per task
-│   └── archive/
-│
-├── context/                   Your knowledge library
-│   ├── company/  organization/  strategy/  programs/
-│   └── decisions/  risks/  glossary/  situation/
-├── context-updates/           Imported material and what it changed
-│
-├── outputs/templates/         What "finished" looks like
-├── kaizen/                    Kaizen notes (each opens a context update)
-└── workflows/                 Reserved for multi-step workflows
-```
-
-Deletes are soft. Removing a file in the dashboard moves it to
-`.situation-board/trash/` with a timestamp, and every overwrite keeps the previous
-version there too.
-
-### Cleanup and retention
-
-A built-in **System cleanup** routine (Routines page, settings in
-`.situation-board/routines/system-cleanup.json`) keeps the workspace tidy. Out of the
-box it runs every Monday at 09:00 and only suggests: it scans your context notes and
-stakeholders for duplicates, empty and old notes, and opens a context update tagged
-**System cleanup**. Run `/gtd-context-analyze` on it, and the agent proposes merges,
-moves and removals for you to approve. Approved removals go to the trash.
-
-It never archives, trashes or deletes a file until you turn a rule on. Per type
-(finished tasks, archived tasks, finished context updates, closed kaizen proposals,
-the trash itself) you choose the age in days and the action: archive, move to trash
-or delete permanently. A preview shows exactly what a run would do before you save.
-Tasks tagged `keep` are never touched, nor are context updates whose materials you kept
-or that hold a confirmed meeting record, and a run handles at most 200 items.
-
-### Meeting digest
-
-For meetings, choose **Add to the meeting digest** in the Import dialog instead of
-importing straight away: the transcript or notes go into a queue
-(`context-updates/meeting-queue/`, raw material like every update). A built-in
-**Meeting digest** routine (Routines page, settings in
-`.situation-board/routines/meeting-digest.json`) turns the queued meetings into one
-context update, tagged **Meeting digest**, every working day at 18:00 by default. Run
-`/gtd-context-analyze` on it (or **Run analysis** on its page), and the agent drafts one
-meeting record per meeting and proposes context changes, as for any update. No AI runs
-by itself unless you switch on **Analyze each new digest automatically** in its
-settings.
-
-- A day without queued meetings makes nothing. Missed days (the computer was off) make
-  one digest the next time the dashboard starts; a digest covering several days says
-  so in its title.
-- While a digest waits for your review, no new one starts: meetings wait in the queue
-  instead of piling up as stale digests. **Make digest now** does not wait for the
-  schedule.
-- The oldest meetings go first, at most 10 per digest (up to 20) and 400,000 characters
-  of readable text, about a day and a half of meetings (a full-day meeting is about
-  250,000; changeable in Settings); the rest wait. One analysis reads the whole digest,
-  so long days are spread over several digests, and a meeting longer than that on its
-  own gets a digest of its own. The agent reads one meeting at a time, long transcripts
-  in parts.
-- **Right after each meeting** (off by default): next to the schedule, a digest is made
-  within a minute of a meeting being queued, any day and time, when no digest waits for
-  review. Meetings queued while one waits go into the next digest as soon as it is done.
-  A digest that cannot be made (a queued file changed) is tried again only once the
-  queue changes.
-- **Automatic analysis** (off by default): as soon as a digest is made, the dashboard
-  runs the analysis with your installed Claude Code on your own plan, so the proposals
-  are ready the next morning. If another run is going, it starts after it. If it cannot
-  start (Claude Code not installed, not signed in, or the folder not trusted), the card
-  says why and nothing is retried by itself; a digest that already had a run is never
-  started again automatically. While the routine is paused nothing starts on its own;
-  **Make digest now** with automatic analysis on still analyzes the digest it makes.
-  Nothing changes in your context until you approve.
-- Each meeting keeps its own date, and the digest records which queued meeting each
-  file came from. A meeting whose file changed since it was queued stays in the queue,
-  with the reason.
-- A meeting leaves the queue only once the digest holds all its files, checked by hash;
-  until then the digest cannot be changed or deleted. If the dashboard stops halfway,
-  the next run finishes or undoes the digest, so no meeting is lost or digested twice.
-  A digest deleted by hand before its meetings left the queue puts them **on hold**:
-  they stay, and go into a digest only after you choose **Queue again**.
-- **Recordings** can go into the queue too, up to 4 GB: WAV, and on a Mac also M4A, MP3,
-  AAC, FLAC or AIFF. Uploads stream to disk. A meeting with a recording waits in the
-  queue for its transcript, made on this computer with the model chosen in **Settings >
-  Transcription** (see below); the transcript then goes into the digest with the meeting.
-- **Meetings**, in the left menu, is where recording, the live transcript, the queue and
-  its transcripts are. The Meeting digest card in Routines keeps the schedule and settings.
-- **Make digest now** on the Meetings page sends the queue to a digest without waiting for
-  the schedule, which it shows beside the button.
-- Starting a recording opens the Meetings page with its live text. After Stop the page
-  shows the transcript, the live text first and the final one once it is ready, and
-  **Read it** on any meeting opens its transcript there.
-- **Record** in the top bar (or **Record a meeting** on the Meetings page, in ⌘K search,
-  or in the desktop app's menu-bar menu) records the microphone, in the desktop app
-  and in the browser (Chrome or Edge, with the dashboard opened at localhost). While it
-  runs, the top bar shows the time and **Stop** on every page. Tell
-  everyone first: the dialog asks each time. A banner shows on every page with what was
-  captured and what is saved. In the desktop app it also records the computer's own
-  sound, so the other people in a video call are recorded too, also when you wear
-  headphones (Windows, and macOS 14.2 or later, which asks once for System Audio
-  Recording). With speakers instead of headphones the microphone hears the call as
-  well; headphones give the cleanest recording. In a browser only the microphone is
-  recorded. Audio is saved as it arrives, about 115 MB an hour; what the page
-  has not sent yet is lost if the page crashes, so the banner warns when the server stops
-  answering. In the desktop app the recording keeps going with the window closed, and the
-  computer stays awake. A recording whose page is gone is never cleaned up: it stays
-  until you choose Finish or remove the meeting, and a new recording waits for that.
-  Stay on one workspace while recording.
-- Every change to the queue takes one lock for the workspace, so two dashboards on the
-  same workspace never change it at the same time.
-- A meeting removed from the queue, and drafts left half-uploaded for a day, are
-  deleted with their files.
-
-### Offline transcription
-
-Meeting recordings are transcribed on your computer, offline: nothing is sent
-anywhere. **Settings > Transcription** lists the speech-to-text models with their
-pluses and minuses; download one once (it is shared by every workspace and kept in
-`~/.gtd/models/`, outside the workspace).
-
-- **Whisper large-v3-turbo** (the default): accurate, in English and Japanese alike,
-  with full punctuation and 100 languages. It takes longer (about 4 times faster than
-  real time, so an 8-hour meeting takes about 2 hours) and needs about 4 GB of memory
-  while it transcribes.
-- **Whisper large-v3**: the most accurate, also of short remarks, with the same
-  languages. It is slow (about real time on continuous speech, so an 8-hour meeting
-  can take up to 8 hours), needs about 5 GB of memory and is a 1.8 GB download.
-- **SenseVoice**: very fast (about 80 times faster than real time, so an 8-hour meeting
-  takes about 6 minutes) and light (under 1 GB), a little less accurate, in English, Japanese,
-  Chinese, Korean and Cantonese.
-- **Language**: Auto detects the language of each part of a meeting, so it suits a
-  meeting that switches between English and Japanese, though it can pick the wrong
-  language for a very short remark. For the most accurate transcript of a meeting in
-  one language, choose that language.
-- **Spoken language during a recording**: the recording banner, and in the desktop app
-  the menu-bar menu, change the language from that moment on: the live transcript and
-  the transcript made after the meeting both follow it. It applies from the audio saved
-  so far, up to a few seconds before the click. Whisper then writes that language;
-  SenseVoice takes it as a hint and still follows clear speech in another language.
-- **Parts of a meeting**: a transcript made after a meeting cuts it at 2 seconds of
-  silence, and a live transcript at half a second, so text keeps coming. Each part is
-  given a moment of the audio around it, speech too long for the model is split at a
-  quiet moment, and text a model repeated in a loop is marked `[repeated N times]`. A live
-  transcript that is final at Stop keeps its shorter parts. These choices follow
-  [Meetily](https://github.com/Zackriya-Solutions/meeting-minutes) (MIT).
-- **Tell speakers apart** (optional, a 41 MB download): a transcript made after a meeting
-  marks who spoke when, as Speaker 1 and Speaker 2. These are labels for that recording,
-  not names. It runs on this computer, in a job of its own: if it fails, the transcript is
-  still made, without them. A part that is not clearly one voice stays unmarked. With it
-  on, a live transcript stays a draft until the transcript after the meeting is ready.
-  Name the speakers right there on the Meetings page, with **Name** beside each one: a
-  stakeholder or any name. The digest passes them on as named by you, and the analysis
-  proposes names only for the speakers you left unnamed.
-- Downloads show their progress, can be cancelled and continue where they stopped. Press
-  Download on a second model while one runs and it waits its turn;
-  every file is checked against its pinned checksum before it is used. On a computer
-  with little memory, Settings suggests the lighter model.
-- Behind a company proxy: downloads use Node's built-in `fetch`, which ignores the usual
-  proxy variables unless told otherwise. Set `NODE_USE_ENV_PROXY=1` together with
-  `HTTPS_PROXY` (Node 22.21 or later, or 24), and `NODE_EXTRA_CA_CERTS` for a company
-  certificate, before starting the dashboard. Never turn certificate checks off.
-
-**Test speed** on a downloaded model measures it on this computer, on about a minute of
-sample speech (two short recordings from the SenseVoice model's repository, downloaded
-once and checked): it estimates how long an hour of meeting takes, and, by rule of
-thumb, whether there is room to transcribe while recording next to a video call. Once a model is tested, Settings recommends one
-for this computer: the most accurate one that gets an hour done in 15 minutes.
-
-Speeds were measured on an Apple Silicon Mac. **Check** on a downloaded model loads it
-in the transcription engine, so you know it works on this computer. The engine
-([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), Apache-2.0) runs in its own
-process for each job, so the model's memory and any crash stay out of the dashboard.
-
-Recordings in the meeting queue are transcribed one at a time, oldest first, once a
-model is downloaded; the Meetings page shows each one's progress.
-
-- The transcript becomes a file of the meeting, `<recording>.transcript.md`: each part
-  with speech, with its start and end time. Speakers are not told apart yet.
-- **Stop** ends a transcription and keeps nothing of it; the meeting waits until you
-  choose **Try again** or remove it.
-- A transcription that ends part way (the engine stopped, or no speech was found in more
-  than a minute of audio) keeps what it found as a **partial** transcript: choose **Use
-  this transcript** to let the digest take it as it is, or **Try again** to replace it.
-- One transcription runs at a time across every dashboard on the workspace. If a
-  dashboard stops in the middle, the recording goes back in line and starts again.
-- **Live transcript:** choose a model under **Live transcript while recording** in
-  Settings > Transcription (one much faster than real time, see **Test speed**), and the
-  text appears on the Meetings page as people speak. If it covered the whole recording
-  and is the chosen model, the transcript is ready at Stop. If it is another model, the
-  chosen model transcribes the recording again after the meeting: the live text stays
-  readable, the meeting waits, and **Use the live transcript** skips the wait. If a live
-  transcript stops or falls behind, the recording is simply transcribed after the meeting.
-- **Participants:** when recording or adding a meeting, list who you expect: stakeholders,
-  or any other name. They stay with the meeting, the reminder to tell everyone names them,
-  and the digest lists them as expected, not as proof of who came: the analysis names
-  anyone who never appears. **Record this meeting** on a prepare-a-meeting task starts
-  with its title and stakeholders.
-- A recording stays in the queue until its meeting goes into a digest. Once the digest
-  is checked to hold the complete transcript, the recording goes with the queue folder.
-  **Keep recordings after transcription** in Settings keeps it with the digest's
-  materials instead, and they stay after review. A partial transcript you chose to use
-  keeps its recording until the digest is done.
-
----
-
-## What is yours and what is the app's
-
-This is worth understanding, because it is what makes upgrades safe.
-
-**App-provided** — ships with the package, refreshed on `gtd upgrade`:
-
-```
-CLAUDE.md    README.md    .gitignore    .schemas/
-.claude/     (agents, commands, skills, settings)
-outputs/templates/plain-text, executive-document, executive-deck, meeting-brief
-```
-
-**Yours** — created through the dashboard or by hand, never touched:
-
-```
-tasks/    stakeholders/    context/    context-updates/    kaizen/    workflows/
-profile/executive-profile.md
-outputs/templates/<anything you made>
-.claude/skills/<anything you installed from the marketplace>
-```
-
-### How the app tells them apart
-
-Not by folder — `outputs/templates/` and `.claude/skills/` legitimately hold both
-kinds, and you may well want to edit `CLAUDE.md` yourself.
-
-Instead the app records a SHA-256 of every file it installs in
-`.situation-board/app-manifest.json`. On upgrade, for each app-provided file:
-
-| Situation | What happens |
-|---|---|
-| File is missing | Installed |
-| Hash still matches the manifest | You never touched it — replaced silently |
-| Hash differs | **You edited it.** Yours is kept; the new version is written as `<file>.new` |
-
-So customize `CLAUDE.md` freely. You will never lose your changes, and you will never
-be stuck on an old version without knowing it. `gtd upgrade` prints exactly which
-files fell into which bucket.
-
----
-
-## Upgrading
-
-```bash
-npm update -g @bertonha/getthingsdone
-gtd stop
-gtd upgrade
-gtd start
-```
-
-`gtd upgrade` operates on the configured workspace. If you keep several, run it in
-each with `-d`:
-
-```bash
-gtd upgrade -d ~/work-workspace
-gtd upgrade -d ~/board-workspace
-```
-
----
-
-## Version control and privacy
-
-A workspace is a plain folder of Markdown, so git works well:
-
-```bash
-cd my-workspace
-git init
-git add .
-git commit -m "Initial workspace"
-```
-
-The generated `.gitignore` already excludes caches, logs and trash.
-
-> **Use a private repository.** Stakeholder files contain real names, influence
-> assessments and political notes. Context notes contain strategy and risk registers.
-> Deliverables contain whatever you asked for. This is exactly the material that
-> should not be public.
-
-The application never transmits your content. The server binds to `127.0.0.1` only.
-The single outbound call it can make is when you explicitly install a skill from the
-Anthropic marketplace in the Agents view.
-
----
-
-## Configuration
-
-Global config lives at `~/.gtd/config.json`:
-
-```json
-{
-  "workspace_path": "/Users/you/executive-workspace",
-  "port": 3001
-}
-```
-
-| Environment variable | Effect |
-|---|---|
-| `ESB_WORKSPACE_PATH` | Override the workspace path (takes precedence over config) |
-| `PORT` | Override the port |
-
-Switching between workspaces:
-
-```bash
-gtd use ~/other-workspace
-gtd start
-```
-
-In the dashboard, click the workspace name at the top of the sidebar. It lists the
-workspaces you opened on this machine (kept in `recent_workspaces` in the config file),
-so switching back is one click. **Open another folder...** adds a new one. Removing an
-entry from the list never touches the folder.
-
----
-
-## Troubleshooting
-
-**`gtd start` says the port is in use.**
-It automatically moves to the next free port and prints which one. Pin it with
-`-p 4000` if you prefer.
-
-**The dashboard will not start.**
-Check `.situation-board/logs/server.log` in your workspace — `gtd start` prints the
-last lines on failure. `gtd status` shows whether a server is running and where.
-
-**Search results look incomplete.**
-Search uses the SQLite index built into Node 22.13 and newer (the desktop app has it
-too). On Node 20 the app falls back to an in-memory scan automatically — everything
-still works, ranking is just simpler. The log line starting `[search]` confirms it.
-
-**I edited `CLAUDE.md` and now there is a `CLAUDE.md.new` next to it.**
-Working as intended. A new version shipped, but your edits were kept. Diff the two
-and merge whatever you want, then delete the `.new` file.
-
-**I upgraded from the old `esb` command.**
-`gtd` is the command now. `esb` still works as an alias, and your old `~/.esb/config.json`
-is migrated to `~/.gtd/` automatically the first time you run it.
-
----
-
-## Development
-
-```bash
-git clone https://github.com/geovanneb/get-things-done.git
-cd get-things-done
-npm install
-npm run dev          # API on :3001, Vite UI on :5173
-```
-
-| Script | Purpose |
-|---|---|
-| `npm run build` | Build CLI, server and UI into `dist/` |
-| `npm run dev` | Run server and UI in watch mode |
-| `npm test` | Unit tests plus an end-to-end smoke test (needs `npm run build` first) |
-| `npm run desktop` | Build, then open the desktop app from source (needs `npm install --prefix desktop` once) |
-| `npm run seed:demo -- <url>` | Fill a running server with the fictional demo workspace |
-| `npm pack` | Produce the exact tarball that would be published |
-
-To get a populated dashboard for development or screenshots, create a throwaway
-workspace and seed it. Never seed your real workspace.
-
-```bash
-node bin/gtd.js init -y -d /tmp/gtd-demo --name "Alex Morgan" --role COO --org "Northwind Labs"
-cd /tmp/gtd-demo && node /path/to/get-things-done/bin/gtd.js start --no-open
-npm run seed:demo -- http://127.0.0.1:3001
-```
-
-**Architecture.** See the [architecture and regression guide](docs/architecture.md)
-for module ownership, trust boundaries and testing rules. `src/cli/` is the CLI. `server/` is an Express API over the
-workspace files, with a chokidar watcher pushing changes over SSE. `ui/` is React +
-Vite, served statically by the server in production. `templates/` holds everything
-scaffolded into a new workspace. `desktop/` is the Electron shell of the desktop app: it runs the
-same server and dashboard, nothing is duplicated.
-
-**HTTP API.** Agents and scripts can use the same local API as the dashboard. Every
-route is listed, with examples, in the [API reference](docs/api.md).
-
-`server/src/services/scaffold.ts` is the single source of truth for creating and
-upgrading workspaces. The CLI loads its compiled output at runtime so `gtd init` and
-the server's `POST /api/workspace/init` can never disagree.
-
-**Releases.** Maintainers push a `vX.Y.Z` tag. GitHub Actions builds, tests,
-publishes to npm with provenance and creates the GitHub release from
-[CHANGELOG.md](CHANGELOG.md).
-
----
-
-## Contributing
-
-Contributions are welcome, from typo fixes to new features. Start with
-[CONTRIBUTING.md](CONTRIBUTING.md). Please read the [Code of Conduct](CODE_OF_CONDUCT.md),
-and report security issues privately as described in [SECURITY.md](SECURITY.md).
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+MIT licensed. See [LICENSE](LICENSE).
