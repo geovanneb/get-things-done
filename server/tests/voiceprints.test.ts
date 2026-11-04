@@ -322,6 +322,28 @@ test('remembering a voice: only a speaker named with a stakeholder, with consent
   assert.equal(print.samples[0]!.source.transcript_sha256, sha);
   assert.equal(print.consent.person, 'Kim Park');
 
+  // Their page: how it stands, the consent, each sample with its meeting; never the voice itself.
+  await service.remember({ source: { ...src, transcript_sha256: sha }, label: 'Speaker 1' }).catch(() => {});
+  const detail = await service.detail('STK-0002');
+  assert.equal(detail.voice?.name, 'Kim Park');
+  assert.equal(detail.voice?.consent?.person, 'Kim Park');
+  assert.deepEqual(detail.samples.map((s) => [s.meeting, s.title, s.label, s.kind]), [[id, 'Fictional weekly sync', 'Speaker 1', 'queue']]);
+  assert.doesNotMatch(JSON.stringify(detail), /embedding|centroid/, 'no voice data leaves the store');
+  assert.equal((await service.detail('STK-0003')).voice, null, 'no voice remembered');
+  await assert.rejects(service.detail('../x'), /Invalid person/);
+  await assert.rejects(service.removeSample('STK-0002', 'nothex'), /Invalid sample/);
+  await assert.rejects(service.removeSample('STK-0002', 'f'.repeat(16)), /No such sample/);
+  // A second sample from another recording, then removing one keeps the voice; removing the last forgets it.
+  await store.addSample(ws, { ref: 'STK-0002', name: 'Kim Park', model: VOICE_MODEL, sample: sample('MQ-2026-0042'), consent: null, expect: await store.snapshot(ws, 'STK-0002'), stillConfirmed: async () => true });
+  const two = await service.detail('STK-0002');
+  assert.equal(two.samples.length, 2);
+  assert.equal(two.samples[0]!.title, null, 'a meeting that is not here is listed without a title');
+  assert.deepEqual(await service.removeSample('STK-0002', two.samples[0]!.key), { left: true });
+  assert.deepEqual((await service.detail('STK-0002')).samples.map((s) => s.meeting), [id]);
+  assert.deepEqual(await service.removeSample('STK-0002', two.samples[1]!.key), { left: false });
+  assert.equal(await store.read(ws, 'STK-0002'), null, 'the last sample takes the voice and its consent');
+  await service.remember({ source: src, label: 'Speaker 1', consent: true });
+
   // Off in Settings: nothing is remembered.
   const off = new VoiceprintService(store, fakes(ws, { enabled: false }).engine, fakes(ws, { enabled: false }).models, queue, f.stakeholders, () => ws);
   await assert.rejects(off.remember({ source: src, label: 'Speaker 1' }), /Turn on Recognize known voices/);
@@ -539,9 +561,11 @@ test('real model: a remembered voice is suggested again, and a voice never remem
   process.env.ESB_MODELS_PATH = realModels;
   t.after(() => { if (previous === undefined) delete process.env.ESB_MODELS_PATH; else process.env.ESB_MODELS_PATH = previous; });
   const dir = await tmp(t, 'gtd-voices-real-');
-  // Two voices taking turns: the English sample, then the Japanese one, twice.
+  // Two voices taking turns: the English sample, then the Japanese one, eight times. Long enough for many clean
+  // stretches per voice, so the voices message is large (found in the desktop app: a large one was lost when the
+  // worker ended before it was written, and the speakers job failed).
   const [en, ja] = await Promise.all(['en.wav', 'ja.wav'].map((n) => fsp.readFile(path.join(realAudio!, n))));
-  const body = Buffer.concat([en!.subarray(44), ja!.subarray(44), en!.subarray(44), ja!.subarray(44)]);
+  const body = Buffer.concat(Array.from({ length: 8 }, () => [en!.subarray(44), ja!.subarray(44)]).flat());
   const head = Buffer.from(en!.subarray(0, 44));
   head.writeUInt32LE(36 + body.length, 4);
   head.writeUInt32LE(body.length, 40);
@@ -550,6 +574,8 @@ test('real model: a remembered voice is suggested again, and a voice never remem
 
   const engine = new TranscriptionEngine();
   const result = await engine.transcribeWithSpeakers(wav, { model: 'sensevoice-2024-07-17', language: 'auto', identify: true });
+  assert.equal(result.speaker_note, null, 'finding speakers and their voices did not fail');
+  assert.ok(result.voices.every((v) => (v.samples?.length ?? 0) >= 5), `many samples per voice: ${result.voices.map((v) => v.samples?.length)}`);
   const labelOf = (text: RegExp) => `Speaker ${result.segments.find((s) => text.test(s.text))!.speaker}`;
   const english = result.voices.find((v) => v.label === labelOf(/tribal/i))!;
   const japanese = result.voices.find((v) => v.label === labelOf(/中学/))!;

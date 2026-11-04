@@ -16,7 +16,8 @@ import { hashFile } from '../../utils/fileHash';
 import { fileInside, topLevelName } from '../../utils/files';
 import type { SpeakerName } from '../speakerData';
 import { MATCH_RULES, suggestSpeakers, type KnownVoice } from './matching';
-import { CONSENT_VERSION, consentText, printVoice, VOICE_REF, VoiceprintStore, type MovedBinding, type SampleSource } from './store';
+import { CONSENT_VERSION, consentText, printVoice, sampleKey, VOICE_REF, VoiceprintStore, type MovedBinding, type SampleSource } from './store';
+import { MeetingHistoryService } from '../meetingHistoryService';
 import { EventEmitter } from 'events';
 
 /**
@@ -84,6 +85,31 @@ export interface PrintView {
   updated_at: string | null;
 }
 
+/** One sample of a voice, as the stakeholder page lists it: where it came from, never the voice itself. */
+export interface SampleView {
+  key: string;
+  meeting: string;
+  /** The meeting's title, when it is still here; null for a meeting that is gone (the sample stays until removed). */
+  title: string | null;
+  meeting_date: string | null;
+  kind: 'queue' | 'folder';
+  version: string | null;
+  label: string;
+  seconds: number;
+  at: string;
+}
+
+/** One person's voice for their page: how it stands, the consent, and each sample. */
+export interface VoiceDetail {
+  enabled: boolean;
+  voice: PrintView | null;
+  samples: SampleView[];
+  /** The consent wording, `{person}` for the name, and its version now. */
+  consent_text: string;
+  consent_version: number;
+  min_seconds: number;
+}
+
 export interface VoiceprintsView {
   /** Recognize known voices is on, and the speaker model is here. */
   enabled: boolean;
@@ -142,6 +168,31 @@ export class VoiceprintService {
       consent_version: CONSENT_VERSION, consent_text: consentText('{person}'), min_seconds: MATCH_RULES.printSeconds,
       prints, moved: await this.store.moved(ws),
     };
+  }
+
+  /** One person's voice, for their page. Samples are listed newest first, with the meeting they came from. */
+  async detail(ref: string): Promise<VoiceDetail> {
+    if (!VOICE_REF.test(ref)) throw httpError(400, 'Invalid person: a stakeholder id like STK-0001, or me');
+    const view = await this.view();
+    const voice = view.prints.find((p) => p.ref === ref) ?? null;
+    const print = voice && !voice.damaged ? await this.store.read(this.workspace(), ref) : null;
+    const meetings = new Map<string, { title: string; meeting_date: string }>();
+    if (print?.samples.length) {
+      for (const m of (await this.queue.readQueue().catch(() => ({ meetings: [] as QueuedMeeting[] }))).meetings) meetings.set(m.id, { title: m.title, meeting_date: m.meeting_date });
+      for (const m of await new MeetingHistoryService().list().catch(() => [])) if (m.linkable) meetings.set(m.id, { title: m.title, meeting_date: m.meeting_date });
+    }
+    const samples = (print?.samples ?? []).map((s): SampleView => ({
+      key: sampleKey(s.source), meeting: s.source.meeting, title: meetings.get(s.source.meeting)?.title ?? null, meeting_date: meetings.get(s.source.meeting)?.meeting_date ?? null,
+      kind: s.source.kind, version: s.source.version ?? null, label: s.source.label, seconds: Math.round(s.seconds * 10) / 10, at: s.at,
+    })).reverse();
+    return { enabled: view.enabled, voice, samples, consent_text: view.consent_text, consent_version: view.consent_version, min_seconds: view.min_seconds };
+  }
+
+  /** Removes one sample of a person's voice; the last one forgets the voice. */
+  async removeSample(ref: string, key: string): Promise<{ left: boolean }> {
+    const result = await this.store.removeSample(this.workspace(), ref, key);
+    voiceprintEvents.emit('change');
+    return result;
   }
 
   /**

@@ -22,7 +22,10 @@ name is worse than none, because it would land quietly in records, tasks and del
    voice, only the stretches that sound like them (each scoring 0.5 or more against the voice), so a speaker
    diarization merged with someone else does not mix that person in. Correcting or removing a name takes back
    what it added.
-5. **Forget** a voice on the stakeholder's page or in Settings, or **Forget all**. Deleting a stakeholder in the
+5. **The stakeholder's page is where a voice is managed**: its **Voice** section shows how it stands, the consent
+   (the wording, who recorded it and when), and every sample with the meeting and speaker it came from. Remove one
+   sample there (the last one forgets the voice, consent and all), or **Forget voice**. Settings lists every voice,
+   linking each to its stakeholder, with **Forget all**; your own voice (`me`) is managed there. Deleting a stakeholder in the
    dashboard forgets their voice. A stakeholder deleted by editing files is never suggested again and stays
    listed in Settings, to be forgotten.
 

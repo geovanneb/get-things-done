@@ -78,6 +78,16 @@ router.post('/suggestions/:action', async (req: Request, res: Response) => {
   void voiceprints.afterNaming(source, [label], names);
 });
 
+// GET /api/voiceprints/:ref  one person's voice for their page: how it stands, the consent, each sample's meeting
+router.get('/:ref', async (req: Request, res: Response) => {
+  res.json(await voiceprints.detail(param(req, 'ref')));
+});
+
+// DELETE /api/voiceprints/:ref/samples/:key  removes one sample; the last one forgets the voice
+router.delete('/:ref/samples/:key', async (req: Request, res: Response) => {
+  res.json(await voiceprints.removeSample(param(req, 'ref'), param(req, 'key')));
+});
+
 // DELETE /api/voiceprints/:ref  forgets one person's voice
 router.delete('/:ref', async (req: Request, res: Response) => {
   await voiceprints.forget(param(req, 'ref'));

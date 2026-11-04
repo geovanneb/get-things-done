@@ -15,7 +15,7 @@ import { formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppDispatch } from '@/store';
 import { meetingPrepDraft } from '@/utils/meetingPrep';
 import type { ClaudeAgent, OrgPersonSummary, OrgPosition, OutputTemplate, Stakeholder, Task } from '@/types';
-import { StakeholderVoice } from '@/components/stakeholders/VoiceTag';
+import { StakeholderVoice, StakeholderVoiceCard } from '@/components/stakeholders/VoiceTag';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -405,7 +405,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
                 </span>
               ))}
 
-            <StakeholderVoice id={stakeholder.id} name={stakeholder.name} />
+            <StakeholderVoice id={stakeholder.id} />
           </div>
         </div>
 
@@ -484,6 +484,9 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
           <MarkdownView content={notes} />
         </Card>
       )}
+
+      {/* Voice: see and manage what is remembered of it (Recognize known voices) */}
+      <StakeholderVoiceCard id={stakeholder.id} name={stakeholder.name} headingLevel={embedded ? 3 : 2} />
 
       {/* Related tasks */}
       <Card headingLevel={embedded ? 3 : 2}

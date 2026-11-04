@@ -49,8 +49,16 @@ interface Sherpa {
 interface SherpaOnlineStream { acceptWaveform(input: { samples: Float32Array; sampleRate: number }): void; inputFinished(): void }
 interface SherpaExtractor { createStream(): SherpaOnlineStream; isReady(stream: SherpaOnlineStream): boolean; compute(stream: SherpaOnlineStream, enableExternalBuffer?: boolean): Float32Array }
 
+/**
+ * Messages still being written to the dashboard. A large one (a speakers job's voices) takes a while to write: ending
+ * the process before it is written loses it, and the job's end with it.
+ */
+const writing = new Set<Promise<void>>();
 function sendNow(reply: WorkerReply): void {
-  if (process.connected) process.send?.(reply);
+  if (!process.connected || !process.send) return;
+  const written = new Promise<void>((resolve) => { process.send!(reply, undefined, {}, () => resolve()); });
+  writing.add(written);
+  void written.then(() => writing.delete(written));
 }
 
 /**
@@ -487,7 +495,8 @@ process.once('message', (request: WorkerRequest) => {
     .finally(async () => {
       await (loaded?.close() ?? starting?.())?.catch(() => {});
       if (ending) sendNow(ending);
-      // Let the last message reach the dashboard, then end: one job per process.
+      // Let every message reach the dashboard, then end: one job per process.
+      await Promise.all(writing);
       if (process.connected) process.disconnect();
       else process.exit(0);
     });

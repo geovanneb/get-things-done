@@ -145,6 +145,12 @@ export function printVoice(print: Voiceprint): { centroid: number[] | null; seco
   return { centroid: centroid(print.samples.map((s) => s.embedding)), seconds: Math.round(print.samples.reduce((n, s) => n + s.seconds, 0) * 10) / 10 };
 }
 
+/** A sample's id in the API: a short hash of where it came from (unique within a print, since a source has one sample). */
+export function sampleKey(s: SampleSource): string {
+  return createHash('sha256').update(JSON.stringify([s.kind, s.meeting, s.file, s.version ?? '', s.transcript_sha256, s.label])).digest('hex').slice(0, 16);
+}
+export const SAMPLE_KEY = /^[0-9a-f]{16}$/;
+
 const sameSource = (a: SampleSource, b: SampleSource) =>
   a.kind === b.kind && a.meeting === b.meeting && a.file === b.file && a.version === b.version && a.transcript_sha256 === b.transcript_sha256 && a.label === b.label;
 
@@ -258,6 +264,20 @@ export class VoiceprintStore {
       }
       return dropped;
     });
+  }
+
+  /**
+   * Removes one sample of a person's voice, chosen by the user. The last one takes the print with it, consent and all.
+   * Returns whether the print is left.
+   */
+  async removeSample(workspace: string, ref: string, key: string): Promise<{ left: boolean }> {
+    checkRef(ref);
+    if (!SAMPLE_KEY.test(key)) throw httpError(400, 'Invalid sample');
+    const print = await this.read(workspace, ref);
+    if (!print || !print.samples.some((s) => sampleKey(s.source) === key)) throw httpError(404, 'No such sample of this voice');
+    const dropped = await this.dropSamples(workspace, (s, printRef) => printRef === ref && sampleKey(s) === key);
+    if (!dropped) throw httpError(404, 'No such sample of this voice');
+    return { left: Boolean(await this.read(workspace, ref)) };
   }
 
   /** Forgets one person's voice. Any enrollment still under way for anyone is refused when it tries to save. */

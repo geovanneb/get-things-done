@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import Notice from '@/components/common/Notice';
@@ -53,6 +54,7 @@ export function RememberedVoices({ on, speakersOn, saving, onToggle }: { on: boo
         Suggests a speaker&apos;s name when a transcript has a voice you asked the app to remember, with that person&apos;s consent.
         It only suggests: nothing is named until you choose Use. Voices stay on this computer, outside the workspace, and are
         never shared or given to AI tools. A voice can be wrong for someone it never heard, so check each suggestion.
+        See and manage a stakeholder&apos;s voice on their page.
       </p>
       {blocked && <p role="note" style={hintStyle}>{blocked}</p>}
       {notice && <Notice tone="critical" title="That did not work.">{notice}</Notice>}
@@ -75,7 +77,11 @@ export function RememberedVoices({ on, speakersOn, saving, onToggle }: { on: boo
               return (
                 <li key={p.ref} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', padding: 'var(--space-2) var(--space-3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
                   <span style={{ flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontWeight: 600 }}>{p.name} <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>{p.ref === 'me' ? '' : p.ref}</span></span>
+                    <span style={{ fontWeight: 600 }}>
+                      {/* A stakeholder's voice is managed on their page; yours here. */}
+                      {p.ref !== 'me' && p.stakeholder ? <Link to={`/stakeholders/${p.ref}`} className="gtd-link">{p.name}</Link> : p.name}
+                      {' '}<span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>{p.ref === 'me' ? '' : p.ref}</span>
+                    </span>
                     <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-xs)' }}>
                       {p.damaged ? 'This file cannot be read; forget it.' : `${speechLength(p.seconds)} of speech from ${p.meetings} ${p.meetings === 1 ? 'meeting' : 'meetings'}.`}
                       {p.consent && ` Consent recorded by ${p.consent.recorded_by} on ${new Date(p.consent.at).toLocaleDateString()}${p.old_consent ? ', under an earlier wording' : ''}.`}

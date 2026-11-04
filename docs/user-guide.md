@@ -705,8 +705,9 @@ pluses and minuses; download one once (it is shared by every workspace and kept 
   Later transcripts show "Sounds like Kim Park" next to a speaker: **Use** names them,
   **Not them** hides the hint. It only suggests, never names anyone by itself, and works for
   Transcribe again too, so names do not have to be typed again after speakers are renumbered.
-  Stakeholders with a remembered voice carry a **Voice remembered** tag. Forget a voice on the
-  stakeholder's page or in Settings > Transcription; deleting a stakeholder forgets it too.
+  Stakeholders with a remembered voice carry a **Voice remembered** tag. Their page has a
+  **Voice** section: the consent, each sample with the meeting it came from (remove any), and
+  **Forget voice**. Settings > Transcription lists every voice; deleting a stakeholder forgets it too.
   Details and privacy notes: [Recognize known voices](voiceprints.md).
 - Downloads show their progress, can be cancelled and continue where they stopped. Press
   Download on a second model while one runs and it waits its turn;

@@ -820,6 +820,30 @@ export interface RememberedVoice {
   updated_at: string | null;
 }
 
+/** One sample of a remembered voice: where it came from, never the voice itself. */
+export interface VoiceSample {
+  key: string;
+  meeting: string;
+  /** Null for a meeting that is no longer here. */
+  title: string | null;
+  meeting_date: string | null;
+  kind: 'queue' | 'folder';
+  version: string | null;
+  label: string;
+  seconds: number;
+  at: string;
+}
+
+/** GET /api/voiceprints/:ref */
+export interface VoiceDetail {
+  enabled: boolean;
+  voice: RememberedVoice | null;
+  samples: VoiceSample[];
+  consent_text: string;
+  consent_version: number;
+  min_seconds: number;
+}
+
 /** GET /api/voiceprints */
 export interface Voiceprints {
   enabled: boolean;
