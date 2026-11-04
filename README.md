@@ -49,7 +49,7 @@ Choose your AI tool during setup. The local dashboard opens in your browser. You
 
 The workspace and offline transcription need no Get Things Done account. AI analysis and task execution use the AI tool you bring; that tool may require its own account or subscription.
 
-> **New in 0.9.0:** searchable meeting history, reviewed corrections, tasks with pinned meeting sources, and retained recordings with transcript versions. [See what changed](CHANGELOG.md).
+> **New in 0.10.0:** context updates that run from the dashboard and tell you when they are done, suggested speaker names for voices you know (with consent), and update notices. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 
