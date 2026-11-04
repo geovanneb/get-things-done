@@ -7,7 +7,7 @@ import { typeMeta, updateType } from '@/utils/updateTypes';
 export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: string; subtle: string; step: number; next: string }> = {
   ready: {
     label: 'Run the analyze command', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 1,
-    next: 'Materials are saved. Copy the command below and run it in Claude Code. The agent reads everything and proposes changes; nothing in your context changes yet.',
+    next: 'Materials are saved. Run the analysis: the agent reads everything and proposes changes; nothing in your context changes yet.',
   },
   analyzing: {
     label: 'Agent is analyzing', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 1,
@@ -19,7 +19,7 @@ export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: st
   },
   approved: {
     label: 'Approved: run the apply command', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 3,
-    next: 'Your selection is locked. Copy the command below and run it in Claude Code to write the accepted changes into your context.',
+    next: 'Your selection is locked. Apply it: the agent writes the accepted changes into your context.',
   },
   applying: {
     label: 'Agent is applying', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 3,
@@ -108,7 +108,7 @@ export const CommandBox = forwardRef<HTMLButtonElement, { command: string; label
           <code style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', color: 'var(--color-text)', overflowX: 'auto', whiteSpace: 'nowrap', userSelect: 'all' }}>
             {command}
           </code>
-          <button ref={ref} type="button" onClick={copy} aria-label={`Copy ${command}`}
+          <button ref={ref} type="button" onClick={copy} aria-label={`Copy ${command}`} data-next-action={emphasis ? '' : undefined}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, height: 36, padding: '0 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)', fontWeight: emphasis ? 600 : 500, cursor: 'pointer',
               border: `1px solid ${copied ? 'var(--color-border)' : emphasis ? 'var(--color-accent)' : 'var(--color-border)'}`,
