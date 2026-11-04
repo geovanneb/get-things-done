@@ -345,8 +345,16 @@ and MCP servers are left out of the run. Before it starts, the dashboard checks 
 Claude Code is signed in with a Claude plan (not an API account), that the workspace sets
 no API key, and that Claude Code trusts the workspace folder: the first time, open a
 terminal in the workspace folder, run `claude` once and accept "trust this folder". One
-analysis runs at a time, the update is locked while it runs, and **Stop** ends it with
-everything it started.
+analysis runs at a time, the update is locked while it runs, and **Stop analysis** ends it
+with everything it started.
+
+While it runs, the same box shows how long it has been going and the step it is on, for
+example "Step 7 · Reading `context/risks/…/note.md`". **Show details** lists one line per step
+(the last 50). A step says only which tool the agent used and which file or folder it
+touched, and only when that already exists in your workspace (a new file shows the folder it
+goes in): never file contents, search terms, commands or what the agent writes to itself.
+The steps are kept in memory while the run lasts and are not saved; an apply started from
+the dashboard shows the same.
 
 ### 3. Review
 
@@ -417,10 +425,10 @@ can be continued with **Continue applying**.
 | Status | Meaning | What you do |
 |---|---|---|
 | Run the analyze command | Material saved | Run `/gtd-context-analyze` |
-| Agent is analyzing | The agent is reading | Wait; the page refreshes by itself |
+| Analyzing… | The agent is reading | Wait; the page refreshes by itself |
 | Ready for your review | Proposals are in | Tick what you accept, then approve |
 | Approved: run the apply command | Selection locked | Run `/gtd-context-apply` |
-| Agent is applying | The agent is writing | Wait |
+| Applying… | The agent is writing | Wait |
 | Done | Finished | Nothing; the record stays as history |
 
 Next to the title of the updates list, two counts say whose move it is: **ready for you**
