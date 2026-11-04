@@ -1,4 +1,4 @@
-import type { ContextUpdate } from '@/types';
+import type { ContextUpdate, ContextUpdateStatus } from '@/types';
 
 /**
  * What kind of update it is, from who opened it. One list of types feeds the filter, the badge and the counts,
@@ -57,3 +57,25 @@ export function typeCounts(updates: Typed[]): Partial<Record<UpdateType, number>
  * Updates that wait on the user or the agent always show in full: there are few, and hiding one hides work.
  */
 export const HISTORY_PAGE = 20;
+
+/**
+ * Whose move it is (#246). Ready for you: analyzed and waiting for review, or approved and waiting to be applied, so
+ * the count goes up exactly when a run finishes. To analyze: material waiting for an analysis, nothing to review yet.
+ * The sidebar dot, the list's groups and the counts by the title all read these, so they always agree.
+ */
+export const READY_FOR_YOU: ContextUpdateStatus[] = ['in_review', 'approved'];
+export const TO_ANALYZE: ContextUpdateStatus[] = ['ready'];
+
+export function waitingCounts(updates: Pick<ContextUpdate, 'status'>[]): { ready: number; toAnalyze: number } {
+  return {
+    ready: updates.filter((u) => READY_FOR_YOU.includes(u.status)).length,
+    toAnalyze: updates.filter((u) => TO_ANALYZE.includes(u.status)).length,
+  };
+}
+
+/** Both counts in words, for a tooltip or an accessible name: status never rests on colour alone. */
+export function waitingLabel({ ready, toAnalyze }: { ready: number; toAnalyze: number }): string {
+  const one = (n: number, a: string, many: string) => `${n} ${n === 1 ? a : many}`;
+  const parts = [ready ? `${one(ready, 'context update', 'context updates')} ready for you` : '', toAnalyze ? `${toAnalyze} to analyze` : ''];
+  return parts.filter(Boolean).join(', ');
+}

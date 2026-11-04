@@ -22,6 +22,8 @@ async function microphoneAccess(): Promise<string> {
 }
 
 import { parseLanguageMenu, type SpokenLanguageMenu } from './language-menu';
+import { parseRunNoticeRequest, type RunNoticeRequest } from './run-notice';
+export { parseRunNoticeRequest, type RunNoticeRequest } from './run-notice';
 export { parseLanguageMenu, type SpokenLanguageMenu, type SuggestedLanguage } from './language-menu';
 
 export function registerBridge(
@@ -30,6 +32,7 @@ export function registerBridge(
   onRecording: (active: boolean) => void,
   takeRecordingCommand: () => RecordingCommand | null,
   onLanguageMenu: (menu: SpokenLanguageMenu | null) => void,
+  runNotices: { prepare: (notice: RunNoticeRequest) => Promise<string | null>; show: (token: string) => boolean } = { prepare: async () => null, show: () => false },
 ): void {
   const trusted = (event: IpcMainInvokeEvent): BrowserWindow => {
     const window = getWindow();
@@ -72,6 +75,19 @@ export function registerBridge(
   ipcMain.handle('gtd:take-recording-command', async (event) => {
     if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
     return takeRecordingCommand();
+  });
+
+  // A finished run in two steps: read and checked by the app (a token back), then shown once the page says it still
+  // should, with nothing awaited in between.
+  ipcMain.handle('gtd:run-notice-prepare', async (event, notice: unknown) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    const parsed = parseRunNoticeRequest(notice);
+    return parsed ? runNotices.prepare(parsed) : null;
+  });
+
+  ipcMain.handle('gtd:run-notice-show', async (event, token: unknown) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    return typeof token === 'string' && /^[0-9a-f]{32}$/.test(token) ? runNotices.show(token) : false;
   });
 
   ipcMain.handle('gtd:open-workspace-folder', async (event) => {

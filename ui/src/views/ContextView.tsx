@@ -20,7 +20,7 @@ import { useAppDispatch, useDataVersion } from '@/store';
 import ImportUpdateModal from '@/components/context-updates/ImportUpdateModal';
 import UpdatesList from '@/components/context-updates/UpdatesList';
 import UpdateDetail from '@/components/context-updates/UpdateDetail';
-import { filterUpdates, HISTORY_PAGE, type TypeFilter } from '@/utils/updateTypes';
+import { filterUpdates, HISTORY_PAGE, waitingCounts, waitingLabel, type TypeFilter } from '@/utils/updateTypes';
 import type { ContextNote, ContextUpdate, QueuedMeeting } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -212,12 +212,35 @@ interface SidebarProps {
   activeCategory: Category | null;
   onSelect: (cat: Category) => void;
   updatesActive: boolean;
-  /** Updates waiting on the user: an analysis to run, proposals to review, or an apply to run. */
-  updatesWaiting: number;
+  /** Updates ready for you (review or apply), and material waiting for an analysis. */
+  waiting: { ready: number; toAnalyze: number };
   onSelectUpdates: () => void;
 }
 
-function Sidebar({ notes, activeCategory, onSelect, updatesActive, updatesWaiting, onSelectUpdates }: SidebarProps) {
+/**
+ * Whose move it is, next to the title of the updates list (#246): "ready for you" in amber, your turn; "to analyze"
+ * neutral, the agent's turn. Each takes the list to its group.
+ */
+function WaitingCounts({ waiting, onShow }: { waiting: { ready: number; toAnalyze: number }; onShow: (group: string) => void }) {
+  const pills = [
+    { id: 'updates-ready-for-you', count: waiting.ready, text: 'ready for you', tone: 'warning' as const },
+    { id: 'updates-to-analyze', count: waiting.toAnalyze, text: 'to analyze', tone: 'neutral' as const },
+  ].filter((p) => p.count > 0);
+  if (!pills.length) return null;
+  return (
+    <div role="group" aria-label={waitingLabel(waiting)} style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+      {pills.map((p) => (
+        <Button key={p.id} size="sm" variant="secondary" icon={<CountBadge count={p.count > 99 ? 99 : p.count} tone={p.tone} />}
+          onClick={() => onShow(p.id)}
+          aria-label={`${p.count} ${p.text}: show them`}>
+          {p.text}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function Sidebar({ notes, activeCategory, onSelect, updatesActive, waiting, onSelectUpdates }: SidebarProps) {
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
     for (const note of notes) {
@@ -248,10 +271,10 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, updatesWaitin
         <div style={{ borderTop: '1px solid var(--color-border)', marginTop: 'var(--space-2)', paddingBottom: 'var(--space-4)' }}>
           <div className="gtd-subnav__label">Updates</div>
           <button type="button" onClick={onSelectUpdates} aria-current={updatesActive ? 'page' : undefined} className="gtd-subnav__item"
-            aria-label={updatesWaiting > 0 ? `Import and review, ${updatesWaiting} waiting on you` : 'Import and review'}
-            title="Import meetings, decks or photos, and review the context changes an agent proposes">
+            aria-label={waiting.ready + waiting.toAnalyze > 0 ? `Import and review, ${waitingLabel(waiting)}` : 'Import and review'}
+            title={waiting.ready + waiting.toAnalyze > 0 ? waitingLabel(waiting) : 'Import meetings, decks or photos, and review the context changes an agent proposes'}>
             <span>Import &amp; review</span>
-            {updatesWaiting > 0 && <CountBadge count={updatesWaiting > 99 ? 99 : updatesWaiting} tone="warning" />}
+            {waiting.ready > 0 && <CountBadge count={waiting.ready > 99 ? 99 : waiting.ready} tone="warning" />}
           </button>
           <p style={{ margin: 'var(--space-1) var(--space-4) 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 'var(--leading-normal)' }}>
             Bring in meetings, decks and photos. An agent proposes changes; you approve.
@@ -273,7 +296,7 @@ export default function ContextView() {
   const showUpdates = location.pathname.startsWith('/context/updates');
   const updatesVersion = useDataVersion('context-updates');
   const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
-  const updatesWaiting = (updates ?? []).filter((u) => ['ready', 'in_review', 'approved'].includes(u.status)).length;
+  const waiting = waitingCounts(updates ?? []);
   const [importOpen, setImportOpen] = useState(false);
   // Kept here, not in the list, so opening an update and coming back keeps the filter and the page.
   const [updateType, setUpdateType] = useState<TypeFilter>('all');
@@ -288,6 +311,21 @@ export default function ContextView() {
     if (box) box.scrollTop = updateId ? 0 : listScrollTop.current;
   }, [updateId]);
   const updatesShown = useMemo(() => filterUpdates(updates ?? [], updateType, updateQuery).length, [updates, updateType, updateQuery]);
+  // A count by the title takes the list to its group: filters that hide the group are cleared first, and the keyboard
+  // lands on the group, so the next Tab goes on from there.
+  const [groupToShow, setGroupToShow] = useState<string | null>(null);
+  const showGroup = (group: string) => {
+    if (!document.getElementById(group)) { setUpdateType('all'); setUpdateQuery(''); }
+    setGroupToShow(group);
+  };
+  useEffect(() => {
+    if (!groupToShow) return;
+    const el = document.getElementById(groupToShow);
+    if (!el) return;
+    el.scrollIntoView({ block: 'start' });
+    el.focus({ preventScroll: true });
+    setGroupToShow(null);
+  }, [groupToShow, updatesShown]);
   const dispatch = useAppDispatch();
   const [notes, setNotes] = useState<ContextNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -380,26 +418,29 @@ export default function ContextView() {
     <div className="gtd-split">
       <Sidebar notes={notes} activeCategory={showUpdates ? null : activeCategory}
         onSelect={(cat) => { setActiveCategory(cat); setSearch(''); if (showUpdates) navigate('/context'); }}
-        updatesActive={showUpdates} updatesWaiting={updatesWaiting} onSelectUpdates={() => navigate('/context/updates')} />
+        updatesActive={showUpdates} waiting={waiting} onSelectUpdates={() => navigate('/context/updates')} />
 
       <div className="gtd-split__main">
         <div className="gtd-split__header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap', minWidth: 0 }}>
           <h2 className="gtd-split__title">
             {categoryTitle}
             {(!showUpdates || (updatesList && (updates?.length ?? 0) > 0)) && (
               <CountBadge count={showUpdates ? updatesShown : filtered.length} tone="accent" />
             )}
           </h2>
+          {updatesList && <WaitingCounts waiting={waiting} onShow={showGroup} />}
+          </div>
           <div className="gtd-page-header__actions">
             {!showUpdates && <SearchInput value={search} onChange={setSearch} placeholder="Search notes" width={220} />}
             {updatesList && (updates?.length ?? 0) > 0 && (
               <SearchInput value={updateQuery} onChange={(v) => { setUpdateQuery(v); setHistoryShown(HISTORY_PAGE); }} placeholder="Search updates by title or ID" width={240} />
             )}
-            {updatesWaiting > 0 && !updatesList && (
+            {waiting.ready > 0 && !updatesList && (
               <Button onClick={() => navigate('/context/updates')}
-                aria-label={`${updatesWaiting} ${updatesWaiting === 1 ? 'update waits' : 'updates wait'} for your review`}
-                title="Open the updates waiting for your review"
-                icon={<CountBadge count={updatesWaiting > 99 ? 99 : updatesWaiting} tone="warning" />}>
+                aria-label={`To review: ${waitingLabel(waiting)}`}
+                title={waitingLabel(waiting)}
+                icon={<CountBadge count={waiting.ready > 99 ? 99 : waiting.ready} tone="warning" />}>
                 To review
               </Button>
             )}

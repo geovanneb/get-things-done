@@ -18,4 +18,16 @@ contextBridge.exposeInMainWorld('gtdDesktop', {
     return () => { ipcRenderer.removeListener('gtd:recording-command', ping); };
   },
   takeRecordingCommand: (): Promise<string | null> => ipcRenderer.invoke('gtd:take-recording-command'),
+  // A finished run, said by the system while the app is not in front (the app writes the words); a click on it asks
+  // the page to open the update, with its workspace.
+  prepareRunNotice: (notice: unknown): Promise<string | null> => ipcRenderer.invoke('gtd:run-notice-prepare', notice).then((t) => (typeof t === 'string' ? t : null), () => null),
+  showRunNotice: (token: string): Promise<boolean> => ipcRenderer.invoke('gtd:run-notice-show', token).then((shown) => shown === true, () => false),
+  onOpenUpdate: (listener: (open: { update_id: string; workspace: string }) => void): (() => void) => {
+    const open = (_event: unknown, value: unknown): void => {
+      const o = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+      if (typeof o['update_id'] === 'string' && /^CU-\d{4}-\d{4}$/.test(o['update_id']) && typeof o['workspace'] === 'string') listener({ update_id: o['update_id'], workspace: o['workspace'] });
+    };
+    ipcRenderer.on('gtd:open-update', open);
+    return () => { ipcRenderer.removeListener('gtd:open-update', open); };
+  },
 });

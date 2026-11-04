@@ -1,14 +1,16 @@
 import Button from '@/components/common/Button';
 import EmptyState from '@/components/common/EmptyState';
 import { formatRelativeDate } from '@/utils/format';
-import { filterUpdates, HISTORY_PAGE, typeCounts, UPDATE_TYPES, type TypeFilter } from '@/utils/updateTypes';
+import { filterUpdates, HISTORY_PAGE, READY_FOR_YOU, TO_ANALYZE, typeCounts, UPDATE_TYPES, type TypeFilter } from '@/utils/updateTypes';
 import type { ContextUpdate, ContextUpdateStatus } from '@/types';
 import { HelpBox, StatusPill, TypeBadge, sectionLabel } from './shared';
 
-const GROUPS: { title: string; hint: string; statuses: ContextUpdateStatus[]; paged?: boolean }[] = [
-  { title: 'Waiting on you', hint: 'Run a command, or review proposals.', statuses: ['in_review', 'ready', 'approved'] },
-  { title: 'Agent working', hint: 'These update by themselves.', statuses: ['analyzing', 'applying'] },
-  { title: 'History', hint: 'What each update changed. Materials were deleted when it finished, unless you kept them.', statuses: ['done'], paged: true },
+const GROUPS: { id: string; title: string; hint: string; statuses: ContextUpdateStatus[]; paged?: boolean }[] = [
+  // Your turn first, then the agent's: the counts by the title take the user to these two.
+  { id: 'updates-ready-for-you', title: 'Ready for you', hint: 'Analyzed and waiting for your review, or approved and waiting to be applied.', statuses: READY_FOR_YOU },
+  { id: 'updates-to-analyze', title: 'To analyze', hint: 'Material waiting for an analysis. Nothing to review yet.', statuses: TO_ANALYZE },
+  { id: 'updates-agent-working', title: 'Agent working', hint: 'These update by themselves.', statuses: ['analyzing', 'applying'] },
+  { id: 'updates-history', title: 'History', hint: 'What each update changed. Materials were deleted when it finished, unless you kept them.', statuses: ['done'], paged: true },
 ];
 
 function summaryLine(u: ContextUpdate): string {
@@ -142,7 +144,7 @@ export default function UpdatesList({ updates, type, query, historyShown, onType
         const visible = group.paged ? items.slice(0, historyShown) : items;
         const rest = items.length - visible.length;
         return (
-          <section key={group.title} aria-label={group.title}>
+          <section key={group.title} id={group.id} aria-label={group.title} tabIndex={-1} style={{ scrollMarginTop: 'var(--space-4)', outlineOffset: 4 }}>
             <h2 style={sectionLabel}>{group.title} · {items.length}</h2>
             <p style={{ margin: '-4px 0 8px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{group.hint}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
