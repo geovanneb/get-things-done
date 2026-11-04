@@ -7,7 +7,8 @@ interface ApiResult<T> {
   refetch: () => void;
 }
 
-export function useApi<T>(url: string, deps: unknown[] = []): ApiResult<T> {
+/** `workspace`: the request says it is about that workspace, and is refused when another is open (see apiFor). */
+export function useApi<T>(url: string, deps: unknown[] = [], workspace?: string): ApiResult<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,7 @@ export function useApi<T>(url: string, deps: unknown[] = []): ApiResult<T> {
     setError(null);
 
     try {
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await fetch(url, { signal: controller.signal, headers: workspace ? { 'X-GTD-Workspace': encodeURIComponent(workspace) } : {} });
       if (!res.ok) {
         const text = await res.text().catch(() => res.statusText);
         throw new Error(text || `HTTP ${res.status}`);
@@ -43,7 +44,7 @@ export function useApi<T>(url: string, deps: unknown[] = []): ApiResult<T> {
       if (!controller.signal.aborted) setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, ...deps]);
+  }, [url, workspace, ...deps]);
 
   useEffect(() => {
     fetchData();

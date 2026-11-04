@@ -1,7 +1,7 @@
 /**
  * Unit tests for the error message of a failed request. Run with `npm run test:api-errors --workspace=ui`.
  */
-import { errorMessage } from './api';
+import { apiFor, errorMessage } from './api';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -24,8 +24,29 @@ for (const [name, body, expected] of cases) {
   check(name, got === expected, got);
 }
 
-if (failures > 0) {
-  console.error(`\n${failures} check(s) failed.`);
-  process.exit(1);
-}
-console.log('\nAll API error checks passed.');
+// Requests bound to a page's workspace (#246 follow-up): each says which; plain ones say nothing.
+const sent: { url: string; header: string | null }[] = [];
+(globalThis as { fetch: unknown }).fetch = async (url: string, init?: { headers?: Record<string, string> }) => {
+  sent.push({ url, header: init?.headers?.['X-GTD-Workspace'] ?? null });
+  return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+};
+(async () => {
+  const api = apiFor('/Users/demo/Northwind Labs');
+  await api.get('/api/runner');
+  await api.post('/api/context-updates/CU-2026-0001/approve', {});
+  await api.put('/api/x', {});
+  await api.patch('/api/x', {});
+  await api.del('/api/context-updates/CU-2026-0001/materials/a.md');
+  const enc = encodeURIComponent('/Users/demo/Northwind Labs');
+  check('every request of the page says its workspace, also outside the update\'s own paths', sent.length === 5 && sent.every((r) => r.header === enc), JSON.stringify(sent));
+  check('a link carries it in the address', api.link('/api/context-updates/CU-2026-0001/materials/a.md') === `/api/context-updates/CU-2026-0001/materials/a.md?workspace=${enc}`);
+  sent.length = 0;
+  const plain = apiFor(undefined);
+  await plain.get('/api/runner');
+  check('without a workspace, plain requests and links', sent[0]?.header === null && plain.link('/x') === '/x');
+    if (failures > 0) {
+    console.error(`\n${failures} check(s) failed.`);
+    process.exit(1);
+  }
+  console.log('\nAll API checks passed.');
+})();

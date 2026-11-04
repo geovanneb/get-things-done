@@ -24,7 +24,9 @@ const serverWorkspace = () => apiGet<WorkspaceConfig>('/api/workspace').then((w)
  *   awaited before showing it (still elsewhere, still wanted).
  * - The desktop app is only told which run: it reads it from its server and writes the words, then shows it when the
  *   page's last checks pass (and its own window is not in front).
- * - A click opens the update only while the server shows the workspace it ran in.
+ * - A click opens the update only while the server shows the workspace it ran in. The page itself reads the update
+ *   with that workspace in one request, so a workspace switched in another tab meanwhile never shows another update
+ *   with the same id.
  */
 export default function RunFinishedNotifier() {
   const navigate = useNavigate();
@@ -66,7 +68,7 @@ export default function RunFinishedNotifier() {
       dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: `${id} is in another workspace (${where}). Switch to it, then open the update.` } });
       return;
     }
-    navigate(`/context/updates/${id}`);
+    navigate(`/context/updates/${id}`, { state: { workspace: where } });
   }, [navigate, dispatch]);
 
   React.useEffect(() => desktopBridge()?.onOpenUpdate?.((o) => void open(o.update_id, o.workspace)), [open]);

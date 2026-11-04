@@ -26,13 +26,18 @@ function today(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Uploads one file to an update; resolves to an error message, or null when it worked. */
-export async function uploadMaterial(updateId: string, file: File): Promise<string | null> {
+/**
+ * Uploads one file to an update; resolves to an error message, or null when it worked. `workspace`: the page belongs to
+ * that workspace (opened from a run-finished notice), and the upload is refused when another one is open.
+ */
+export async function uploadMaterial(updateId: string, file: File, workspace?: string): Promise<string | null> {
   if (file.size > MAX_FILE) return `${file.name} is larger than 50 MB`;
   const form = new FormData();
   form.append('file', file);
   try {
-    const res = await fetch(`/api/context-updates/${updateId}/materials`, { method: 'POST', body: form });
+    const res = await fetch(`/api/context-updates/${updateId}/materials`, {
+      method: 'POST', body: form, headers: workspace ? { 'X-GTD-Workspace': encodeURIComponent(workspace) } : {},
+    });
     if (res.ok) return null;
     const body = await res.json().catch(() => null) as { message?: string } | null;
     return `${file.name}: ${body?.message ?? `upload failed (${res.status})`}`;

@@ -293,6 +293,9 @@ export default function ContextView() {
   const location = useLocation();
   const navigate = useNavigate();
   const { id: updateId } = useParams<{ id?: string }>();
+  // Opened from a run-finished notice: the workspace the run was in, so the update is read only there.
+  const expectedWorkspace = typeof (location.state as { workspace?: unknown } | null)?.workspace === 'string'
+    ? (location.state as { workspace: string }).workspace : undefined;
   const showUpdates = location.pathname.startsWith('/context/updates');
   const updatesVersion = useDataVersion('context-updates');
   const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
@@ -455,7 +458,8 @@ export default function ContextView() {
         {showUpdates && (
           <div ref={updatesScroll} className="gtd-split__body">
             {updateId
-              ? <UpdateDetail key={updateId} id={updateId} onBack={() => navigate('/context/updates')} />
+              // Keyed by the workspace too: the same id from another workspace's notice is another page, read again.
+              ? <UpdateDetail key={`${updateId}\0${expectedWorkspace ?? ''}`} id={updateId} workspace={expectedWorkspace} onBack={() => navigate('/context/updates')} />
               : <UpdatesList updates={updates ?? []} type={updateType} query={updateQuery} historyShown={historyShown}
                   onType={(t) => { setUpdateType(t); setHistoryShown(HISTORY_PAGE); }}
                   onShowMore={() => setHistoryShown((n) => n + HISTORY_PAGE)}

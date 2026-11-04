@@ -43,6 +43,22 @@ test('startServer runs in-process on the given workspace and closes without exit
   const foreign = await fetch(`${running.url}/health`, { headers: { origin: 'http://example.test' } });
   assert.equal(foreign.status, 403);
 
+  // An update opened from a run-finished notice is read only from the workspace the run was in (#246 follow-up).
+  const asked = (where: string) => fetch(`${running.url}/api/context-updates/CU-2026-0001?${where}`).then((r) => r.status);
+  assert.equal(await asked(`workspace=${encodeURIComponent(workspace)}`), 404, 'the right workspace gets past the check (there is no such update here)');
+  assert.equal(await asked(`workspace=${encodeURIComponent(path.join(workspace, 'other'))}`), 409, 'another workspace is refused');
+  assert.equal(await asked(`workspace=${encodeURIComponent(workspace)}&workspace=x`), 409, 'a list is not a workspace');
+  assert.equal(await asked(''), 404, 'without it, read as before');
+  // Every request of such a page says so in a header, changes included; checked before anything is read or changed.
+  const other = encodeURIComponent(path.join(workspace, 'other'));
+  const said = (method: string, url: string, header: string) => fetch(`${running.url}${url}`, { method, headers: { 'X-GTD-Workspace': header, 'Content-Type': 'application/json' }, body: method === 'GET' ? undefined : '{}' }).then((r) => r.status);
+  assert.equal(await said('GET', '/api/context-updates/CU-2026-0001/run', other), 409);
+  assert.equal(await said('POST', '/api/context-updates/CU-2026-0001/approve', other), 409, 'a change is refused too');
+  assert.equal(await said('GET', '/api/context-updates/CU-2026-0001/run', '%E0%A4%A'), 409, 'an unreadable header is refused');
+  assert.notEqual(await said('GET', '/api/context-updates/CU-2026-0001/run', encodeURIComponent(workspace)), 409, 'the right workspace goes through');
+  assert.equal(await asked(`workspace=${other}`.replace('?', '')), 409);
+  assert.equal(await fetch(`${running.url}/api/context-updates/CU-2026-0001/materials/notes.md?workspace=${other}`).then((r) => r.status), 409, 'a material link with another workspace is refused');
+
   await running.close();
 
   // The port is free again, so a host can start the server a second time.
