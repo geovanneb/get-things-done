@@ -142,6 +142,7 @@ jobs:
       # Layout, labels, names, contrast and keyboard checks on every page; screenshots compared where
       # ui/visual-baselines/linux exists (see docs/design-system.md).
       - run: npm run test:visual
+      - run: node scripts/voiceprint-ui-check.mjs
       - name: Keep the screenshots for review
         if: always()
         uses: actions/upload-artifact@v7

@@ -132,6 +132,9 @@ try {
   const settle = async (page) => {
     // The live-events stream keeps the network busy, so wait for the page itself instead.
     await page.waitForLoadState('load');
+    // A lazy route may not have mounted yet; absence of a spinner alone is not readiness.
+    // Still run the heading assertion if it never appears, rather than silently skipping the page.
+    await page.locator('h1').first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
     await page.waitForFunction(() => !document.querySelector('[role="status"] .gtd-spin'), null, { timeout: 8000 }).catch(() => {});
     // Load every weight the UI uses before measuring or taking a picture, so a late font swap cannot change it.
     await page.evaluate(async () => {
