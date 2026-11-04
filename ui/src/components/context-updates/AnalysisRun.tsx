@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import Button from '@/components/common/Button';
-import { apiGet, apiPost } from '@/utils/api';
+import { usePageApi } from '@/hooks/usePageApi';
 import { formatRelativeDate } from '@/utils/format';
 import type { AgentRun, RunnerStatus } from '@/types';
 import RunProgress from './RunProgress';
@@ -49,6 +49,8 @@ export default forwardRef<AnalysisRunHandle, {
   /** A start failed: the page brings the box (and its message) into view. */
   onStartFailed?: () => void;
 }>(function AnalysisRun({ updateId, status, onChange, onRunning, startable = true, manual, onAction, onStartFailed }, handle) {
+  // The page's requests: bound to the workspace it was opened for, when it was opened from a notice.
+  const api = usePageApi();
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
   // The runner check: until it answers neither way is offered (no flicker); when it fails, that is said.
   const [runnerCheck, setRunnerCheck] = useState<'checking' | 'ok' | 'failed'>('checking');
@@ -64,7 +66,7 @@ export default forwardRef<AnalysisRunHandle, {
   const load = useCallback(async (): Promise<{ ok: boolean; run: AgentRun | null }> => {
     const mine = generation.current;
     try {
-      const latest = await apiGet<AgentRun | null>(`/api/context-updates/${updateId}/run`);
+      const latest = await api.get<AgentRun | null>(`/api/context-updates/${updateId}/run`);
       if (mine !== generation.current) return { ok: false, run: null };
       setRun(latest);
       setKnown(true);
@@ -74,7 +76,7 @@ export default forwardRef<AnalysisRunHandle, {
       if (mine === generation.current) setLostContact(true);
       return { ok: false, run: null };
     }
-  }, [updateId]);
+  }, [updateId, api]);
 
   useEffect(() => {
     generation.current += 1;
@@ -90,7 +92,7 @@ export default forwardRef<AnalysisRunHandle, {
   /** Asks whether the dashboard can run it here; also from "Check again". */
   function checkRunner(mine = generation.current): Promise<void> {
     setRunnerCheck('checking');
-    return apiGet<RunnerStatus>('/api/runner')
+    return api.get<RunnerStatus>('/api/runner')
       .then((answer) => { if (mine === generation.current) { setRunner(answer); setRunnerCheck('ok'); } })
       .catch(() => { if (mine === generation.current) { setRunner(null); setRunnerCheck('failed'); } });
   }
@@ -121,7 +123,7 @@ export default forwardRef<AnalysisRunHandle, {
     setBusy(true);
     setError('');
     try {
-      const started = await apiPost<AgentRun>(`/api/context-updates/${updateId}/run`, { command });
+      const started = await api.post<AgentRun>(`/api/context-updates/${updateId}/run`, { command });
       if (mine !== generation.current) return;
       setRun(started);
       onChange();
@@ -137,7 +139,7 @@ export default forwardRef<AnalysisRunHandle, {
     const mine = generation.current;
     setBusy(true);
     try {
-      await apiPost(`/api/context-updates/${updateId}/run/cancel`);
+      await api.post(`/api/context-updates/${updateId}/run/cancel`);
       if (mine !== generation.current) return;
       await load();
       onChange();

@@ -32,7 +32,17 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // GET /api/context-updates/:id  (with proposals, current and proposed content)
+/** `?workspace=…` (a link from a page opened from a run-finished notice): false, and answered 409, when another is open. */
+function inExpectedWorkspace(req: Request, res: Response): boolean {
+  const expected = req.query['workspace'];
+  if (expected === undefined || (typeof expected === 'string' && expected === new WorkspaceService().getWorkspacePath())) return true;
+  res.status(409).json({ error: 'Conflict', message: 'This update is in another workspace. Switch to it, then open the update.' });
+  return false;
+}
+
+// ?workspace=…  only from that workspace (also as the X-GTD-Workspace header, checked for every route).
 router.get('/:id', async (req: Request, res: Response) => {
+  if (!inExpectedWorkspace(req, res)) return;
   res.json(await service.get(param(req, 'id')));
 });
 
@@ -55,6 +65,7 @@ router.post('/:id/materials', upload.single('file'), async (req: Request, res: R
 
 // GET /api/context-updates/:id/materials/<name>  open in the browser; ?download=1 to save it
 router.get('/:id/materials/*name', async (req: Request, res: Response) => {
+  if (!inExpectedWorkspace(req, res)) return;
   sendFile(res, await service.materialPath(param(req, 'id'), param(req, 'name')), req.query['download'] === '1');
 });
 

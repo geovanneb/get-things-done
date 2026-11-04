@@ -30,6 +30,22 @@ export function registerRoutes(app: Express): void {
     catch { next(); return; } // Setup routes must also work before a workspace is selected.
     withWorkspacePath(workspacePath, next);
   });
+  // A page that belongs to one workspace (an update opened from a run-finished notice) says so on each request:
+  // refused before anything is read or changed when another workspace is open. Checked against this request's
+  // pinned workspace, the one every service below uses.
+  app.use('/api', (req, res, next) => {
+    const header = req.get('x-gtd-workspace');
+    if (header === undefined) { next(); return; }
+    let expected: string | null;
+    try { expected = decodeURIComponent(header); } catch { expected = null; }
+    let open: string | null;
+    try { open = new WorkspaceService().getWorkspacePath(); } catch { open = null; }
+    if (expected === null || expected !== open) {
+      res.status(409).json({ error: 'Conflict', message: 'This update is in another workspace. Switch to it, then open the update.' });
+      return;
+    }
+    next();
+  });
   app.use('/api/tasks', tasksRouter);
   app.use('/api/stakeholders', stakeholdersRouter);
   app.use('/api/context', contextRouter);

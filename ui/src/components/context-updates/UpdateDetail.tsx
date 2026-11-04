@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link, useNavigate } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
@@ -9,7 +9,7 @@ import MarkdownView from '@/components/common/MarkdownView';
 import OfficeCheckBadge from '@/components/common/OfficeCheckBadge';
 import { useApi } from '@/hooks/useApi';
 import { useAppDispatch, useDataVersion } from '@/store';
-import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
+import { PageWorkspace, usePageApi } from '@/hooks/usePageApi';
 import { diffLines, diffStats } from '@/utils/lineDiff';
 import { formatRelativeDate } from '@/utils/format';
 import { meetingActionDraft } from '@/utils/meetingAction';
@@ -127,7 +127,7 @@ function SpeakerList({ speakers, title, reviewing, onSet }: {
   onSet: (speaker: MeetingSpeaker, person: { ref?: string; name: string } | null) => void;
 }) {
   const version = useDataVersion('stakeholders');
-  const { data } = useApi<Stakeholder[]>('/api/stakeholders', [version]);
+  const { data } = useApi<Stakeholder[]>('/api/stakeholders', [version], useContext(PageWorkspace));
   const people = data ?? [];
   return (
     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
@@ -605,11 +605,25 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
   );
 }
 
-export default function UpdateDetail({ id, onBack }: { id: string; onBack: () => void }) {
+/**
+ * `workspace`: when set (opened from a run-finished notice), every request of the page and its children says it is about
+ * that workspace, and the server refuses it when another one is open: a switch in another tab never shows or changes
+ * another workspace's update with this id (#246 follow-up).
+ */
+export default function UpdateDetail({ id, onBack, workspace }: { id: string; onBack: () => void; workspace?: string }) {
+  return (
+    <PageWorkspace.Provider value={workspace}>
+      <UpdateDetailPage id={id} onBack={onBack} />
+    </PageWorkspace.Provider>
+  );
+}
+
+function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   const confirm = useConfirm();
   const navigate = useNavigate();
   const version = useDataVersion('context-updates');
-  const { data, loading, error, refetch } = useApi<ContextUpdate>(`/api/context-updates/${id}`, [version]);
+  const api = usePageApi();
+  const { data, loading, error, refetch } = useApi<ContextUpdate>(`/api/context-updates/${id}`, [version], api.workspace);
   const dispatch = useAppDispatch();
   const [decisions, setDecisions] = useState<Decisions>({});
   const [confirmations, setConfirmations] = useState<Confirmations>({});
@@ -689,7 +703,11 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   if (error || !data) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 600 }}>
-        <HelpBox tone="critical">This update could not be loaded. It may have been deleted.</HelpBox>
+        <HelpBox tone="critical">
+          {api.workspace && error && /another workspace/.test(error)
+            ? <>This update is in another workspace ({api.workspace}). Switch to it, then open the update again.</>
+            : 'This update could not be loaded. It may have been deleted.'}
+        </HelpBox>
         <div><Button variant="secondary" onClick={onBack}>Back to updates</Button></div>
       </div>
     );
@@ -721,7 +739,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
   // A finished correction that is still the meeting's current version: look for its old values in the context.
   const followUp = () => run('follow', async () => {
-    const created = await apiPost<{ id: string }>(`/api/context-updates/${u.id}/follow-up`);
+    const created = await api.post<{ id: string }>(`/api/context-updates/${u.id}/follow-up`);
     navigate(`/context/updates/${created.id}`);
   }, 'Follow-up opened. Analyze it to find notes that still use the old values.');
 
@@ -751,7 +769,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       return next;
     });
     try {
-      await apiPut(`/api/context-updates/${u.id}/decisions`, { decisions: changes });
+      await api.put(`/api/context-updates/${u.id}/decisions`, { decisions: changes });
     } catch (err) {
       setDecisions((d) => {
         const next = { ...d };
@@ -773,7 +791,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     const ticket = pendingRecords.current.start(record.id);
     updateSaving();
     try {
-      await apiPut(`/api/context-updates/${u.id}/meeting-records/${record.id}/speaker`, { label: speaker.label, source: speaker.source, person, revision: record.revision });
+      await api.put(`/api/context-updates/${u.id}/meeting-records/${record.id}/speaker`, { label: speaker.label, source: speaker.source, person, revision: record.revision });
       setConfirmations((c) => ({ ...c, [record.id]: null }));
       await refetch();
     } catch (err) {
@@ -789,7 +807,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     const ticket = pendingRecords.current.start(record.id);
     updateSaving();
     try {
-      await apiPost(`/api/context-updates/${u.id}/meeting-records/${record.id}/${kind}/${index}`, { revision: record.revision, use });
+      await api.post(`/api/context-updates/${u.id}/meeting-records/${record.id}/${kind}/${index}`, { revision: record.revision, use });
       setConfirmations((c) => ({ ...c, [record.id]: null }));
       await refetch();
     } catch (err) {
@@ -808,7 +826,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     updateSaving();
     setConfirmations((c) => ({ ...c, [rid]: value }));
     try {
-      const saved = await apiPut<ContextUpdate>(`/api/context-updates/${u.id}/meeting-records`, { records: { [rid]: { confirmation: value, revision: record.revision } } });
+      const saved = await api.put<ContextUpdate>(`/api/context-updates/${u.id}/meeting-records`, { records: { [rid]: { confirmation: value, revision: record.revision } } });
       const answer = saved.meeting_records.find((r) => r.id === rid);
       if (answer && pendingRecords.current.isLatest(rid, ticket)) setConfirmations((c) => ({ ...c, [rid]: answer.confirmation }));
     } catch (err) {
@@ -826,7 +844,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
     const ownerRef = record.action_items[item]?.owner;
     let owner: Stakeholder | undefined;
     if (ownerRef?.ref && ownerRef.ref !== 'me' && ownerRef.ref_found) {
-      owner = await apiGet<Stakeholder>(`/api/stakeholders/${ownerRef.ref}`).catch(() => undefined);
+      owner = await api.get<Stakeholder>(`/api/stakeholders/${ownerRef.ref}`).catch(() => undefined);
     }
     dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: meetingActionDraft(u, record, item, owner) });
   };
@@ -836,27 +854,27 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
 
   const addFiles = (files: File[]) => run('upload', async () => {
     const errors: string[] = [];
-    for (const f of files) { const e = await uploadMaterial(u.id, f); if (e) errors.push(e); }
+    for (const f of files) { const e = await uploadMaterial(u.id, f, api.workspace); if (e) errors.push(e); }
     if (errors.length) throw new Error(errors.join('; '));
   });
 
   const removeFile = async (name: string) => {
     if (!(await confirm({ title: `Remove "${name}" from this update?`, message: 'The file is deleted from the update before it is analyzed.', confirmLabel: 'Remove file', tone: 'danger' }))) return;
-    void run('remove', () => apiDelete(`/api/context-updates/${u.id}/materials/${encodeURIComponent(name)}`));
+    void run('remove', () => api.del(`/api/context-updates/${u.id}/materials/${encodeURIComponent(name)}`));
   };
 
   const reopen = async () => {
     const msg = u.status === 'analyzing'
       ? 'Stop waiting for the agent and go back to collecting? Run the analysis again afterwards.'
       : `Add more material? The current proposals${records.length ? ' and meeting records (also confirmed ones)' : ''} are discarded, and the next analysis looks at all material together.`;
-    if (await confirm({ title: u.status === 'analyzing' ? 'Stop waiting for the agent?' : 'Add more material?', message: msg, confirmLabel: u.status === 'analyzing' ? 'Stop waiting' : 'Add material' })) void run('reopen', () => apiPost(`/api/context-updates/${u.id}/reopen`));
+    if (await confirm({ title: u.status === 'analyzing' ? 'Stop waiting for the agent?' : 'Add more material?', message: msg, confirmLabel: u.status === 'analyzing' ? 'Stop waiting' : 'Add material' })) void run('reopen', () => api.post(`/api/context-updates/${u.id}/reopen`));
   };
 
   const close = async () => {
     const files = u.keep_materials ? 'the materials are kept until you release them' : 'the materials are deleted';
     const kept = confirmedCount > 0 ? ' Confirmed meeting records are kept.' : '';
     if (!(await confirm({ title: 'Close without changes?', message: `No context file is changed. The record stays; ${files}.${kept}`, confirmLabel: 'Close without changes' }))) return;
-    void run('close', () => apiPost(`/api/context-updates/${u.id}/close`), 'Closed without changes.');
+    void run('close', () => api.post(`/api/context-updates/${u.id}/close`), 'Closed without changes.');
   };
 
   const remove = async () => {
@@ -871,17 +889,17 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       : '';
     if (!(await confirm({ title: u.status === 'done' ? 'Delete this record?' : 'Delete this update?', message: `${msg}${onlyCopy} The update's folder${u.meeting_folders ? ' and its meetings\' folders go' : ' goes'} to the trash (.situation-board/trash/), where you can still get the files back.`, confirmLabel: u.status === 'done' ? 'Delete record' : 'Delete update', tone: 'danger' }))) return;
     void (async () => {
-      try { await apiDelete(`/api/context-updates/${u.id}`); notify('success', 'Update moved to the trash.'); onBack(); changed(); } catch (err) {
+      try { await api.del(`/api/context-updates/${u.id}`); notify('success', 'Update moved to the trash.'); onBack(); changed(); } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Could not delete.');
       }
     })();
   };
 
-  const keepMaterials = (keep: boolean) => run('keep', () => apiPut(`/api/context-updates/${u.id}/keep-materials`, { keep }));
+  const keepMaterials = (keep: boolean) => run('keep', () => api.put(`/api/context-updates/${u.id}/keep-materials`, { keep }));
 
   const releaseMaterials = async () => {
     if (!(await confirm({ title: 'Delete the kept files of this update?', message: 'The record stays. This cannot be undone.', confirmLabel: 'Delete files', tone: 'danger' }))) return;
-    void run('keep', () => apiPut(`/api/context-updates/${u.id}/keep-materials`, { keep: false }), 'Files released.');
+    void run('keep', () => api.put(`/api/context-updates/${u.id}/keep-materials`, { keep: false }), 'Files released.');
   };
 
   // A finished update still has its files only when the user kept them; otherwise just the record's list.
@@ -968,7 +986,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
         )}
         {u.status === 'approved' && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button variant="secondary" size="sm" loading={busy === 'back'} onClick={() => run('back', () => apiPost(`/api/context-updates/${u.id}/back-to-review`))}>Change my selection</Button>
+            <Button variant="secondary" size="sm" loading={busy === 'back'} onClick={() => run('back', () => api.post(`/api/context-updates/${u.id}/back-to-review`))}>Change my selection</Button>
           </div>
         )}
       </section>
@@ -1001,7 +1019,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)' }}>
               {filesGone
                 ? <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-text-secondary)' }}>{f.name}</span>
-                : <a href={`/api/context-updates/${u.id}/materials/${f.name.split('/').map(encodeURIComponent).join('/')}`} target="_blank" rel="noreferrer" style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-accent)' }}>{f.name}</a>}
+                : <a href={api.link(`/api/context-updates/${u.id}/materials/${f.name.split('/').map(encodeURIComponent).join('/')}`)} target="_blank" rel="noreferrer" style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', color: 'var(--color-accent)' }}>{f.name}</a>}
               {(() => {
                 const copy = (u.transcripts ?? []).find((x) => x.file === f.name);
                 const problem = (u.transcript_problems ?? []).find((x) => x.source === f.name);
@@ -1158,7 +1176,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
             {(u.proposals.length > 0 || records.length > 0) && (
               <Button variant="primary" disabled={!canApprove || saving > 0} loading={busy === 'approve'}
                 title={saving > 0 ? 'Saving your choices...' : correctionBlocked ? (u.follow_up_problem ? 'This follow-up no longer matches the meeting\'s record: close or delete it' : 'This correction cannot be approved: see what it says above. Close it, or reject the record') : !canApprove ? 'Tick at least one proposal or confirm a meeting record, or close without changes' : noFileToWrite ? 'Finish this update now: nothing needs the apply command' : 'Lock your selection and get the apply command'}
-                onClick={() => run('approve', () => apiPost(`/api/context-updates/${u.id}/approve`),
+                onClick={() => run('approve', () => api.post(`/api/context-updates/${u.id}/approve`),
                   isCorrection ? 'Corrected. The meeting shows the new version of its record.' : !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.')}>
                 {acceptedCount > 0 ? `Approve ${acceptedCount} selected` : isCorrection ? 'Approve correction' : 'Approve'}
               </Button>

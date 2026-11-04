@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { useNavigate } from 'react-router-dom';
 import MentionIcon from './MentionIcon';
 import type { MentionType } from './MentionIcon';
-import { apiGet } from '@/utils/api';
+import { usePageApi } from '@/hooks/usePageApi';
 
 function mentionType(href: string): MentionType | null {
   const h = href.replace(/^\//, '');
@@ -19,18 +19,20 @@ function mentionType(href: string): MentionType | null {
 
 /** A mention chip: icon by type, opens the item in the app, struck through if the file is gone. */
 function MentionChip({ href, route, children }: { href: string; route: string; children: ReactNode }) {
+  // On a page that belongs to one workspace (an update opened from a notice), resolved there only.
+  const api = usePageApi();
   const navigate = useNavigate();
   const [missing, setMissing] = useState(false);
   const type = mentionType(href);
   useEffect(() => {
     let live = true;
-    apiGet<{ exists: boolean }>(`/api/mentions/resolve?href=${encodeURIComponent(href)}`)
+    api.get<{ exists: boolean }>(`/api/mentions/resolve?href=${encodeURIComponent(href)}`)
       .then((r) => live && setMissing(!r.exists))
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [href]);
+  }, [href, api]);
   return (
     <a
       href={route}
