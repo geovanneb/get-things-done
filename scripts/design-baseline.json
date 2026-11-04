@@ -51,7 +51,6 @@
     "components/context-updates/UpdatesList.tsx": 2,
     "components/context-updates/shared.tsx": 1,
     "components/insights/calendar/DayPanel.tsx": 1,
-    "components/meetings/TranscriptReader.tsx": 2,
     "components/routines/RoutineEditor.tsx": 2,
     "components/stakeholders/OrgChartDialogs.tsx": 5,
     "components/stakeholders/OrgChartTree.tsx": 2,

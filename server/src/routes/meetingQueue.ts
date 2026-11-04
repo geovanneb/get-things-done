@@ -6,6 +6,8 @@ import { MAX_RECORDING_BYTES, MeetingDigestService, queueId, type Upload } from 
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
 import { MeetingRecordingService } from '../services/meetingRecording';
 import { MeetingLiveTranscriptService } from '../services/meetingLiveTranscript';
+import { namesFor } from '../services/meetingDigestService';
+import { VoiceprintService } from '../services/voiceprints/service';
 import { fileInside, sendFile, topLevelName } from '../utils/files';
 import { utf8FileNames } from '../utils/uploadNames';
 
@@ -14,6 +16,7 @@ const service = new MeetingDigestService();
 const transcription = new MeetingTranscriptionService();
 const recording = new MeetingRecordingService(service);
 const liveTranscript = new MeetingLiveTranscriptService(service);
+const voiceprints = new VoiceprintService();
 
 /**
  * One file per request, streamed straight into its meeting's folder (recordings can be gigabytes): writeUpload checks
@@ -134,7 +137,16 @@ router.post('/:id/recordings/:file/:action', async (req: Request, res: Response)
 
 // PUT /api/meeting-queue/:id/recordings/:file/speakers  { transcript_sha256, names: { "Speaker 2": { name, ref } | null } }
 router.put('/:id/recordings/:file/speakers', async (req: Request, res: Response) => {
-  res.json(await transcription.nameSpeakers(queueId(param(req, 'id')), topLevelName(param(req, 'file')), req.body));
+  const id = queueId(param(req, 'id'));
+  const file = topLevelName(param(req, 'file'));
+  const meeting = await transcription.nameSpeakers(id, file, req.body);
+  res.json(meeting);
+  // A changed name drops the voice samples it added; a person whose voice is remembered learns from this one.
+  const r = meeting.files.find((f) => f.name === file)?.recording;
+  const asked = (req.body as { names?: unknown } | undefined)?.names;
+  if (r?.transcript_sha256 && asked && typeof asked === 'object') {
+    void voiceprints.afterNaming({ kind: 'queue', meeting: id, file, transcript_sha256: r.transcript_sha256 }, Object.keys(asked), namesFor(r));
+  }
 });
 
 // DELETE /api/meeting-queue/:id  remove a meeting and its files from the queue

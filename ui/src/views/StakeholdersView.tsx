@@ -15,7 +15,8 @@ import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Modal, { FormActions } from '@/components/common/Modal';
 import OrgChartsPanel from '@/components/stakeholders/OrgChartsPanel';
 import { apiDelete, apiPost, apiPut } from '@/utils/api';
-import type { Stakeholder } from '@/types';
+import type { RememberedVoice, Stakeholder } from '@/types';
+import { useRememberedVoices, VoiceBadge } from '@/components/stakeholders/VoiceTag';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -209,11 +210,13 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
 
 interface RowProps {
   stakeholder: Stakeholder;
+  /** Their voice is remembered on this computer (Recognize known voices). */
+  voice?: RememberedVoice;
   onEdit: () => void;
   onDelete: () => void;
 }
 
-function StakeholderRow({ stakeholder: s, onEdit, onDelete }: RowProps) {
+function StakeholderRow({ stakeholder: s, voice, onEdit, onDelete }: RowProps) {
   const missing = <span style={{ color: 'var(--color-text-muted)' }} aria-label="Not set">—</span>;
   return (
     <tr>
@@ -221,6 +224,7 @@ function StakeholderRow({ stakeholder: s, onEdit, onDelete }: RowProps) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Avatar name={s.name} size="md" />
           <Link to={`/stakeholders/${s.id}`} className="gtd-link-strong">{s.name}</Link>
+          <VoiceBadge voice={voice} />
         </div>
       </td>
       <td style={{ color: 'var(--color-text-secondary)' }}>{s.role || missing}</td>
@@ -263,6 +267,7 @@ export default function StakeholdersView() {
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Stakeholder | null>(null);
+  const { voices } = useRememberedVoices();
 
   async function fetchStakeholders() {
     try {
@@ -376,7 +381,7 @@ export default function StakeholdersView() {
                   </thead>
                   <tbody>
                     {sorted.map((s) => (
-                      <StakeholderRow key={s.id} stakeholder={s}
+                      <StakeholderRow key={s.id} stakeholder={s} voice={voices.get(s.id)}
                         onEdit={() => { setEditing(s); setModalOpen(true); }}
                         onDelete={() => handleDelete(s)} />
                     ))}

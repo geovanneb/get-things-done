@@ -1,6 +1,7 @@
 /** Messages between the dashboard and the transcription worker (see worker.ts). */
 import type { LanguageChange } from './languages';
 import type { SpeakerTurn } from './parts';
+import type { Interval } from './voices';
 
 /** A model as the worker needs it: which engine, and the full paths of its files and of the VAD model. */
 export interface EngineModel {
@@ -19,8 +20,13 @@ export type WorkerRequest =
   | { type: 'version' }
   | { type: 'check'; model: EngineModel }
   | { type: 'transcribe'; model: EngineModel; wav: string; language: string; changes?: LanguageChange[]; turns?: SpeakerTurn[] }
-  /** Who spoke when in a whole recording. A job of its own: if it fails, the transcript does not. */
-  | { type: 'speakers'; wav: string; segmentation: string; embedding: string; threads: number }
+  /**
+   * Who spoke when in a whole recording. A job of its own: if it fails, the transcript does not. `identify`: also the
+   * mean embedding of each voice's clean speech, to compare with remembered voices (Recognize known voices).
+   */
+  | { type: 'speakers'; wav: string; segmentation: string; embedding: string; threads: number; identify?: boolean }
+  /** One embedding per stretch of a recording, to remember a voice the user named. Light: no transcription model. */
+  | { type: 'embed'; wav: string; embedding: string; threads: number; intervals: Interval[] }
   /**
    * Follows a recording as it is made: a 16 kHz mono 16-bit WAV that grows. The worker reads only audio the dashboard
    * says is saved (`committed`), then everything up to `end` once the recording is sealed.
@@ -38,6 +44,9 @@ export type WorkerRequest =
  * Sent to a job after its request. `helper-known`: its GPU engine was recorded (see `helper` below). The others go to a
  * follow job; byte counts are of audio, after the 44-byte header.
  */
+/** A diarized voice's mean embedding, and each clean sample's own, to tell one person from two merged into one voice. */
+export interface HeardVoiceReply { speaker: number; centroid: number[]; seconds: number; samples: { seconds: number; embedding: number[] }[] }
+
 export type WorkerControl = { type: 'helper-known' } | { type: 'committed'; bytes: number } | { type: 'end'; bytes: number } | ({ type: 'language' } & LanguageChange);
 
 export type WorkerReply =
@@ -54,6 +63,12 @@ export type WorkerReply =
   /** A follow job's decoded part, with or without words: its own speech and the language it sounded like. */
   | { type: 'part'; start: number; end: number; detected: string | null }
   | { type: 'turns'; turns: SpeakerTurn[] }
+  /** A `speakers` job with `identify`: per diarized voice (as in `turns`), the mean embedding of its clean speech. */
+  | { type: 'voices'; voices: HeardVoiceReply[] }
+  /** A transcription with turns: which diarized voice became which `Speaker N` of the transcript, as [voice, N]. */
+  | { type: 'labels'; labels: [number, number][] }
+  /** An `embed` job: one embedding per interval asked for, in order; null for one too short or silent to tell. */
+  | { type: 'embeddings'; embeddings: (number[] | null)[] }
   /**
    * `bytes`: for a follow job, exactly how much audio it read, so the dashboard can tell it covered all of it.
    * `late_language`: a language change came after a part it applies to was already transcribed.

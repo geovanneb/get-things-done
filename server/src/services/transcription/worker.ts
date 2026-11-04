@@ -11,13 +11,14 @@
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { Worker } from 'worker_threads';
-import type { EngineModel, WorkerControl, WorkerRequest, WorkerReply } from './protocol';
+import type { EngineModel, HeardVoiceReply, WorkerControl, WorkerRequest, WorkerReply } from './protocol';
 import { languageAt, type LanguageChange } from './languages';
 import { contextRange, cutsAround, RecentAudio, SHORTEST_TURN, speakerCuts, speakerOf, speakerTurns, splitAtChanges, splitLong, type Part, type SpeakerTurn } from './parts';
 import { markRepeats } from './repeats';
 import { readWavFormat, wavChunks, WavError } from './wav';
 import { HelperError, startHelper } from './whisperHelper';
 import { detectedLanguage } from './languageSuggestion';
+import { centroid, cleanIntervals, compact, secondsOf, MIN_SAMPLE_SECONDS, type Interval } from './voices';
 
 const SAMPLE_RATE = 16000;
 /** Enough for the context around any part: a stretch is cut well before this. */
@@ -43,7 +44,10 @@ interface Sherpa {
   Vad: new (config: unknown, bufferSeconds: number) => SherpaVad;
   LinearResampler: new (from: number, to: number) => SherpaResampler;
   OfflineSpeakerDiarization: new (config: unknown) => { process(samples: Float32Array): { start: number; end: number; speaker: number }[] };
+  SpeakerEmbeddingExtractor: new (config: unknown) => SherpaExtractor;
 }
+interface SherpaOnlineStream { acceptWaveform(input: { samples: Float32Array; sampleRate: number }): void; inputFinished(): void }
+interface SherpaExtractor { createStream(): SherpaOnlineStream; isReady(stream: SherpaOnlineStream): boolean; compute(stream: SherpaOnlineStream, enableExternalBuffer?: boolean): Float32Array }
 
 function sendNow(reply: WorkerReply): void {
   if (process.connected) process.send?.(reply);
@@ -341,6 +345,8 @@ async function transcribe(sherpa: Sherpa, request: Extract<WorkerRequest, { type
   vad.flush();
   job.ending = true;
   await decode();
+  // Which diarized voice became which Speaker N: remembering a voice takes its samples from the diarizer's own turns.
+  if (job.shown.size) send({ type: 'labels', labels: [...job.shown] });
   send({ type: 'done', seconds: format.duration, segments });
 }
 
@@ -368,7 +374,80 @@ async function findSpeakers(sherpa: Sherpa, request: Extract<WorkerRequest, { ty
     clustering: { numClusters: -1, threshold: SAME_SPEAKER },
     minDurationOn: 0.3, minDurationOff: 0.5,
   });
-  send({ type: 'turns', turns: speakerTurns(diarization.process(samples.subarray(0, filled)), format.duration) });
+  const turns = speakerTurns(diarization.process(samples.subarray(0, filled)), format.duration);
+  send({ type: 'turns', turns });
+  if (request.identify) {
+    // Only a help for suggestions: when it fails, the speakers are still told apart.
+    try {
+      send({ type: 'voices', voices: voicesOf(sherpa, request, turns, samples.subarray(0, filled)) });
+    } catch (err) {
+      process.stderr.write(`Voices: ${(err as Error).message}\n`);
+    }
+  }
+  send({ type: 'done', seconds: format.duration, segments: 0 });
+}
+
+function newExtractor(sherpa: Sherpa, model: string, threads: number): SherpaExtractor {
+  return new sherpa.SpeakerEmbeddingExtractor({ model, numThreads: threads, debug: 0 });
+}
+
+/** One embedding of some audio; null when the model cannot tell anything from it (too short). */
+function embedOne(extractor: SherpaExtractor, samples: Float32Array): number[] | null {
+  if (samples.length < MIN_SAMPLE_SECONDS * SAMPLE_RATE) return null;
+  const stream = extractor.createStream();
+  // A copy: Electron refuses buffers that live in native memory, and a subarray shares its parent's.
+  stream.acceptWaveform({ samples: Float32Array.from(samples), sampleRate: SAMPLE_RATE });
+  stream.inputFinished();
+  if (!extractor.isReady(stream)) return null;
+  return Array.from(extractor.compute(stream, false));
+}
+
+/** Each voice's mean embedding over its clean speech. They leave this process only as numbers, never as audio. */
+function voicesOf(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'speakers' }>, turns: SpeakerTurn[], samples: Float32Array): HeardVoiceReply[] {
+  const extractor = newExtractor(sherpa, request.embedding, request.threads);
+  const voices: HeardVoiceReply[] = [];
+  for (const speaker of new Set(turns.map((t) => t.speaker).filter((v) => v > 0))) {
+    const intervals = cleanIntervals(turns, speaker);
+    const embeddings = intervals.map((i) => embedOne(extractor, samples.subarray(Math.round(i.start * SAMPLE_RATE), Math.round(i.end * SAMPLE_RATE))));
+    const used = intervals.filter((_, n) => embeddings[n]);
+    const mean = centroid(embeddings.filter((e): e is number[] => e !== null));
+    const each = intervals.flatMap((i, n) => (embeddings[n] ? [{ seconds: Math.round((i.end - i.start) * 1000) / 1000, embedding: compact(embeddings[n]!) }] : []));
+    if (mean) voices.push({ speaker, centroid: compact(mean), seconds: secondsOf(used), samples: each });
+  }
+  return voices;
+}
+
+/**
+ * The embedding job: reads only the stretches asked for, as the recording streams by, so an hours-long recording is
+ * never held in memory. Stretches are in seconds of the recording, as the diarization gave them.
+ */
+async function embed(sherpa: Sherpa, request: Extract<WorkerRequest, { type: 'embed' }>): Promise<void> {
+  const format = await readWavFormat(request.wav);
+  const wanted: Interval[] = request.intervals.filter((i) => Number.isFinite(i.start) && Number.isFinite(i.end) && i.start >= 0 && i.end > i.start).slice(0, 64);
+  if (wanted.length !== request.intervals.length) throw new Error('Some stretches to remember are not valid');
+  const resampler = format.sampleRate === SAMPLE_RATE ? null : new sherpa.LinearResampler(format.sampleRate, SAMPLE_RATE);
+  const ranges = wanted.map((i) => ({ from: Math.round(i.start * SAMPLE_RATE), to: Math.round(i.end * SAMPLE_RATE) }));
+  const buffers = ranges.map((r) => new Float32Array(Math.max(0, r.to - r.from)));
+  let position = 0;
+  const take = (block: Float32Array) => {
+    const end = position + block.length;
+    ranges.forEach((r, n) => {
+      const from = Math.max(r.from, position);
+      const to = Math.min(r.to, end);
+      if (to > from) buffers[n]!.set(block.subarray(from - position, to - position), from - r.from);
+    });
+    position = end;
+  };
+  const last = Math.max(...ranges.map((r) => r.to));
+  for await (const chunk of wavChunks(request.wav, format, 1)) {
+    take(resampler ? resampler.resample(chunk) : chunk);
+    if (position >= last) break;
+  }
+  if (resampler && position < last) take(resampler.flush(new Float32Array(0)));
+  // A stretch past the end (rounding at the last sample) keeps what the recording has; one too short then gets null.
+  const heard = buffers.map((b, n) => (ranges[n]!.to > position ? b.subarray(0, Math.max(0, position - ranges[n]!.from)) : b));
+  const extractor = newExtractor(sherpa, request.embedding, request.threads);
+  send({ type: 'embeddings', embeddings: heard.map((b) => { const e = embedOne(extractor, b); return e ? compact(e) : null; }) });
   send({ type: 'done', seconds: format.duration, segments: 0 });
 }
 
@@ -389,6 +468,10 @@ async function handle(request: WorkerRequest): Promise<void> {
   }
   if (request.type === 'speakers') {
     await findSpeakers(sherpa, request);
+    return;
+  }
+  if (request.type === 'embed') {
+    await embed(sherpa, request);
     return;
   }
   await transcribe(sherpa, request);

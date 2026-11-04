@@ -35,7 +35,8 @@
     "test:transcript-reading": "tsx src/utils/transcriptReading.test.ts",
     "test:meeting-queue": "tsx src/utils/meetingQueue.test.ts",
     "test:meeting-history": "tsx src/utils/meetingHistory.test.ts",
-    "test:speaker-choices": "tsx src/utils/speakerChoices.test.ts"
+    "test:speaker-choices": "tsx src/utils/speakerChoices.test.ts",
+    "test:voiceprints": "tsx src/utils/voiceprints.test.ts"
   },
   "dependencies": {
     "date-fns": "^3.6.0",

@@ -5,10 +5,14 @@ import { isMeetingId } from '../services/meetingLibrary';
 import { sendFile } from '../utils/files';
 import { startCorrection } from '../services/meetingCorrectionService';
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
+import { nameVersionSpeakers } from '../services/meetingVersions';
+import { VoiceprintService } from '../services/voiceprints/service';
+import { WorkspaceService } from '../services/workspace';
 
 const router = Router();
 const service = new MeetingHistoryService();
 const transcription = new MeetingTranscriptionService();
+const voiceprints = new VoiceprintService();
 
 /** A meeting id from the path, checked before it reaches a service: MQ-…, CU-… or CU-…-M-01. */
 function meetingId(req: Request): string {
@@ -77,6 +81,22 @@ router.put('/:id/version', async (req: Request, res: Response) => {
   const id = meetingId(req);
   await service.chooseVersion(id, (req.body as { version?: unknown } | undefined)?.version);
   res.json(await service.detail(id));
+});
+
+// PUT /api/meetings/:id/versions/:version/speakers  { transcript_sha256, names: { "Speaker 2": { name, ref } | null } }
+// names the speakers of a Transcribe again version: the confirm path of a kept meeting, apart from its reviewed record
+router.put('/:id/versions/:version/speakers', async (req: Request, res: Response) => {
+  const id = meetingId(req);
+  await service.detail(id);
+  const b = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+  const asked = (b['names'] && typeof b['names'] === 'object' && !Array.isArray(b['names']) ? b['names'] : {}) as Record<string, unknown>;
+  const version = param(req, 'version');
+  const named = await nameVersionSpeakers(new WorkspaceService().getWorkspacePath(), id, { version, transcript_sha256: b['transcript_sha256'] }, asked);
+  res.json(await service.detail(id));
+  // A changed name drops the voice samples it added; a person whose voice is remembered learns from this one.
+  if (named.version.speakers) {
+    void voiceprints.afterNaming({ kind: 'folder', meeting: id, version, transcript_sha256: named.version.speakers.transcript_sha256 }, Object.keys(asked), named.after);
+  }
 });
 
 // POST /api/meetings/:id/corrections  starts a correction of the meeting's reviewed record: a context update to analyze

@@ -15,6 +15,7 @@ import { formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppDispatch } from '@/store';
 import { meetingPrepDraft } from '@/utils/meetingPrep';
 import type { ClaudeAgent, OrgPersonSummary, OrgPosition, OutputTemplate, Stakeholder, Task } from '@/types';
+import { StakeholderVoice } from '@/components/stakeholders/VoiceTag';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -403,6 +404,8 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
                   {tag}
                 </span>
               ))}
+
+            <StakeholderVoice id={stakeholder.id} name={stakeholder.name} />
           </div>
         </div>
 

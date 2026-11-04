@@ -19,6 +19,7 @@ import routinesRouter from './routines';
 import meetingQueueRouter from './meetingQueue';
 import meetingsRouter from './meetings';
 import transcriptionRouter from './transcription';
+import voiceprintsRouter from './voiceprints';
 import setupRouter from './setup';
 import appRouter from './app';
 
@@ -50,5 +51,6 @@ export function registerRoutes(app: Express): void {
   app.use('/api/meeting-queue', meetingQueueRouter);
   app.use('/api/meetings', meetingsRouter);
   app.use('/api/transcription', transcriptionRouter);
+  app.use('/api/voiceprints', voiceprintsRouter);
   app.use('/api/app', appRouter);
 }

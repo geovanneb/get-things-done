@@ -7,6 +7,7 @@ import { apiDelete, apiPost, apiPut } from '@/utils/api';
 import { useApi } from '@/hooks/useApi';
 import { useAppState } from '@/store';
 import type { Transcription, TranscriptionLanguage, TranscriptionModel } from '@/types';
+import { RememberedVoices } from './RememberedVoices';
 
 const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' };
 
@@ -165,7 +166,7 @@ function SpeakerDetection({ speakers, enabled, saving, downloading, onToggle, on
         : <span style={{ fontWeight: 600 }}>Tell speakers apart</span>}
       <span style={hintStyle}>
         Marks who spoke when, as Speaker 1 and Speaker 2, in a transcript made after a meeting. It runs on this computer, adds
-        about a tenth of the meeting&apos;s length, and keeps nothing of anyone&apos;s voice. A live transcript has no speakers.
+        about a tenth of the meeting&apos;s length, and keeps nothing of anyone&apos;s voice unless you ask it to remember one (below). A live transcript has no speakers.
       </span>
       {d?.message && !running && <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{d.message}</p>}
       {running && (
@@ -330,6 +331,7 @@ export default function TranscriptionSettings() {
       })()}
       <SpeakerDetection speakers={data.speakers} enabled={data.settings.speakers} saving={saving} downloading={downloading}
         onToggle={(on) => void save({ speakers: on })} onAction={(action) => void act(data.speakers, action)} />
+      <RememberedVoices on={data.settings.recognize_voices === true} speakersOn={data.settings.speakers} saving={saving} onToggle={(on) => void save({ recognize_voices: on })} />
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
           <input type="checkbox" checked={data.settings.keep_recordings} disabled={saving}

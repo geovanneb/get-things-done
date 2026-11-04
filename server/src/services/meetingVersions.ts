@@ -1,7 +1,8 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
 import { createHash, randomUUID } from 'crypto';
-import { meetingsRoot, place, readFolder, writeManifest, type FolderManifest, type FolderState, type FolderVersion, type TranscribeRequest } from './meetingFolder';
+import { meetingsRoot, place, readFolder, writeManifest, type FolderManifest, type FolderState, type FolderVersion, type TranscribeRequest, type VersionSpeakers } from './meetingFolder';
+import { MAX_SPEAKER_NAMES, parseSpeakerNames, SPEAKER_LABEL, type SpeakerName, type SpeakerSuggestion } from './speakerData';
 import { isMeetingId } from './meetingLibrary';
 import { hashFile } from '../utils/fileHash';
 import { fileInside, workspaceEntry } from '../utils/files';
@@ -195,7 +196,11 @@ export async function failTranscription(ws: string, id: string, job: { generatio
  * unchanged: copies of the current version's other files and the new transcript in place of the old one.
  * Written under a draft name and renamed into place, then listed; the current version stays as it is.
  */
-export async function publishTranscription(ws: string, id: string, job: { generation: string; token: string }, result: { content: Buffer; model: string; language: string }): Promise<string | null> {
+export async function publishTranscription(ws: string, id: string, job: { generation: string; token: string }, result: {
+  content: Buffer; model: string; language: string;
+  /** Speakers told apart: where each speaks alone, and suggestions from remembered voices. */
+  speakers?: Pick<VersionSpeakers, 'voices' | 'suggestions'>;
+}): Promise<string | null> {
   return withFolder(ws, id, async (folder) => {
     const m = folder.manifest;
     const t = m.transcribe;
@@ -219,7 +224,11 @@ export async function publishTranscription(ws: string, id: string, job: { genera
         files.push({ name: f.name, sha256: sha });
       }
       await fsp.writeFile(path.join(draft, t.transcript), result.content, { flag: 'wx' });
-      files.push({ name: t.transcript, sha256: (await hashFile(path.join(draft, t.transcript))).sha256 });
+      const transcriptSha = (await hashFile(path.join(draft, t.transcript))).sha256;
+      files.push({ name: t.transcript, sha256: transcriptSha });
+      const speakers: VersionSpeakers | undefined = result.speakers?.voices.length
+        ? { transcript: t.transcript, transcript_sha256: transcriptSha, voices: result.speakers.voices, ...(result.speakers.suggestions?.items.length ? { suggestions: result.speakers.suggestions } : {}) }
+        : undefined;
       // A folder of that name the manifest does not list is a leftover of a crash: it never counts, and goes now.
       const target = path.join(folder.dir, id_);
       await fsp.rm(target, { recursive: true, force: true });
@@ -227,7 +236,7 @@ export async function publishTranscription(ws: string, id: string, job: { genera
       const { transcribe: _done, ...rest } = m;
       await writeManifest(folder, {
         ...rest,
-        versions: [...m.versions, { id: id_, at: new Date().toISOString(), made_from: 'transcription', model: result.model, language: result.language, from: { name: audio.name, sha256: audio.sha256 }, files }],
+        versions: [...m.versions, { id: id_, at: new Date().toISOString(), made_from: 'transcription', model: result.model, language: result.language, from: { name: audio.name, sha256: audio.sha256 }, files, ...(speakers ? { speakers } : {}) }],
       });
       return id_;
     } finally {
@@ -421,4 +430,72 @@ export async function readVersionFile(ws: string, id: string, version: string, n
   if (folder.state !== 'ok') return null;
   const v = folder.manifest.versions.find((x) => x.id === version);
   return v ? versionReader(folder, v)(name) : null;
+}
+
+/** What a click on a version's speakers was made on: refused when any of it changed meanwhile. */
+export interface VersionSpeakersTarget { version: unknown; transcript_sha256: unknown }
+
+/** The Transcribe again version whose speakers a click names, as the page saw it. */
+function speakersOf(folder: Folder, target: VersionSpeakersTarget): { version: FolderVersion; speakers: VersionSpeakers } {
+  if (typeof target.version !== 'string') throw httpError(400, 'Invalid version: use one the meeting lists, like v2');
+  const version = folder.manifest.versions.find((v) => v.id === target.version);
+  if (!version) throw httpError(404, `This meeting has no version ${target.version}`);
+  if (version.made_from !== 'transcription' || !version.speakers) throw httpError(409, 'The speakers of this version were not told apart, so they cannot be named here');
+  if (target.transcript_sha256 !== version.speakers.transcript_sha256) throw httpError(409, 'The transcript changed meanwhile; look again');
+  return { version, speakers: version.speakers };
+}
+
+async function saveSpeakers(folder: Folder, version: FolderVersion, speakers: VersionSpeakers): Promise<FolderManifest> {
+  const next = { ...folder.manifest, versions: folder.manifest.versions.map((v) => (v.id === version.id ? { ...v, speakers } : v)) };
+  await writeManifest(folder, next);
+  return next;
+}
+
+/**
+ * Names the speakers of a Transcribe again version: `{ "Speaker 2": { name, ref } }`, null to take a name back. The
+ * confirm path of a kept meeting, apart from the queue's: only labels that version's transcript has, only for the
+ * transcript the page showed. `suggestion`: the click was "Use" on a suggestion, which must still be there, for that
+ * person, made with that speaker model; otherwise it is refused as stale.
+ */
+export async function nameVersionSpeakers(ws: string, id: string, target: VersionSpeakersTarget, names: Record<string, unknown>,
+  suggestion?: { label: string; ref: string; model_sha256: string }): Promise<{ manifest: FolderManifest; version: FolderVersion; before: SpeakerName[]; after: SpeakerName[] }> {
+  return withFolder(ws, id, async (folder) => {
+    const { version, speakers } = speakersOf(folder, target);
+    if (suggestion) {
+      const open = speakers.suggestions?.model_sha256 === suggestion.model_sha256 && speakers.suggestions.items.some((i) => i.label === suggestion.label && i.ref === suggestion.ref);
+      if (!open) throw httpError(409, 'This suggestion is no longer there; look again');
+    }
+    const labels = new Set(speakers.voices.map((v) => v.label));
+    const before = speakers.names ?? [];
+    const named = new Map(before.map((n) => [n.label, n] as const));
+    for (const [label, value] of Object.entries(names)) {
+      if (!SPEAKER_LABEL.test(label) || !labels.has(label)) throw httpError(400, `This transcript has no ${label}`);
+      if (value === null) { named.delete(label); continue; }
+      const [person] = parseSpeakerNames([{ ...(value && typeof value === 'object' ? value : {}), label }]);
+      if (!person) throw httpError(400, `Invalid name for ${label}`);
+      named.set(label, person);
+    }
+    if (named.size > MAX_SPEAKER_NAMES) throw httpError(400, `At most ${MAX_SPEAKER_NAMES} speakers can be named in one transcript`);
+    const after = [...named.values()];
+    const { names: _old, ...rest } = speakers;
+    const manifest = await saveSpeakers(folder, version, after.length ? { ...rest, names: after } : rest);
+    return { manifest, version: manifest.versions.find((v) => v.id === version.id)!, before, after };
+  });
+}
+
+/** "Not them": hides one suggestion of a version. Nothing about the voice is kept or learned from it. */
+export async function dismissVersionSuggestion(ws: string, id: string, target: VersionSpeakersTarget, label: unknown): Promise<FolderManifest> {
+  return withFolder(ws, id, async (folder) => {
+    const { version, speakers } = speakersOf(folder, target);
+    if (!speakers.suggestions?.items.some((i) => i.label === label)) throw httpError(409, 'This suggestion is no longer there; look again');
+    const items: SpeakerSuggestion[] = speakers.suggestions.items.filter((i) => i.label !== label);
+    const { suggestions: _s, ...rest } = speakers;
+    return saveSpeakers(folder, version, items.length ? { ...rest, suggestions: { model_sha256: speakers.suggestions.model_sha256, items } } : rest);
+  });
+}
+
+/** The speakers of a version, read only, with the open suggestions (not for a label already named). */
+export function openSuggestions(speakers: VersionSpeakers | undefined): SpeakerSuggestion[] {
+  const named = new Set((speakers?.names ?? []).map((n) => n.label));
+  return (speakers?.suggestions?.items ?? []).filter((i) => !named.has(i.label));
 }

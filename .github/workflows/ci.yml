@@ -83,7 +83,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       # Every run, not only on a cache miss: the app's own downloader fetches SenseVoice (240 MB) and the
-      # voice-activity model from their pinned addresses and checks every byte, as Settings does.
+      # voice-activity and speaker models from their pinned addresses and checks every byte, as Settings does.
       - name: Download the test model with the app's downloader
         env:
           ESB_MODELS_PATH: ${{ runner.temp }}/models
@@ -94,8 +94,11 @@ jobs:
             (async () => {
               await service.download('sensevoice-2024-07-17');
               await TranscriptionModelService.settled();
+              // The speaker model (41 MB): who spoke when, and the voices of Recognize known voices.
+              await service.download('speaker-detection');
+              await TranscriptionModelService.settled();
               const model = (await service.view()).models.find((m) => m.id === 'sensevoice-2024-07-17');
-              if (!model.installed || !(await service.installed('silero-vad'))) { console.error(model.download); process.exit(1); }
+              if (!model.installed || !(await service.installed('silero-vad')) || !(await service.installed('speaker-detection'))) { console.error(model.download); process.exit(1); }
               console.log('Model installed and verified');
             })();
           "
@@ -115,7 +118,7 @@ jobs:
         env:
           STT_TEST_MODELS: ${{ runner.temp }}/models
           STT_TEST_AUDIO: ${{ runner.temp }}/audio
-        run: node --import tsx --test --test-concurrency=1 --test-name-pattern="real model" tests/transcription-engine.test.ts tests/meeting-acceptance.test.ts
+        run: node --import tsx --test --test-concurrency=1 --test-name-pattern="real model" tests/transcription-engine.test.ts tests/meeting-acceptance.test.ts tests/voiceprints.test.ts
 
   design:
     name: Design (browser)
