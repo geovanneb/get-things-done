@@ -211,12 +211,24 @@ export function Textarea({
 interface SelectProps extends FieldFrameProps {
   value: string;
   onChange: (value: string) => void;
-  options: ReadonlyArray<{ value: string; label: string; disabled?: boolean }>;
+  /** `group`: options with the same group, next to each other, are shown under that heading (an `optgroup`). */
+  options: ReadonlyArray<{ value: string; label: string; disabled?: boolean; group?: string }>;
   disabled?: boolean;
   size?: 'sm' | 'md';
   'aria-label'?: string;
   id?: string;
   selectStyle?: React.CSSProperties;
+}
+
+/** Consecutive options of the same group, in order; options without a group stand alone. */
+function groupOptions<T extends { group?: string }>(options: ReadonlyArray<T>): { group?: string; options: T[] }[] {
+  const out: { group?: string; options: T[] }[] = [];
+  for (const o of options) {
+    const last = out[out.length - 1];
+    if (last && last.group === o.group) last.options.push(o);
+    else out.push({ ...(o.group ? { group: o.group } : {}), options: [o] });
+  }
+  return out;
 }
 
 /** A native select: keyboard and screen-reader behaviour come with it. */
@@ -249,11 +261,14 @@ export function Select({
         className={['gtd-control', size === 'sm' && 'gtd-control--sm'].filter(Boolean).join(' ')}
         style={selectStyle}
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value} disabled={o.disabled}>
-            {o.label}
-          </option>
-        ))}
+        {groupOptions(options).map((g, i) => {
+          const items = g.options.map((o) => (
+            <option key={o.value} value={o.value} disabled={o.disabled}>
+              {o.label}
+            </option>
+          ));
+          return g.group ? <optgroup key={`${g.group}-${i}`} label={g.group}>{items}</optgroup> : <React.Fragment key={`none-${i}`}>{items}</React.Fragment>;
+        })}
       </select>
     </Field>
   );

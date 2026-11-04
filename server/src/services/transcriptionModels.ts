@@ -76,6 +76,11 @@ export interface TranscriptionSettings {
   live_model_source: LiveModelSource;
   /** Tell speakers apart in transcripts made after a meeting, once the speaker model is downloaded. */
   speakers: boolean;
+  /**
+   * Recognize known voices: suggest a speaker's name from the voices remembered on this computer, with each person's
+   * consent (docs/voiceprints.md). Off by default; needs `speakers` and the speaker model.
+   */
+  recognize_voices: boolean;
   updated_at: string | null;
 }
 
@@ -251,7 +256,7 @@ export const VAD: CatalogModel = {
   ],
 };
 
-const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, live_model_source: 'unset', speakers: true, updated_at: null };
+const DEFAULTS: TranscriptionSettings = { model: 'whisper-large-v3-turbo', language: 'auto', keep_recordings: false, live_model: null, live_model_source: 'unset', speakers: true, recognize_voices: false, updated_at: null };
 /** Below this much memory the default model leaves little room, and the lighter one is suggested. */
 const LOW_MEMORY_BYTES = 8.5 * 1024 ** 3;
 const STALL_MS = 60_000;
@@ -288,6 +293,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
   if (o['language'] !== undefined && o['language'] !== 'auto' && !WHISPER_LANGUAGES.some((l) => l.id === o['language'])) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
   if (o['keep_recordings'] !== undefined && typeof o['keep_recordings'] !== 'boolean') throw httpError(400, 'Invalid keep_recordings: use true or false');
   if (o['speakers'] !== undefined && typeof o['speakers'] !== 'boolean') throw httpError(400, 'Invalid speakers: use true or false');
+  if (o['recognize_voices'] !== undefined && typeof o['recognize_voices'] !== 'boolean') throw httpError(400, 'Invalid recognize_voices: use true or false');
   if (o['live_model'] !== undefined && o['live_model'] !== null && !catalog.some((m) => m.id === o['live_model'])) throw httpError(400, 'Invalid live_model: a catalog model, or null for no live transcript');
   const model = (o['model'] as string | undefined) ?? base.model;
   return {
@@ -297,6 +303,7 @@ export function parseTranscriptionSettings(input: unknown, base: TranscriptionSe
     language: (o['language'] as TranscriptionLanguage | undefined) ?? base.language,
     keep_recordings: (o['keep_recordings'] as boolean | undefined) ?? base.keep_recordings,
     speakers: (o['speakers'] as boolean | undefined) ?? base.speakers,
+    recognize_voices: (o['recognize_voices'] as boolean | undefined) ?? base.recognize_voices,
     live_model: o['live_model'] === undefined ? base.live_model : (o['live_model'] as string | null),
     live_model_source: LIVE_SOURCES.includes(o['live_model_source'] as LiveModelSource) ? o['live_model_source'] as LiveModelSource : base.live_model_source,
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,

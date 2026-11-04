@@ -7,6 +7,7 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { hashFile } from '../utils/fileHash';
 import { fileInside, workspaceEntry } from '../utils/files';
 import { moveToTrash } from './trash';
+import { parseSpeakerNames, parseSpeakerSuggestions, parseSpeakerVoices, type SpeakerName, type SpeakerSuggestion, type SpeakerVoices } from './speakerData';
 
 /**
  * A meeting's own folder: where its text lives once its update is done, instead of the update's materials/.
@@ -54,6 +55,39 @@ export interface FolderVersion {
    * the changes), so finishing again after a crash finds this version instead of writing another. Absent on older ones.
    */
   receipt?: string;
+  /** A transcription only, made with speakers told apart: who speaks in its transcript (see VersionSpeakers). */
+  speakers?: VersionSpeakers;
+}
+
+/**
+ * The speakers of a Transcribe again version's transcript: where each speaks alone (times only), "sounds like"
+ * suggestions from remembered voices, and the names the user confirmed for this very transcript. A new transcription
+ * numbers speakers anew, so this belongs to the version, never to the meeting. Changed only under the meeting's lock
+ * (meetingVersions.ts).
+ */
+export interface VersionSpeakers {
+  transcript: string;
+  transcript_sha256: string;
+  voices: SpeakerVoices['voices'];
+  suggestions?: { model_sha256: string; items: SpeakerSuggestion[] };
+  names?: SpeakerName[];
+}
+
+/** A version's speakers as stored, only for a transcript the version lists with that hash; anything else is left out. */
+function parseVersionSpeakers(raw: unknown, files: { name: string; sha256: string }[]): VersionSpeakers | undefined {
+  const o = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null) as Record<string, unknown> | null;
+  if (!o || typeof o['transcript'] !== 'string' || typeof o['transcript_sha256'] !== 'string') return undefined;
+  if (!files.some((f) => f.name === o['transcript'] && f.sha256 === o['transcript_sha256'])) return undefined;
+  const voices = parseSpeakerVoices({ transcript_sha256: o['transcript_sha256'], voices: o['voices'] });
+  if (!voices) return undefined;
+  const suggestions = o['suggestions'] && typeof o['suggestions'] === 'object'
+    ? parseSpeakerSuggestions({ ...(o['suggestions'] as Record<string, unknown>), transcript_sha256: o['transcript_sha256'] }) : undefined;
+  const names = parseSpeakerNames(o['names']);
+  return {
+    transcript: o['transcript'], transcript_sha256: o['transcript_sha256'], voices: voices.voices,
+    ...(suggestions ? { suggestions: { model_sha256: suggestions.model_sha256, items: suggestions.items } } : {}),
+    ...(names.length ? { names } : {}),
+  };
 }
 
 /** Transcribe again: one recording of the meeting, waiting, being transcribed, or failed. At most one at a time. */
@@ -119,7 +153,8 @@ function parseManifest(raw: string, id: string): FolderManifest | string {
     if (v['made_from'] === 'transcription') {
       const from = fileList([v['from']]);
       if (!from || typeof v['model'] !== 'string' || typeof v['language'] !== 'string') return 'a version in meeting.json is damaged';
-      versions.push({ id: v['id'], at: v['at'], made_from: 'transcription', files, model: v['model'], language: v['language'], from: from[0]! });
+      const speakers = parseVersionSpeakers(v['speakers'], files);
+      versions.push({ id: v['id'], at: v['at'], made_from: 'transcription', files, model: v['model'], language: v['language'], from: from[0]!, ...(speakers ? { speakers } : {}) });
     } else if (v['made_from'] === 'correction') {
       if (typeof v['correction'] !== 'string' || !/^CU-\d{4}-\d{4}$/.test(v['correction']) || typeof v['base'] !== 'string' || !VERSION_ID.test(v['base'])) return 'a version in meeting.json is damaged';
       if (v['receipt'] !== undefined && (typeof v['receipt'] !== 'string' || !/^[0-9a-f]{64}$/.test(v['receipt']))) return 'a version in meeting.json is damaged';

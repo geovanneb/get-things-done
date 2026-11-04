@@ -63,3 +63,19 @@ A local process that can change workspace directories remains trusted. Path chec
 are not an OS sandbox against another process swapping directories during a request.
 Atomic replacement avoids partial files and temporary-file collisions, but concurrent
 read-modify-write operations can still lose updates. Keep workspace backups.
+
+## Remembered voices (biometric data)
+
+**Recognize known voices** (off by default, [docs/voiceprints.md](docs/voiceprints.md)) keeps a voiceprint of
+a stakeholder only after the user records that person's consent. Voiceprints are biometric data:
+
+- They stay on this computer in `~/.gtd/voiceprints/`, outside the workspace (never in git or a sync folder),
+  in folders and files readable only by the current account (`0700` / `0600`).
+- They are never sent anywhere, never part of the digest, run packages, exports or search, and never given to
+  AI tools. The API lists them without their samples.
+- A voice only suggests a name; nothing is named without the user's click.
+- Forget, Forget all and deleting a stakeholder remove the file. System backups (Time Machine and the like)
+  include `~/.gtd`, so a forgotten voiceprint may remain in an older backup.
+
+Anyone who can read this account's files can read the voiceprints, as with the rest of the app's local data.
+

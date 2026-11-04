@@ -2,9 +2,11 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import { StakeholderService } from '../services/stakeholderService';
 import { orgChartService } from '../services/orgChartService';
+import { VoiceprintService } from '../services/voiceprints/service';
 
 const router = Router();
 const stakeholderService = new StakeholderService();
+const voiceprints = new VoiceprintService();
 
 // GET /api/stakeholders
 router.get('/', async (req: Request, res: Response) => {
@@ -35,6 +37,8 @@ router.put('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   await stakeholderService.deleteStakeholder(param(req, 'id'));
   await orgChartService.removeStakeholder(param(req, 'id'));
+  // Their remembered voice goes with them (a stakeholder deleted by editing files is caught before any comparison).
+  await voiceprints.stakeholderDeleted(param(req, 'id'));
   res.status(204).send();
 });
 

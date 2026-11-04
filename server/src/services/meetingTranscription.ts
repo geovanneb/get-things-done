@@ -1,9 +1,8 @@
 import * as fsp from 'fs/promises';
 import * as path from 'path';
-import { execFile } from 'child_process';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
-import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft, namesFor, parseSpeakerNames, SPEAKER_LABEL, transcriptSpeakers, MAX_SPEAKER_NAMES } from './meetingDigestService';
+import { MeetingDigestService, QueuedMeeting, RecordingState, nextRecording, withoutDraft, namesFor, parseSpeakerNames, SPEAKER_LABEL, suggestionsFor, transcriptSpeakers, MAX_SPEAKER_NAMES } from './meetingDigestService';
 import { TranscriptionModelService, CATALOG, languagesFor, runnableModel, SPEAKER_MODEL } from './transcriptionModels';
 import type { LanguageChange } from './transcription/languages';
 import { hasWords } from './transcription/repeats';
@@ -18,6 +17,10 @@ import { atomicWrite } from '../utils/atomicWrite';
 import { clock } from '../utils/transcript';
 import { fileInside } from '../utils/files';
 import { readFolder } from './meetingFolder';
+import { convertToWav } from './transcription/convert';
+import { VoiceprintService } from './voiceprints/service';
+import type { RecordingVoice } from './transcription/engine';
+import type { SpeakerSuggestions } from './speakerData';
 import { cancelTranscription, claimTranscription, endTranscriptionJob, failTranscription, giveBackTranscription, publishTranscription, recoverTranscriptions, requestIdentity, stillTranscribing, waitingTranscriptions } from './meetingVersions';
 
 /**
@@ -50,7 +53,6 @@ function noWords(model: string, parts: number): string {
   const name = CATALOG.find((m) => m.id === model)?.name ?? model;
   return `No words were found in more than a minute of speech. ${name} may not know the meeting's language: choose another model or the language in Settings > Transcription, then try again.`;
 }
-const MAC_CONVERTER = '/usr/bin/afconvert';
 /** Progress reaches the dashboard at most this often. */
 const NOTIFY_MS = 1000;
 /** How often a running job checks it is still wanted: a Stop or a removal from another dashboard ends it. Tests shorten it. */
@@ -70,6 +72,10 @@ interface Job { meeting: string; file: string; generation: string; token: string
   frees: number;
   /** Its result could not be saved. */
   unsaved?: boolean;
+  /** The speakers diarization found, with their clean stretches (and voice means, when known voices were compared). */
+  voices?: RecordingVoice[];
+  /** "Sounds like" suggestions for them, from the voices remembered on this computer. */
+  suggestions?: Omit<SpeakerSuggestions, 'transcript_sha256'>;
   /** A Transcribe again stopped for a recording that needed the engine: it goes back in line, never fails. */
   yielded?: boolean;
   /** The workspace it belongs to: a recording may start in another one, after a switch. */
@@ -146,6 +152,7 @@ export class MeetingTranscriptionService {
     private readonly queue = digest,
     private readonly models = new TranscriptionModelService(),
     private readonly engine = new TranscriptionEngine(),
+    private readonly voiceprints = new VoiceprintService(),
   ) {}
 
   /** The transcription running in this dashboard, with its progress. */
@@ -343,12 +350,16 @@ export class MeetingTranscriptionService {
    * Names the speakers of a recording's transcript: `{ "Speaker 2": { name, ref } }`, null to take a name back. Only for
    * the transcript the page showed, and only labels that transcript has.
    */
-  async nameSpeakers(meetingId: string, file: string, input: unknown): Promise<QueuedMeeting> {
+  async nameSpeakers(meetingId: string, file: string, input: unknown, suggestion?: { label: string; ref: string; model_sha256: string }): Promise<QueuedMeeting> {
     const body = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
     const asked = (body['names'] && typeof body['names'] === 'object' && !Array.isArray(body['names']) ? body['names'] : {}) as Record<string, unknown>;
     return this.change(meetingId, file, async (r) => {
       if (!r.transcript || !r.transcript_sha256 || (r.status !== 'done' && r.status !== 'partial')) throw httpError(409, 'This recording has no transcript to name speakers in');
       if (body['transcript_sha256'] !== r.transcript_sha256) throw httpError(409, 'The transcript changed meanwhile; look again');
+      // "Use" on a suggestion: it must still be open, for that person, made with that speaker model.
+      if (suggestion && !(r.speaker_suggestions?.model_sha256 === suggestion.model_sha256 && suggestionsFor(r).some((i) => i.label === suggestion.label && i.ref === suggestion.ref))) {
+        throw httpError(409, 'This suggestion is no longer there; look again');
+      }
       const labels = transcriptSpeakers(await fsp.readFile(await fileInside(await this.queue.meetingFolder(meetingId), r.transcript), 'utf-8'));
       const names = new Map(namesFor(r).map((n) => [n.label, n] as const));
       for (const [label, value] of Object.entries(asked)) {
@@ -361,6 +372,18 @@ export class MeetingTranscriptionService {
       if (names.size > MAX_SPEAKER_NAMES) throw httpError(400, `At most ${MAX_SPEAKER_NAMES} speakers can be named in one transcript`);
       const { speaker_names: _old, ...rest } = r;
       return names.size ? { ...rest, speaker_names: { transcript_sha256: r.transcript_sha256, names: [...names.values()] } } : rest;
+    });
+  }
+
+  /** "Not them": hides one suggestion for this recording. Nothing about the voice is kept or learned from it. */
+  async dismissSuggestion(meetingId: string, file: string, transcriptSha256: unknown, label: unknown): Promise<QueuedMeeting> {
+    return this.change(meetingId, file, (r) => {
+      if (!r.transcript_sha256 || transcriptSha256 !== r.transcript_sha256) throw httpError(409, 'The transcript changed meanwhile; look again');
+      const s = r.speaker_suggestions;
+      if (!s || s.transcript_sha256 !== r.transcript_sha256 || !s.items.some((i) => i.label === label)) throw httpError(409, 'This suggestion is no longer there; look again');
+      const items = s.items.filter((i) => i.label !== label);
+      const { speaker_suggestions: _old, ...rest } = r;
+      return items.length ? { ...rest, speaker_suggestions: { ...s, items } } : rest;
     });
   }
 
@@ -560,7 +583,7 @@ export class MeetingTranscriptionService {
       if (path.extname(job.file).toLowerCase() !== '.wav') {
         converted = true;
         wav = path.join((await workFolder(folder, true))!, `${job.generation}-${process.pid}.wav`);
-        await convert(source, wav, job.abort.signal);
+        await convertToWav(source, wav, job.abort.signal);
       }
       const options: TranscribeOptions = {
         model, language, changes: job.changes, signal: job.abort.signal,
@@ -571,10 +594,12 @@ export class MeetingTranscriptionService {
           if (now - notified >= NOTIFY_MS) { notified = now; meetingTranscriptionEvents.emit('change'); }
         },
       };
+      // Voices are compared only when Recognize known voices is on and some are remembered: otherwise no voice is computed.
+      const identify = job.speakers && await this.voiceprints.enabled().catch(() => false) && (await this.voiceprints.known().catch(() => [])).length > 0;
       const attempt = async (with_: string) => {
         segments.length = 0;
-        const run = { ...options, model: with_ };
-        return job.speakers ? await this.engine.transcribeWithSpeakers(wav!, run) : { ...await this.engine.transcribe(wav!, run), speaker_note: null };
+        const run = { ...options, model: with_, ...(identify ? { identify: true } : {}) };
+        return job.speakers ? await this.engine.transcribeWithSpeakers(wav!, run) : { ...await this.engine.transcribe(wav!, run), speaker_note: null, voices: [] as RecordingVoice[] };
       };
       const gpu = CATALOG.find((c) => c.id === model)?.gpu;
       let result: Awaited<ReturnType<typeof attempt>>;
@@ -604,6 +629,13 @@ export class MeetingTranscriptionService {
       }
       job.speakerNote = result.speaker_note ?? job.speakerNote;
       seconds = result.seconds;
+      job.voices = result.voices ?? [];
+      if (identify) {
+        const expected = job.folder ? await this.voiceprints.expectedForFolder(job.meeting)
+          : ((await this.queue.loadMeeting(job.meeting).catch(() => null))?.participants ?? []).map((p) => p.ref).filter((r): r is string => Boolean(r));
+        const found = await this.voiceprints.suggest(job.voices, expected);
+        if (found) job.suggestions = found;
+      }
     } catch (err) {
       error = err as Error;
     } finally {
@@ -673,6 +705,9 @@ export class MeetingTranscriptionService {
         const result = nextRecording(r, {
           status: complete ? 'done' : 'partial', model, language, transcript: name, transcript_sha256: sha256, seconds,
           ...(error ? { error: error.message } : !complete ? { error: noWords(model, segments.length) } : {}),
+          // Times only, so the user can remember a voice later; the voice means themselves are not kept.
+          ...(job.voices?.length ? { speaker_voices: { transcript_sha256: sha256, voices: VoiceprintService.stretches(job.voices) } } : {}),
+          ...(job.suggestions?.items.length ? { speaker_suggestions: { transcript_sha256: sha256, ...job.suggestions } } : {}),
         });
         // A complete transcript is chosen over the live draft, in this same step. A partial one leaves both, for the
         // user to choose between.
@@ -715,7 +750,10 @@ export class MeetingTranscriptionService {
     // Unreadable for a moment: not saved, so the job is set aside and the transcription runs again later; never dropped.
     if (!sha) throw new Error('The meeting\'s folder could not be read to save the new version');
     const content = Buffer.from(audioTranscriptMarkdown(job.file, sha, model, language, seconds, segments, true, job.changes, false, job.speakerNote ?? null, job.engineNote ?? null), 'utf-8');
-    await publishTranscription(ws, job.meeting, job, { content, model, language });
+    await publishTranscription(ws, job.meeting, job, {
+      content, model, language,
+      ...(job.voices?.length ? { speakers: { voices: VoiceprintService.stretches(job.voices), ...(job.suggestions?.items.length ? { suggestions: job.suggestions } : {}) } } : {}),
+    });
   }
 
   /** Removes files of a meeting that its manifest no longer names; call under the queue lock, after saving it. */
@@ -751,16 +789,6 @@ async function workFolder(folder: string, make: boolean): Promise<string | null>
   return work;
 }
 
-/** Converts a recording to 16 kHz mono WAV with the Mac's own converter. Stops with the job. */
-function convert(source: string, target: string, signal: AbortSignal): Promise<void> {
-  if (process.platform !== 'darwin') return Promise.reject(new Error('This recording format can be converted on a Mac only; use WAV on this computer.'));
-  return new Promise((resolve, reject) => {
-    execFile(MAC_CONVERTER, ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', source, target], { signal, timeout: 60 * 60 * 1000 }, (err, _stdout, stderr) => {
-      if (err) reject(new Error(signal.aborted ? 'Cancelled.' : `The recording could not be converted: ${String(stderr || err.message).trim().split('\n').pop()}`));
-      else resolve();
-    });
-  });
-}
 
 // The engine came free (a live transcript or a speed test ended): a waiting recording can start now.
 engineEvents.on('free', () => {

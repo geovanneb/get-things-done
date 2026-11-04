@@ -12,6 +12,7 @@ import { Tabs } from '@/components/common/Tabs';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { MeetingRecordCard } from '@/components/context-updates/UpdateDetail';
 import { MeetingText } from '@/components/meetings/MeetingText';
+import { SpeakerNaming } from '@/components/meetings/SpeakerNaming';
 import { TranscribeAgainDialog, TranscriptionNotice, VersionsSection } from '@/components/meetings/MeetingVersions';
 import { QueuedMeetingActions, recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
 import { useRecorder } from '@/components/recording/RecordingProvider';
@@ -24,8 +25,8 @@ import { historyProcessing, historyReview, queueProcessing, type RowStatus, type
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { joinNames } from '@/utils/meetingParticipants';
 import { meetingPeriod } from '@/utils/meetingQueue';
-import { transcriptOnItsWay } from '@/utils/transcriptReading';
-import type { MeetingDetail, MeetingDigest, MeetingRecord, QueuedMeeting, Stakeholder } from '@/types';
+import { readableTranscript, speakerLabelsOf, transcriptOnItsWay } from '@/utils/transcriptReading';
+import type { MeetingDetail, MeetingDigest, MeetingRecord, QueuedMeeting, SpeakerName, Stakeholder, VersionSpeakers } from '@/types';
 
 /** What the Meetings page hands its dialog: the queue it already has, and System cleanup's Meetings settings. */
 export interface MeetingsOutlet {
@@ -190,9 +191,24 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   const transcribed = m.files.filter((f) => f.recording).every((f) => f.recording!.status === 'done' || (f.recording!.status === 'partial' && f.recording!.accepted));
   const period = meetingPeriod(m);
 
+  // The speakers of the recording's final transcript: named here, with suggestions from remembered voices.
+  const readable = shown ? readableTranscript(m, shown.key) : null;
+  const speakerLabels = readable?.final ? speakerLabelsOf(m, readable.file, readable.sha256) : [];
+
   const main = tab === 'transcript' ? (
     <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
       <SourcePicker sources={sources} value={shown?.key ?? ''} onChange={setPicked} />
+      {readable?.final && speakerLabels.length > 0 && (
+        <div>
+          <SpeakerNaming source={{ kind: 'queue', meeting: m.id, file: readable.file, transcript_sha256: readable.sha256 }}
+            transcriptUrl={shown?.url} {...(shown?.audio ? { audioUrl: shown.audio.url } : {})}
+            hint={m.in_digest ? undefined : 'Name who spoke, or leave them for the analysis to propose.'}
+            labels={speakerLabels} names={readable.names} suggestions={readable.suggestions ?? []} rememberable={readable.rememberable ?? []}
+            modelSha={readable.modelSha ?? null} participants={m.participants ?? []} editable={!m.in_digest}
+            onName={async (label, person) => { await apiPut(`/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(readable.file)}/speakers`, { transcript_sha256: readable.sha256, names: { [label]: person } }); }}
+            onChanged={onChanged} />
+        </div>
+      )}
       {shown ? <MeetingText key={shown.url} url={shown.url} names={shown.names} initialFind={found} {...(shown.audio ? { audio: shown.audio } : {})} />
         : transcriptOnItsWay(m) ? <LoadingSpinner text="The transcript appears here when transcription finishes." />
           : <EmptyState size="compact" title="Nothing to read yet" description="This meeting has no transcript or notes that can be shown here. Its files are in the Files tab." action={{ label: 'Show the files', onClick: () => setTab('files') }} />}
@@ -343,6 +359,9 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   );
 
   const modelNames = outlet.job?.model_names ?? {};
+  // A Transcribe again version numbers its speakers anew: they are named for that version, apart from the record.
+  const current = data.versions.find((v) => v.current);
+  const versionSpeakers = shown && current?.speakers && current.speakers.recording === shown.file ? current.speakers : null;
   const main = (
     <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
       {trashNotice}
@@ -351,7 +370,13 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
       {tab === 'transcript' && (shown ? (
         <>
           <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.kind === 'recording' ? `${s.name}, transcript` : s.name }))} value={shown.file} onChange={setPicked} />
-          <MeetingText key={`${shown.file}:${data.versions.find((v) => v.current)?.id ?? ''}`} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} initialFind={found}
+          {versionSpeakers && (
+            <VersionSpeakersPanel meetingId={h.id} version={current!.id} speakers={versionSpeakers} editable={!h.deleted} onChanged={changed}
+              transcriptUrl={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`}
+              {...(shown.playable ? { audioUrl: audioUrl(h.id, shown.file) } : {})} />
+          )}
+          <MeetingText key={`${shown.file}:${current?.id ?? ''}`} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} initialFind={found}
+            names={Object.fromEntries((versionSpeakers?.names ?? []).map((n) => [n.label, n.name]))}
             {...(shown.playable ? { audio: { url: audioUrl(h.id, shown.file), label: `Recording ${shown.name}` } } : {})} />
           {shown.kind === 'recording' && !shown.playable && (
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
@@ -521,4 +546,27 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
     </>,
     h.title,
   )}</>;
+}
+
+/**
+ * The speakers of a Transcribe again version: named here for this version's transcript (the meeting's record keeps the
+ * names it was reviewed with), with suggestions from remembered voices.
+ */
+function VersionSpeakersPanel({ meetingId, version, speakers, editable, onChanged, transcriptUrl, audioUrl: clipUrl }: {
+  meetingId: string; version: string; speakers: VersionSpeakers; editable: boolean; onChanged: () => void; transcriptUrl: string; audioUrl?: string;
+}) {
+  if (!speakers.labels.length) return null;
+  const name = async (label: string, person: Omit<SpeakerName, 'label'> | null) => {
+    await apiPut(`/api/meetings/${encodeURIComponent(meetingId)}/versions/${version}/speakers`, { transcript_sha256: speakers.transcript_sha256, names: { [label]: person } });
+  };
+  return (
+    <div>
+      <SpeakerNaming source={{ kind: 'folder', meeting: meetingId, version, transcript_sha256: speakers.transcript_sha256 }}
+        transcriptUrl={transcriptUrl} {...(clipUrl ? { audioUrl: clipUrl } : {})}
+        hint={`Speakers of ${version}, numbered anew by its transcription. Names given here are for this version; the record keeps its own.`}
+        labels={speakers.labels.map((l) => l.label)} names={speakers.names} suggestions={speakers.suggestions}
+        rememberable={speakers.audio_kept ? speakers.labels.filter((l) => l.can_remember).map((l) => l.label) : []}
+        modelSha={speakers.model_sha256} editable={editable} onName={name} onChanged={onChanged} />
+    </div>
+  );
 }

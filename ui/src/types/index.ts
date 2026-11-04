@@ -777,7 +777,83 @@ export interface RecordingState {
   accepted?: boolean;
   /** Who the speakers are, as the user named them: only for the transcript with this hash. */
   speaker_names?: { transcript_sha256: string; names: SpeakerName[] };
+  /** Where each speaker speaks alone (times only): a speaker with some can have their voice remembered. */
+  speaker_voices?: { transcript_sha256: string; voices: { label: string; intervals: [number, number][]; seconds: number }[] };
+  /** Remembered voices the speakers sound like: hints, never names. */
+  speaker_suggestions?: { transcript_sha256: string; model_sha256: string; items: SpeakerSuggestion[] };
   error?: string;
+}
+
+/** "Sounds like": a remembered voice a speaker of a transcript resembles, and how closely (0 to 1). */
+export interface SpeakerSuggestion { label: string; ref: string; score: number }
+
+/** Where speakers were confirmed: a recording in the queue, or a Transcribe again version of a kept meeting. */
+export type VoiceSource =
+  | { kind: 'queue'; meeting: string; file: string; transcript_sha256: string }
+  | { kind: 'folder'; meeting: string; version: string; transcript_sha256: string };
+
+/** The speakers of a Transcribe again version, as its page names them. */
+export interface VersionSpeakers {
+  recording: string;
+  transcript: string;
+  transcript_sha256: string;
+  labels: { label: string; seconds: number; can_remember: boolean }[];
+  names: SpeakerName[];
+  suggestions: SpeakerSuggestion[];
+  model_sha256: string | null;
+  audio_kept: boolean;
+}
+
+/** A voice remembered on this computer, as Settings and the stakeholder pages show it (never its samples). */
+export interface RememberedVoice {
+  ref: string;
+  name: string;
+  stakeholder: boolean;
+  damaged: boolean;
+  stale_model: boolean;
+  old_consent: boolean;
+  ready: boolean;
+  seconds: number;
+  samples: number;
+  meetings: number;
+  consent: { version: number; person: string; recorded_by: string; at: string } | null;
+  updated_at: string | null;
+}
+
+/** One sample of a remembered voice: where it came from, never the voice itself. */
+export interface VoiceSample {
+  key: string;
+  meeting: string;
+  /** Null for a meeting that is no longer here. */
+  title: string | null;
+  meeting_date: string | null;
+  kind: 'queue' | 'folder';
+  version: string | null;
+  label: string;
+  seconds: number;
+  at: string;
+}
+
+/** GET /api/voiceprints/:ref */
+export interface VoiceDetail {
+  enabled: boolean;
+  voice: RememberedVoice | null;
+  samples: VoiceSample[];
+  consent_text: string;
+  consent_version: number;
+  min_seconds: number;
+}
+
+/** GET /api/voiceprints */
+export interface Voiceprints {
+  enabled: boolean;
+  setting: boolean;
+  speaker_model: boolean;
+  consent_version: number;
+  consent_text: string;
+  min_seconds: number;
+  prints: RememberedVoice[];
+  moved: { key: string; workspace: string; prints: { ref: string; name: string }[] }[];
 }
 
 /** The transcription this dashboard is running; `done` and `total` are seconds of audio. */
@@ -894,7 +970,7 @@ export interface TranscriptionModel {
   gpu_ready?: boolean;
 }
 
-export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; live_model_source?: 'unset' | 'user' | 'automatic'; speakers: boolean; updated_at: string | null }
+export interface TranscriptionSettings { model: string; language: TranscriptionLanguage; keep_recordings: boolean; live_model: string | null; live_model_source?: 'unset' | 'user' | 'automatic'; speakers: boolean; recognize_voices?: boolean; updated_at: string | null }
 
 export interface Transcription {
   models: TranscriptionModel[];
@@ -967,7 +1043,7 @@ export interface MeetingDetail {
   update_records: { id: string; title: string; meeting_date: string; confirmation: MeetingRecord['confirmation'] }[];
   sources: MeetingSource[];
   /** The versions of its text, when it has a folder of its own: the reviewed one (`v1`) and any made by Transcribe again. */
-  versions: { id: string; at: string; made_from: 'review' | 'transcription' | 'correction'; model: string | null; correction: string | null; current: boolean }[];
+  versions: { id: string; at: string; made_from: 'review' | 'transcription' | 'correction'; model: string | null; correction: string | null; current: boolean; speakers?: VersionSpeakers | null }[];
   /** Transcribe again: waiting, running or failed; null when none. */
   transcription: { file: string; model: string; status: 'pending' | 'running' | 'failed'; error: string | null; started_at: string | null } | null;
   /** How far it got, when this dashboard runs it. */

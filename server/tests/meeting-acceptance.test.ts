@@ -72,14 +72,16 @@ test('real model: meetings recorded offline, one with a live transcript and one 
 
   const participants = [{ name: 'Jane Doe', ref: 'STK-0001' }, { name: 'Kim Park' }];
 
-  await models.updateSettings({ model: MODEL, language: 'auto', live_model: MODEL, keep_recordings: false });
+  // Without speakers: a complete live transcript is then the transcript at Stop. With the speaker model installed (the CI
+  // job downloads it for the speaker tests), speakers would make the recording wait for the transcription after it.
+  await models.updateSettings({ model: MODEL, language: 'auto', live_model: MODEL, keep_recordings: false, speakers: false });
   const live = await queue.createMeeting({ title: 'Fictional live sync', meeting_date: '2026-10-29', participants });
   recorded = record(recording, live.id, 'fictional-acceptance-token-live', await speech(path.join(realAudio!, 'en.wav')));
   await recorded;
   const atStop = (await queue.loadMeeting(live.id)).files.find((f) => f.recording)!.recording!;
   assert.equal(atStop.status, 'done', 'with the live model chosen, the transcript is ready at Stop');
 
-  await models.updateSettings({ model: MODEL, language: 'auto', live_model: null, keep_recordings: false });
+  await models.updateSettings({ model: MODEL, language: 'auto', live_model: null, keep_recordings: false, speakers: false });
   const after = await queue.createMeeting({ title: 'Fictional sync without live text', meeting_date: '2026-10-30' });
   recorded = record(recording, after.id, 'fictional-acceptance-token-after', await speech(path.join(realAudio!, 'ja.wav')));
   await recorded;

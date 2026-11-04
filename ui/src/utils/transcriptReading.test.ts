@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict';
-import { readableTranscript, transcriptOnItsWay, transcriptParts, transcriptTurns } from './transcriptReading';
+import { readableTranscript, speakerLabelsOf, transcriptOnItsWay, transcriptParts, transcriptTurns } from './transcriptReading';
 import type { QueuedMeeting } from '@/types';
 
 const meeting = (files: QueuedMeeting['files']) => ({ id: 'MQ-2026-0001', files }) as QueuedMeeting;
 const draft = { transcript: 'live.transcript.md', transcript_sha256: 'a', model: 'fast', language: 'auto', seconds: 1 };
 
 assert.deepEqual(readableTranscript(meeting([{ name: 'a.wav', recording: { status: 'running', draft } }] as unknown as QueuedMeeting['files'])), { name: 'live.transcript.md', final: false, file: 'a.wav', sha256: 'a', names: [] }, 'the live text while the accurate one is made');
-assert.deepEqual(readableTranscript(meeting([{ name: 'a.wav', recording: { status: 'done', transcript: 'a.transcript.md', transcript_sha256: 'b', draft } }] as unknown as QueuedMeeting['files'])), { name: 'a.transcript.md', final: true, file: 'a.wav', sha256: 'b', names: [] }, 'the final one first');
+assert.deepEqual(readableTranscript(meeting([{ name: 'a.wav', recording: { status: 'done', transcript: 'a.transcript.md', transcript_sha256: 'b', draft } }] as unknown as QueuedMeeting['files'])), { name: 'a.transcript.md', final: true, file: 'a.wav', sha256: 'b', names: [], suggestions: [], modelSha: null, rememberable: [] }, 'the final one first');
+// Suggestions and stretches count only for the transcript with their hash, like names.
+const voices = { transcript_sha256: 'b', voices: [{ label: 'Speaker 1', intervals: [[1, 3]], seconds: 2 }, { label: 'Speaker 2', intervals: [], seconds: 0 }] };
+const hints = { transcript_sha256: 'b', model_sha256: 'm', items: [{ label: 'Speaker 2', ref: 'STK-0002', score: 0.9 }] };
+const read = (sha: string) => readableTranscript(meeting([{ name: 'a.wav', recording: { status: 'done', transcript: 'a.md', transcript_sha256: sha, speaker_voices: voices, speaker_suggestions: hints } }] as unknown as QueuedMeeting['files']));
+assert.deepEqual([read('b')?.suggestions, read('b')?.modelSha, read('b')?.rememberable], [hints.items, 'm', ['Speaker 1']], 'only a speaker with speech of their own can be remembered');
+assert.deepEqual([read('c')?.suggestions, read('c')?.modelSha, read('c')?.rememberable], [[], null, []], 'those of an earlier transcript do not count');
+const withVoices = meeting([{ name: 'a.wav', recording: { status: 'done', transcript: 'a.md', transcript_sha256: 'b', speaker_voices: voices } }, { name: 'notes.txt' }] as unknown as QueuedMeeting['files']);
+assert.deepEqual(speakerLabelsOf(withVoices, 'a.wav', 'b'), ['Speaker 1', 'Speaker 2']);
+assert.deepEqual(speakerLabelsOf(withVoices, 'a.wav', 'c'), [], 'another transcript');
+assert.deepEqual(speakerLabelsOf(withVoices, 'notes.txt', 'b'), [], 'a file without a recording');
+assert.deepEqual(speakerLabelsOf(withVoices, 'gone.wav', 'b'), [], 'a file that is not there (the page once crashed here)');
 const named = { transcript_sha256: 'b', names: [{ label: 'Speaker 1', name: 'Kim Park' }] };
 assert.deepEqual(readableTranscript(meeting([{ name: 'a.wav', recording: { status: 'done', transcript: 'a.md', transcript_sha256: 'b', speaker_names: named } }] as unknown as QueuedMeeting['files']))?.names, named.names);
 assert.deepEqual(readableTranscript(meeting([{ name: 'a.wav', recording: { status: 'done', transcript: 'a.md', transcript_sha256: 'c', speaker_names: named } }] as unknown as QueuedMeeting['files']))?.names, [], 'names of an earlier transcript do not count');

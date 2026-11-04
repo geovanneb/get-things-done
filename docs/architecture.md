@@ -73,6 +73,19 @@ finishes exactly that, and every other change to the correction waits under the 
 Remaining risk: the first move is coordinated with the update's own queue, not across two dashboards
 on the same workspace. A WebVTT original saved in UTF-16 is written back in UTF-8 when corrected. The writer takes a receipt (its caller's hash of what is being finished) and records it on the version: finishing the same correction again returns the version already written, and another receipt for it is refused. Reading a version's files checks their hashes, so a file changed on disk is never corrected.
 
+### Remembered voices
+
+Recognize known voices (`server/src/services/voiceprints/`, [voiceprints.md](voiceprints.md)) keeps biometric
+data, so its store is **outside the workspace**, in `~/.gtd/voiceprints/<binding>/`, private to the account, and
+never read by anything but its own routes. The worker computes voice embeddings (`speakers` with `identify`, and
+the light `embed` job, which takes no engine slot); a recording or a Transcribe again version keeps only the
+**times** of each speaker's clean speech (`speaker_voices`, `versions[].speakers.voices`) and the suggestions
+made (`{ label, ref, score }` with the transcript's and speaker model's hashes). A suggestion is a hint: names
+are given only through the existing confirm paths, `nameSpeakers` for the queue and `nameVersionSpeakers` in
+`meetingVersions.ts` for a kept meeting's version, both refusing a click on a transcript, suggestion or model
+that changed. Saving a voice re-checks the confirmed name, a forget counter and the print's revision under the
+store's lock, so a Forget or a correction during an extraction always wins.
+
 ## Request and file flow
 
 1. The listener binds to loopback. The local request guard checks Host, Origin and

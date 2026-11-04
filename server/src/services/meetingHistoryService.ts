@@ -7,7 +7,9 @@ import { fileInside, topLevelName } from '../utils/files';
 import { correctionChain, type ChainState, type CorrectionChain } from './meetingCorrections';
 import { MAX_CONVERT_BYTES } from '../utils/transcript';
 import { meetingFiles } from './meetingFolder';
-import { chooseVersion, requestTranscription } from './meetingVersions';
+import { chooseVersion, openSuggestions, requestTranscription } from './meetingVersions';
+import type { FolderVersion } from './meetingFolder';
+import type { SpeakerName, SpeakerSuggestion } from './speakerData';
 import { CATALOG, runnableModel, TranscriptionModelService } from './transcriptionModels';
 import { WorkspaceService } from './workspace';
 import { MAX_QUERY, MIN_QUERY, queryWords, searchMeeting, type SearchHit } from './meetingSearch';
@@ -95,9 +97,37 @@ export interface MeetingDetail {
    * The versions of its text, when it has a folder of its own: the reviewed one (`v1`) and any made by Transcribe
    * again, with the current one marked. Its record always stays the account of the version it was reviewed from.
    */
-  versions: { id: string; at: string; made_from: 'review' | 'transcription' | 'correction'; model: string | null; correction: string | null; current: boolean }[];
+  versions: { id: string; at: string; made_from: 'review' | 'transcription' | 'correction'; model: string | null; correction: string | null; current: boolean; speakers: VersionSpeakersView | null }[];
   /** Transcribe again: waiting, running or failed; null when none. */
   transcription: { file: string; model: string; status: 'pending' | 'running' | 'failed'; error: string | null; started_at: string | null } | null;
+}
+
+/**
+ * The speakers of a Transcribe again version, as its page names them: the labels with how much clean speech each has
+ * (only a speaker with some can be remembered), the names given, and the open suggestions. Never a voice itself.
+ */
+export interface VersionSpeakersView {
+  /** The recording it was transcribed from, and its transcript. */
+  recording: string;
+  transcript: string;
+  transcript_sha256: string;
+  labels: { label: string; seconds: number; can_remember: boolean }[];
+  names: SpeakerName[];
+  suggestions: SpeakerSuggestion[];
+  /** The speaker model the suggestions were made with: sent back with a Use, refused when it changed. */
+  model_sha256: string | null;
+  /** Its recording is still kept, so a voice can be remembered from it. */
+  audio_kept: boolean;
+}
+
+function versionSpeakers(v: FolderVersion, audio: { name: string; sha256: string }[]): VersionSpeakersView | null {
+  if (!v.speakers) return null;
+  return {
+    recording: v.from?.name ?? '', transcript: v.speakers.transcript, transcript_sha256: v.speakers.transcript_sha256,
+    labels: v.speakers.voices.map((x) => ({ label: x.label, seconds: x.seconds, can_remember: x.intervals.length > 0 })),
+    names: v.speakers.names ?? [], suggestions: openSuggestions(v.speakers), model_sha256: v.speakers.suggestions?.model_sha256 ?? null,
+    audio_kept: Boolean(v.from && audio.some((a) => a.name === v.from!.name && a.sha256 === v.from!.sha256)),
+  };
 }
 
 function httpError(status: number, message: string): Error {
@@ -276,7 +306,7 @@ export class MeetingHistoryService {
       record,
       update_records: record ? [] : update.meeting_records.filter((r) => !linked.has(r.id)).map((r) => ({ id: r.id, title: r.title, meeting_date: r.meeting_date, confirmation: r.confirmation })),
       sources,
-      versions: folder ? folder.manifest.versions.map((v) => ({ id: v.id, at: v.at, made_from: v.made_from, model: v.model ?? null, correction: v.correction ?? null, current: v.id === folder.manifest.current })) : [],
+      versions: folder ? folder.manifest.versions.map((v) => ({ id: v.id, at: v.at, made_from: v.made_from, model: v.model ?? null, correction: v.correction ?? null, current: v.id === folder.manifest.current, speakers: versionSpeakers(v, folder.manifest.audio) })) : [],
       transcription: folder?.manifest.transcribe
         ? { file: folder.manifest.transcribe.file, model: folder.manifest.transcribe.model, status: folder.manifest.transcribe.status, error: folder.manifest.transcribe.error ?? null, started_at: folder.manifest.transcribe.started_at ?? null }
         : null,

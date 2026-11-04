@@ -1,4 +1,4 @@
-import type { QueuedMeeting, SpeakerName } from '@/types';
+import type { QueuedMeeting, SpeakerName, SpeakerSuggestion } from '@/types';
 
 /** `speaker`: `Speaker 2`, a label for one recording, when the part is clearly one voice. */
 export interface TranscriptPart { time: string; speaker?: string; text: string }
@@ -7,19 +7,38 @@ export interface TranscriptPart { time: string; speaker?: string; text: string }
  * The transcript to read of a recording: the final one when there is one, else the live draft. `file` and `sha256` say
  * which recording and transcript; `names` are who its speakers are, as the user named them.
  */
-export interface Readable { name: string; final: boolean; file: string; sha256: string; names: SpeakerName[] }
+export interface Readable {
+  name: string; final: boolean; file: string; sha256: string; names: SpeakerName[];
+  /** Remembered voices its speakers sound like, with the speaker model they were made with. */
+  suggestions?: SpeakerSuggestion[];
+  modelSha?: string | null;
+  /** The labels with speech of their own, whose voice can be remembered. */
+  rememberable?: string[];
+}
 
 /** What can be read of a meeting: of `file`, or of its first recording with something to read. */
 export function readableTranscript(meeting: QueuedMeeting, file?: string): Readable | null {
   for (const f of meeting.files) {
     if (!f.recording || (file && f.name !== file)) continue;
-    const { transcript, transcript_sha256, draft, speaker_names } = f.recording;
+    const { transcript, transcript_sha256, draft, speaker_names, speaker_voices, speaker_suggestions } = f.recording;
     if (transcript && transcript_sha256) {
-      return { name: transcript, final: true, file: f.name, sha256: transcript_sha256, names: speaker_names && speaker_names.transcript_sha256 === transcript_sha256 ? speaker_names.names : [] };
+      // Each is for the transcript with its hash only: a transcript made again starts without.
+      const ours = <T extends { transcript_sha256: string }>(x: T | undefined) => (x && x.transcript_sha256 === transcript_sha256 ? x : undefined);
+      return {
+        name: transcript, final: true, file: f.name, sha256: transcript_sha256, names: ours(speaker_names)?.names ?? [],
+        suggestions: ours(speaker_suggestions)?.items ?? [], modelSha: ours(speaker_suggestions)?.model_sha256 ?? null,
+        rememberable: (ours(speaker_voices)?.voices ?? []).filter((v) => v.intervals.length > 0).map((v) => v.label),
+      };
     }
     if (draft) return { name: draft.transcript, final: false, file: f.name, sha256: draft.transcript_sha256, names: [] };
   }
   return null;
+}
+
+/** The speaker labels of a recording's transcript with this hash, from where each speaks alone; none when unknown. */
+export function speakerLabelsOf(meeting: QueuedMeeting, file: string, sha256: string): string[] {
+  const voices = meeting.files.find((f) => f.name === file)?.recording?.speaker_voices;
+  return voices && voices.transcript_sha256 === sha256 ? voices.voices.map((v) => v.label) : [];
 }
 
 /** Whether a transcript of this meeting is still being made or waits its turn. */

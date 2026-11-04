@@ -18,6 +18,10 @@ import { processAlive } from './runState';
 import { AgentRunnerService } from './agentRunner';
 import { readWavFormat, WavError } from './transcription/wav';
 import { knownLanguage, parseLanguageChanges, type LanguageChange } from './transcription/languages';
+import { MAX_SPEAKER_NAMES, parseSpeakerNames, parseSpeakerSuggestions, parseSpeakerVoices, SPEAKER_LABEL, type SpeakerName, type SpeakerNames, type SpeakerSuggestion, type SpeakerSuggestions, type SpeakerVoices } from './speakerData';
+
+export { MAX_SPEAKER_NAMES, parseSpeakerNames, parseSpeakerSuggestions, parseSpeakerVoices, SPEAKER_LABEL };
+export type { SpeakerName, SpeakerNames, SpeakerSuggestion, SpeakerSuggestions, SpeakerVoices };
 
 const workspaceService = new WorkspaceService();
 const contextUpdateService = new ContextUpdateService();
@@ -236,33 +240,29 @@ export interface RecordingState {
   target?: RecordingTarget;
   /** Who the speakers of the transcript are, as the user named them: for that transcript only. */
   speaker_names?: SpeakerNames;
+  /** Where each speaker of the transcript speaks alone, as diarization heard it: times only, to remember a voice. */
+  speaker_voices?: SpeakerVoices;
+  /** Remembered voices the speakers sound like: hints for the user, never names (see docs/voiceprints.md). */
+  speaker_suggestions?: SpeakerSuggestions;
 }
 
-/** A speaker label of a transcript (`Speaker 2`) and the person the user says it is. */
-export interface SpeakerName { label: string; name: string; ref?: string }
-export interface SpeakerNames { transcript_sha256: string; names: SpeakerName[] }
 
-export const SPEAKER_LABEL = /^Speaker \d{1,3}$/;
-/** As many voices as speaker detection finds in a long meeting, with room to spare. */
-export const MAX_SPEAKER_NAMES = 200;
-
-/** The names a user gave, each label once: what a request sends and what a manifest holds. */
-export function parseSpeakerNames(value: unknown): SpeakerName[] {
-  const seen = new Set<string>();
-  return (Array.isArray(value) ? value : []).flatMap((entry) => {
-    const o = obj(entry);
-    const label = typeof o['label'] === 'string' ? o['label'] : '';
-    const name = typeof o['name'] === 'string' ? o['name'].trim().replace(/\s+/g, ' ').slice(0, 120) : '';
-    const ref = typeof o['ref'] === 'string' && /^(STK-\d{4}|me)$/.test(o['ref']) ? o['ref'] : undefined;
-    if (!SPEAKER_LABEL.test(label) || !name || seen.has(label)) return [];
-    seen.add(label);
-    return [{ label, name, ...(ref ? { ref } : {}) }];
-  }).slice(0, MAX_SPEAKER_NAMES);
-}
 
 /** The speaker labels a transcript really has: those on its `#3 [start → end] Speaker 2` lines, never words someone said. */
 export function transcriptSpeakers(markdown: string): Set<string> {
   return new Set([...markdown.matchAll(/^(?:#\d+ )?\[\d\d:\d\d:\d\d → \d\d:\d\d:\d\d\] (Speaker \d{1,3})$/gm)].map((m) => m[1]!));
+}
+
+/** The speakers' stretches, when they are for this transcript. */
+export function voicesFor(r: RecordingState | undefined): SpeakerVoices['voices'] {
+  return r?.speaker_voices && r.transcript_sha256 === r.speaker_voices.transcript_sha256 ? r.speaker_voices.voices : [];
+}
+
+/** The suggestions still open for this transcript: not for a label already named. */
+export function suggestionsFor(r: RecordingState | undefined): SpeakerSuggestion[] {
+  if (!r?.speaker_suggestions || r.transcript_sha256 !== r.speaker_suggestions.transcript_sha256) return [];
+  const named = new Set(namesFor(r).map((n) => n.label));
+  return r.speaker_suggestions.items.filter((i) => !named.has(i.label));
 }
 
 /** The names, when they are for this transcript: a transcript made again starts without. */
@@ -312,6 +312,8 @@ function parseRecording(value: unknown): RecordingState | undefined {
     ...(parseDraft(o['draft']) ? { draft: parseDraft(o['draft'])! } : {}),
     ...(parseTarget(o['target']) ? { target: parseTarget(o['target'])! } : {}),
     ...parsedSpeakerNames(o['speaker_names']),
+    ...(parseSpeakerVoices(o['speaker_voices']) ? { speaker_voices: parseSpeakerVoices(o['speaker_voices'])! } : {}),
+    ...(parseSpeakerSuggestions(o['speaker_suggestions']) ? { speaker_suggestions: parseSpeakerSuggestions(o['speaker_suggestions'])! } : {}),
   };
 }
 

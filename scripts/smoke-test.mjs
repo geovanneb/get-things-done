@@ -817,6 +817,21 @@ try {
       stt.models?.some((m) => m.id === 'whisper-large-v3-turbo') && stt.settings?.model && stt.speakers?.id === 'speaker-detection' && stt.speakers.size > 0 && !stt.models.some((m) => m.id === 'speaker-detection') && stt.settings.speakers === true && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
       && ['auto', 'en', 'ja'].includes(stt.settings.language) && badLanguage.status === 400,
       `models=${stt.models?.map((m) => m.id).join(',')} bad=${badLanguage.status}`);
+    // Recognize known voices (#287): off by default, nothing remembered, and nothing is remembered without the model
+    // and a confirmed stakeholder name; requests that could reach a path are refused before anything is read.
+    const voices = await (await fetch(`${base}/api/voiceprints`)).json();
+    const remember = await json('POST', '/api/voiceprints', { source: { kind: 'queue', meeting: liveMeeting.id, file: 'missing.wav', transcript_sha256: 'a'.repeat(64) }, label: 'Speaker 1', consent: true });
+    const badSource = await json('POST', '/api/voiceprints/suggestions/use', { source: { kind: 'queue', meeting: '../x', file: 'a.wav', transcript_sha256: 'a'.repeat(64) }, label: 'Speaker 1' });
+    const badRef = await fetch(`${base}/api/voiceprints/..%2Fx`, { method: 'DELETE' });
+    const badMoved = await json('POST', '/api/voiceprints/moved/not-a-key/relink');
+    const oneVoice = await (await fetch(`${base}/api/voiceprints/STK-0001`)).json();
+    const badSample = await fetch(`${base}/api/voiceprints/STK-0001/samples/not-a-key`, { method: 'DELETE' });
+    const voicesAfter = fs.existsSync(path.join(home, '.gtd', 'voiceprints')) ? fs.readdirSync(path.join(home, '.gtd', 'voiceprints')) : [];
+    check('known voices are off by default, list nothing, and refuse to remember or act without what they need',
+      voices.setting === false && voices.enabled === false && Array.isArray(voices.prints) && voices.prints.length === 0 && voices.consent_version === 1
+      && remember.status === 409 && badSource.status === 400 && badRef.status === 400 && badMoved.status === 400 && voicesAfter.length === 0
+      && oneVoice.voice === null && Array.isArray(oneVoice.samples) && badSample.status === 400,
+      `setting=${voices.setting} remember=${remember.status} source=${badSource.status} ref=${badRef.status} moved=${badMoved.status} dirs=${voicesAfter.length}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

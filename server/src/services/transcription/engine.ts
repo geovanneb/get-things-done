@@ -8,7 +8,8 @@ import { readWavFormat } from './wav';
 import { whisperHelperPath } from './whisperHelper';
 import type { LanguageChange } from './languages';
 import type { SpeakerTurn } from './parts';
-import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './protocol';
+import { cleanIntervals, secondsOf, type Interval } from './voices';
+import type { EngineModel, HeardVoiceReply, WorkerControl, WorkerReply, WorkerRequest } from './protocol';
 
 /**
  * Runs the transcription worker (worker.ts) for one job at a time: a model check, or a WAV file to transcribe.
@@ -20,7 +21,15 @@ import type { EngineModel, WorkerControl, WorkerReply, WorkerRequest } from './p
 export interface Segment { start: number; end: number; text: string; speaker?: number }
 /** `backend`: for the GPU engine, the device it really used (e.g. "MTL0"). */
 export interface TranscriptResult { segments: Segment[]; seconds: number; load_ms: number | null; backend?: string }
-export interface TranscribeOptions { model?: string; language?: string; changes?: LanguageChange[]; turns?: SpeakerTurn[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal }
+export interface TranscribeOptions { model?: string; language?: string; changes?: LanguageChange[]; turns?: SpeakerTurn[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal;
+  /** With speakers: also each voice's mean embedding, to compare with remembered voices. */
+  identify?: boolean }
+/**
+ * A speaker of the transcript as diarization heard it: its label, the stretches where it alone speaks (times only,
+ * which is what remembering its voice later reads), and with `identify` the mean embedding of those stretches. The
+ * embedding is for comparing at once; it is never saved.
+ */
+export interface RecordingVoice { label: string; intervals: Interval[]; seconds: number; centroid?: number[]; samples?: { seconds: number; embedding: number[] }[] }
 /** `gpu`: the GPU engine (gtd-whisper) is part of this install. Whether it works here is for the speed test to show. */
 export interface EngineStatus { available: boolean; version: string | null; error: string | null; gpu: boolean }
 
@@ -199,7 +208,29 @@ export class TranscriptionEngine {
       await release();
       throw err;
     }
-    return this.recognize(wav, prepared, languageFor(id, options.language ?? settings.language), options, release, false);
+    const { labels: _labels, ...result } = await this.recognize(wav, prepared, languageFor(id, options.language ?? settings.language), options, release, false);
+    return result;
+  }
+
+  /**
+   * One embedding per stretch of a WAV recording, with the speaker model, to remember a voice. A light job (the
+   * embedding model is about 40 MB), so it does not wait for the one-job slot: a voice can be remembered while a
+   * meeting is recorded or transcribed. It still holds the model's lease, so the model is never removed under it.
+   */
+  async embed(wav: string, intervals: Interval[], signal?: AbortSignal): Promise<(number[] | null)[]> {
+    const release = await this.models.lease(SPEAKER_MODEL.id);
+    let dir: string | null;
+    try {
+      dir = await this.models.installedPath(SPEAKER_MODEL.id);
+      if (!dir) throw httpError(409, 'The speaker model is not downloaded: download it in Settings > Transcription');
+    } catch (err) { await release(); throw err; }
+    const format = await readWavFormat(wav).catch(async (err: Error) => { await release(); throw err; });
+    let embeddings: (number[] | null)[] | null = null;
+    await this.run({ type: 'embed', wav, embedding: path.join(dir, SPEAKER_MODEL.files[1]!.name), threads: 2, intervals },
+      speakerTimeout(format.duration), (reply) => { if (reply.type === 'embeddings') embeddings = reply.embeddings; }, signal, release, false, true);
+    const result = embeddings as (number[] | null)[] | null;
+    if (!result || result.length !== intervals.length) throw new Error('The speaker model gave no voice for this speech');
+    return result;
   }
 
   /**
@@ -207,7 +238,7 @@ export class TranscriptionEngine {
    * are held from start to end, so nothing gets in between and no detection is done twice. If finding speakers
    * fails the transcript is still made, and `speaker_note` says why they are missing; only a Stop ends the job.
    */
-  async transcribeWithSpeakers(wav: string, options: TranscribeOptions = {}): Promise<TranscriptResult & { speaker_note: string | null }> {
+  async transcribeWithSpeakers(wav: string, options: TranscribeOptions = {}): Promise<TranscriptResult & { speaker_note: string | null; voices: RecordingVoice[] }> {
     if (closing) throw httpError(503, 'The dashboard is shutting down');
     if (busy) throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true });
     busy = true;
@@ -219,6 +250,7 @@ export class TranscriptionEngine {
       leases.push(await this.models.lease(id));
       const prepared = await this.prepare(wav, id);
       let turns: SpeakerTurn[] = [];
+      let heard: HeardVoiceReply[] = [];
       let note: string | null = null;
       if (prepared.format.duration > MAX_SPEAKER_SECONDS) note = 'the recording is too long for speaker detection';
       else {
@@ -228,16 +260,19 @@ export class TranscriptionEngine {
           if (!dir) throw new Error('The speaker model is not downloaded');
           await this.run({
             type: 'speakers', wav, segmentation: path.join(dir, SPEAKER_MODEL.files[0]!.name), embedding: path.join(dir, SPEAKER_MODEL.files[1]!.name),
-            threads: Math.max(1, Math.min(8, os.availableParallelism() - 1)),
-          }, speakerTimeout(prepared.format.duration), (reply) => { if (reply.type === 'turns') turns = reply.turns; }, options.signal, undefined, true);
+            threads: Math.max(1, Math.min(8, os.availableParallelism() - 1)), ...(options.identify ? { identify: true } : {}),
+          }, speakerTimeout(prepared.format.duration), (reply) => {
+            if (reply.type === 'turns') turns = reply.turns;
+            if (reply.type === 'voices') heard = reply.voices;
+          }, options.signal, undefined, true);
         } catch (err) {
           if (options.signal?.aborted || closing) throw err;
           console.error(`[transcription] Speakers: ${(err as Error).message}`);
           note = 'speaker detection failed';
         }
       }
-      const result = await this.recognize(wav, prepared, languageFor(id, options.language ?? settings.language), { ...options, turns }, undefined, true);
-      return { ...result, speaker_note: note };
+      const { labels, ...result } = await this.recognize(wav, prepared, languageFor(id, options.language ?? settings.language), { ...options, turns }, undefined, true);
+      return { ...result, speaker_note: note, voices: voicesOfLabels(turns, labels, heard) };
     } finally {
       free();
       await giveBack();
@@ -248,8 +283,9 @@ export class TranscriptionEngine {
     return { id, model: await this.engineModel(id), format: await readWavFormat(wav) };
   }
 
-  private async recognize(wav: string, { model, format }: Awaited<ReturnType<TranscriptionEngine['prepare']>>, language: string, options: TranscribeOptions, release: (() => Promise<void>) | undefined, held: boolean): Promise<TranscriptResult> {
+  private async recognize(wav: string, { model, format }: Awaited<ReturnType<TranscriptionEngine['prepare']>>, language: string, options: TranscribeOptions, release: (() => Promise<void>) | undefined, held: boolean): Promise<TranscriptResult & { labels: [number, number][] }> {
     const segments: Segment[] = [];
+    let labels: [number, number][] = [];
     let loadMs: number | null = null;
     let backend: string | undefined;
     let seconds = format.duration;
@@ -261,9 +297,10 @@ export class TranscriptionEngine {
         options.onSegment?.(segment);
       }
       if (reply.type === 'progress') options.onProgress?.(reply.done, reply.total);
+      if (reply.type === 'labels') labels = reply.labels;
       if (reply.type === 'done') seconds = reply.seconds;
     }, options.signal, release, held);
-    return { segments, seconds, load_ms: loadMs, ...(backend ? { backend } : {}) };
+    return { segments, seconds, load_ms: loadMs, labels, ...(backend ? { backend } : {}) };
   }
 
   /**
@@ -431,17 +468,18 @@ export class TranscriptionEngine {
    * One job in a fresh worker. Ends it on success, error, timeout or cancel. The one-job slot and `afterExit` (a
    * model lease) are given back only once the worker has really exited, even when that takes longer than the job.
    */
-  private async run(request: WorkerRequest, timeoutMs: number, onReply: (reply: WorkerReply) => void, signal?: AbortSignal, afterExit?: () => Promise<void>, held = false): Promise<void> {
+  private async run(request: WorkerRequest, timeoutMs: number, onReply: (reply: WorkerReply) => void, signal?: AbortSignal, afterExit?: () => Promise<void>, held = false, light = false): Promise<void> {
     const giveBack = async () => { await afterExit?.().catch(() => {}); };
     if (closing) { await giveBack(); throw httpError(503, 'The dashboard is shutting down'); }
-    // `held`: part of a job that already has the slot, and keeps it after this worker.
-    if (busy && !held) { await giveBack(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
-    busy = true;
+    // `held`: part of a job that already has the slot, and keeps it after this worker. `light`: a job that never
+    // takes the slot (see `embed`).
+    if (busy && !held && !light) { await giveBack(); throw Object.assign(httpError(409, 'A transcription is already running; wait for it to finish'), { engineBusy: true }); }
+    if (!light) busy = true;
     let child: ChildProcess;
     try {
       child = this.launcher();
     } catch (err) {
-      if (!held) free();
+      if (!held && !light) free();
       await giveBack();
       throw new Error(`The transcription engine could not start: ${(err as Error).message}`, { cause: err });
     }
@@ -486,10 +524,22 @@ export class TranscriptionEngine {
       });
     } finally {
       // The next job starts only once this worker has really exited, so two never hold a model's memory at once.
-      const done = async () => { await helperGone(helper); running.delete(child); if (!held) free(); await giveBack(); };
+      const done = async () => { await helperGone(helper); running.delete(child); if (!held && !light) free(); await giveBack(); };
       if (await stop(child)) await done();
       else if (held) await new Promise<void>((resolve) => { child.once('exit', () => { void done().finally(resolve); }); });
       else child.once('exit', () => { void done(); });
     }
   }
+}
+
+/**
+ * The transcript's speakers with their clean stretches and, when they were asked for, their mean embeddings. `labels`
+ * says which diarized voice became which Speaker N; a voice with no words has no label and is left out.
+ */
+export function voicesOfLabels(turns: readonly SpeakerTurn[], labels: readonly [number, number][], heard: readonly (Pick<HeardVoiceReply, 'speaker' | 'centroid' | 'seconds'> & { samples?: HeardVoiceReply['samples'] })[]): RecordingVoice[] {
+  return labels.map(([voice, n]) => {
+    const intervals = cleanIntervals(turns, voice);
+    const found = heard.find((h) => h.speaker === voice);
+    return { label: `Speaker ${n}`, intervals, seconds: found?.seconds ?? secondsOf(intervals), ...(found ? { centroid: found.centroid, ...(found.samples ? { samples: found.samples } : {}) } : {}) };
+  }).sort((a, b) => Number(a.label.slice(8)) - Number(b.label.slice(8)));
 }

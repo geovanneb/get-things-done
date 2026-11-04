@@ -60,6 +60,8 @@ export function useLiveEvents(): void {
     const handleTranscription = () => dispatch({ type: 'DATA_CHANGED', payload: 'transcription' });
     // More live transcript, or its status changed: the page reads on from its own number, so a missed notice costs nothing.
     const handleLive = () => dispatch({ type: 'DATA_CHANGED', payload: 'live-transcript' });
+    // Remembered voices live outside the workspace: the server says when they changed, never whose.
+    const handleVoiceprints = () => dispatch({ type: 'DATA_CHANGED', payload: 'voiceprints' });
     // A run started from this dashboard ended: the update changed, and the notifier may tell a user who is elsewhere.
     const handleRunFinished = (e: MessageEvent) => {
       dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
@@ -88,6 +90,7 @@ export function useLiveEvents(): void {
       source.addEventListener('file_change', handleFileChange as EventListener);
       source.addEventListener('transcription', handleTranscription);
       source.addEventListener('live-transcript', handleLive);
+      source.addEventListener('voiceprints', handleVoiceprints);
       source.addEventListener('run-finished', handleRunFinished as EventListener);
       source.addEventListener('error', handleError);
     };

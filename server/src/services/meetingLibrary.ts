@@ -20,6 +20,20 @@ export function isMeetingId(value: unknown): value is string {
   return typeof value === 'string' && (QUEUED_MEETING_ID.test(value) || IMPORTED_MEETING_ID.test(value));
 }
 
+/**
+ * A meeting id rebuilt from its numbers, or null when the value is not one. What comes back holds no character of the
+ * value itself, so it can go into a path even where a check made elsewhere cannot be seen (CodeQL's path rules).
+ */
+export function canonicalMeetingId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const n = (s: string, width: number) => String(Number(s)).padStart(width, '0');
+  const queued = /^MQ-(\d{4})-(\d{4})$/.exec(value);
+  if (queued) return `MQ-${n(queued[1]!, 4)}-${n(queued[2]!, 4)}`;
+  const imported = /^CU-(\d{4})-(\d{4})(?:-M-(\d{2,3}))?$/.exec(value);
+  if (!imported) return null;
+  return `CU-${n(imported[1]!, 4)}-${n(imported[2]!, 4)}${imported[3] ? `-M-${n(imported[3], imported[3].length)}` : ''}`;
+}
+
 /** An imported meeting's update and record; null for a queued meeting's id. */
 export function importedParts(id: string): { update: string; record: string | null } | null {
   const m = IMPORTED_MEETING_ID.exec(id);

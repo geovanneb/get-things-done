@@ -19,6 +19,7 @@ import { FileWatchEvent } from './types';
 import { AgentRunnerService, runEvents, type RunFinished } from './services/agentRunner';
 import { transcriptionEvents } from './services/transcriptionModels';
 import { meetingTranscriptionEvents } from './services/meetingTranscription';
+import { voiceprintEvents } from './services/voiceprints/service';
 import { liveTranscriptEvents } from './services/meetingLiveTranscript';
 import { TranscriptionEngine } from './services/transcription/engine';
 import { isKaizenNote, scheduleKaizenIntake } from './services/kaizenIntake';
@@ -95,6 +96,10 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
   const broadcastTranscription = (): void => {
     for (const client of sseClients) client.write('event: transcription\ndata: {}\n\n');
   };
+  // Remembered voices live outside the workspace too. Only that they changed: never who or what.
+  const broadcastVoiceprints = (): void => {
+    for (const client of sseClients) client.write('event: voiceprints\ndata: {}\n\n');
+  };
 
   // Set once the server listens; stops the daily update check when it closes.
   let stopUpdateChecks = (): void => {};
@@ -103,6 +108,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     transcriptionEvents.off('change', broadcastTranscription);
     runEvents.off('finished', broadcastRunFinished);
     meetingTranscriptionEvents.off('change', broadcastTranscription);
+    voiceprintEvents.off('change', broadcastVoiceprints);
     liveTranscriptEvents.off('change', broadcastLive);
     for (const client of sseClients) {
       client.write('event: server_shutdown\ndata: {}\n\n');
@@ -148,6 +154,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       transcriptionEvents.on('change', broadcastTranscription);
       runEvents.on('finished', broadcastRunFinished);
       meetingTranscriptionEvents.on('change', broadcastTranscription);
+      voiceprintEvents.on('change', broadcastVoiceprints);
       liveTranscriptEvents.on('change', broadcastLive);
 
       const workspaceService = new WorkspaceService();
