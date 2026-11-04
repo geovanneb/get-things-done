@@ -356,6 +356,29 @@ export interface ValidationResult {
   path?: string;
 }
 
+/** GET /api/app/update: this version, the newest one found, and how this install updates. */
+export interface AppUpdateStatus {
+  current: string;
+  latest: string | null;
+  /** Strictly newer than `current`. */
+  newer: boolean;
+  kind: 'desktop' | 'npm' | 'npm-local' | 'npx' | 'source';
+  channel: string;
+  /** `self`: the desktop app updates itself; `command`: run `commands`; `manual`: from the release page or the source. */
+  how: 'self' | 'command' | 'manual';
+  commands: string[];
+  release_url: string;
+  notes_url: string | null;
+  auto_check: boolean;
+  /** The version whose notice was put off with Later. */
+  dismissed: string | null;
+  checked_at: string | null;
+  checking: boolean;
+  error: string | null;
+  /** Something important running now (a recording, a transcription, an AI tool run): no notice meanwhile. */
+  busy: string | null;
+}
+
 export interface WorkspaceConfig {
   path: string;
   name: string;

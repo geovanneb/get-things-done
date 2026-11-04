@@ -17,6 +17,8 @@ export function scopeForPath(filePath: string): DataScope {
   if (p.includes('/context-updates/')) return 'context-updates';
   // A meeting's chosen version: the meeting views read it with the context updates that hold the meeting.
   if (/\/meetings\/[^/]+\/meeting\.json$/.test(p)) return 'context-updates';
+  // An AI tool run starting or ending on an update (in any dashboard): its views, and the update notice, follow it.
+  if (/\/\.situation-board\/runs\/CU-\d{4}-\d{4}\.json$/.test(p)) return 'context-updates';
   if (p.includes('/context/')) return 'context';
   if (p.includes('/routines/')) return 'routines';
   if (p.includes('/profile/')) return 'profile';

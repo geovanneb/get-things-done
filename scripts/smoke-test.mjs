@@ -50,7 +50,7 @@ check('gtd init creates a workspace', fs.existsSync(path.join(ws, 'workspace.yam
 check('gtd init writes the Claude Code setup', fs.existsSync(path.join(ws, 'CLAUDE.md')));
 
 const server = spawn(process.execPath, [path.join(root, 'dist/server/index.js')], {
-  env: { ...env, ESB_WORKSPACE_PATH: ws, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production' },
+  env: { ...env, ESB_WORKSPACE_PATH: ws, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production', GTD_DISABLE_UPDATES: '1' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverLog = '';

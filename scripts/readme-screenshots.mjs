@@ -33,7 +33,7 @@ try {
   execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'init', '-y', '-d', workspace,
     '--name', 'Alex Morgan', '--role', 'Project lead', '--org', 'Northwind Labs', '--workspace-name', 'Northwind work memory', '--ai', 'claude-code,codex,copilot'], { env, stdio: 'pipe' });
   server = spawn(process.execPath, [path.join(root, 'dist/server/index.js')], {
-    env: { ...env, ESB_WORKSPACE_PATH: workspace, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production' }, stdio: 'ignore',
+    env: { ...env, ESB_WORKSPACE_PATH: workspace, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production', GTD_DISABLE_UPDATES: '1' }, stdio: 'ignore',
   });
   let healthy = false;
   for (let i = 0; i < 100; i++) {

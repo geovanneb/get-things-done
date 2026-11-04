@@ -11,6 +11,7 @@ import { localRequestGuard, allowedOrigins } from './middleware/localRequestGuar
 import { errorHandler } from './middleware/errorHandler';
 import { watcherService } from './services/watcherService';
 import { routineScheduler } from './services/routineScheduler';
+import { startUpdateChecks } from './services/appUpdates';
 import { WorkspaceService } from './services/workspace';
 import { refreshWorkspaceFiles } from './services/workspaceActivation';
 import { GitRuntime, useGitRuntime } from './services/gitService';
@@ -89,6 +90,9 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     for (const client of sseClients) client.write('event: transcription\ndata: {}\n\n');
   };
 
+  // Set once the server listens; stops the daily update check when it closes.
+  let stopUpdateChecks = (): void => {};
+
   const close = (): Promise<void> => {
     transcriptionEvents.off('change', broadcastTranscription);
     meetingTranscriptionEvents.off('change', broadcastTranscription);
@@ -106,6 +110,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     watcherService.off('change', onKaizenNote);
     watcherService.stop();
     routineScheduler.stop();
+    stopUpdateChecks();
     // A running analysis is stopped first, with everything it started, and its record saved.
     const runnerStopped = AgentRunnerService.stopAll().catch(() => {});
     // A transcription worker is ended too, so nothing keeps running (or holding gigabytes) after the dashboard.
@@ -154,6 +159,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
 
       // Runs even without a workspace yet: each tick reads the current workspace path.
       routineScheduler.start();
+      // Once a day, while automatic checks are on (see appUpdates).
+      stopUpdateChecks = startUpdateChecks();
 
       resolve({ port, url, close });
     });

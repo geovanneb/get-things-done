@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import NavRail from './NavRail';
 import Header from './Header';
+import UpdateBanner from './UpdateBanner';
 import SearchOverlay from '../common/SearchOverlay';
 import Toaster from '../common/Toaster';
 import NewTaskModal from '../board/NewTaskModal';
@@ -28,6 +29,7 @@ export default function AppLayout() {
       <NavRail />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         <Header />
+        <UpdateBanner />
         <main
           id="main-content"
           style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}

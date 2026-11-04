@@ -14,6 +14,11 @@ export function setAnalysisRunning(workspace: string, id: string, on: boolean): 
   else running.delete(key(workspace, id));
 }
 
+/** Whether this dashboard has any run going, in any workspace. */
+export function anyAnalysisRunning(): boolean {
+  return running.size > 0;
+}
+
 /** Whether a process still exists. Only probed, never signalled. */
 export function processAlive(pid: unknown): boolean {
   if (typeof pid !== 'number' || pid <= 0) return false;

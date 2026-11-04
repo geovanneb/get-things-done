@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { registerBridge } from './bridge';
 import { stopServer } from './server-lifecycle';
-import { holdUpdatesWhile, installNow, startUpdateChecks } from './updates';
+import { holdUpdatesWhile, installNow, startUpdateChecks, updateEnvironment } from './updates';
 import { classifyLink } from './links';
 import { RecordingCommands, type RecordingCommand } from './recording-commands';
 import type { SpokenLanguageMenu } from './language-menu';
@@ -71,7 +71,7 @@ function startServerProcess(port: number): Promise<string> {
     serviceName: `${APP_NAME} server`,
     stdio: 'pipe',
     env: {
-      ...process.env, GTD_PORT: String(port), GTD_APP_ROOT: appRoot, NODE_ENV: 'production',
+      ...process.env, GTD_PORT: String(port), GTD_APP_ROOT: appRoot, NODE_ENV: 'production', ...updateEnvironment(),
       // Whisper on the GPU: built for Apple Silicon Macs only, and the server checks it is really there.
       ...(process.platform === 'darwin' && process.arch === 'arm64' ? { GTD_WHISPER_HELPER: path.join(process.resourcesPath, 'whisper', 'gtd-whisper') } : {}),
     },

@@ -33,6 +33,9 @@ check('the context update count is among them', after['context-updates'] === bef
 // Choosing a meeting's version in another dashboard writes only its meeting.json: open meeting views must read again.
 check('a meeting\'s meeting.json refreshes the meeting views', scopeForPath('/home/demo/northwind/meetings/MQ-2026-0003/meeting.json') === 'context-updates');
 check('with Windows separators too', scopeForPath('C:\\Users\\demo\\Northwind\\meetings\\MQ-2026-0003\\meeting.json') === 'context-updates');
+// An AI tool run starting or ending in another dashboard writes only its record: updates and the update notice follow it.
+check('a run\'s record refreshes the updates', scopeForPath('/home/demo/northwind/.situation-board/runs/CU-2026-0007.json') === 'context-updates');
+check('the runner\'s settings file does not', scopeForPath('/home/demo/northwind/.situation-board/runs/runner-settings.json') === 'other');
 check('a file inside a version is not a meeting change', scopeForPath('/home/demo/northwind/meetings/MQ-2026-0003/v1/notes.md') === 'other');
 
 // An update action now also tells the shared count, not only its own page.

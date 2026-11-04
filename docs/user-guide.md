@@ -22,6 +22,25 @@ Verify:
 gtd --version
 ```
 
+### Updating
+
+**Settings > Updates** shows your version and whether a newer one is out; a banner at the top
+says so once per version (**Later** hides it for that version), never while a recording, a
+transcription or an AI tool run is going. For an npm install, it gives the commands to run:
+
+```bash
+npm install -g @bertonha/getthingsdone@<version>
+gtd stop
+gtd upgrade
+gtd start
+```
+
+`gtd upgrade` refreshes the app's own files in your workspace (instructions, schemas); a file
+you edited is kept, with the new version saved next to it as `.new`. A copy installed in a
+project folder (not with `-g`) is updated there, and `npx` runs take the version in the command.
+The desktop app updates itself and asks you to restart; an unsigned or preview build links to
+the release page instead.
+
 ---
 
 ## Your first workspace
@@ -825,8 +844,14 @@ Git is not a backup of ignored recordings; back up the workspace folder separate
 The dashboard server binds to `127.0.0.1`. Recording and transcription run locally
 after the speech models are downloaded. Cloud AI tools receive the material they
 read when you run analysis or tasks, including automatic digest analysis if enabled.
-Model and sample downloads, marketplace access and desktop update checks also use
-the network. There is no Get Things Done cloud account or telemetry service.
+Model and sample downloads and marketplace access also use the network. Checking for
+updates asks the npm registry, through your own npm and its settings (npm sends its version,
+your system type and your registry login if you set one, as with any request), or, in the
+desktop app, GitHub for the newest version number, once a day. Apart from the AI tool runs you
+start or turn on, it is the only request the app makes on its own, and nothing from your
+workspace goes with it; turn it off in **Settings > Updates**. The desktop app that updates
+itself asks GitHub every six hours, on its own schedule. There is no Get Things Done cloud
+account or telemetry service.
 
 ---
 
