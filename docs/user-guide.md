@@ -420,8 +420,16 @@ can be continued with **Continue applying**.
 | Agent is applying | The agent is writing | Wait |
 | Done | Finished | Nothing; the record stays as history |
 
-The sidebar shows how many updates are waiting on you, and **Context** in the main
-navigation shows a badge when proposals are ready for review.
+Next to the title of the updates list, two counts say whose move it is: **ready for you**
+(amber: proposals to review, or an approved update to apply) and **to analyze** (material
+waiting for an analysis). The list groups them the same way. The dot on **Context** in the main
+navigation, and the count on **Import & review**, count only what is ready for you, so they go
+up exactly when an analysis finishes.
+
+When an analysis or apply you started from the dashboard finishes while you are in another app
+or tab, the dashboard tells you: the desktop app with a system notification, a browser once you
+allow notifications (**Settings > Notifications**, where you can also turn it off). A click
+opens the update.
 
 ### Common questions
 

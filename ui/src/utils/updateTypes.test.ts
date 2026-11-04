@@ -1,7 +1,7 @@
 /**
  * Unit tests for the context update types and filter. Run with `npm run test:update-types --workspace=ui`.
  */
-import { filterUpdates, typeCounts, updateType } from './updateTypes';
+import { waitingCounts, waitingLabel, filterUpdates, typeCounts, updateType } from './updateTypes';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -37,6 +37,13 @@ check('type and query combine', filterUpdates(updates, 'meeting-digest', 'logist
 const counts = typeCounts(updates);
 check('counts per type', counts.imported === 2 && counts['meeting-digest'] === 1 && counts['memory-review'] === 1 && counts.kaizen === 1 && counts.other === 1);
 check('types with no update are left out', !('imported' in typeCounts([{ origin: 'meetings' }])));
+
+// #246: whose move it is.
+const waiting = waitingCounts([{ status: 'ready' }, { status: 'ready' }, { status: 'in_review' }, { status: 'approved' }, { status: 'analyzing' }, { status: 'applying' }, { status: 'done' }]);
+check('ready for you: review and apply; to analyze: material only; runs and history in neither', waiting.ready === 2 && waiting.toAnalyze === 2);
+check('both counts in words', waitingLabel(waiting) === '2 context updates ready for you, 2 to analyze');
+check('one ready, none to analyze', waitingLabel({ ready: 1, toAnalyze: 0 }) === '1 context update ready for you');
+check('only to analyze', waitingLabel({ ready: 0, toAnalyze: 3 }) === '3 to analyze');
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);

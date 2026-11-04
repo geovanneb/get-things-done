@@ -7,6 +7,8 @@ import { startFollowUp } from '../services/meetingCorrectionService';
 import { AgentRunnerService } from '../services/agentRunner';
 import { scheduleKaizenIntake } from '../services/kaizenIntake';
 import { utf8FileNames } from '../utils/uploadNames';
+import { runNoticeData } from '../services/runNotice';
+import { WorkspaceService } from '../services/workspace';
 
 const router = Router();
 const service = new ContextUpdateService();
@@ -105,6 +107,15 @@ router.put('/:id/meeting-records/:recordId/speaker', async (req: Request, res: R
 // GET /api/context-updates/:id/run  the current or last run started from the dashboard (null if none)
 router.get('/:id/run', async (req: Request, res: Response) => {
   res.json(await runner.get(param(req, 'id')));
+});
+
+// GET /api/context-updates/:id/run-notice?workspace=…&started_at=…  what the notice of that finished run says, read
+// in this request's one workspace (null unless it is the expected workspace and that very run ended)
+router.get('/:id/run-notice', async (req: Request, res: Response) => {
+  const workspace = new WorkspaceService().getWorkspacePath();
+  const run = await runner.get(param(req, 'id'));
+  const update = run ? await service.get(param(req, 'id')).catch(() => null) : null;
+  res.json({ notice: runNoticeData(workspace, { workspace: req.query['workspace'], started_at: req.query['started_at'] }, run, update) });
 });
 
 // POST /api/context-updates/:id/run  { command: "analyze" | "apply" }  runs /gtd-context-analyze or /gtd-context-apply

@@ -2,6 +2,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
+import { EventEmitter } from 'events';
 import { WorkspaceService } from './workspace';
 import { findCommand } from './aiToolDetection';
 import { ContextUpdateService, proposalTarget, updateId } from './contextUpdateService';
@@ -37,6 +38,12 @@ export type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 /** The workspace commands the dashboard can run: analyze a ready update, apply an approved one. */
 export type RunCommand = 'analyze' | 'apply';
+
+/** How a run started from the dashboard ended: what the page needs to say so, never more. */
+export interface RunFinished { workspace: string; update_id: string; command: RunCommand; status: Exclude<RunStatus, 'running'> }
+
+/** Says when a run started from the dashboard ends, after its record is saved ('finished', RunFinished). */
+export const runEvents = new EventEmitter();
 
 export interface AgentRun {
   update_id: string;
@@ -648,6 +655,10 @@ export class AgentRunnerService {
       current.run = { ...current.run, ...explainOutcome(outcome, status, current.run.command, apply), ended_at: new Date().toISOString() };
       recent.set(recentKey(current.workspace, current.run.update_id), current.run);
       await this.record(current);
+      if (current.run.status !== 'running') {
+        const finished: RunFinished = { workspace: current.workspace, update_id: current.run.update_id, command: current.run.command, status: current.run.status };
+        runEvents.emit('finished', finished);
+      }
     } catch (err) {
       console.error(`Could not save how the run of ${current.run.update_id} ended: ${(err as Error).message}`);
     } finally {

@@ -2,6 +2,9 @@ import { useEffect } from 'react';
 import { useAppDispatch, DataScope } from '../store';
 import { RECONNECT_DELAY_MS, streamTracker } from '../utils/liveEvents';
 
+/** Passed on from the server's `run-finished` event to the page's notifier (see RunFinishedNotifier). */
+export const RUN_FINISHED_EVENT = 'gtd:run-finished';
+
 interface FileChangeEvent {
   type: 'change' | 'add' | 'unlink';
   path: string;
@@ -57,6 +60,11 @@ export function useLiveEvents(): void {
     const handleTranscription = () => dispatch({ type: 'DATA_CHANGED', payload: 'transcription' });
     // More live transcript, or its status changed: the page reads on from its own number, so a missed notice costs nothing.
     const handleLive = () => dispatch({ type: 'DATA_CHANGED', payload: 'live-transcript' });
+    // A run started from this dashboard ended: the update changed, and the notifier may tell a user who is elsewhere.
+    const handleRunFinished = (e: MessageEvent) => {
+      dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
+      try { window.dispatchEvent(new CustomEvent(RUN_FINISHED_EVENT, { detail: JSON.parse(e.data) as unknown })); } catch { /* malformed: nothing to say */ }
+    };
 
     // The browser retries a dropped stream by itself, but gives up for good on some errors (a failed restart,
     // for example). Then open a new one after a short wait.
@@ -80,6 +88,7 @@ export function useLiveEvents(): void {
       source.addEventListener('file_change', handleFileChange as EventListener);
       source.addEventListener('transcription', handleTranscription);
       source.addEventListener('live-transcript', handleLive);
+      source.addEventListener('run-finished', handleRunFinished as EventListener);
       source.addEventListener('error', handleError);
     };
 

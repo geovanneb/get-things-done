@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { AgentRunnerService, ClaudeCodeAdapter, childEnv, explainOutcome, workspaceTrusted, type AgentRunnerAdapter, type RunOutcome, type StopReason } from '../src/services/agentRunner';
+import { AgentRunnerService, ClaudeCodeAdapter, childEnv, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
 
@@ -111,6 +111,25 @@ test('an analysis runs the workspace\'s own command, one at a time, and locks th
   await setStatus(ws, 'in_review');
   await assert.rejects(service.startAnalysis('CU-2026-0001'), /while the update is "in_review"/, 'only a ready update is analyzed');
   await assert.rejects(service.startAnalysis('../x'), /Invalid context update id/);
+});
+
+test('a finished run is announced once, after its record is saved, with the update and how it ended (#246)', async (t) => {
+  const ws = await workspace(t);
+  const fake = fakeAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+  const heard: RunFinished[] = [];
+  const listen = (run: RunFinished) => heard.push(run);
+  runEvents.on('finished', listen);
+  t.after(() => { runEvents.off('finished', listen); });
+  await service.startAnalysis('CU-2026-0001');
+  assert.deepEqual(heard, [], 'nothing while it runs');
+  await setStatus(ws, 'in_review');
+  fake.end(success);
+  await ended();
+  assert.ok(await eventually(async () => heard.length === 1));
+  assert.deepEqual(heard[0], { workspace: ws, update_id: 'CU-2026-0001', command: 'analyze', status: 'succeeded' });
+  const saved = JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8'));
+  assert.equal(saved.status, 'succeeded', 'the record says so before anyone is told');
 });
 
 test('startup checks the update again right before launch, and a Stop before launch means it never starts', async (t) => {

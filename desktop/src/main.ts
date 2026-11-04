@@ -3,7 +3,9 @@
 import { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, powerSaveBlocker, session, shell, utilityProcess, UtilityProcess } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import { registerBridge } from './bridge';
+import { registerBridge, type RunNoticeRequest } from './bridge';
+import { noticeFromServer, noticeMemory, runNoticeWords, type RunNotice } from './run-notice';
+import { randomUUID } from 'crypto';
 import { stopServer } from './server-lifecycle';
 import { holdUpdatesWhile, installNow, startUpdateChecks, updateEnvironment } from './updates';
 import { classifyLink } from './links';
@@ -256,6 +258,65 @@ function announceSuggestion(menu: SpokenLanguageMenu): void {
   }
 }
 
+/** A run started from the dashboard ended while the app was not in front: said once by the system; a click opens it. */
+const notices = noticeMemory();
+/** Notices read and checked, waiting for the page's last word (by token), for a short while only. */
+const readyNotices = new Map<string, { notice: RunNotice; at: number }>();
+const READY_FOR_MS = 30_000;
+/** Drops notices kept longer than they may wait. */
+function sweepReadyNotices(now: number): void {
+  for (const [token, ready] of readyNotices) if (now - ready.at > READY_FOR_MS) readyNotices.delete(token);
+}
+/** Reads one of the app's own API answers, or null. */
+async function own(pathname: string): Promise<unknown> {
+  try {
+    const res = await fetch(`${appUrl}${pathname}`, { headers: { Accept: 'application/json' } });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+/**
+ * A finished run, step one: read it from the app's own server, in one request with its workspace, and keep it ready.
+ * Only a run the server confirms ended; null otherwise or when already said. The page then decides (step two).
+ */
+async function prepareRunNotice(req: RunNoticeRequest): Promise<string | null> {
+  if (!appUrl || !Notification.isSupported()) return null;
+  const query = new URLSearchParams({ workspace: req.workspace, started_at: req.started_at });
+  const notice = noticeFromServer(req, await own(`/api/context-updates/${req.update_id}/run-notice?${query}`));
+  if (!notice || notices.said(notice)) return null;
+  const now = Date.now();
+  sweepReadyNotices(now);
+  const token = randomUUID().replace(/-/g, '');
+  readyNotices.set(token, { notice, at: now });
+  return token;
+}
+
+/**
+ * Step two, right after the page's own last checks: shown at once, nothing awaited, unless the app's window is in
+ * front. Counted as said only once it showed. Answers whether it did.
+ */
+function showRunNotice(token: string): boolean {
+  const now = Date.now();
+  const ready = readyNotices.get(token);
+  readyNotices.delete(token);
+  sweepReadyNotices(now);
+  // Kept too long (the page or the app was held up): old news, not said.
+  if (!ready || now - ready.at > READY_FOR_MS || mainWindow?.isFocused() || notices.said(ready.notice)) return false;
+  const { notice } = ready;
+  try {
+    const note = new Notification(runNoticeWords(notice));
+    // With its workspace: the page opens it only there, never an update of the same id in another workspace.
+    note.on('click', () => {
+      showWindow();
+      mainWindow?.webContents.send('gtd:open-update', { update_id: notice.update_id, workspace: notice.workspace });
+    });
+    note.show();
+    notices.remember(notice);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Asks the page to open the record dialog or to stop the recording. Opening needs the window; stopping does not,
  * since the recorder keeps running while the window is hidden.
@@ -360,7 +421,7 @@ if (!app.requestSingleInstanceLock()) {
       if (menu) announceSuggestion(menu);
       showRecordingTitle();
       setTrayMenu(pendingUpdate);
-    });
+    }, { prepare: prepareRunNotice, show: showRunNotice });
     holdUpdatesWhile(() => recording);
 
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {

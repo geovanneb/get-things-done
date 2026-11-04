@@ -16,7 +16,7 @@ import { WorkspaceService } from './services/workspace';
 import { refreshWorkspaceFiles } from './services/workspaceActivation';
 import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
-import { AgentRunnerService } from './services/agentRunner';
+import { AgentRunnerService, runEvents, type RunFinished } from './services/agentRunner';
 import { transcriptionEvents } from './services/transcriptionModels';
 import { meetingTranscriptionEvents } from './services/meetingTranscription';
 import { liveTranscriptEvents } from './services/meetingLiveTranscript';
@@ -86,6 +86,12 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     for (const client of sseClients) if (client.writableLength < 64 * 1024) client.write(`event: live-transcript\ndata: ${data}\n\n`);
   };
 
+  // A run started from the dashboard ended: the page says so if the user is elsewhere. Which update and how, nothing else.
+  const broadcastRunFinished = (run: RunFinished): void => {
+    const data = JSON.stringify({ update_id: run.update_id, command: run.command, status: run.status, workspace: run.workspace });
+    for (const client of sseClients) client.write(`event: run-finished\ndata: ${data}\n\n`);
+  };
+
   const broadcastTranscription = (): void => {
     for (const client of sseClients) client.write('event: transcription\ndata: {}\n\n');
   };
@@ -95,6 +101,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
 
   const close = (): Promise<void> => {
     transcriptionEvents.off('change', broadcastTranscription);
+    runEvents.off('finished', broadcastRunFinished);
     meetingTranscriptionEvents.off('change', broadcastTranscription);
     liveTranscriptEvents.off('change', broadcastLive);
     for (const client of sseClients) {
@@ -139,6 +146,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       watcherService.on('add', onKaizenNote);
       watcherService.on('change', onKaizenNote);
       transcriptionEvents.on('change', broadcastTranscription);
+      runEvents.on('finished', broadcastRunFinished);
       meetingTranscriptionEvents.on('change', broadcastTranscription);
       liveTranscriptEvents.on('change', broadcastLive);
 

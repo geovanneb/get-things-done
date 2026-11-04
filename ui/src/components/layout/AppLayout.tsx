@@ -3,6 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import NavRail from './NavRail';
 import Header from './Header';
 import UpdateBanner from './UpdateBanner';
+import RunFinishedNotifier from './RunFinishedNotifier';
 import SearchOverlay from '../common/SearchOverlay';
 import Toaster from '../common/Toaster';
 import NewTaskModal from '../board/NewTaskModal';
@@ -30,6 +31,7 @@ export default function AppLayout() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         <Header />
         <UpdateBanner />
+        <RunFinishedNotifier />
         <main
           id="main-content"
           style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}

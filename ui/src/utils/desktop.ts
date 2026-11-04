@@ -25,6 +25,12 @@ export interface DesktopBridge {
    * or `suggestion:switch:<id>` / `suggestion:keep:<id>` for a suggested spoken language.
    */
   takeRecordingCommand?(): Promise<string | null>;
+  /** Names a finished run; the app reads it from its server and keeps its notice ready. A token, or null when not to say. */
+  prepareRunNotice?(notice: { update_id: string; workspace: string; started_at: string }): Promise<string | null>;
+  /** Shows a prepared notice now (unless the app's window is in front); whether it showed. */
+  showRunNotice?(token: string): Promise<boolean>;
+  /** Calls `listener` with the update to open (and its workspace) when such a notification is clicked. Returns an unsubscribe. */
+  onOpenUpdate?(listener: (open: { update_id: string; workspace: string }) => void): () => void;
 }
 
 export type RecordingCommand = 'open' | 'stop' | `language:${string}` | `suggestion:${'switch' | 'keep'}:${string}`;

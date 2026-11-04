@@ -19,6 +19,7 @@ import { cleanupSummary } from '@/components/routines/SystemCleanup';
 import WorkspaceAvatar from '@/components/layout/WorkspaceAvatar';
 import WorkspaceIconCrop from '@/components/layout/WorkspaceIconCrop';
 import UpdatesSettings from '@/components/settings/UpdatesSettings';
+import RunNoticeSettings from '@/components/settings/RunNoticeSettings';
 import TranscriptionSettings from '@/components/settings/TranscriptionSettings';
 import SidebarSettings from '@/components/settings/SidebarSettings';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
@@ -811,6 +812,10 @@ export default function SettingsView() {
       {/* Section 3: Appearance */}
       <Card title="Cleanup and retention">
         <CleanupPointer />
+      </Card>
+
+      <Card title="Notifications">
+        <RunNoticeSettings />
       </Card>
 
       <Card title="Transcription">
