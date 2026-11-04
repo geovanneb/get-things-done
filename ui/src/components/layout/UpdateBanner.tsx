@@ -6,6 +6,8 @@ import { useApi } from '@/hooks/useApi';
 import { useDataVersion } from '@/store';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import type { AppUpdateStatus } from '@/types';
+import { useDesktopUpdate } from '@/hooks/useDesktopUpdate';
+import { dismissDesktopUpdate, restartToUpdate } from '@/utils/desktop';
 
 /** How often the page asks this dashboard what it found and what runs (a local question); the internet, at most daily. */
 const REFRESH_MS = 60 * 1000;
@@ -79,6 +81,10 @@ export default function UpdateBanner() {
   const recorder = useRecorder();
   const [hidden, setHidden] = React.useState<string | null>(null);
   const { restarting, late } = useRestartWatch(data?.installing ? data.latest : null);
+  // The desktop app's own update (#284): said here once downloaded, instead of in a dialog.
+  const desktop = useDesktopUpdate();
+  const [restartWhy, setRestartWhy] = React.useState<string | null>(null);
+  const [restartingApp, setRestartingApp] = React.useState(false);
   React.useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), REFRESH_MS);
     return () => clearInterval(id);
@@ -108,10 +114,34 @@ export default function UpdateBanner() {
       </div>
     );
   }
-  if (!data?.newer || !data.latest || data.latest === data.dismissed || data.latest === hidden || recorder.active || data.busy || data.installing) return null;
+  // The desktop app's own update, as its updater says it (not the server's check), never over a recording or a run.
+  if (data?.how === 'self') {
+    const ready = desktop?.phase === 'ready' ? desktop.version : null;
+    if (!ready || ready === desktop?.dismissed || ready === hidden || recorder.active || data.busy) return null;
+    const failed = restartWhy ?? desktop?.error ?? null;
+    const restart = () => {
+      setRestartingApp(true);
+      setRestartWhy(null);
+      void restartToUpdate().then((reason) => { if (reason) { setRestartWhy(reason); setRestartingApp(false); } });
+    };
+    const putOff = () => {
+      setHidden(ready);
+      void dismissDesktopUpdate(ready);
+    };
+    return (
+      <div role="status" aria-label="An update is ready" style={bar}>
+        <span style={{ flex: '1 1 240px' }}>
+          Get Things Done {ready} is ready.{failed ? <> {failed}</> : ' Restart to finish; your workspace stays as it is.'}
+        </span>
+        {ready === data.latest && data.notes_url && <a href={data.notes_url} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>What&apos;s new</a>}
+        <Button size="sm" variant="secondary" loading={restartingApp && !desktop?.error} onClick={restart}>Restart to update</Button>
+        <Button size="sm" variant="ghost" onClick={putOff}>Later</Button>
+      </div>
+    );
+  }  if (!data?.newer || !data.latest || data.latest === data.dismissed || data.latest === hidden || recorder.active || data.busy || data.installing) return null;
   // Installed from Settings and waiting for a restart: said instead of offering it again.
   const installed = data.installed === data.latest;
-  if (data.how === 'self') return null;
+
   const later = () => {
     setHidden(data.latest);
     void apiPost('/api/app/update/dismiss', { version: data.latest }).then(refetch, () => {});

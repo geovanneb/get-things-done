@@ -7,6 +7,8 @@ import { apiPost, apiPut } from '@/utils/api';
 import { useApi } from '@/hooks/useApi';
 import { copyText } from '@/components/context-updates/shared';
 import type { AppUpdateStatus } from '@/types';
+import { useDesktopUpdate } from '@/hooks/useDesktopUpdate';
+import { checkDesktopUpdate, hasDesktopUpdates, restartToUpdate } from '@/utils/desktop';
 import { updateStarted } from '@/components/layout/UpdateBanner';
 
 const hint: React.CSSProperties = { margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' };
@@ -17,9 +19,9 @@ const CHECKING_POLL_MS = 2000;
 /** What the check asks and what goes with it, for the switch's explanation. */
 function privacyNote(kind: AppUpdateStatus['kind']): string {
   const asks = kind === 'desktop'
-    ? 'GitHub, where the app is released, for the newest version number: an ordinary web request'
+    ? 'GitHub, where the app is released, for the newest version (and the app downloads it quietly): an ordinary web request'
     : 'the npm registry for the newest version number, through your own npm and its settings. npm sends what it sends with any request (its version and your system type, and your registry login if you set one)';
-  return `Once a day it asks ${asks}. Apart from the AI tool runs you start or turn on, it's the only request the app makes on its own, and nothing from your workspace goes with it. Off: it asks only when you press Check now.`;
+  return `${kind === 'desktop' ? 'A few times a day' : 'Once a day'} it asks ${asks}. Apart from the AI tool runs you start or turn on, it's the only request the app makes on its own, and nothing from your workspace goes with it. Off: it asks only when you press Check now.`;
 }
 
 /** The commands to run, with a button to copy them. */
@@ -88,9 +90,44 @@ function NpmUpdate({ status, updating, onUpdate }: { status: AppUpdateStatus; up
   );
 }
 
+/**
+ * The desktop app's own update (#284): how far it is, and Restart to update once it is downloaded. The restart waits
+ * while a recording, a transcription or an AI tool run is going, and says so. An app without the bridge (older) says
+ * how it updates, as before.
+ */
+function DesktopUpdatePanel() {
+  const update = useDesktopUpdate();
+  const [restarting, setRestarting] = React.useState(false);
+  const [why, setWhy] = React.useState<string | null>(null);
+  if (!update) return <p style={hint}>This app downloads new versions by itself and asks you to restart when one is ready.</p>;
+  if (update.phase === 'ready' && update.version) {
+    const restart = () => {
+      setRestarting(true);
+      setWhy(null);
+      void restartToUpdate().then((reason) => { if (reason) { setWhy(reason); setRestarting(false); } });
+    };
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span><Button variant="primary" size="sm" loading={restarting && !update.error} onClick={restart}>Restart to update to {update.version}</Button></span>
+        <p style={hint}>Downloaded. The app restarts on the new version; your workspace stays as it is. It waits while a recording, a transcription or an AI tool run is going. Not now: it is installed the next time you quit.</p>
+        {(why ?? update.error) && <p role="alert" style={{ ...hint, color: 'var(--color-warning)' }}>{why ?? update.error}</p>}
+      </div>
+    );
+  }
+  return (
+    <p role="status" style={hint}>
+      {update.phase === 'downloading' ? <>Downloading {update.version}{update.percent !== null ? ` (${update.percent}%)` : ''}… It is ready to restart when done.</>
+        : update.phase === 'checking' ? 'Checking for a new version…'
+          : update.phase === 'error' ? <>The app&apos;s last check did not work: {update.error}</>
+            : update.phase === 'off' ? 'This build of the app does not update itself.'
+              : 'This app downloads new versions by itself, then offers to restart.'}
+    </p>
+  );
+}
+
 /** How this install updates, in words, with the commands to copy when there are some. */
 function HowToUpdate({ status, updating, onUpdate }: { status: AppUpdateStatus; updating: boolean; onUpdate: () => void }) {
-  if (status.how === 'self') return <p style={hint}>This app downloads new versions by itself and asks you to restart when one is ready.</p>;
+  if (status.how === 'self') return <DesktopUpdatePanel />;
   if (status.how === 'manual') {
     return (
       <p style={hint}>
@@ -141,8 +178,8 @@ export default function UpdatesSettings() {
   if (error && !waiting) return <p role="alert" style={{ ...hint, color: 'var(--color-critical)' }}>Could not read the update status: {error}</p>;
   if (!data) return <p style={hint}>Loading…</p>;
   const checked = data.checked_at ? new Date(data.checked_at).toLocaleString() : null;
-  // The desktop app that updates itself checks on its own schedule; a switch here would not stop it (yet).
-  const switchable = data.how !== 'self';
+  // The desktop app that updates itself follows the switch too (#284).
+  const switchable = data.how !== 'self' || hasDesktopUpdates();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -163,7 +200,7 @@ export default function UpdatesSettings() {
       )}
       {data.error && <p role="alert" style={{ ...hint, color: 'var(--color-warning)' }}>The last check did not work: {data.error}</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <Button size="sm" variant="secondary" loading={busy || checking} disabled={busy || waiting || data.installing} onClick={() => void act(() => apiPost('/api/app/update/check'))}>Check now</Button>
+        <Button size="sm" variant="secondary" loading={busy || checking} disabled={busy || waiting || data.installing} onClick={() => void act(async () => { await apiPost('/api/app/update/check'); if (data.how === 'self') await checkDesktopUpdate(); })}>Check now</Button>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{checked ? `Last checked ${checked}` : 'Not checked yet'}</span>
       </div>
       {switchable

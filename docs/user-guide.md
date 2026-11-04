@@ -54,8 +54,12 @@ gtd start
 `gtd upgrade` refreshes the app's own files in your workspace (instructions, schemas); a file
 you edited is kept, with the new version saved next to it as `.new`. A copy installed in a
 project folder (not with `-g`) is updated there, and `npx` runs take the version in the command.
-The desktop app updates itself and asks you to restart; an unsigned or preview build links to
-the release page instead.
+The desktop app downloads new versions by itself. **Settings > Updates** shows how far it is,
+and once it is downloaded a banner (and the menu-bar or tray menu) offers **Restart to update**.
+The restart waits while a recording, a transcription or an AI tool run is going, and says so;
+if you don't restart, the update is installed the next time you quit. Quitting while a
+transcription or an AI tool run is going asks first. An unsigned or preview build links to the
+release page instead.
 
 ---
 
@@ -895,7 +899,8 @@ your system type and your registry login if you set one, as with any request), o
 desktop app, GitHub for the newest version number, once a day. Apart from the AI tool runs you
 start or turn on, it is the only request the app makes on its own, and nothing from your
 workspace goes with it; turn it off in **Settings > Updates**. The desktop app that updates
-itself asks GitHub every six hours, on its own schedule. There is no Get Things Done cloud
+itself asks GitHub every six hours while that switch is on (and when you press Check now). There
+is no Get Things Done cloud
 account or telemetry service.
 
 ---

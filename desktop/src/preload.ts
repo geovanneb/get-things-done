@@ -22,6 +22,16 @@ contextBridge.exposeInMainWorld('gtdDesktop', {
   // the page to open the update, with its workspace.
   prepareRunNotice: (notice: unknown): Promise<string | null> => ipcRenderer.invoke('gtd:run-notice-prepare', notice).then((t) => (typeof t === 'string' ? t : null), () => null),
   showRunNotice: (token: string): Promise<boolean> => ipcRenderer.invoke('gtd:run-notice-show', token).then((shown) => shown === true, () => false),
+  // The app's own update (#284): where it is, a check now, a restart to install it (null when restarting, else why not).
+  updateState: (): Promise<unknown> => ipcRenderer.invoke('gtd:update-state'),
+  checkForUpdate: (): Promise<void> => ipcRenderer.invoke('gtd:update-check'),
+  dismissUpdate: (version: string): Promise<void> => ipcRenderer.invoke('gtd:update-dismiss', version),
+  restartToUpdate: (): Promise<string | null> => ipcRenderer.invoke('gtd:update-restart').then((r) => (typeof r === 'string' ? r : null), () => 'The app could not be asked to restart'),
+  onUpdateState: (listener: (state: unknown) => void): (() => void) => {
+    const changed = (_event: unknown, value: unknown): void => listener(value);
+    ipcRenderer.on('gtd:update-state', changed);
+    return () => { ipcRenderer.removeListener('gtd:update-state', changed); };
+  },
   onOpenUpdate: (listener: (open: { update_id: string; workspace: string }) => void): (() => void) => {
     const open = (_event: unknown, value: unknown): void => {
       const o = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;

@@ -31,6 +31,71 @@ export interface DesktopBridge {
   showRunNotice?(token: string): Promise<boolean>;
   /** Calls `listener` with the update to open (and its workspace) when such a notification is clicked. Returns an unsubscribe. */
   onOpenUpdate?(listener: (open: { update_id: string; workspace: string }) => void): () => void;
+  /** Where the app's own update is (#284). */
+  updateState?(): Promise<unknown>;
+  /** Checks for an update now. */
+  checkForUpdate?(): Promise<void>;
+  /** Later on the banner, for this downloaded version: the app remembers it. */
+  dismissUpdate?(version: string): Promise<void>;
+  /** Restarts to install the downloaded update: null when it restarts, else why not now. */
+  restartToUpdate?(): Promise<string | null>;
+  /** Calls `listener` whenever the update's state changes. Returns an unsubscribe. */
+  onUpdateState?(listener: (state: unknown) => void): () => void;
+}
+
+/** Where the desktop app's own update is: `off` for a build that does not update itself, `ready` to restart. */
+export interface DesktopUpdate {
+  phase: 'off' | 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+  version: string | null;
+  percent: number | null;
+  error: string | null;
+  /** The downloaded version put off with Later on the banner. */
+  dismissed: string | null;
+}
+
+const PHASES = new Set(['off', 'idle', 'checking', 'downloading', 'ready', 'error']);
+
+/** The app's answer, checked: anything else is no state at all. */
+export function readDesktopUpdate(value: unknown): DesktopUpdate | null {
+  if (!value || typeof value !== 'object') return null;
+  const o = value as Record<string, unknown>;
+  if (typeof o['phase'] !== 'string' || !PHASES.has(o['phase'])) return null;
+  const text = (v: unknown, max: number) => (typeof v === 'string' && v.length <= max ? v : null);
+  const percent = typeof o['percent'] === 'number' && Number.isFinite(o['percent']) ? Math.max(0, Math.min(100, Math.round(o['percent']))) : null;
+  return { phase: o['phase'] as DesktopUpdate['phase'], version: text(o['version'], 60), percent, error: text(o['error'], 300), dismissed: text(o['dismissed'], 60) };
+}
+
+/** Whether this page runs in a desktop app that can tell it about its own update. */
+export function hasDesktopUpdates(): boolean {
+  const b = desktopBridge();
+  return Boolean(b?.updateState && b.onUpdateState && b.restartToUpdate);
+}
+
+/** Follows the desktop app's update: the state now, then each change. No-op (and never called) in a browser. */
+export function followDesktopUpdate(listener: (state: DesktopUpdate) => void): () => void {
+  const b = desktopBridge();
+  if (!b?.updateState || !b.onUpdateState) return () => undefined;
+  let live = true;
+  // A change pushed before the first answer is newer than that answer: the answer is then dropped.
+  let pushed = false;
+  const stop = b.onUpdateState((s) => { const v = readDesktopUpdate(s); if (live && v) { pushed = true; listener(v); } });
+  void b.updateState().then((s) => { const v = readDesktopUpdate(s); if (live && !pushed && v) listener(v); }, () => undefined);
+  return () => { live = false; stop(); };
+}
+
+/** Restart to update: null when the app restarts, else why not now. */
+export async function restartToUpdate(): Promise<string | null> {
+  const b = desktopBridge();
+  if (!b?.restartToUpdate) return 'Only the desktop app restarts itself';
+  return b.restartToUpdate();
+}
+
+export async function dismissDesktopUpdate(version: string): Promise<void> {
+  await desktopBridge()?.dismissUpdate?.(version);
+}
+
+export async function checkDesktopUpdate(): Promise<void> {
+  await desktopBridge()?.checkForUpdate?.();
 }
 
 export type RecordingCommand = 'open' | 'stop' | `language:${string}` | `suggestion:${'switch' | 'keep'}:${string}`;

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { checkNow, dismiss, install, setAutoCheck, updateHandoffFailed, updateStatus } from '../services/appUpdates';
+import { cancelDesktopRestart, checkNow, dismiss, install, prepareDesktopRestart, setAutoCheck, updateHandoffFailed, updateStatus } from '../services/appUpdates';
 import { WorkspaceService } from '../services/workspace';
 
 /** The workspace this request is about, or none yet (the update state itself is the user's, not a workspace's). */
@@ -38,6 +38,17 @@ router.post('/update/install', async (req: Request, res: Response) => {
     setTimeout(updateHandoffFailed, 45_000).unref();
   });
   res.json(status);
+});
+
+// POST /api/app/update/desktop-restart  the desktop app is about to stop this server to install its update: closes
+// admission and checks again what runs (409 with the reason while something does). /cancel opens admission again.
+router.post('/update/desktop-restart', async (_req: Request, res: Response) => {
+  await prepareDesktopRestart(workspace());
+  res.json({ ok: true });
+});
+router.post('/update/desktop-restart/cancel', (_req: Request, res: Response) => {
+  cancelDesktopRestart();
+  res.json({ ok: true });
 });
 
 export default router;
