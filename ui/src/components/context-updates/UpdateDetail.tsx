@@ -16,7 +16,7 @@ import { meetingActionDraft } from '@/utils/meetingAction';
 import { doubtLine, doubtsAbout } from '@/utils/recordDoubts';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
 import type { ContextUpdate, ContextUpdateProposal, FieldChange, MeetingPerson, MeetingRecord, MeetingSpeaker, RecordChange, RecordDoubt, Stakeholder, TranscriptChangeView, TranscriptReview } from '@/types';
-import AnalysisRun from './AnalysisRun';
+import AnalysisRun, { type AnalysisRunHandle, type NextAction } from './AnalysisRun';
 import DiffView from './DiffView';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
 import { CommandBox, HelpBox, STATUS_META, StatusPill, StepIndicator, TypeBadge, copyText, formatBytes, sectionLabel } from './shared';
@@ -623,22 +623,54 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const [copiedFor, setCopiedFor] = useState<string | null>(null);
   // An analysis started from the dashboard is running: the page does not also ask the user to run the command.
   const [running, setRunning] = useState(false);
-  const nextRef = useRef<HTMLElement>(null);
-  const copyRef = useRef<HTMLButtonElement>(null);
+  const nextRef = useRef<HTMLElement | null>(null);
+  // The Next box itself, watched for being on screen (a callback ref: the box can be replaced, e.g. after an error).
+  const [nextBox, setNextBox] = useState<HTMLElement | null>(null);
+  const runRef = useRef<AnalysisRunHandle>(null);
+  // The next step as the box offers it: the sticky bar repeats exactly that (Run, Copy), or nothing while checking.
+  const [nextAction, setNextAction] = useState<NextAction>('none');
+  // The Next box is on screen: the sticky bar shows only when it is scrolled away, never a second primary next to it.
+  const [nextInView, setNextInView] = useState(true);
+  // Focus to move to the next step's main action once it is there (it appears after its checks answer).
+  const focusPending = useRef(false);
   const prevStatus = useRef<string | null>(null);
 
-  // Right after approving, the apply command is the one step left and it sits at the top of the page,
-  // out of sight of the approve bar. Bring it into view and put focus on its Copy button.
+  // Right after approving, applying is the one step left and it sits at the top of the page, out of sight of the
+  // approve bar. Bring it into view and put focus on its main action (Apply, or Copy when the dashboard cannot run it).
   useEffect(() => {
     const status = data?.status ?? null;
     if (prevStatus.current === 'in_review' && status === 'approved') {
       const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
       nextRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
-      copyRef.current?.focus({ preventScroll: true });
+      // Once the step's main action is there (see below): it appears after the new panel's checks answer.
+      focusPending.current = true;
     }
     if (prevStatus.current !== status) setCopiedFor(null);
     prevStatus.current = status;
   }, [data?.status]);
+
+  // Another update: no focus left to move.
+  useEffect(() => { focusPending.current = false; }, [data?.id]);
+  useEffect(() => {
+    if (!focusPending.current || (nextAction !== 'run' && nextAction !== 'copy')) return;
+    focusPending.current = false;
+    const frame = requestAnimationFrame(() => nextRef.current?.querySelector<HTMLElement>('[data-next-action]')?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [nextAction]);
+
+  useEffect(() => {
+    setNextInView(true);
+    if (!nextBox || typeof IntersectionObserver === 'undefined') return;
+    const watch = new IntersectionObserver(([entry]) => setNextInView(Boolean(entry?.isIntersecting)), { threshold: 0.1 });
+    watch.observe(nextBox);
+    return () => watch.disconnect();
+  }, [nextBox]);
+
+  /** A start from the sticky bar failed: the box, with its message, comes into view. */
+  const showNextBox = () => {
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    nextRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+  };
 
   const notify = (type: 'success' | 'error' | 'info', message: string) => dispatch({ type: 'ADD_NOTIFICATION', payload: { type, message } });
   // The sidebar dot and "Waiting on you" count the same updates: tell them too, not only this page (#201).
@@ -683,7 +715,7 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
   const noFileToWrite = canApprove && u.proposals.every((p) => decisions[p.id]?.decision !== 'accepted' || p.action === 'remove');
   const isCorrection = u.kind === 'meeting-correction';
   const approveHint = isCorrection ? 'Approving makes the confirmed record the meeting\'s current version.'
-    : !noFileToWrite ? 'After approving, you copy one command to apply.'
+    : !noFileToWrite ? 'After approving, apply your accepted changes in one step.'
     : acceptedCount > 0 ? 'Approving moves the selected files to the trash right away.'
     : 'Approving keeps the confirmed meeting records and finishes the update.';
 
@@ -884,30 +916,52 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
       <div style={card}><StepIndicator status={u.status} /></div>
 
       {/* What to do next: always one clear action. */}
-      <section ref={nextRef} aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
+      <section ref={(el) => { nextRef.current = el; setNextBox(el); }} aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
         <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{u.status === 'done' ? doneNext : u.follow_up_problem
           ? `This follow-up is outdated: ${['in_review', 'approved'].includes(u.status) ? 'close' : 'delete'} it, then follow up the meeting's current correction from the meeting.`
           : meta.next}</div>
-        {(u.status === 'ready' || u.status === 'analyzing') && !running && !u.follow_up_problem && (
-          <CommandBox ref={u.status === 'ready' ? copyRef : undefined} command={`/gtd-context-analyze ${u.id}`} emphasis={u.status === 'ready'}
-            label={u.status === 'ready' ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Run in Claude Code to analyze'}
-            onCopied={() => setCopiedFor(u.status)} />
+        {/* A run going by hand (no dashboard run): its command stays at hand to run again. */}
+        {u.status === 'analyzing' && !running && !u.follow_up_problem && (
+          <CommandBox command={`/gtd-context-analyze ${u.id}`} label="Run in Claude Code to analyze" onCopied={() => setCopiedFor(u.status)} />
         )}
-
-        {['ready', 'analyzing', 'in_review'].includes(u.status) && <AnalysisRun startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
-        {(u.status === 'approved' || u.status === 'applying') && !running && !u.follow_up_problem && (
-          <CommandBox ref={u.status === 'approved' ? copyRef : undefined} command={`/gtd-context-apply ${u.id}`} emphasis={u.status === 'approved'}
-            label={u.status === 'approved' ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Run in Claude Code to apply your accepted changes'}
-            onCopied={() => setCopiedFor(u.status)} />
+        {/* One primary action (#246): the dashboard runs it, the command one click away under "Or run it yourself";
+            when the dashboard cannot run it, copying the command is the main action, with the reason. */}
+        {['ready', 'analyzing', 'in_review'].includes(u.status) && (
+          <AnalysisRun ref={runRef} startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} onAction={setNextAction} onStartFailed={showNextBox}
+            {...(u.status === 'ready' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
+              <>
+                <CommandBox command={`/gtd-context-analyze ${u.id}`} emphasis={emphasis}
+                  label={emphasis ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Copy this and run it in Claude Code'}
+                  onCopied={() => setCopiedFor(u.status)} />
+                <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  Using Codex or Copilot? Ask it to &quot;analyze context update {u.id}&quot;. The workspace instructions explain the steps.
+                </p>
+              </>
+            ) } : {})} />
         )}
-        {['approved', 'applying', 'done'].includes(u.status) && <AnalysisRun startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} />}
+        {u.status === 'applying' && !running && !u.follow_up_problem && (
+          <CommandBox command={`/gtd-context-apply ${u.id}`} label="Run in Claude Code to apply your accepted changes" onCopied={() => setCopiedFor(u.status)} />
+        )}
+        {['approved', 'applying', 'done'].includes(u.status) && (
+          <AnalysisRun ref={runRef} startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} onAction={setNextAction} onStartFailed={showNextBox}
+            {...(u.status === 'approved' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
+              <>
+                <CommandBox command={`/gtd-context-apply ${u.id}`} emphasis={emphasis}
+                  label={emphasis ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Copy this and run it in Claude Code'}
+                  onCopied={() => setCopiedFor(u.status)} />
+                <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  Using Codex or Copilot? Ask it to &quot;apply context update {u.id}&quot;. The workspace instructions explain the steps.
+                </p>
+              </>
+            ) } : {})} />
+        )}
         {(u.status === 'analyzing' || u.status === 'applying') && !running && !u.follow_up_problem && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             Taking too long, or the agent stopped? Run the same command again: it picks up where it left off.
             {u.status === 'analyzing' && <> Or <button type="button" onClick={reopen} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'inherit' }}>go back to collecting</button>.</>}
           </p>
         )}
-        {(u.status === 'ready' || u.status === 'analyzing') && !u.follow_up_problem && (
+        {u.status === 'analyzing' && !u.follow_up_problem && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             Using Codex or Copilot? Ask it to "analyze context update {u.id}". The workspace instructions explain the steps.
           </p>
@@ -1113,20 +1167,26 @@ export default function UpdateDetail({ id, onBack }: { id: string; onBack: () =>
         </div>
       )}
 
-      {/* Waiting on a command: keep the step in view wherever the user has scrolled. */}
-      {command && (
+      {/* Waiting on the next step: repeated here only while the Next box is scrolled away, with the same action. */}
+      {command && !nextInView && ['run', 'starting', 'copy'].includes(nextAction) && (
         <div role="region" aria-label="Your next step" style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1.5px solid var(--color-accent)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md)' }}>
           <span aria-live="polite" style={{ flex: '1 1 260px', minWidth: 0, fontSize: 'var(--text-sm)', lineHeight: 1.45 }}>
-            {copied ? (
+            {nextAction !== 'copy' ? (
+              <><strong>{u.status === 'ready' ? 'Your turn:' : 'Last step:'}</strong>{u.status === 'ready' ? ' run the analysis. The agent proposes changes; nothing in your context changes yet.' : ' apply your accepted changes. Nothing changes in your context until you do.'}</>
+            ) : copied ? (
               <><strong style={{ color: 'var(--color-success)' }}>Copied.</strong> Paste it into Claude Code and press Enter. This page updates by itself when the agent starts.</>
             ) : (
               <><strong>{u.status === 'ready' ? 'Your turn:' : 'Last step:'}</strong> run <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{command.split(' ')[0]}</code> in Claude Code
                 {u.status === 'ready' ? ' so the agent can analyze the material.' : ' to write the accepted changes. Nothing changes in your context until you do.'}</>
             )}
           </span>
-          <Button variant={copied ? 'secondary' : 'primary'} onClick={() => void copyText(command).then((ok) => { if (ok) setCopiedFor(u.status); })}>
-            {copied ? 'Copy again' : 'Copy command'}
-          </Button>
+          {nextAction !== 'copy'
+            ? <Button variant="primary" loading={nextAction === 'starting'} onClick={() => runRef.current?.start()}>{u.status === 'ready' ? 'Run analysis' : 'Apply with Claude Code'}</Button>
+            : (
+              <Button variant={copied ? 'secondary' : 'primary'} onClick={() => void copyText(command).then((ok) => { if (ok) setCopiedFor(u.status); })}>
+                {copied ? 'Copy again' : 'Copy command'}
+              </Button>
+            )}
         </div>
       )}
     </div>

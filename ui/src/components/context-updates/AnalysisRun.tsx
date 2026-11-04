@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import Button from '@/components/common/Button';
 import { apiGet, apiPost } from '@/utils/api';
 import { formatRelativeDate } from '@/utils/format';
@@ -25,7 +25,19 @@ const COMMAND_FOR: Record<string, 'analyze' | 'apply'> = { ready: 'analyze', app
  * While a run is going the page checks on it one request at a time. A failed check keeps the last known state
  * (and Stop) and tries again; an answer for another update, or an older one, is ignored.
  */
-export default function AnalysisRun({ updateId, status, onChange, onRunning, startable = true }: {
+/** What the page can ask of the panel: start the run, as its own button would (the sticky bar repeats it). */
+export interface AnalysisRunHandle { start(): void }
+
+/**
+ * The next step as the panel offers it, shared with the page's sticky bar so the two always agree (#246):
+ * - `checking`: not known yet whether the dashboard can run it, or whether a run is going (neither way is offered);
+ * - `run` / `starting`: the dashboard runs it (one primary button), starting now;
+ * - `copy`: run it yourself (the command is the primary action), with the reason;
+ * - `running`: a run is going; `none`: nothing to start here.
+ */
+export type NextAction = 'checking' | 'run' | 'starting' | 'copy' | 'running' | 'none';
+
+export default forwardRef<AnalysisRunHandle, {
   updateId: string;
   status: string;
   onChange: () => void;
@@ -33,8 +45,19 @@ export default function AnalysisRun({ updateId, status, onChange, onRunning, sta
   startable?: boolean;
   /** Tells the page a run is going, so it does not ask the user to run the command too. */
   onRunning?: (running: boolean) => void;
-}) {
+  /**
+   * The way to run it yourself (the command to copy, other tools): folded under "Or run it yourself" while the
+   * dashboard can run it, shown as the main action (`emphasis`) when it cannot (#246).
+   */
+  manual?: (emphasis: boolean) => ReactNode;
+  /** The next step as offered here, so the page's sticky bar repeats the same action. */
+  onAction?: (action: NextAction) => void;
+  /** A start failed: the page brings the box (and its message) into view. */
+  onStartFailed?: () => void;
+}>(function AnalysisRun({ updateId, status, onChange, onRunning, startable = true, manual, onAction, onStartFailed }, handle) {
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
+  // The runner check: until it answers neither way is offered (no flicker); when it fails, that is said.
+  const [runnerCheck, setRunnerCheck] = useState<'checking' | 'ok' | 'failed'>('checking');
   const [run, setRun] = useState<AgentRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -66,11 +89,17 @@ export default function AnalysisRun({ updateId, status, onChange, onRunning, sta
     setKnown(false);
     setError('');
     void load();
-    void apiGet<RunnerStatus>('/api/runner')
-      .then((status) => { if (mine === generation.current) setRunner(status); })
-      .catch(() => { if (mine === generation.current) setRunner(null); });
+    void checkRunner(mine);
     return () => { generation.current += 1; };
   }, [load]);
+
+  /** Asks whether the dashboard can run it here; also from "Check again". */
+  function checkRunner(mine = generation.current): Promise<void> {
+    setRunnerCheck('checking');
+    return apiGet<RunnerStatus>('/api/runner')
+      .then((answer) => { if (mine === generation.current) { setRunner(answer); setRunnerCheck('ok'); } })
+      .catch(() => { if (mine === generation.current) { setRunner(null); setRunnerCheck('failed'); } });
+  }
 
   const running = run?.status === 'running';
   useEffect(() => { onRunning?.(running); }, [running, onRunning]);
@@ -103,7 +132,10 @@ export default function AnalysisRun({ updateId, status, onChange, onRunning, sta
       setRun(started);
       onChange();
     } catch (err) {
-      if (mine === generation.current) setError(err instanceof Error ? err.message : 'Could not start the analysis.');
+      if (mine === generation.current) {
+        setError(err instanceof Error ? err.message : 'Could not start the analysis.');
+        onStartFailed?.();
+      }
     } finally { if (mine === generation.current) setBusy(false); }
   };
 
@@ -124,6 +156,17 @@ export default function AnalysisRun({ updateId, status, onChange, onRunning, sta
   const ended = run && !running ? run : null;
   const command = startable ? COMMAND_FOR[status] : undefined;
   const noun = (ended ?? run)?.command === 'apply' ? 'Apply' : 'Analysis';
+  // The dashboard runs it: one primary button, the command one click away. Otherwise copying it is the main action.
+  const action: NextAction = running ? 'running'
+    : !command ? 'none'
+      : !known || runnerCheck === 'checking' ? 'checking'
+        : runnerCheck === 'ok' && runner && !problem ? (busy ? 'starting' : 'run')
+          : 'copy';
+  const runnable = action === 'run' || action === 'starting';
+  useEffect(() => { onAction?.(action); }, [action, onAction]);
+  useEffect(() => () => onAction?.('none'), [onAction]);
+  useImperativeHandle(handle, () => ({ start: () => { if (action === 'run') void start(); } }));
+  const label = command === 'analyze' ? 'Run analysis' : status === 'applying' ? 'Continue applying' : `Apply with ${runner?.label ?? 'Claude Code'}`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -132,17 +175,41 @@ export default function AnalysisRun({ updateId, status, onChange, onRunning, sta
           <span style={{ flex: 1, minWidth: 0 }}>{run.message} Started {startedAt(run.started_at)}; this page updates when it is done.</span>
           <Button variant="secondary" size="sm" loading={busy} onClick={() => void stop()}>Stop</Button>
         </div>
-      ) : command && runner && known && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <Button variant="secondary" size="sm" loading={busy} disabled={!!problem} onClick={() => void start()}>
-            {command === 'analyze' ? 'Run analysis' : status === 'applying' ? 'Continue applying' : 'Apply'} with {runner.label}
-          </Button>
-          <span style={{ flex: 1, minWidth: 200, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            {problem ?? (command === 'analyze'
-              ? `Runs the same command in the background with your ${runner.label} and your Claude plan, under this workspace's permission rules, as when you run it yourself. Hooks and MCP servers are off for this run.`
-              : `Runs the same command in the background with your ${runner.label} and your Claude plan. Where the workspace would ask you, the dashboard answers: yes only for the files you accepted, no for anything else.`)}
-          </span>
-        </div>
+      ) : action === 'checking' ? (
+        <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Checking whether the dashboard can run this here…</p>
+      ) : runnable && runner ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {/* data-next-action: the page moves focus here when this step becomes due. */}
+            <Button data-next-action="" variant="primary" loading={busy} onClick={() => void start()}>{label}</Button>
+            <span style={{ flex: '1 1 240px', minWidth: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+              Runs {runner.label} with your Claude plan, under this workspace&apos;s rules. You can leave this page; it updates when it is ready.
+            </span>
+          </div>
+          <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            {command === 'analyze'
+              ? 'The same command you would run yourself, in the background. Hooks and MCP servers are off for this run.'
+              : 'The same command you would run yourself, in the background. Where the workspace would ask you, the dashboard answers: yes only for the files you accepted, no for anything else.'}
+          </p>
+          {manual && (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 500 }}>Or run it yourself</summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>{manual(false)}</div>
+            </details>
+          )}
+          {!ended && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Last run: none yet</p>}
+        </>
+      ) : (
+        <>
+          {action === 'copy' && problem && <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{problem}</p>}
+          {action === 'copy' && runnerCheck === 'failed' && (
+            <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              Could not check whether the dashboard can run this here, so run it yourself.
+              <Button size="sm" variant="ghost" onClick={() => void checkRunner()}>Check again</Button>
+            </p>
+          )}
+          {manual && (!startable || action === 'copy') && manual(true)}
+        </>
       )}
       {(running || !known) && lostContact && (
         <HelpBox tone="warning">{running ? 'Lost contact with the dashboard for a moment. The run keeps going; trying again.' : 'Could not check whether something is running for this update; trying again.'}</HelpBox>
@@ -165,4 +232,4 @@ export default function AnalysisRun({ updateId, status, onChange, onRunning, sta
       {error && <HelpBox tone="critical">{error}</HelpBox>}
     </div>
   );
-}
+});

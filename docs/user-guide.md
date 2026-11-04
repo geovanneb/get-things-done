@@ -332,8 +332,11 @@ listed too, instead of being guessed at.
 
 The dashboard updates by itself while the agent works.
 
-**Or run it from the dashboard.** If Claude Code is installed and signed in with your
-Claude account, a ready update has **Run analysis with Claude Code**. The dashboard runs
+**Run it from the dashboard.** If Claude Code is installed and signed in with your
+Claude account, a ready update's main action is **Run analysis**, and the command to copy
+waits under **Or run it yourself** (for Codex or Copilot, or to watch it in your own
+terminal). When the dashboard cannot run it, it says why, and copying the command is the
+main action instead. The dashboard runs
 the same command in the background, with your Claude Code and your Claude plan (no API
 key), under this workspace's own permission rules, as when you run it yourself: with the
 rules the app installs it can write into `context-updates/` and `tasks/`, never into
@@ -398,7 +401,7 @@ the update is **Done**. Its record stays (the summary, the list of materials, ev
 proposal with your decision and its outcome), while the uploaded files and drafts are
 deleted, so the workspace does not grow over time.
 
-**Or apply from the dashboard.** An approved update has **Apply with Claude Code**: the
+**Apply from the dashboard.** An approved update's main action is **Apply with Claude Code**: the
 same command, run in the background with your Claude Code and your Claude plan. The
 workspace asks before any write to `context/`, `stakeholders/` and `outputs/`, and the
 dashboard answers for you, file by file: yes only for the files you accepted (and the
