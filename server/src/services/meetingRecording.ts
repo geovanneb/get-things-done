@@ -7,6 +7,7 @@ import { MeetingLiveTranscriptService } from './meetingLiveTranscript';
 import { CATALOG, SPEAKER_MODEL, TranscriptionModelService } from './transcriptionModels';
 import { knownLanguage, MAX_LANGUAGE_CHANGES, withLanguageChange, type LanguageChange } from './transcription/languages';
 import { hasWords } from './transcription/repeats';
+import { beginStart } from './appActivity';
 import { audioTranscriptMarkdown } from './meetingTranscription';
 import { LiveRecording, liveRecordingFile, MAX_RECORDING_BYTES, MeetingDigestService, QueuedMeeting, SPARE_DISK_BYTES } from './meetingDigestService';
 
@@ -115,6 +116,16 @@ export class MeetingRecordingService {
   async start(id: string, token: string, now = new Date(), chosen?: unknown): Promise<{ generation: string; offset: number; language: string; language_changes: LanguageChange[] }> {
     if (chosen !== undefined && !knownLanguage(chosen)) throw httpError(400, 'Invalid language: use auto or the code of a language in Settings');
     if (typeof token !== 'string' || token.length < 16 || token.length > 200) throw httpError(400, 'A writer token is required');
+    // Counted from here until saved: an update starting meanwhile sees it.
+    const release = beginStart('A recording is starting');
+    try {
+      return await this.startAdmitted(id, token, now, chosen);
+    } finally {
+      release();
+    }
+  }
+
+  private async startAdmitted(id: string, token: string, now: Date, chosen: unknown): Promise<{ generation: string; offset: number; language: string; language_changes: LanguageChange[] }> {
     const language = (chosen as string | undefined) ?? (await this.models.readSettings().catch(() => null))?.language ?? 'auto';
     const opened = await this.queue.withQueue(async () => {
       const meeting = await this.queue.loadMeeting(id);

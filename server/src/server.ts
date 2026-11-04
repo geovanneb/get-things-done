@@ -11,7 +11,7 @@ import { localRequestGuard, allowedOrigins } from './middleware/localRequestGuar
 import { errorHandler } from './middleware/errorHandler';
 import { watcherService } from './services/watcherService';
 import { routineScheduler } from './services/routineScheduler';
-import { startUpdateChecks } from './services/appUpdates';
+import { admitRuntime, startUpdateChecks } from './services/appUpdates';
 import { WorkspaceService } from './services/workspace';
 import { refreshWorkspaceFiles } from './services/workspaceActivation';
 import { GitRuntime, useGitRuntime } from './services/gitService';
@@ -62,6 +62,10 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
   if (options.workspacePath) process.env['ESB_WORKSPACE_PATH'] = options.workspacePath;
   if (options.templatesPath) process.env['ESB_TEMPLATES_PATH'] = options.templatesPath;
   if (options.git) useGitRuntime(options.git);
+
+  // Known to the others running from the same install before it listens; not started while an update replaces it.
+  let unregisterRuntime: () => void;
+  try { unregisterRuntime = admitRuntime(port); } catch (err) { return Promise.reject(err); }
 
   const sseClients = new Set<Response>();
   const app = createApp(port, options, sseClients);
@@ -175,7 +179,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       // Runs even without a workspace yet: each tick reads the current workspace path.
       routineScheduler.start();
       // Once a day, while automatic checks are on (see appUpdates).
-      stopUpdateChecks = startUpdateChecks();
+      const checks = startUpdateChecks();
+      stopUpdateChecks = () => { checks(); unregisterRuntime(); };
 
       resolve({ port, url, close });
     });

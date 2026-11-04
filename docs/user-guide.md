@@ -26,7 +26,23 @@ gtd --version
 
 **Settings > Updates** shows your version and whether a newer one is out; a banner at the top
 says so once per version (**Later** hides it for that version), never while a recording, a
-transcription or an AI tool run is going. For an npm install, it gives the commands to run:
+transcription or an AI tool run is going.
+
+For a global npm install started with `gtd start`, **Update to <version> and restart** stops
+the dashboard, installs that version with your npm and its settings (your registry, your
+global folder), runs `gtd upgrade` and starts it again; the page reconnects by itself. It
+installs only the version the check found, never an older one, and not while something
+important is running. When npm fails, the version that was running starts again and Settings
+says why; the details are in `~/.gtd/update.log`. Where it can't update from here (a dashboard
+started with `--foreground`, npm set to install somewhere else, or a global folder that needs
+administrator rights), it says why.
+
+An update waits for, and keeps out, other dashboards running from the same install, but only
+those of this version or later; stop older ones, and a `gtd start --foreground` one, yourself
+first. `npm` run in a terminal and other users of the computer don't take part either. Putting
+the old version back needs npm to work. On Windows, an update stopped while npm was running
+blocks the next one until you check that no npm runs and delete `~/.gtd/update.lock`; the
+message says so. Either way, these are the commands to run yourself:
 
 ```bash
 npm install -g @bertonha/getthingsdone@<version>

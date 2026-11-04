@@ -162,7 +162,19 @@ export function getTemplatesPath(): string {
   return candidates[0] as string;
 }
 
+let appVersion: string | null = null;
+
+/**
+ * The version of the app running in this process, read once: an update installed while it runs changes the files on
+ * disk, not the code running (#284).
+ */
 export function getAppVersion(): string {
+  appVersion ??= readAppVersion();
+  return appVersion;
+}
+
+/** The version in the app's package.json now, as installed on disk. */
+export function readAppVersion(): string {
   const candidates = [
     path.resolve(__dirname, '../../..', 'package.json'),
     path.resolve(__dirname, '../../../..', 'package.json'),

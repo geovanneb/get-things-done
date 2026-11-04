@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { beginStart } from '../services/appActivity';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { Router, Request, Response, NextFunction } from 'express';
@@ -229,8 +230,18 @@ router.post('/init', async (req: Request, res: Response) => {
   res.status(201).json({ message: 'Workspace initialized', config });
 });
 
-// POST /api/workspace/switch — point the app at another folder
+// POST /api/workspace/switch — point the app at another folder. Counted as going from start to end, so an update
+// never restarts the dashboard on a workspace being left.
 router.post('/switch', async (req: Request, res: Response) => {
+  const release = beginStart('A workspace switch is going');
+  try {
+    await switchWorkspace(req, res);
+  } finally {
+    release();
+  }
+});
+
+async function switchWorkspace(req: Request, res: Response): Promise<void> {
   const { path: rawPath, initialize } = req.body ?? {};
   if (!rawPath || typeof rawPath !== 'string' || !rawPath.trim()) {
     res.status(400).json({ error: 'Please enter a folder path.' });
@@ -268,7 +279,7 @@ router.post('/switch', async (req: Request, res: Response) => {
   const git_enabled = await gitService.isGitRepo();
   const git_installed = await gitService.isInstalled();
   res.json({ message: 'Workspace changed', initialized: !isWorkspace, config: { ...config, git_enabled, git_installed } });
-});
+}
 
 // GET /api/workspace/recent — workspaces opened on this machine, for one-click switching
 router.get('/recent', async (_req: Request, res: Response) => {
