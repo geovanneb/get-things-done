@@ -1,15 +1,15 @@
-# Release readiness review — 4 November 2026
+# Release readiness review for 0.10.0, 4 November 2026
 
 ## Verdict and scope
 
 **The reviewed main snapshot needed fixes before release. The fixes below are on
-`chore/0.9-release-review`; final release approval remains conditional on CI and the
+`chore/0.10-release-review`; final release approval remains conditional on CI and the
 manual/native acceptance gates below.** No release, tag, public security report or
 installation into the user's application/workspace was performed.
 
 Base: `89fde1c` from freshly fetched `upstream/main`. `v0.9.0` already exists at the
-release preceding six additional feature/fix commits. This review covers the 0.9
-feature family (`v0.8.0..89fde1c`: 197 files), with detailed source and adversarial
+release preceding six additional feature/fix commits, so the next release is 0.10.0. This
+review covers the features since 0.8 (`v0.8.0..89fde1c`: 197 files), with detailed source and adversarial
 review of the newer voice recognition, speaker naming, run progress/notifications,
 update checks and GPU-settings changes. The older meeting-history, correction,
 source-pin and retention work was re-exercised through the current regression
