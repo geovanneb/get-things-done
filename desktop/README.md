@@ -107,9 +107,14 @@ Apple Silicon uses the `latest-arm64` update channel; Intel Mac and Windows use 
 two Mac manifests cannot overwrite each other. `gtdSignedRelease: true` is embedded only in signed
 builds; unsigned, preview and source builds do not request updates.
 
-Signed installed apps check GitHub Releases at startup and every six hours. A downloaded update
-adds a tray restart action and offers Restart now / Later. Restart stops the server before handing
-control to the installer; Later leaves installation until quit. Downgrades are disabled.
+Signed installed apps check GitHub Releases at startup and every six hours, while automatic update
+checks are on in Settings (Check now always asks). The page follows the update through the bridge
+(checking, downloading with progress, ready): a downloaded update shows in the page's banner and in
+Settings, and adds a tray restart action; a notification says it when the window is closed.
+Restart to update waits while a recording, a transcription or an AI tool run is going (the same
+check as the npm update), then stops the server before handing control to the installer; otherwise
+it is installed at quit. Quitting while a transcription or an AI tool run is going asks first.
+Downgrades are disabled.
 `GTD_DISABLE_UPDATES=1` disables checks for isolated smoke tests.
 
 Before declaring Phase 1 complete, configure the accounts, run the signed workflow, install on

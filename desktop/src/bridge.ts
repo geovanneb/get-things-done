@@ -33,6 +33,7 @@ export function registerBridge(
   takeRecordingCommand: () => RecordingCommand | null,
   onLanguageMenu: (menu: SpokenLanguageMenu | null) => void,
   runNotices: { prepare: (notice: RunNoticeRequest) => Promise<string | null>; show: (token: string) => boolean } = { prepare: async () => null, show: () => false },
+  updates: { state: () => unknown; check: () => void; restart: () => Promise<string | null>; dismiss: (version: unknown) => void } = { state: () => null, check: () => undefined, restart: async () => 'Not available', dismiss: () => undefined },
 ): void {
   const trusted = (event: IpcMainInvokeEvent): BrowserWindow => {
     const window = getWindow();
@@ -42,6 +43,24 @@ export function registerBridge(
     }
     return window;
   };
+
+  // The app's own update (#284): read, checked now, or installed with a restart (which waits while something runs).
+  ipcMain.handle('gtd:update-state', async (event) => {
+    trusted(event);
+    return updates.state();
+  });
+  ipcMain.handle('gtd:update-check', async (event) => {
+    trusted(event);
+    updates.check();
+  });
+  ipcMain.handle('gtd:update-dismiss', async (event, version: unknown) => {
+    trusted(event);
+    updates.dismiss(version);
+  });
+  ipcMain.handle('gtd:update-restart', async (event) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    return updates.restart();
+  });
 
   ipcMain.handle('gtd:pick-folder', async (event) => {
     const window = trusted(event);

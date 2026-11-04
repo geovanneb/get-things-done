@@ -1,7 +1,7 @@
 /**
  * Unit tests for the desktop bridge and its browser fallback. Run with `npm run test:desktop-bridge --workspace=ui`.
  */
-import { isDesktopApp, openWorkspaceFolder, pickFolder } from './desktop';
+import { followDesktopUpdate, hasDesktopUpdates, isDesktopApp, openWorkspaceFolder, pickFolder, readDesktopUpdate, restartToUpdate } from './desktop';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -41,6 +41,40 @@ async function main() {
   // Something else on window named gtdDesktop is ignored.
   g.gtdDesktop = { pickFolder: 'nope' };
   check('an object without a version is not the bridge', !isDesktopApp());
+
+  // The app's own update (#284): what the page accepts from the bridge.
+  check('a ready update is read', JSON.stringify(readDesktopUpdate({ phase: 'ready', version: '0.11.0', percent: null, error: null, dismissed: '0.10.5' })) === JSON.stringify({ phase: 'ready', version: '0.11.0', percent: null, error: null, dismissed: '0.10.5' }));
+  check('progress is kept between 0 and 100', readDesktopUpdate({ phase: 'downloading', version: '0.11.0', percent: 140.2 })?.percent === 100);
+  check('an unknown phase or no object is no state', readDesktopUpdate({ phase: 'install-now' }) === null && readDesktopUpdate(null) === null && readDesktopUpdate('ready') === null);
+  check('odd fields are dropped', readDesktopUpdate({ phase: 'error', version: 7, error: 'x'.repeat(400) })?.error === null);
+  check('a browser has no desktop updates', !hasDesktopUpdates() && (await restartToUpdate()) === 'Only the desktop app restarts itself');
+  const seen: string[] = [];
+  let push: (s: unknown) => void = () => undefined;
+  g.gtdDesktop = {
+    version: 1,
+    updateState: async () => ({ phase: 'downloading', version: '0.11.0', percent: 10 }),
+    onUpdateState: (l: (s: unknown) => void) => { push = l; return () => { push = () => undefined; }; },
+    restartToUpdate: async () => 'A transcription is running: restart to update when it is done',
+  };
+  const stop = followDesktopUpdate((s) => seen.push(`${s.phase}:${s.percent ?? ''}`));
+  await new Promise((r) => setTimeout(r, 0));
+  push({ phase: 'ready', version: '0.11.0' });
+  push({ phase: 'bogus' });
+  stop();
+  push({ phase: 'idle' });
+  check('the state now, then each change, until stopped', seen.join(',') === 'downloading:10,ready:', seen.join(','));
+  check('a restart that has to wait says why', hasDesktopUpdates() && (await restartToUpdate()) === 'A transcription is running: restart to update when it is done');
+  // A change pushed before the first answer arrives is newer: the late answer is dropped.
+  let answer: (s: unknown) => void = () => undefined;
+  const order: string[] = [];
+  (g.gtdDesktop as Record<string, unknown>)['updateState'] = () => new Promise((r) => { answer = r; });
+  const stop2 = followDesktopUpdate((s) => order.push(s.phase));
+  push({ phase: 'ready', version: '0.11.0' });
+  answer({ phase: 'downloading', version: '0.11.0', percent: 90 });
+  await new Promise((r) => setTimeout(r, 0));
+  stop2();
+  check('an older first answer never replaces a newer pushed state', order.join(',') === 'ready', order.join(','));
+  delete g.gtdDesktop;
 
   if (failures) {
     console.error(`\n${failures} check(s) failed`);

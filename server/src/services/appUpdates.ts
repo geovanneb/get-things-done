@@ -712,6 +712,37 @@ export async function setAutoCheck(value: unknown, workspace: string | null = nu
   return describe(await changeStored((s) => ({ ...s, auto_check: value })), workspace);
 }
 
+/**
+ * The desktop app is about to stop this server to install its update (#284): admission closes first (no run, recording
+ * or workspace switch starts from now), then what runs is checked again. Refused, with the reason, while something runs;
+ * admission opens again then. The app calls `cancelDesktopRestart` when its restart does not go ahead; admission also
+ * opens again by itself a minute later if this server is still running.
+ */
+export async function prepareDesktopRestart(workspace: string | null): Promise<void> {
+  if (thisInstall() !== 'desktop') throw Object.assign(new Error('Only the desktop app restarts to update this way'), { statusCode: 409 });
+  // Each try owns the hold: an earlier try's timer or refusal never opens a later one's.
+  const mine = ++desktopRestartTry;
+  clearTimeout(desktopRestartTimer);
+  setUpdating(true);
+  const busy = await busyReason(workspace).catch(() => 'What runs could not be checked');
+  if (mine !== desktopRestartTry) throw Object.assign(new Error('Another restart to update was asked meanwhile'), { statusCode: 409 });
+  if (busy) {
+    setUpdating(false);
+    throw Object.assign(new Error(`${busy}: restart to update when it is done`), { statusCode: 409 });
+  }
+  desktopRestartTimer = setTimeout(() => { if (mine === desktopRestartTry) setUpdating(false); }, 60_000);
+  desktopRestartTimer.unref();
+}
+
+let desktopRestartTry = 0;
+let desktopRestartTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function cancelDesktopRestart(): void {
+  desktopRestartTry += 1;
+  clearTimeout(desktopRestartTimer);
+  setUpdating(false);
+}
+
 /** "Later" on the notice: hides it for that version only, in every dashboard. */
 export async function dismiss(version: unknown, workspace: string | null = null): Promise<UpdateStatus> {
   const key = sourceKey();

@@ -7,7 +7,8 @@ import { registerBridge, type RunNoticeRequest } from './bridge';
 import { noticeFromServer, noticeMemory, runNoticeWords, type RunNotice } from './run-notice';
 import { randomUUID } from 'crypto';
 import { stopServer } from './server-lifecycle';
-import { holdUpdatesWhile, installNow, startUpdateChecks, updateEnvironment } from './updates';
+import { checkNow, holdUpdatesWhile, installNow, startUpdateChecks, updateEnvironment, updateState } from './updates';
+import { createQuitFlow, whyNotNow, type DesktopUpdateState } from './update-controller';
 import { classifyLink } from './links';
 import { RecordingCommands, type RecordingCommand } from './recording-commands';
 import type { SpokenLanguageMenu } from './language-menu';
@@ -25,6 +26,119 @@ let tray: Tray | null = null;
 let server: UtilityProcess | null = null;
 let appUrl = '';
 let quitting = false;
+
+/**
+ * Asked before quitting: a recording in this window, then what else would stop with the app (a recording from another
+ * page, a transcription, an AI tool run; an update waiting would install). A server that can't be asked never keeps
+ * the app from quitting.
+ */
+async function confirmQuit(): Promise<boolean> {
+  let recordingAccepted = false;
+  if (recording) {
+    const choice = dialog.showMessageBoxSync({
+      type: 'warning', buttons: ['Keep recording', 'Quit anyway'], defaultId: 0, cancelId: 0,
+      message: 'A recording is in progress',
+      detail: 'Stop it first to save everything. If you quit, what was already saved stays, and you can finish it on the Routines page.',
+    });
+    if (choice === 0) return false;
+    recordingAccepted = true;
+  }
+  if (!server) return true;
+  const reason = whyNotNow(false, (await serverUpdateStatus())?.busy);
+  if (!reason || (recordingAccepted && reason === 'A meeting is being recorded')) return true;
+  const { response } = await dialog.showMessageBox({
+    type: 'warning', buttons: ['Keep running', 'Quit anyway'], defaultId: 0, cancelId: 0,
+    message: reason,
+    detail: 'Quitting stops it now. Wait until it is done, or quit anyway.',
+  });
+  return response === 1;
+}
+
+/** One quit at a time; none goes through while the server stops (see createQuitFlow). */
+const quitFlow = createQuitFlow({
+  confirm: confirmQuit,
+  stop: async () => { quitting = true; if (server) await stopServerProcess(); },
+  quit: () => app.quit(),
+});
+
+/**
+ * The app's own server, asked for its update status: what important runs (`busy`) and whether automatic update checks
+ * are on. Undefined when it can't be asked in time (it never blocks then).
+ */
+async function serverUpdateStatus(): Promise<{ busy: string | null; auto_check: boolean } | undefined> {
+  if (!appUrl) return undefined;
+  try {
+    const res = await fetch(new URL('/api/app/update', appUrl), { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return undefined;
+    const body = await res.json() as { busy?: unknown; auto_check?: unknown };
+    // Automatic checks only when the setting says so: anything else counts as off.
+    return { busy: typeof body.busy === 'string' ? body.busy : null, auto_check: body.auto_check === true };
+  } catch {
+    return undefined;
+  }
+}
+
+/** A downloaded update said once in a system notification, when the window is not there to show the banner. */
+let notifiedUpdate: string | null = null;
+
+/** The update changed: the tray, the page (banner and Settings), and a notification when no window shows it. */
+function onUpdateState(state: DesktopUpdateState): void {
+  setTrayMenu(state.phase === 'ready' ? state.version : null);
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('gtd:update-state', { ...state, dismissed: readSettings().dismissedUpdate ?? null });
+  if (state.phase === 'ready' && state.version && notifiedUpdate !== state.version && !mainWindow?.isVisible() && Notification.isSupported()) {
+    notifiedUpdate = state.version;
+    const note = new Notification({ title: `${APP_NAME} ${state.version} is ready`, body: 'Restart to update from the menu, or it is installed the next time you quit.' });
+    note.on('click', showWindow);
+    note.show();
+  }
+}
+
+/**
+ * Gets the app's server ready for a restart to update: it closes admission and checks again what runs. Null when it
+ * may go ahead; otherwise why not (also when the server can't be asked: never a restart blindly).
+ */
+async function prepareServerForRestart(): Promise<string | null> {
+  if (!appUrl) return 'The dashboard is not running';
+  try {
+    const res = await fetch(new URL('/api/app/update/desktop-restart', appUrl), { method: 'POST', signal: AbortSignal.timeout(5000) });
+    if (res.ok) return null;
+    const body = await res.json().catch(() => ({})) as { message?: unknown };
+    return typeof body.message === 'string' ? body.message : 'What runs could not be checked; try again in a moment';
+  } catch {
+    return 'What runs could not be checked; try again in a moment';
+  }
+}
+
+/** The restart to update did not go ahead: the server takes runs again, or, if it already stopped, the app starts over. */
+function afterFailedRestart(): void {
+  quitting = false;
+  quitFlow.reset();
+  if (server && appUrl) {
+    void fetch(new URL('/api/app/update/desktop-restart/cancel', appUrl), { method: 'POST', signal: AbortSignal.timeout(5000) }).catch(() => undefined);
+  } else {
+    app.relaunch();
+    app.exit(0);
+  }
+}
+
+/** The page's view of the update: the updater's state, and the version put off with Later. */
+function pageUpdateState(): DesktopUpdateState & { dismissed: string | null } {
+  return { ...updateState(), dismissed: readSettings().dismissedUpdate ?? null };
+}
+
+/** Later on the banner: that downloaded version is not offered again there (the tray and Settings still offer it). */
+function dismissUpdate(version: unknown): void {
+  if (typeof version !== 'string' || version !== updateState().version) return;
+  writeSettings({ ...readSettings(), dismissedUpdate: version });
+  onUpdateState(updateState());
+}
+
+/** Restart to update from the tray: says why when it has to wait. */
+function restartFromTray(): void {
+  void installNow().then((reason) => {
+    if (reason) void dialog.showMessageBox({ type: 'info', message: 'Not now', detail: reason });
+  });
+}
 /** A recording runs in the window; set by the dashboard through the bridge. */
 let recording = false;
 /** The spoken languages the page offers for the running recording, for the menu-bar menu. */
@@ -39,6 +153,8 @@ let keepAwake: number | null = null;
 
 interface DesktopSettings {
   port?: number;
+  /** A downloaded update put off with Later on the banner. */
+  dismissedUpdate?: string;
 }
 
 function settingsFile(): string {
@@ -375,7 +491,7 @@ function setTrayMenu(update: string | null): void {
       { type: 'separator' },
       { label: `Open ${APP_NAME}`, click: showWindow },
       { label: 'Open in browser', click: () => void shell.openExternal(appUrl) },
-      ...(update ? [{ type: 'separator' as const }, { label: `Restart to update to ${update}`, click: installNow }] : []),
+      ...(update ? [{ type: 'separator' as const }, { label: `Restart to update to ${update}`, click: restartFromTray }] : []),
       { type: 'separator' },
       { label: `Quit ${APP_NAME}`, click: () => app.quit() },
     ]),
@@ -394,19 +510,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => undefined);
 
   app.on('before-quit', (event) => {
-    if (quitting) return;
-    if (recording) {
-      const choice = dialog.showMessageBoxSync({
-        type: 'warning', buttons: ['Keep recording', 'Quit anyway'], defaultId: 0, cancelId: 0,
-        message: 'A recording is in progress',
-        detail: 'Stop it first to save everything. If you quit, what was already saved stays, and you can finish it on the Routines page.',
-      });
-      if (choice === 0) { event.preventDefault(); return; }
-    }
-    quitting = true;
-    if (!server) return;
-    event.preventDefault();
-    void stopServerProcess().then(() => app.quit());
+    if (!quitFlow.request()) event.preventDefault();
   });
 
   app.whenReady().then(async () => {
@@ -421,8 +525,19 @@ if (!app.requestSingleInstanceLock()) {
       if (menu) announceSuggestion(menu);
       showRecordingTitle();
       setTrayMenu(pendingUpdate);
-    }, { prepare: prepareRunNotice, show: showRunNotice });
-    holdUpdatesWhile(() => recording);
+    }, { prepare: prepareRunNotice, show: showRunNotice }, { state: pageUpdateState, check: checkNow, restart: installNow, dismiss: dismissUpdate });
+    // A restart to update waits for what the npm update waits for (a recording, a transcription, an AI tool run): the
+    // server closes admission and checks again, and the recording in this window is read again after that.
+    holdUpdatesWhile(async () => {
+      if (recording) return whyNotNow(true, null);
+      const reason = await prepareServerForRestart();
+      if (reason) return reason;
+      if (recording) {
+        void fetch(new URL('/api/app/update/desktop-restart/cancel', appUrl), { method: 'POST' }).catch(() => undefined);
+        return whyNotNow(true, null);
+      }
+      return null;
+    });
 
     session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
       if (permission === 'media') {
@@ -459,16 +574,17 @@ if (!app.requestSingleInstanceLock()) {
     } catch (err) {
       dialog.showErrorBox(APP_NAME, `Could not start: ${err instanceof Error ? err.message : String(err)}`);
       quitting = true;
+      quitFlow.allow();
       app.quit();
       return;
     }
 
     createTray();
-    startUpdateChecks((version) => setTrayMenu(version), async () => {
-      // Electron closes windows before before-quit during an update. Allow that only after the server stops.
-      quitting = true;
-      await stopServerProcess();
-    });
+    startUpdateChecks(onUpdateState, async () => {
+      // Electron closes windows before before-quit during an update. Allow that only after the server stops; other
+      // quits wait meanwhile.
+      await quitFlow.stopForUpdate(async () => { quitting = true; await stopServerProcess(); });
+    }, async () => (await serverUpdateStatus())?.auto_check ?? false, afterFailedRestart);
     createWindow();
   });
 }

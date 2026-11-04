@@ -5,7 +5,7 @@ import * as fsp from 'node:fs/promises';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { checkNow, compareVersions, dismiss, feedFile, globalDirs, install, installKind, isVersion, npmInstallArgs, npmInstallBlocked, npmLatest, otherRuntimes, registerRuntime, admitRuntime, setAutoCheck, setInstallerForTests, setLatestSourceForTests, updateStatus, type Installer } from '../src/services/appUpdates';
+import { checkNow, compareVersions, dismiss, feedFile, globalDirs, install, installKind, isVersion, npmInstallArgs, npmInstallBlocked, npmLatest, otherRuntimes, registerRuntime, admitRuntime, prepareDesktopRestart, cancelDesktopRestart, setAutoCheck, setInstallerForTests, setLatestSourceForTests, updateStatus, type Installer } from '../src/services/appUpdates';
 import { getAppVersion } from '../src/services/scaffold';
 import { startUpdateHelper } from '../src/services/updateHelper';
 import { beginStart, refuseWhileUpdating } from '../src/services/appActivity';
@@ -372,6 +372,36 @@ test('on Windows an update stopped while npm ran blocks updates and starts until
   await fsp.rm(lock);
   admitRuntime(3005)();
   assert.equal((await updateStatus(ws)).can_install, true, 'removed by hand: updates again');
+});
+
+test('before the desktop app restarts to update, the server closes admission and checks again what runs', async (t) => {
+  const { ws } = await setup(t);
+  setInstallerForTests(fakeInstaller().installer, 'npm');
+  await assert.rejects(prepareDesktopRestart(ws), /Only the desktop app/);
+  setInstallerForTests(fakeInstaller().installer, 'desktop');
+  await fsp.writeFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), JSON.stringify({ status: 'running', pid: process.pid }));
+  await assert.rejects(prepareDesktopRestart(ws), /An AI tool run is going: restart to update when it is done/);
+  assert.doesNotThrow(refuseWhileUpdating, 'refused: admission is open again');
+  await fsp.rm(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'));
+  await prepareDesktopRestart(ws);
+  assert.throws(refuseWhileUpdating, /restarting for an update/, 'ready: nothing new starts');
+  assert.throws(() => beginStart('A recording is starting'), /restarting for an update/);
+  cancelDesktopRestart();
+  assert.doesNotThrow(refuseWhileUpdating, 'the restart did not go ahead: open again');
+});
+
+test('an earlier restart try never opens a later one\'s hold', async (t) => {
+  const { ws } = await setup(t);
+  setInstallerForTests(fakeInstaller().installer, 'desktop');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  await prepareDesktopRestart(ws); // try A: its timer would open admission a minute later
+  cancelDesktopRestart();
+  t.mock.timers.tick(30_000);
+  await prepareDesktopRestart(ws); // try B
+  t.mock.timers.tick(30_000); // A's minute is up
+  assert.throws(refuseWhileUpdating, /restarting for an update/, 'still closed for B');
+  t.mock.timers.tick(30_000); // B's minute is up
+  assert.doesNotThrow(refuseWhileUpdating, 'B\'s own timer opens it');
 });
 
 test('another dashboard running from the same install is known, until it stops', async (t) => {
