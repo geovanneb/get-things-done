@@ -40,6 +40,11 @@ export function RememberedVoices({ on, speakersOn, saving, onToggle }: { on: boo
     await act(() => apiPost('/api/voiceprints/forget-all'));
   };
 
+  const forgetMoved = async (key: string, workspace: string) => {
+    if (!(await confirm({ title: 'Forget these moved voices?', message: `Every remembered voice and its consent for ${workspace} will be removed. This cannot be undone; backups of this computer are not changed.`, confirmLabel: 'Forget voices', tone: 'danger' }))) return;
+    await act(() => apiDelete(`/api/voiceprints/moved/${key}`));
+  };
+
   if (error) return <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{error}</p>;
   if (!data) return null;
   const blocked = !data.speaker_model ? 'Download the speaker model above first.' : !speakersOn ? 'Turn on Tell speakers apart first.' : null;
@@ -62,7 +67,7 @@ export function RememberedVoices({ on, speakersOn, saving, onToggle }: { on: boo
         <Notice key={m.key} tone="info" title="Voices of a workspace that was moved"
           action={<span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => void act(() => apiPost(`/api/voiceprints/moved/${m.key}/relink`))}>Use them here</Button>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void act(() => apiDelete(`/api/voiceprints/moved/${m.key}`))}>Forget them</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void forgetMoved(m.key, m.workspace)}>Forget them</Button>
           </span>}>
           {m.prints.length} {m.prints.length === 1 ? 'voice was' : 'voices were'} remembered for <code style={{ overflowWrap: 'anywhere' }}>{m.workspace}</code>, which is
           not there any more. If this workspace is that folder, moved, use them here. A copy of a workspace never gets them by itself.

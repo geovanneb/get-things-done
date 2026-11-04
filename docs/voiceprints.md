@@ -147,3 +147,13 @@ A voiceprint used to recognise someone is biometric data: special-category data 
 explicitly by Illinois' BIPA, and sensitive data under Brazil's LGPD. That is why the feature is off by default,
 asks for consent per person and keeps the wording version, stays on this computer outside the workspace, is never
 shared, and is easy to forget. Offline and local lowers the risk; it does not remove the duty to ask.
+
+### Consent and moved-store concurrency
+
+A consent submission includes the person shown in the dialog (`consent_ref`). If another window
+renames the speaker before submission, the API refuses it and asks the user to reopen the dialog.
+Moved-store relinking and deletion share a lock and also lock the source binding; a successful
+forget cannot be followed by an already-running relink publishing those voices. Relinking validates
+all source prints before copying any, and refuses damaged prints without removing their files.
+These locks do not make copying multiple files a crash-atomic transaction: interruption or a write
+failure can still leave copies in both bindings. Preserve the source until recovery is complete.

@@ -325,6 +325,10 @@ export class VoiceprintService {
     const named = resolved.names.find((n) => n.label === label);
     if (!named?.ref || !VOICE_REF.test(named.ref)) throw httpError(409, `Name ${label || 'the speaker'} with a stakeholder first: only a stakeholder's voice can be remembered`);
     const ref = named.ref;
+    // Consent belongs to the person shown in the dialog, not whoever this label names by the time it arrives.
+    if (body['consent'] === true && body['consent_ref'] !== ref) {
+      throw httpError(409, body['consent_ref'] === undefined ? 'Voice consent must name the person; reopen Remember voice' : 'The speaker\'s name changed; reopen Remember voice and confirm consent for that person');
+    }
     const voice = resolved.voices.find((v) => v.label === label);
     if (!voice || !voice.intervals.length) throw httpError(409, `${label} has too little speech of their own (without others talking over them) to remember`);
     const expect = await this.store.snapshot(ws, ref);

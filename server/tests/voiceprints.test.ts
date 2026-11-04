@@ -239,6 +239,48 @@ test('a moved workspace\'s voices can be relinked; a copy never gets them by its
   assert.equal(fs.existsSync(path.join(root, offered[0]!.key)), false, 'the old binding is gone');
 });
 
+test('relink refuses damaged voices without deleting or partially copying the source', async (t) => {
+  const root = await tmp(t);
+  const parent = await tmp(t, 'gtd-ws-');
+  const old = path.join(parent, 'gone');
+  const destination = path.join(parent, 'destination');
+  const store = new VoiceprintStore(() => root);
+  await store.addSample(old, { ref: 'STK-0002', name: 'Kim Park', model: VOICE_MODEL, sample: sample('MQ-2026-0001'), consent, expect: await store.snapshot(old, 'STK-0002'), stillConfirmed: async () => true });
+  const broken = path.join(root, bindingKey(old), 'STK-0003.json');
+  await fsp.writeFile(broken, '{"unfinished":');
+  await assert.rejects(store.relink(destination, bindingKey(old)), /cannot be read/);
+  assert.equal(await fsp.readFile(broken, 'utf8'), '{"unfinished":');
+  assert.ok(await store.read(old, 'STK-0002'));
+  assert.deepEqual(await store.list(destination), []);
+});
+
+test('forgetting moved voices cannot succeed while relink still has a copy to publish', async (t) => {
+  const root = await tmp(t);
+  const parent = await tmp(t, 'gtd-ws-');
+  const old = path.join(parent, 'gone');
+  const destination = path.join(parent, 'destination');
+  const store = new VoiceprintStore(() => root);
+  await store.addSample(old, { ref: 'STK-0002', name: 'Kim Park', model: VOICE_MODEL, sample: sample('MQ-2026-0001'), consent, expect: await store.snapshot(old, 'STK-0002'), stillConfirmed: async () => true });
+  const rename = fs.promises.rename;
+  let arrived!: () => void;
+  const ready = new Promise<void>((r) => { arrived = r; });
+  let resume!: () => void;
+  const gate = new Promise<void>((r) => { resume = r; });
+  t.mock.method(fs.promises, 'rename', async (from: fs.PathLike, to: fs.PathLike) => {
+    if (to === path.join(root, bindingKey(destination), 'STK-0002.json')) { arrived(); await gate; }
+    return rename(from, to);
+  });
+  const linking = store.relink(destination, bindingKey(old));
+  await ready;
+  const forgetting = store.forgetMoved(destination, bindingKey(old)).then(() => 'forgotten', () => 'refused');
+  // Give the independent delete a chance to finish while publication is deliberately suspended.
+  await Promise.race([forgetting, new Promise((r) => setTimeout(r, 100))]);
+  resume();
+  await linking;
+  assert.equal(await forgetting, 'refused', 'once moved, the old location must not report successful deletion');
+  assert.ok(await store.read(destination, 'STK-0002'));
+});
+
 // ---- the service: suggestions, remembering, and the lifecycle -------------------------------------------------
 
 /** Fictional stakeholders, models with Recognize known voices on, and an engine whose embed job returns `vectors`. */
@@ -305,16 +347,16 @@ test('remembering a voice: only a speaker named with a stakeholder, with consent
   const transcription = new MeetingTranscriptionService(queue, f.models, {} as TranscriptionEngine);
   const src = { kind: 'queue', meeting: id, file: 'call.wav', transcript_sha256: sha };
 
-  await assert.rejects(service.remember({ source: src, label: 'Speaker 1', consent: true }), /Name Speaker 1 with a stakeholder first/);
+  await assert.rejects(service.remember({ source: src, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' }), /Name Speaker 1 with a stakeholder first/);
   await transcription.nameSpeakers(id, 'call.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Sam Rot' } } });
-  await assert.rejects(service.remember({ source: src, label: 'Speaker 1', consent: true }), /stakeholder first/, 'a typed name is not a person to remember');
+  await assert.rejects(service.remember({ source: src, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' }), /stakeholder first/, 'a typed name is not a person to remember');
   await transcription.nameSpeakers(id, 'call.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Kim Park', ref: 'STK-0002' }, 'Speaker 2': { name: 'Jo Lin', ref: 'STK-0003' } } });
   await assert.rejects(service.remember({ source: src, label: 'Speaker 1' }), /consent/);
-  await assert.rejects(service.remember({ source: src, label: 'Speaker 2', consent: true }), /too little speech of their own/);
-  await assert.rejects(service.remember({ source: { ...src, transcript_sha256: 'f'.repeat(64) }, label: 'Speaker 1', consent: true }), /changed meanwhile/);
+  await assert.rejects(service.remember({ source: src, label: 'Speaker 2', consent: true, consent_ref: 'STK-0003' }), /too little speech of their own/);
+  await assert.rejects(service.remember({ source: { ...src, transcript_sha256: 'f'.repeat(64) }, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' }), /changed meanwhile/);
   assert.equal(f.calls.length, 0, 'nothing was read before every check passed');
 
-  const view = await service.remember({ source: src, label: 'Speaker 1', consent: true });
+  const view = await service.remember({ source: src, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' });
   assert.equal(view.ref, 'STK-0002');
   assert.equal(view.name, 'Kim Park');
   assert.deepEqual(f.calls[0]!.intervals, [{ start: 0.2, end: 1.9 }], 'only the speaker\'s own stretches are read');
@@ -342,7 +384,7 @@ test('remembering a voice: only a speaker named with a stakeholder, with consent
   assert.deepEqual((await service.detail('STK-0002')).samples.map((s) => s.meeting), [id]);
   assert.deepEqual(await service.removeSample('STK-0002', two.samples[1]!.key), { left: false });
   assert.equal(await store.read(ws, 'STK-0002'), null, 'the last sample takes the voice and its consent');
-  await service.remember({ source: src, label: 'Speaker 1', consent: true });
+  await service.remember({ source: src, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' });
 
   // Off in Settings: nothing is remembered.
   const off = new VoiceprintService(store, fakes(ws, { enabled: false }).engine, fakes(ws, { enabled: false }).models, queue, f.stakeholders, () => ws);
@@ -350,6 +392,20 @@ test('remembering a voice: only a speaker named with a stakeholder, with consent
   // A recording whose bytes changed is never read.
   await fsp.appendFile(path.join(await queue.meetingFolder(id), 'call.wav'), Buffer.alloc(2));
   await assert.rejects(service.remember({ source: src, label: 'Speaker 1' }), /recording changed/);
+});
+
+test('consent from an open dialog cannot enroll a speaker renamed to another person', async (t) => {
+  const { ws, queue, id, sha } = await transcribedMeeting(t);
+  const store = new VoiceprintStore(() => path.join(ws, '.private-voices'));
+  const f = fakes(ws);
+  const service = new VoiceprintService(store, f.engine, f.models, queue, f.stakeholders, () => ws);
+  const transcription = new MeetingTranscriptionService(queue, f.models, {} as TranscriptionEngine);
+  await transcription.nameSpeakers(id, 'call.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Jo Lin', ref: 'STK-0003' } } });
+  const request = { source: { kind: 'queue', meeting: id, file: 'call.wav', transcript_sha256: sha }, label: 'Speaker 1', consent: true };
+  await assert.rejects(service.remember({ ...request, consent_ref: 'STK-0002' }), /name changed/);
+  await assert.rejects(service.remember(request), /consent.*person/);
+  assert.equal(f.calls.length, 0, 'stale or unbound consent never starts extraction');
+  assert.deepEqual(await store.list(ws), []);
 });
 
 test('renaming a speaker drops the samples it gave; a later confirmation adds one; a deleted stakeholder is never suggested', async (t) => {
@@ -363,7 +419,7 @@ test('renaming a speaker drops the samples it gave; a later confirmation adds on
   const transcription = new MeetingTranscriptionService(queue, f.models, {} as TranscriptionEngine);
   const src = { kind: 'queue' as const, meeting: id, file: 'call.wav', transcript_sha256: sha };
   await transcription.nameSpeakers(id, 'call.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Kim Park', ref: 'STK-0002' } } });
-  await service.remember({ source: src, label: 'Speaker 1', consent: true });
+  await service.remember({ source: src, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' });
   assert.equal((await store.read(ws, 'STK-0002'))!.samples.length, 1);
 
   // Kim's name taken back from Speaker 1: the sample it gave goes, and with it the print.
@@ -373,7 +429,7 @@ test('renaming a speaker drops the samples it gave; a later confirmation adds on
 
   // Remembered again, then a later confirmation (naming Kim again on this transcript) adds by itself, without consent.
   await transcription.nameSpeakers(id, 'call.wav', { transcript_sha256: sha, names: { 'Speaker 1': { name: 'Kim Park', ref: 'STK-0002' } } });
-  await service.remember({ source: src, label: 'Speaker 1', consent: true });
+  await service.remember({ source: src, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' });
   const calls = f.calls.length;
   await service.afterNaming(src, ['Speaker 1'], [{ label: 'Speaker 1', name: 'Kim Park', ref: 'STK-0002' }]);
   assert.equal(f.calls.length, calls + 1, 'the confirmation was read again');
@@ -520,7 +576,7 @@ test('a Transcribe again version keeps its own speakers, named through the meeti
   const store = new VoiceprintStore(() => root);
   const f = fakes(ws);
   const service = new VoiceprintService(store, f.engine, f.models, new MeetingDigestService(), f.stakeholders, () => ws);
-  const view = await service.remember({ source: { kind: 'folder', meeting: id, ...target }, label: 'Speaker 1', consent: true });
+  const view = await service.remember({ source: { kind: 'folder', meeting: id, ...target }, label: 'Speaker 1', consent: true, consent_ref: 'STK-0002' });
   assert.equal(view.damaged, false);
   const print = await store.read(ws, 'STK-0002');
   assert.ok(print, 'the print can be read back');

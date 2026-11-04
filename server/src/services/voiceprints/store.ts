@@ -341,33 +341,44 @@ export class VoiceprintStore {
     return out;
   }
 
+  /** Serialize moves and deletes before reading their source; also exclude enrollment in that source. */
+  private async withMoved<T>(workspace: string, key: string, fn: (source: string) => Promise<T>): Promise<T> {
+    await privateDir(this.root());
+    const held = await lock(path.join(this.root(), '.moves.lock'), LOCK_WAIT_MS, () => httpError(409, 'Moved voices are being changed in another window; try again'));
+    try {
+      const from = (await this.moved(workspace)).find((m) => m.key === key);
+      if (!from) throw httpError(404, 'No voices of a moved workspace by that name');
+      return await this.locked(from.workspace, async (source) => {
+        if (await fsp.stat(from.workspace).then(() => true, () => false)) throw httpError(409, 'The original workspace is available again; leave its voices there');
+        return fn(source);
+      });
+    } finally {
+      await unlock(held);
+    }
+  }
+
   /**
    * Relinks a moved workspace's prints to this folder. Only from a folder that is gone (a move, not a copy), and only
    * while this workspace remembers no voice of its own, so nothing is merged by guessing.
    */
   async relink(workspace: string, key: string): Promise<void> {
     if (!BINDING_KEY.test(key)) throw httpError(400, 'Invalid voices to relink');
-    const from = (await this.moved(workspace)).find((m) => m.key === key);
-    if (!from) throw httpError(404, 'No voices of a moved workspace by that name');
-    await this.locked(workspace, async (dir, binding) => {
-      if ((await this.listDir(dir)).length) throw httpError(409, 'This workspace already remembers voices: forget them first, or keep the moved ones apart');
-      // The folder as read from disk, never the key the request sent.
-      const source = path.join(this.root(), from.key);
-      for (const name of await fsp.readdir(source)) {
-        if (!name.endsWith('.json') || !VOICE_REF.test(name.slice(0, -5))) continue;
-        const print = parsePrint(await readJson(path.join(source, name)), name.slice(0, -5));
-        if (print) await writePrivate(path.join(dir, name), print);
-      }
-      await writePrivate(path.join(dir, 'binding.json'), { ...binding, epoch: binding.epoch + 1 });
-      await fsp.rm(source, { recursive: true, force: true });
+    await this.withMoved(workspace, key, async (source) => {
+      // Check every print before publishing any: damaged data stays recoverable at its original location.
+      const prints = await this.listDir(source);
+      if (prints.some((p) => 'damaged' in p)) throw httpError(409, 'Some moved voices cannot be read; recover their files or forget them before relinking');
+      await this.locked(workspace, async (dir, binding) => {
+        if ((await this.listDir(dir)).length) throw httpError(409, 'This workspace already remembers voices: forget them first, or keep the moved ones apart');
+        for (const print of prints) await writePrivate(printFile(dir, print.ref), print);
+        await writePrivate(path.join(dir, 'binding.json'), { ...binding, epoch: binding.epoch + 1 });
+        await fsp.rm(source, { recursive: true, force: true });
+      });
     });
   }
 
-  /** Forgets a moved workspace's prints. */
+  /** Forgets a moved workspace's prints; never races a relink still publishing them. */
   async forgetMoved(workspace: string, key: string): Promise<void> {
     if (!BINDING_KEY.test(key)) throw httpError(400, 'Invalid voices to forget');
-    const found = (await this.moved(workspace)).find((m) => m.key === key);
-    if (!found) throw httpError(404, 'No voices of a moved workspace by that name');
-    await fsp.rm(path.join(this.root(), found.key), { recursive: true, force: true });
+    await this.withMoved(workspace, key, async (source) => { await fsp.rm(source, { recursive: true, force: true }); });
   }
 }

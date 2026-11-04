@@ -832,6 +832,19 @@ try {
       && remember.status === 409 && badSource.status === 400 && badRef.status === 400 && badMoved.status === 400 && voicesAfter.length === 0
       && oneVoice.voice === null && Array.isArray(oneVoice.samples) && badSample.status === 400,
       `setting=${voices.setting} remember=${remember.status} source=${badSource.status} ref=${badRef.status} moved=${badMoved.status} dirs=${voicesAfter.length}`);
+    // A damaged moved voice is refused, never silently discarded by Use them here.
+    const { createHash } = await import('node:crypto');
+    const goneWorkspace = path.join(tmp, 'fictional-moved-workspace');
+    const movedKey = createHash('sha256').update(goneWorkspace).digest('hex').slice(0, 32);
+    const movedDir = path.join(home, '.gtd', 'voiceprints', movedKey);
+    fs.mkdirSync(movedDir, { recursive: true });
+    fs.writeFileSync(path.join(movedDir, 'binding.json'), JSON.stringify({ schema: 1, workspace: goneWorkspace, epoch: 0, created_at: new Date().toISOString() }));
+    fs.writeFileSync(path.join(movedDir, 'STK-0001.json'), '{"unfinished":');
+    const damagedMove = await json('POST', `/api/voiceprints/moved/${movedKey}/relink`);
+    check('relink refuses damaged voices and preserves the original bytes', damagedMove.status === 409
+      && fs.readFileSync(path.join(movedDir, 'STK-0001.json'), 'utf8') === '{"unfinished":');
+    const forgetMoved = await fetch(`${base}/api/voiceprints/moved/${movedKey}`, { method: 'DELETE' });
+    check('explicitly forgetting damaged moved voices still works', forgetMoved.status === 204 && !fs.existsSync(movedDir));
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

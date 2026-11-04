@@ -106,14 +106,14 @@ export function SpeakerNaming({ source, labels, names, suggestions = [], remembe
               onPickValue={(value) => personOf(value, choices, names)}
               onUse={() => void run(() => use(row))}
               onDismiss={() => void run(() => apiPost('/api/voiceprints/suggestions/dismiss', { source, label: row.label }))}
-              onRemember={() => setAsking(row)} />
+              onRemember={() => { setError(null); setAsking(row); }} />
           ))}
         </ul>
       )}
       {asking && voices && (
-        <RememberVoiceDialog row={asking} evidence={evidence.get(asking.label)} consentText={voices.consent_text} busy={busy} minSeconds={voices.min_seconds}
+        <RememberVoiceDialog error={error} row={asking} evidence={evidence.get(asking.label)} consentText={voices.consent_text} busy={busy} minSeconds={voices.min_seconds}
           onCancel={() => setAsking(null)}
-          onConfirm={() => void run(async () => { await apiPost('/api/voiceprints', { source, label: asking.label, consent: true }); setAsking(null); })} />
+          onConfirm={() => void run(async () => { await apiPost('/api/voiceprints', { source, label: asking.label, consent: true, consent_ref: asking.named!.ref }); setAsking(null); })} />
       )}
     </section>
   );
@@ -221,8 +221,8 @@ function useClip(url: string | undefined): { playing: string | null; toggle: (la
 }
 
 /** Asks for the person's consent before their voice is first remembered. Nothing is saved until it is given. */
-function RememberVoiceDialog({ row, evidence, consentText, busy, minSeconds, onCancel, onConfirm }: {
-  row: SpeakerRow; evidence: SpeakerEvidence | undefined; consentText: string; busy: boolean; minSeconds: number; onCancel: () => void; onConfirm: () => void;
+function RememberVoiceDialog({ row, evidence, consentText, busy, minSeconds, onCancel, onConfirm, error }: {
+  row: SpeakerRow; evidence: SpeakerEvidence | undefined; consentText: string; busy: boolean; minSeconds: number; error: string | null; onCancel: () => void; onConfirm: () => void;
 }) {
   const [agreed, setAgreed] = React.useState(false);
   const me = row.named!.ref === 'me';
@@ -234,6 +234,7 @@ function RememberVoiceDialog({ row, evidence, consentText, busy, minSeconds, onC
         <Button variant="primary" disabled={!agreed || busy} loading={busy} onClick={onConfirm}>Remember voice</Button>
       </FormActions>}>
       <div className="gtd-stack" style={{ gap: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>
+        {error && <Notice tone="critical" title="The voice could not be remembered.">{error}</Notice>}
         <p style={{ margin: 0 }}>
           From <strong>{row.label}</strong>{evidence ? <>, who first said &ldquo;{evidence.first.text.slice(0, 80)}{evidence.first.text.length > 80 ? '…' : ''}&rdquo;</> : ''}.
           Check this is {me ? 'you' : row.named!.name} before you go on.
