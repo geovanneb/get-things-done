@@ -55,6 +55,9 @@ const optional = html(<Input label="Email" optional value="" onChange={noop} />)
 check('an optional field is labelled as optional', optional.includes('(optional)'));
 const select = html(<Select id="fmt" label="Format" value="PDF" onChange={noop} options={[{ value: 'PDF', label: 'PDF' }, { value: 'MD', label: 'MD' }]} />);
 check('a select is labelled and keeps its value', attr(select, 'for') === 'fmt' && /<option value="PDF" selected="">/.test(select));
+const grouped = html(<Select id="who" label="Who" value="" onChange={noop} options={[{ value: '', label: 'Not named' }, { value: 'a', label: 'Kim Park', group: 'Expected at this meeting' }, { value: 'b', label: 'Jo Lin', group: 'Expected at this meeting' }, { value: 'c', label: 'Sam Rot', group: 'Other stakeholders' }, { value: 'x', label: 'Someone else…' }]} />);
+check('Select: options with a group sit under its heading, in order; others stand alone',
+  /<option value="" selected="">Not named<\/option><optgroup label="Expected at this meeting"><option value="a">Kim Park<\/option><option value="b">Jo Lin<\/option><\/optgroup><optgroup label="Other stakeholders"><option value="c">Sam Rot<\/option><\/optgroup><option value="x">Someone else…<\/option>/.test(grouped), grouped);
 const search = html(<SearchInput id="search-templates" value="" onChange={noop} placeholder="Search templates" />);
 check('a search field exposes its id for a visible label', attr(search, 'id') === 'search-templates');
 check('a search box is a search field named by its placeholder', attr(search, 'type') === 'search' && attr(search, 'aria-label') === 'Search templates');

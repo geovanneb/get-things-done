@@ -535,6 +535,15 @@ test('a Transcribe again version keeps its own speakers, named through the meeti
   assert.equal((reread as { manifest: { versions: { speakers?: unknown }[] } }).manifest.versions[1]!.speakers, undefined);
 });
 
+test('ids reach paths only rebuilt from their numbers', async () => {
+  const { canonicalMeetingId } = await import('../src/services/meetingLibrary');
+  assert.equal(canonicalMeetingId('MQ-2026-0001'), 'MQ-2026-0001');
+  assert.equal(canonicalMeetingId('CU-2026-0003-M-01'), 'CU-2026-0003-M-01');
+  assert.equal(canonicalMeetingId('CU-2026-0003'), 'CU-2026-0003');
+  for (const bad of ['../MQ-2026-0001', 'MQ-2026-0001/..', 'MQ-26-1', 'CU-2026-0003-M-1', '', 7, null]) assert.equal(canonicalMeetingId(bad), null, String(bad));
+  assert.equal(parseVoiceSource({ kind: 'folder', meeting: 'MQ-2026-0001', version: 'v0012', transcript_sha256: 'a'.repeat(64) }).kind === 'folder' && (parseVoiceSource({ kind: 'folder', meeting: 'MQ-2026-0001', version: 'v12', transcript_sha256: 'a'.repeat(64) }) as { version: string }).version, 'v12');
+});
+
 test('requests and stored data are checked before use', () => {
   assert.throws(() => parseVoiceSource({ kind: 'queue', meeting: '../x', file: 'a.wav', transcript_sha256: 'a'.repeat(64) }), /Invalid meeting/);
   assert.throws(() => parseVoiceSource({ kind: 'queue', meeting: 'MQ-2026-0001', file: '../a.wav', transcript_sha256: 'a'.repeat(64) }));

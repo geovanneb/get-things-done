@@ -55,3 +55,88 @@ export function speechLength(seconds: number): string {
   if (s < 60) return `${s} s`;
   return `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`;
 }
+
+// ---- the speakers panel ----------------------------------------------------------------------------------------
+
+/** What helps recognise a speaker: the first thing they said and when, and how many parts are theirs. */
+export interface SpeakerEvidence { first: { time: string; text: string }; count: number }
+
+export function speakerEvidence(parts: readonly { time: string; speaker?: string; text: string }[]): Map<string, SpeakerEvidence> {
+  const out = new Map<string, SpeakerEvidence>();
+  for (const p of parts) {
+    if (!p.speaker) continue;
+    const seen = out.get(p.speaker);
+    if (seen) seen.count++;
+    else out.set(p.speaker, { first: { time: p.time, text: p.text }, count: 1 });
+  }
+  return out;
+}
+
+/** Seconds of a transcript time (`00:01:05`, `01:05`); null when it is not one. */
+export function secondsOfTime(time: string): number | null {
+  const m = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/.exec(time);
+  return m ? Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) : null;
+}
+
+/** The value of a person in the picker: by stakeholder id, or by a typed name. */
+export const NOT_NAMED = '';
+export const SOMEONE_ELSE = '__other';
+const valueOf = (person: { name: string; ref?: string } | undefined) => (!person ? NOT_NAMED : person.ref ? `ref:${person.ref}` : `name:${person.name}`);
+export { valueOf as personValue };
+
+/**
+ * The picker for one speaker: who the meeting expected first (you among them), then every other stakeholder, then
+ * "Someone else…". A person already given to another speaker says so, and can still be chosen (diarization can split
+ * one person in two). A typed name in use stays listed, so the current value always shows.
+ */
+export function personOptions(input: {
+  label: string;
+  choices: { option: string; person: { name: string; ref?: string } }[];
+  expected: ReadonlySet<string>;
+  names: SpeakerName[];
+}): { value: string; label: string; group?: string }[] {
+  const takenBy = new Map<string, string>();
+  for (const n of input.names) if (n.label !== input.label) takenBy.set(valueOf(n), n.label);
+  const current = input.names.find((n) => n.label === input.label);
+  const item = (person: { name: string; ref?: string }, shown: string, group: string) => {
+    const value = valueOf(person);
+    const other = takenBy.get(value);
+    return { value, label: other ? `${shown} · also ${other}` : shown, group };
+  };
+  const seen = new Set<string>();
+  const expected: { value: string; label: string; group?: string }[] = [];
+  const others: { value: string; label: string; group?: string }[] = [];
+  const meChoice = input.choices.find((c) => c.person.ref === 'me');
+  const me = item(meChoice?.person ?? { name: 'Me', ref: 'me' }, meChoice ? `${meChoice.person.name} (you)` : 'You', 'Expected at this meeting');
+  expected.push(me);
+  seen.add(me.value);
+  for (const c of input.choices) {
+    const value = valueOf(c.person);
+    if (seen.has(value)) continue;
+    seen.add(value);
+    const isExpected = input.expected.has(c.person.ref ?? `name:${c.person.name.toLowerCase()}`);
+    (isExpected ? expected : others).push(item(c.person, c.option, isExpected ? 'Expected at this meeting' : 'Other stakeholders'));
+  }
+  const typed = current && !current.ref && !seen.has(valueOf(current)) ? [{ value: valueOf(current), label: current.name, group: 'Named by hand' }] : [];
+  return [{ value: NOT_NAMED, label: 'Not named yet' }, ...expected, ...others, ...typed, { value: SOMEONE_ELSE, label: 'Someone else…' }];
+}
+
+/** The person a picker value stands for; null for "not named". */
+export function personOf(value: string, choices: { person: { name: string; ref?: string } }[], names: SpeakerName[]): { name: string; ref?: string } | null {
+  if (value === NOT_NAMED || value === SOMEONE_ELSE) return null;
+  const found = choices.find((c) => valueOf(c.person) === value)?.person ?? names.find((n) => valueOf(n) === value);
+  if (found) return { name: found.name, ...(found.ref ? { ref: found.ref } : {}) };
+  if (value === 'ref:me') return { name: 'Me', ref: 'me' };
+  return value.startsWith('name:') ? { name: value.slice(5) } : null;
+}
+
+/** One line on where naming stands: "4 speakers · 2 named · 1 suggestion to review". */
+export function speakersSummary(rows: Pick<SpeakerRow, 'named' | 'suggestion'>[]): string {
+  const named = rows.filter((r) => r.named).length;
+  const suggested = rows.filter((r) => !r.named && r.suggestion).length;
+  return [
+    `${rows.length} ${rows.length === 1 ? 'speaker' : 'speakers'}`,
+    named === rows.length ? 'all named' : `${named} named`,
+    ...(suggested ? [`${suggested} ${suggested === 1 ? 'suggestion' : 'suggestions'} to review`] : []),
+  ].join(' · ');
+}

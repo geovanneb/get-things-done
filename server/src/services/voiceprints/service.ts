@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { MeetingDigestService, namesFor, voicesFor, type QueuedMeeting, type RecordingState } from '../meetingDigestService';
 import { readFolder, type FolderVersion } from '../meetingFolder';
-import { heldMeetings, isMeetingId, QUEUED_MEETING_ID } from '../meetingLibrary';
+import { canonicalMeetingId, heldMeetings, QUEUED_MEETING_ID } from '../meetingLibrary';
 import { ContextUpdateService } from '../contextUpdateService';
 import { ProfileService } from '../profileService';
 import { StakeholderService } from '../stakeholderService';
@@ -44,14 +44,17 @@ export function parseVoiceSource(input: unknown): VoiceSourceRef {
   const o = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   const sha = o['transcript_sha256'];
   if (typeof sha !== 'string' || !/^[0-9a-f]{64}$/.test(sha)) throw httpError(400, 'Invalid transcript_sha256');
+  // Ids are rebuilt from their numbers: nothing of the request's text reaches a path.
+  const meeting = canonicalMeetingId(o['meeting']);
   if (o['kind'] === 'queue') {
-    if (typeof o['meeting'] !== 'string' || !QUEUED_MEETING_ID.test(o['meeting'])) throw httpError(400, 'Invalid meeting');
-    return { kind: 'queue', meeting: o['meeting'], file: topLevelName(o['file'] as string), transcript_sha256: sha };
+    if (!meeting || !QUEUED_MEETING_ID.test(meeting)) throw httpError(400, 'Invalid meeting');
+    return { kind: 'queue', meeting, file: topLevelName(o['file'] as string), transcript_sha256: sha };
   }
   if (o['kind'] === 'folder') {
-    if (!isMeetingId(o['meeting'])) throw httpError(400, 'Invalid meeting');
-    if (typeof o['version'] !== 'string' || !/^v\d{1,4}$/.test(o['version'])) throw httpError(400, 'Invalid version');
-    return { kind: 'folder', meeting: o['meeting'], version: o['version'], transcript_sha256: sha };
+    if (!meeting) throw httpError(400, 'Invalid meeting');
+    const version = typeof o['version'] === 'string' ? /^v(\d{1,4})$/.exec(o['version']) : null;
+    if (!version) throw httpError(400, 'Invalid version');
+    return { kind: 'folder', meeting, version: `v${Number(version[1])}`, transcript_sha256: sha };
   }
   throw httpError(400, 'Invalid source: queue or folder');
 }

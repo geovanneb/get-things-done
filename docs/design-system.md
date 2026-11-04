@@ -77,7 +77,7 @@ the list stacks above the content on a phone.
 | A group of content | `Card` | `padding="md"` content, `"compact"` repeated cards, `"none"` lists and tables (header gets a divider); `title`, `description`, `actions`, `badge`, `footer`. A card with only a header keeps the same space below it; nested cards keep their own padding |
 | Equivalent cards | `CardGrid` | one column on a phone, more as the page widens |
 | A titled group without a surface | `Section` | |
-| A text field, select, textarea | `Input`, `Select`, `Textarea` | `label`, `required`, `optional`, `hint`, `error`, `size` |
+| A text field, select, textarea | `Input`, `Select`, `Textarea` | `label`, `required`, `optional`, `hint`, `error`, `size`; a `Select` option's `group` puts it under a heading (`optgroup`), as when the meeting's people come before everyone else |
 | Any other control with a label | `Field` + `className="gtd-control"` | |
 | A setting or record field, label beside value | `FieldRow` | stacks on a phone |
 | A checkbox with a label (and a line of explanation) | `Checkbox` | for a choice that applies on submit; a setting that applies at once is a `Toggle` |

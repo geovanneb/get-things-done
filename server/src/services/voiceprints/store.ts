@@ -85,6 +85,17 @@ function checkRef(ref: string): string {
   return ref;
 }
 
+/**
+ * A person's file in a binding: `me.json`, or the stakeholder's id rebuilt from its digits. Nothing of the request's
+ * text reaches the path, whatever checks ran before (and CodeQL cannot follow those through calls).
+ */
+function printFile(dir: string, ref: string): string {
+  if (ref === 'me') return path.join(dir, 'me.json');
+  const id = /^STK-(\d{4})$/.exec(ref);
+  if (!id) throw httpError(400, 'Invalid person: a stakeholder id like STK-0001, or me');
+  return path.join(dir, `STK-${String(Number(id[1])).padStart(4, '0')}.json`);
+}
+
 /** A folder of the store: a plain folder, never a link, private to this user. */
 async function privateDir(dir: string): Promise<void> {
   await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
@@ -201,7 +212,7 @@ export class VoiceprintStore {
   }
 
   async read(workspace: string, ref: string): Promise<Voiceprint | null> {
-    return parsePrint(await readJson(path.join(this.dir(workspace), `${checkRef(ref)}.json`)), ref);
+    return parsePrint(await readJson(printFile(this.dir(workspace), ref)), ref);
   }
 
   /** What an enrollment checks again right before it saves. */
@@ -222,7 +233,7 @@ export class VoiceprintStore {
   }): Promise<Voiceprint> {
     checkRef(input.ref);
     return this.locked(workspace, async (dir, binding) => {
-      const file = path.join(dir, `${input.ref}.json`);
+      const file = printFile(dir, input.ref);
       const raw = await readJson(file);
       const current = raw === undefined ? null : parsePrint(raw, input.ref);
       if (raw !== undefined && !current) throw httpError(409, 'The remembered voice of this person cannot be read: forget it in Settings, then try again');
@@ -258,7 +269,7 @@ export class VoiceprintStore {
         const samples = p.samples.filter((s) => !match(s.source, p.ref));
         if (samples.length === p.samples.length) continue;
         dropped += p.samples.length - samples.length;
-        const file = path.join(dir, `${p.ref}.json`);
+        const file = printFile(dir, p.ref);
         if (samples.length === 0) await fsp.rm(file, { force: true });
         else await writePrivate(file, { ...p, samples, revision: p.revision + 1, updated_at: new Date().toISOString() });
       }
@@ -284,7 +295,7 @@ export class VoiceprintStore {
   async forget(workspace: string, ref: string): Promise<boolean> {
     checkRef(ref);
     return this.locked(workspace, async (dir, binding) => {
-      const file = path.join(dir, `${ref}.json`);
+      const file = printFile(dir, ref);
       const existed = await fsp.lstat(file).then(() => true, () => false);
       await fsp.rm(file, { force: true });
       await writePrivate(path.join(dir, 'binding.json'), { ...binding, epoch: binding.epoch + 1 });
@@ -340,7 +351,8 @@ export class VoiceprintStore {
     if (!from) throw httpError(404, 'No voices of a moved workspace by that name');
     await this.locked(workspace, async (dir, binding) => {
       if ((await this.listDir(dir)).length) throw httpError(409, 'This workspace already remembers voices: forget them first, or keep the moved ones apart');
-      const source = path.join(this.root(), key);
+      // The folder as read from disk, never the key the request sent.
+      const source = path.join(this.root(), from.key);
       for (const name of await fsp.readdir(source)) {
         if (!name.endsWith('.json') || !VOICE_REF.test(name.slice(0, -5))) continue;
         const print = parsePrint(await readJson(path.join(source, name)), name.slice(0, -5));
@@ -354,7 +366,8 @@ export class VoiceprintStore {
   /** Forgets a moved workspace's prints. */
   async forgetMoved(workspace: string, key: string): Promise<void> {
     if (!BINDING_KEY.test(key)) throw httpError(400, 'Invalid voices to forget');
-    if (!(await this.moved(workspace)).some((m) => m.key === key)) throw httpError(404, 'No voices of a moved workspace by that name');
-    await fsp.rm(path.join(this.root(), key), { recursive: true, force: true });
+    const found = (await this.moved(workspace)).find((m) => m.key === key);
+    if (!found) throw httpError(404, 'No voices of a moved workspace by that name');
+    await fsp.rm(path.join(this.root(), found.key), { recursive: true, force: true });
   }
 }

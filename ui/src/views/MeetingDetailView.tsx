@@ -199,9 +199,10 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
     <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
       <SourcePicker sources={sources} value={shown?.key ?? ''} onChange={setPicked} />
       {readable?.final && speakerLabels.length > 0 && (
-        <div className="gtd-stack" style={{ gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
-          <span style={{ color: 'var(--color-text-secondary)' }}>{m.in_digest ? 'Speakers:' : 'Who spoke? Name them here, or leave them for the analysis to propose:'}</span>
+        <div>
           <SpeakerNaming source={{ kind: 'queue', meeting: m.id, file: readable.file, transcript_sha256: readable.sha256 }}
+            transcriptUrl={shown?.url} {...(shown?.audio ? { audioUrl: shown.audio.url } : {})}
+            hint={m.in_digest ? undefined : 'Name who spoke, or leave them for the analysis to propose.'}
             labels={speakerLabels} names={readable.names} suggestions={readable.suggestions ?? []} rememberable={readable.rememberable ?? []}
             modelSha={readable.modelSha ?? null} participants={m.participants ?? []} editable={!m.in_digest}
             onName={async (label, person) => { await apiPut(`/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(readable.file)}/speakers`, { transcript_sha256: readable.sha256, names: { [label]: person } }); }}
@@ -370,7 +371,9 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
         <>
           <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.kind === 'recording' ? `${s.name}, transcript` : s.name }))} value={shown.file} onChange={setPicked} />
           {versionSpeakers && (
-            <VersionSpeakersPanel meetingId={h.id} version={current!.id} speakers={versionSpeakers} editable={!h.deleted} onChanged={changed} />
+            <VersionSpeakersPanel meetingId={h.id} version={current!.id} speakers={versionSpeakers} editable={!h.deleted} onChanged={changed}
+              transcriptUrl={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`}
+              {...(shown.playable ? { audioUrl: audioUrl(h.id, shown.file) } : {})} />
           )}
           <MeetingText key={`${shown.file}:${current?.id ?? ''}`} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} initialFind={found}
             names={Object.fromEntries((versionSpeakers?.names ?? []).map((n) => [n.label, n.name]))}
@@ -549,17 +552,18 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
  * The speakers of a Transcribe again version: named here for this version's transcript (the meeting's record keeps the
  * names it was reviewed with), with suggestions from remembered voices.
  */
-function VersionSpeakersPanel({ meetingId, version, speakers, editable, onChanged }: { meetingId: string; version: string; speakers: VersionSpeakers; editable: boolean; onChanged: () => void }) {
+function VersionSpeakersPanel({ meetingId, version, speakers, editable, onChanged, transcriptUrl, audioUrl: clipUrl }: {
+  meetingId: string; version: string; speakers: VersionSpeakers; editable: boolean; onChanged: () => void; transcriptUrl: string; audioUrl?: string;
+}) {
   if (!speakers.labels.length) return null;
   const name = async (label: string, person: Omit<SpeakerName, 'label'> | null) => {
     await apiPut(`/api/meetings/${encodeURIComponent(meetingId)}/versions/${version}/speakers`, { transcript_sha256: speakers.transcript_sha256, names: { [label]: person } });
   };
   return (
-    <div className="gtd-stack" style={{ gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
-      <span style={{ color: 'var(--color-text-secondary)' }}>
-        Speakers of this version ({version}), numbered anew by its transcription. Names given here are for this version; the record keeps its own.
-      </span>
+    <div>
       <SpeakerNaming source={{ kind: 'folder', meeting: meetingId, version, transcript_sha256: speakers.transcript_sha256 }}
+        transcriptUrl={transcriptUrl} {...(clipUrl ? { audioUrl: clipUrl } : {})}
+        hint={`Speakers of ${version}, numbered anew by its transcription. Names given here are for this version; the record keeps its own.`}
         labels={speakers.labels.map((l) => l.label)} names={speakers.names} suggestions={speakers.suggestions}
         rememberable={speakers.audio_kept ? speakers.labels.filter((l) => l.can_remember).map((l) => l.label) : []}
         modelSha={speakers.model_sha256} editable={editable} onName={name} onChanged={onChanged} />

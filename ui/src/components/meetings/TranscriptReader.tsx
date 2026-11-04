@@ -53,9 +53,9 @@ export function TranscriptReader({ meetingId, title, transcript, onClose, canNam
     >
       <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
         {labels.length > 0 && transcript.final && (
-          <div className="gtd-stack" style={{ gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
-            <span style={{ color: 'var(--color-text-secondary)' }}>{canName ? 'Who spoke? Name them here, or leave them for the analysis to propose:' : 'Speakers:'}</span>
-            <SpeakerNaming source={{ kind: 'queue', meeting: meetingId, file: transcript.file, transcript_sha256: transcript.sha256 }}
+          <div>
+            <SpeakerNaming source={{ kind: 'queue', meeting: meetingId, file: transcript.file, transcript_sha256: transcript.sha256 }} transcriptUrl={url}
+              hint={canName ? 'Name who spoke, or leave them for the analysis to propose.' : undefined}
               labels={labels} names={transcript.names} suggestions={transcript.suggestions ?? []} rememberable={transcript.rememberable ?? []}
               modelSha={transcript.modelSha ?? null} participants={participants} editable={naming} onName={name} onChanged={onNamed} />
           </div>
