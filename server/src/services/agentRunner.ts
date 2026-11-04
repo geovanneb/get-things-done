@@ -9,6 +9,7 @@ import { findCommand } from './aiToolDetection';
 import { ContextUpdateService, proposalTarget, updateId } from './contextUpdateService';
 import { GATE_TOOL, readGateLog, removeApprovalGate, writeApprovalGate, type ApprovalGate } from './approvalGate';
 import { processAlive, setAnalysisRunning } from './runState';
+import { refuseWhileUpdating } from './appActivity';
 import { stepsFromMessage, type RunStep } from './runSteps';
 import { parseMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
@@ -613,6 +614,7 @@ export class AgentRunnerService {
    */
   async start(id: string, command: RunCommand): Promise<AgentRun> {
     if (command !== 'analyze' && command !== 'apply') throw httpError(400, 'Invalid command: use analyze or apply');
+    refuseWhileUpdating();
     const uid = updateId(id);
     const workspace = workspaceService.getWorkspacePath();
     // An apply that stopped half way (status "applying") can continue: the apply command resumes and skips what is done.

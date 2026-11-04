@@ -377,6 +377,17 @@ export interface AppUpdateStatus {
   error: string | null;
   /** Something important running now (a recording, a transcription, an AI tool run): no notice meanwhile. */
   busy: string | null;
+  /** A global npm install: whether "Update" can install the version found from here now, and if not, why. */
+  can_install: boolean;
+  install_blocked: string | null;
+  /** An update is going now, from this or another dashboard: the dashboard restarts on its own. */
+  installing: boolean;
+  /** Installed on disk, newer than the version running: restart to finish. */
+  installed: string | null;
+  /** Why the last update from the dashboard did not finish (the version that was running started again), or what is left to do. */
+  install_error: string | null;
+  /** The last update from the dashboard, to this version, finished. */
+  updated: string | null;
 }
 
 export interface WorkspaceConfig {

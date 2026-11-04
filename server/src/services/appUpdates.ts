@@ -5,12 +5,15 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { atomicWrite } from '../utils/atomicWrite';
 import { lock, unlock } from '../utils/fileLock';
-import { getAppVersion } from './scaffold';
-import { busyReason } from './appActivity';
+import { getAppVersion, readAppVersion } from './scaffold';
+import { busyReason, setUpdating } from './appActivity';
+import { WorkspaceService } from './workspace';
+import { processAlive } from './runState';
+import { startUpdateHelper, type UpdateResult } from './updateHelper';
 
 /**
- * Whether a newer version of the app is out, and how this install gets it (#284). This part only checks and says how;
- * installing comes later (npm) or stays with the desktop app's own updater.
+ * Whether a newer version of the app is out, and how this install gets it (#284). A global npm install can install it
+ * from here (`install`); the desktop app keeps its own updater.
  *
  * Apart from AI tool runs the user starts or turns on, the check is the only request the app makes on its own, once a
  * day while automatic checks are on: it asks for the newest version number (the npm registry through the user's own
@@ -30,6 +33,8 @@ const CHECK_TIMEOUT_MS = 20_000;
 /** "Check now" asks again at most this often, whoever presses it. */
 const CHECK_NOW_GAP_MS = 10_000;
 const LOCK_WAIT_MS = 5_000;
+/** Whether npm could install here is asked again after this long (it runs npm once). */
+const INSTALL_CHECK_MS = 5 * 60_000;
 
 /** How this copy of the app was installed, so it is told how to update. */
 export type InstallKind = 'desktop' | 'npm' | 'npm-local' | 'npx' | 'source';
@@ -60,6 +65,20 @@ export interface UpdateStatus {
   error: string | null;
   /** Something important running now (a recording, a transcription, an AI tool run): no notice meanwhile. */
   busy: string | null;
+  /**
+   * A global npm install with a newer version found: whether "Update" can install it from here now, and if not, why
+   * (then the commands are the way). Always false for other installs.
+   */
+  can_install: boolean;
+  install_blocked: string | null;
+  /** An update is going now, from this or another dashboard: the dashboard restarts on its own. */
+  installing: boolean;
+  /** Installed on disk, newer than the version running: restart to finish. */
+  installed: string | null;
+  /** Why the last update from the dashboard did not finish (the version that was running started again), or what is left to do. */
+  install_error: string | null;
+  /** The last update from the dashboard, to this version, finished. */
+  updated: string | null;
 }
 
 interface Result { latest: string | null; checked_at: string | null; error: string | null }
@@ -194,11 +213,17 @@ function npmCli(): string | null {
 /** npm's arguments for the one question asked: no update notice of its own, no other request. */
 export const NPM_VIEW_ARGS = ['view', `${PACKAGE}@latest`, 'version', '--json', '--prefer-online', '--update-notifier=false', '--no-audit', '--no-fund'];
 
-function run(file: string, args: string[]): Promise<string> {
+function run(file: string, args: string[], timeout = CHECK_TIMEOUT_MS): Promise<string> {
   const env: NodeJS.ProcessEnv = { ...process.env, npm_config_update_notifier: 'false' };
   delete env['NODE_OPTIONS'];
   return new Promise((resolve, reject) => {
-    execFile(file, args, { timeout: CHECK_TIMEOUT_MS, maxBuffer: 1 << 20, windowsHide: true, env }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    execFile(file, args, { timeout, maxBuffer: 4 << 20, windowsHide: true, env }, (err, stdout, stderr) => {
+      if (!err) return resolve(stdout);
+      // npm's own words, last lines first: what failed, without the whole log.
+      const said = String(stderr || '').split('\n').map((l) => l.replace(/^npm (ERR!|error) ?/, '').trim()).filter(Boolean);
+      const why = err.killed ? 'it took too long and was stopped' : said.slice(-3).join(' ') || err.message;
+      reject(new Error(why.slice(0, 400)));
+    });
   });
 }
 
@@ -231,6 +256,293 @@ const defaultSource: LatestSource = async (kind, channel) => {
   return npmLatest();
 };
 
+/**
+ * Updates this install and says whether it could here; replaced in tests so they never install anything. `start`
+ * hands the update to a helper that runs once this dashboard has stopped, and returns the helper's process id.
+ */
+export interface Installer {
+  /** null when npm can update this copy from here now, else why not. */
+  blocked(workspace: string | null): Promise<string | null>;
+  start(job: { version: string; from: string; workspace: string }): number;
+  /** The version installed on disk now. */
+  installedVersion(): string;
+}
+
+/** npm's arguments for the install: exactly that version of this package, globally, with nothing else asked. */
+export function npmInstallArgs(version: string): string[] {
+  if (!isVersion(version)) throw new Error(`Not a version: ${version}`);
+  return ['install', '--global', `${PACKAGE}@${version}`, '--update-notifier=false', '--no-audit', '--no-fund', '--no-progress'];
+}
+
+/** Where npm installs global packages under a prefix, and their commands. */
+export function globalDirs(prefix: string, platform: NodeJS.Platform = process.platform): { modules: string; bin: string } {
+  return platform === 'win32' ? { modules: path.join(prefix, 'node_modules'), bin: prefix } : { modules: path.join(prefix, 'lib', 'node_modules'), bin: path.join(prefix, 'bin') };
+}
+
+const real = (p: string): string | null => { try { return fs.realpathSync(p); } catch { return null; } };
+const writable = (p: string): boolean => { try { fs.accessSync(p, fs.constants.W_OK); return true; } catch { return false; } };
+
+/**
+ * Why npm can't update the copy at `root` (null when it can): npm must be there, its global folder (as the user's npm
+ * config sets it) must hold this very copy, as a folder and not a link to one elsewhere, and that folder, the package's
+ * scope folder and the commands' folder must be writable.
+ */
+export async function npmInstallBlocked(cli: string | null, root: string): Promise<string | null> {
+  if (!cli) return 'npm could not be found next to this node';
+  let prefix: string;
+  try { prefix = (await run(process.execPath, [cli, 'prefix', '--global', '--update-notifier=false'])).trim(); } catch (err) {
+    return `npm could not say where it installs (${(err as Error).message})`;
+  }
+  if (!prefix || !path.isAbsolute(prefix)) return 'npm could not say where it installs';
+  const { modules, bin } = globalDirs(prefix);
+  const scope = path.join(modules, PACKAGE.split('/')[0]!);
+  const pkg = path.join(scope, PACKAGE.split('/')[1]!);
+  let linked = false;
+  try { linked = fs.lstatSync(pkg).isSymbolicLink(); } catch { /* not there: the check below says so */ }
+  const here = real(root);
+  if (!here || linked || here !== real(pkg)) return 'This copy is not the one in npm\'s global folder (npm is set to install somewhere else)';
+  if (!writable(modules) || !writable(scope) || !writable(bin)) return 'npm\'s global folder can\'t be written by your user (it may need administrator rights)';
+  return null;
+}
+
+const pidFile = () => path.join(os.homedir(), '.gtd', 'gtd.pid');
+
+/** The dashboard `gtd start` started and recorded (`~/.gtd/gtd.pid`), or null: only that one can restart itself. */
+function recordedDashboard(): { pid: number; port: number } | null {
+  try {
+    const state = JSON.parse(fs.readFileSync(pidFile(), 'utf-8')) as { pid?: unknown; port?: unknown };
+    return typeof state.pid === 'number' && typeof state.port === 'number' ? { pid: state.pid, port: state.port } : null;
+  } catch { return null; }
+}
+
+const updateDir = () => path.dirname(storePath());
+const currentWorkspace = (): string | null => { try { return new WorkspaceService().getWorkspacePath(); } catch { return null; } };
+const runtimesDir = () => path.join(updateDir(), 'runtimes');
+
+/** This install's folder, as the lock and the runtime records name it. */
+const installRoot = (): string => real(appRoot()) ?? appRoot();
+
+/**
+ * Says this dashboard runs from this install, until it stops: an update of the same install waits for it. Returns how
+ * to take it back.
+ */
+export function registerRuntime(port: number): () => void {
+  const file = path.join(runtimesDir(), `${process.pid}.json`);
+  try {
+    fs.mkdirSync(runtimesDir(), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ pid: process.pid, port, root: installRoot() }));
+  } catch { /* not known to the others: an update elsewhere can't wait for it */ }
+  return () => { try { fs.rmSync(file, { force: true }); } catch { /* gone */ } };
+}
+
+/**
+ * A dashboard starting: known to the others first, then refused while an update of this install is going, so either
+ * the update sees it or it sees the update. The dashboard the update's own helper starts is let in (GTD_UPDATE_HELPER).
+ */
+export function admitRuntime(port: number): () => void {
+  const unregister = registerRuntime(port);
+  const going = updateGoing();
+  const halfWay = going ? null : unresolved();
+  const owner = going ?? halfWay;
+  if (owner && owner.root === installRoot() && owner.pid !== Number(process.env['GTD_UPDATE_HELPER'])) {
+    unregister();
+    throw new Error(halfWay
+      ? `The last update of Get Things Done was stopped while npm ran. Once no npm runs any more, delete ${lockFile()} and run npm install -g ${PACKAGE}@${halfWay.version || 'latest'}, then start it again`
+      : `Get Things Done is being updated to ${owner.version || 'a new version'}; start it again in a minute`);
+  }
+  return unregister;
+}
+
+/** The other dashboards running from this very install, by their port. */
+export function otherRuntimes(): number[] {
+  const root = installRoot();
+  const ports: number[] = [];
+  let names: string[];
+  try { names = fs.readdirSync(runtimesDir()); } catch { return ports; }
+  for (const name of names) {
+    try {
+      const r = JSON.parse(fs.readFileSync(path.join(runtimesDir(), name), 'utf-8')) as { pid?: unknown; port?: unknown; root?: unknown };
+      if (typeof r.pid !== 'number' || r.pid === process.pid || r.root !== root) continue;
+      if (processAlive(r.pid)) ports.push(typeof r.port === 'number' ? r.port : 0);
+      else fs.rmSync(path.join(runtimesDir(), name), { force: true });
+    } catch { /* unreadable: skipped */ }
+  }
+  return ports;
+}
+const lockFile = () => path.join(updateDir(), 'update.lock');
+const resultFile = () => path.join(updateDir(), 'update-result.json');
+
+/** An update takes minutes; a lock older than this belongs to no update going, whatever process has its number now. */
+const LOCK_STALE_MS = 30 * 60_000;
+
+interface Lock { pid: number; version: string; at: number; root: string | null; npm: string | null; npm_pid: number | null }
+
+function readLock(): Lock | null {
+  try {
+    const lock = JSON.parse(fs.readFileSync(lockFile(), 'utf-8')) as { pid?: unknown; version?: unknown; at?: unknown; root?: unknown; npm?: unknown; npm_pid?: unknown };
+    const at = typeof lock.at === 'string' ? Date.parse(lock.at) : NaN;
+    return typeof lock.pid === 'number' && Number.isFinite(at)
+      ? { pid: lock.pid, version: isVersion(lock.version) ? lock.version : '', at, root: typeof lock.root === 'string' ? lock.root : null, npm: typeof lock.npm === 'string' ? lock.npm : null, npm_pid: typeof lock.npm_pid === 'number' ? lock.npm_pid : null }
+      : null;
+  } catch { return null; }
+}
+
+/**
+ * The update going now, from any dashboard: a lock not older than an update takes, whose helper or npm still runs
+ * (npm, when the helper was stopped half way: no second npm may start over it).
+ */
+function updateGoing(): Lock | null {
+  const lock = readLock();
+  if (!lock) return null;
+  // npm writing the install: going however long it takes.
+  if (lock.npm_pid !== null && processAlive(lock.npm_pid)) return lock;
+  // macOS and Linux: the helper leads its own process group, npm in it; anything of it running means it is going.
+  if (groupAlive(lock.pid)) return lock;
+  return processAlive(lock.pid) && Date.now() - lock.at < LOCK_STALE_MS ? lock : null;
+}
+
+/** Whether any process of a process group still runs (never on Windows, which has none). */
+function groupAlive(leader: number): boolean {
+  if (process.platform === 'win32' || leader <= 1) return false;
+  try { process.kill(-leader, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+/** A lock left behind with no result after it: the helper was stopped half way. */
+function updateInterrupted(): Lock | null {
+  const lock = readLock();
+  if (!lock || updateGoing()) return null;
+  const last = lastResult();
+  return last && Date.parse(last.finished_at) >= lock.at ? null : lock;
+}
+
+/**
+ * Stopped half way while npm was starting or running, where that npm can't be followed (Windows: no process groups):
+ * whether it still writes the install is not known, so no update and no dashboard start from here until the lock is
+ * removed by hand, once no npm runs. On macOS and Linux the process group answers it (`updateGoing`).
+ */
+function unresolved(): Lock | null {
+  if (process.platform !== 'win32') return null;
+  const lock = readLock();
+  // Judged from the lock alone: a result written meanwhile says nothing about whether npm stopped.
+  return lock && !updateGoing() && lock.npm !== null && lock.npm !== 'done' ? lock : null;
+}
+
+/** Writes the lock in one step (a reader never sees half of it). */
+function writeLock(pid: number, version: string): void {
+  const tmp = `${lockFile()}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({ pid, version, at: new Date().toISOString(), root: installRoot() }));
+  fs.renameSync(tmp, lockFile());
+}
+
+/**
+ * Takes the update lock for this process, or says who holds it. The file appears whole or not at all (a hard link of a
+ * finished file), and taking over a lock whose update is gone happens under a short mutex, so two dashboards can't both
+ * take it.
+ */
+async function takeLock(version: string): Promise<void> {
+  fs.mkdirSync(updateDir(), { recursive: true });
+  const busy = () => Object.assign(new Error('An update is being installed already'), { statusCode: 409 });
+  const held = await lock(`${lockFile()}.take`, LOCK_WAIT_MS, busy);
+  const tmp = `${lockFile()}.${process.pid}.new`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ pid: process.pid, version, at: new Date().toISOString(), root: installRoot() }));
+    if (fs.existsSync(lockFile())) {
+      if (updateGoing()) throw busy();
+      fs.rmSync(lockFile(), { force: true });
+    }
+    try { fs.linkSync(tmp, lockFile()); } catch { throw busy(); }
+  } finally {
+    fs.rmSync(tmp, { force: true });
+    await unlock(held);
+  }
+}
+
+/** Removes the lock only while it is this process's. */
+function dropOwnLock(): void {
+  if (readLock()?.pid === process.pid) fs.rmSync(lockFile(), { force: true });
+}
+
+/** The npm update the dashboard hands to its helper: fixed arguments, no shell, the user's npm and its settings. */
+const npmInstaller: Installer = {
+  blocked: async (workspace) => {
+    const dashboard = recordedDashboard();
+    if (!dashboard || dashboard.pid !== process.pid) return 'This dashboard was not started with gtd start in the background, so it can\'t restart itself';
+    if (!workspace) return 'No workspace is open';
+    const others = otherRuntimes();
+    if (others.length) return `Another Get Things Done runs from this install (port ${others.join(', ')}): stop it first`;
+    return npmInstallBlocked(npmCli(), appRoot());
+  },
+  start: ({ version, from, workspace }) => {
+    const cli = npmCli();
+    const dashboard = recordedDashboard();
+    if (!cli || !dashboard) throw new Error('npm or this dashboard\'s record could not be found');
+    const root = appRoot();
+    return startUpdateHelper({
+      waitPid: process.pid, version, from, node: process.execPath, npmCli: cli, npmArgs: npmInstallArgs(version),
+      repairArgs: npmInstallArgs(from),
+      packageJson: path.join(root, 'package.json'), bin: path.join(root, 'bin', 'gtd.js'), workspace, port: dashboard.port,
+      runtimesDir: runtimesDir(), root: installRoot(),
+      resultFile: resultFile(), lockFile: lockFile(), logFile: path.join(updateDir(), 'update.log'), pidFile: pidFile(),
+    });
+  },
+  installedVersion: readAppVersion,
+};
+
+let installer: Installer = npmInstaller;
+/** Tests only: the kind of install to act as (a test runs from the source). */
+let testKind: InstallKind | null = null;
+const thisInstall = (): InstallKind => testKind ?? installKind();
+/** Set from the first moment of an install request in this process, before anything is awaited. */
+let starting = false;
+let blockedCache: { at: number; reason: Promise<string | null> } | null = null;
+
+/**
+ * The dashboard handed an update to its helper but did not stop (the helper gave up waiting): it carries on as it was,
+ * and the helper's result says nothing was installed.
+ */
+export function updateHandoffFailed(): void {
+  starting = false;
+  setUpdating(false);
+}
+
+/** Tests only: how updates are installed, the kind of install to act as, and a clean slate. */
+export function setInstallerForTests(next: Installer | null, kind: InstallKind | null = null): void {
+  installer = next ?? npmInstaller;
+  testKind = kind;
+  starting = false;
+  setUpdating(false);
+  blockedCache = null;
+}
+
+/** Why npm can't update from here, asked at most every few minutes (it runs npm); concurrent asks share one. */
+function installBlocked(workspace: string | null, fresh = false): Promise<string | null> {
+  if (fresh || !blockedCache || Date.now() - blockedCache.at >= INSTALL_CHECK_MS) {
+    blockedCache = { at: Date.now(), reason: installer.blocked(workspace).catch((err: Error) => err.message || 'npm could not be checked') };
+  }
+  return blockedCache.reason;
+}
+
+/** The version on disk when it can be read; null when it can't (then nothing is installed: fail closed). */
+function onDisk(): string | null {
+  const v = installer.installedVersion();
+  return isVersion(v) ? v : null;
+}
+
+/** The version on disk when it is newer than the one running: installed (in a terminal), waiting for a restart. */
+function installedNewer(): string | null {
+  const v = onDisk();
+  const running = getAppVersion();
+  return v && isVersion(running) && compareVersions(v, running) > 0 ? v : null;
+}
+
+/** How the last update from the dashboard ended, as its helper wrote it. */
+function lastResult(): UpdateResult | null {
+  try {
+    const r = JSON.parse(fs.readFileSync(resultFile(), 'utf-8')) as UpdateResult;
+    return isVersion(r.version) && isVersion(r.from) ? r : null;
+  } catch { return null; }
+}
+
 let source: LatestSource = defaultSource;
 let checking: Promise<Stored> | null = null;
 let lastAsked = 0;
@@ -252,7 +564,7 @@ function channel(): string {
 }
 
 /** Where this install's answer comes from, and so where it is kept. */
-function sourceKey(kind = installKind()): string {
+function sourceKey(kind = thisInstall()): string {
   return kind === 'desktop' ? `desktop:${channel()}:${process.platform}` : 'npm';
 }
 
@@ -268,7 +580,7 @@ async function check(): Promise<Stored> {
       result = { latest: null, checked_at: at, error: 'Checking for updates is turned off here' };
     } else {
       try {
-        const latest = await source(installKind(), channel());
+        const latest = await source(thisInstall(), channel());
         if (!isVersion(latest)) throw new Error('No version was given');
         result = { latest, checked_at: at, error: null };
       } catch (err) {
@@ -283,12 +595,26 @@ async function check(): Promise<Stored> {
 
 async function describe(stored: Stored, workspace: string | null): Promise<UpdateStatus> {
   const current = getAppVersion();
-  const kind = installKind();
+  const kind = thisInstall();
   const result = stored.results[sourceKey(kind)] ?? { latest: null, checked_at: null, error: null };
   const newer = result.latest !== null && isVersion(current) && compareVersions(result.latest, current) > 0;
   const how: UpdateStatus['how'] = kind === 'desktop' ? (process.env['GTD_UPDATES'] === 'on' ? 'self' : 'manual') : kind === 'source' ? 'manual' : 'command';
-  const target = newer ? result.latest! : 'latest';
-  const commands = kind === 'npm' ? [`npm install -g ${PACKAGE}@${target}`, 'gtd stop', 'gtd upgrade', 'gtd start']
+  const installed = kind === 'npm' ? installedNewer() : null;
+  const target = installed ?? (newer ? result.latest! : 'latest');
+  const busy = await busyReason(workspace).catch(() => null);
+  const going = kind === 'npm' ? updateGoing() : null;
+  const disk = kind === 'npm' ? onDisk() : null;
+  // Offered only for a global npm install, a version newer than both the running and the installed one, nothing
+  // important running and no update going.
+  const offer = kind === 'npm' && newer && disk !== null && compareVersions(result.latest!, disk) > 0;
+  const halfWay = kind === 'npm' ? unresolved() : null;
+  const blocked = !offer || going || starting ? null
+    : halfWay ? `the last update was stopped while npm ran. Once no npm runs any more, delete ${lockFile()} and finish it with the commands below`
+      : busy ?? await installBlocked(workspace);
+  const last = kind === 'npm' ? lastResult() : null;
+  const recent = last !== null && Date.now() - Date.parse(last.finished_at) < 24 * 60 * 60 * 1000;
+  const interrupted = kind === 'npm' ? updateInterrupted() : null;
+  const commands = kind === 'npm' ? [...(installed ? [] : [`npm install -g ${PACKAGE}@${target}`]), 'gtd stop', 'gtd upgrade', 'gtd start']
     : kind === 'npm-local' ? ['npx gtd stop', `npm install ${PACKAGE}@${target}`, 'npx gtd upgrade', 'npx gtd start']
       : kind === 'npx' ? ['stop', 'upgrade', 'start'].map((c) => `npx ${PACKAGE}@${target} ${c}`) : [];
   return {
@@ -298,8 +624,76 @@ async function describe(stored: Stored, workspace: string | null): Promise<Updat
     auto_check: stored.auto_check, dismissed: stored.dismissed, checked_at: result.checked_at,
     checking: checking !== null,
     error: stored.unreadable ? 'The saved update settings could not be read, so automatic checks are off until you turn them on again' : result.error,
-    busy: await busyReason(workspace).catch(() => null),
+    busy,
+    can_install: offer && !going && !starting && blocked === null,
+    install_blocked: blocked,
+    installing: going !== null || starting,
+    installed,
+    install_error: interrupted ? `The update to ${interrupted.version || 'a new version'} was stopped half way. Run the commands below to finish it.`
+      : !recent || !last ? null
+        : !last.ok ? [
+          last.error ?? 'The update did not install',
+          last.repaired ? `${last.from} was put back.` : '',
+          !last.restarted && last.start_error ? `Starting the dashboard did not work either (${last.start_error}).` : '',
+        ].filter(Boolean).join(' ')
+          : last.version === current && last.upgrade_error ? `Updated, but refreshing the app's files in your workspace did not finish (${last.upgrade_error}). Run gtd upgrade.` : null,
+    updated: recent && last?.ok && last.version === current ? last.version : null,
   };
+}
+
+/**
+ * "Update": updates this global npm install to the version the check found, and restarts. The dashboard can't replace
+ * its own files while it runs from them, so a helper does it once the dashboard has stopped (npm install, gtd upgrade,
+ * gtd start) and the page reconnects. Only that exact version, newer than both the running and the installed one,
+ * never while something important runs, one update at a time across dashboards. When npm fails, the version that was
+ * running starts again and says why. The caller stops the dashboard after answering.
+ */
+export async function install(version: unknown, workspace: string | null = null): Promise<UpdateStatus> {
+  const refuse = (status: number, message: string) => Object.assign(new Error(message), { statusCode: status });
+  // Claimed before anything is awaited, so two requests at once can't both go on.
+  if (starting) throw refuse(409, 'An update is being installed already');
+  starting = true;
+  let started = false;
+  try {
+    if (thisInstall() !== 'npm') throw refuse(409, 'Only a global npm install can be updated from here');
+    if (!workspace) throw refuse(409, 'No workspace is open');
+    const found = (await readStored()).results[sourceKey('npm')]?.latest ?? null;
+    if (!isVersion(version) || version !== found) throw refuse(400, 'Invalid version: only the version the check found can be installed');
+    const running = getAppVersion();
+    const disk = onDisk();
+    if (!isVersion(running) || disk === null) throw refuse(409, 'The installed version could not be read, so nothing is installed');
+    for (const [what, v] of [['running', running], ['installed', disk]] as const) {
+      if (compareVersions(version, v) <= 0) throw refuse(409, `${version} is not newer than the ${what} ${v}: an update never goes back`);
+    }
+    if (updateGoing()) throw refuse(409, 'An update is being installed already');
+    if (unresolved()) throw refuse(409, 'The last update was stopped while npm ran: finish it with the commands');
+    const busy = await busyReason(workspace).catch(() => null);
+    if (busy) throw refuse(409, `${busy}: update when it is done`);
+    const blocked = await installBlocked(workspace, true);
+    if (blocked) throw refuse(409, blocked);
+    await takeLock(version);
+    try {
+      // Admission closes first, then what runs is checked again: nothing can start between the two.
+      setUpdating(true);
+      const now = await busyReason(workspace).catch(() => null);
+      if (now) throw refuse(409, `${now}: update when it is done`);
+      // The workspace to start again on is the one open now (a switch may have finished during the checks).
+      if (currentWorkspace() !== workspace) throw refuse(409, 'The workspace changed meanwhile: try again');
+      const others = otherRuntimes();
+      if (others.length) throw refuse(409, `Another Get Things Done runs from this install (port ${others.join(', ')}): stop it first`);
+      const pid = installer.start({ version, from: running, workspace });
+      writeLock(pid, version);
+      started = true;
+    } catch (err) {
+      setUpdating(false);
+      dropOwnLock();
+      throw err;
+    }
+    return describe(await readStored(), workspace);
+  } finally {
+    // After a start the flag stays: this dashboard is about to stop.
+    if (!started) starting = false;
+  }
 }
 
 export async function updateStatus(workspace: string | null = null): Promise<UpdateStatus> {
