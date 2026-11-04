@@ -8,6 +8,74 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-04
+
+Get Things Done now **runs the next step for you and tells you when it is your move**. A context
+update's analysis or apply starts from the dashboard with one button, shows what the agent is doing
+while it goes, and sends you a notification when it is done. The app also **recognizes the voices of
+people you know**, with their consent, and suggests their names in new transcripts. And it now
+**says when a new version is out** and how to update.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.10.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.10.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.10.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or 0.9.0 update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.10.0`. No workspace files changed in this release, so
+`gtd upgrade` is not needed this time (running it does no harm).
+
+### Added
+
+#### Context updates that run themselves
+
+- **Run the next step from the dashboard.** When Claude Code is installed and signed in, a ready
+  update's main action is **Run analysis**, and an approved one's is **Apply with Claude Code**. The
+  command to copy is still one click away under **Or run it yourself**, for Codex, Copilot or your
+  own terminal. When the dashboard can't run it, it says why and copying becomes the main action.
+  (#290)
+- **See what the agent is doing.** While a run goes, the Next box shows how long it has been going
+  and the step it is on ("Step 7 · Reading `context/…/note.md`"), with **Stop analysis**. **Show
+  details** lists the last 50 steps. A step names only the tool and an existing file or folder in
+  your workspace: never file contents, search terms, commands or tool output, and nothing is
+  saved once the run ends. (#292)
+- **Know whose move it is.** Next to the title of the updates list, **ready for you** (proposals to
+  review, approved updates to apply) and **to analyze** each take you to their group. The dot on
+  **Context** and the count on **Import & review** now count only what is ready for you, so they go up
+  exactly when an analysis finishes. (#289)
+- **Get told when a run finishes.** When an analysis or apply you started from the dashboard is done
+  while you are in another app or tab, you get a notification: a system one in the desktop app, a
+  browser one once you allow it. A click opens the update. Turn it off in **Settings >
+  Notifications**. (#289)
+
+#### Recognize known voices
+
+- **"Sounds like Kim Park".** Once you name a speaker with a stakeholder, **Remember voice** asks for
+  that person's consent, then remembers their voice on this computer. Later transcripts, and
+  Transcribe again, suggest the name next to the speaker: **Use** names them, **Not them** hides the
+  hint. It only suggests; nobody is named without your click. Off by default, in **Settings >
+  Transcription > Recognize known voices**. (#293)
+- **Your voices stay yours.** Voices are kept outside the workspace, in `~/.gtd/voiceprints/`, never
+  in git, and only for the workspace they were recorded in. A stakeholder's page shows the consent
+  (who recorded it and when) and every sample with the meeting it came from; remove one, or **Forget
+  voice**. Deleting a stakeholder forgets their voice too. Details and privacy notes:
+  [Recognize known voices](docs/voiceprints.md). (#293, #294)
+
+#### Updates
+
+- **Know when a new version is out.** **Settings > Updates** shows your version, whether a newer one
+  is out, and exactly how to update this install (with a Copy button for the npm commands). A notice
+  at the top says so once per version, never while a recording, a transcription or an AI tool run is
+  going; **Later** hides it for that version. It asks the npm registry (or GitHub, in the desktop
+  app) once a day, and nothing from your workspace goes with it; turn it off in the same place. The
+  desktop app that updates itself keeps its own updater. (#288)
+
+### Fixed
+
+- **The GPU model says up front why it can't be chosen yet.** In Settings > Transcription, Whisper
+  Turbo (GPU) shows a badge and the reason under its description ("Test speed to use it"), and the
+  next step is the main button, instead of a radio that looked choosable and did nothing. (#285)
+
 ## [0.9.0] - 2026-11-03
 
 Get Things Done now **keeps your meetings as a memory you can search, correct and build on**. Every
@@ -752,7 +820,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/geovanneb/get-things-done/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/geovanneb/get-things-done/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/geovanneb/get-things-done/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/geovanneb/get-things-done/compare/v0.6.0...v0.7.0
