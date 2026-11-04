@@ -10,7 +10,7 @@ export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: st
     next: 'Materials are saved. Run the analysis: the agent reads everything and proposes changes; nothing in your context changes yet.',
   },
   analyzing: {
-    label: 'Agent is analyzing', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 1,
+    label: 'Analyzing…', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 1,
     next: 'The agent is reading the materials and your current context. This page updates by itself when the proposals are ready.',
   },
   in_review: {
@@ -22,7 +22,7 @@ export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: st
     next: 'Your selection is locked. Apply it: the agent writes the accepted changes into your context.',
   },
   applying: {
-    label: 'Agent is applying', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 3,
+    label: 'Applying…', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 3,
     next: 'The agent is writing the accepted changes. This page updates by itself when it is done.',
   },
   done: {

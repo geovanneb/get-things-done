@@ -3,16 +3,10 @@ import Button from '@/components/common/Button';
 import { apiGet, apiPost } from '@/utils/api';
 import { formatRelativeDate } from '@/utils/format';
 import type { AgentRun, RunnerStatus } from '@/types';
+import RunProgress from './RunProgress';
 import { HelpBox } from './shared';
 
 const POLL_MS = 3000;
-
-/** "at 14:05", or the date as well when the run did not start today. */
-function startedAt(iso: string): string {
-  const d = new Date(iso);
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toDateString() === new Date().toDateString() ? `at ${time}` : `${formatRelativeDate(iso)} at ${time}`;
-}
 
 /** What the panel offers for each status: analyze a ready update, apply an approved one. */
 const COMMAND_FOR: Record<string, 'analyze' | 'apply'> = { ready: 'analyze', approved: 'apply', applying: 'apply' };
@@ -171,10 +165,7 @@ export default forwardRef<AnalysisRunHandle, {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {running ? (
-        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 'var(--text-sm)' }}>
-          <span style={{ flex: 1, minWidth: 0 }}>{run.message} Started {startedAt(run.started_at)}; this page updates when it is done.</span>
-          <Button variant="secondary" size="sm" loading={busy} onClick={() => void stop()}>Stop</Button>
-        </div>
+        <RunProgress run={run} runnerLabel={runner?.label ?? 'Claude Code'} stopping={busy} onStop={() => void stop()} />
       ) : action === 'checking' ? (
         <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Checking whether the dashboard can run this here…</p>
       ) : runnable && runner ? (
@@ -226,7 +217,7 @@ export default forwardRef<AnalysisRunHandle, {
       )}
       {ended && ended.status === 'succeeded' && (status === 'in_review' || status === 'done') && (
         <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          {ended.command === 'apply' ? `${ended.message} Applied` : 'Analyzed'} from the dashboard {formatRelativeDate(ended.ended_at ?? ended.started_at)}{ended.turns ? ` in ${ended.turns} steps` : ''}.
+          {ended.command === 'apply' ? `${ended.message} Applied` : 'Analyzed'} from the dashboard {formatRelativeDate(ended.ended_at ?? ended.started_at)}{ended.turns ? ` in ${ended.turns} turns` : ''}.
         </p>
       )}
       {error && <HelpBox tone="critical">{error}</HelpBox>}

@@ -584,6 +584,19 @@ export interface AgentRun {
   refused: number;
   turns: number | null;
   usage_usd: number | null;
+  /** While a run started from the dashboard is going: its last steps and how many there were (#246). */
+  steps?: RunStep[];
+  step_count?: number;
+}
+
+/** One step of a run: the kind of tool call and the workspace path it touched, never contents. */
+export interface RunStep {
+  kind: 'read' | 'search' | 'list' | 'write' | 'edit' | 'command' | 'skill' | 'other';
+  path: string | null;
+  /** A new file being written: the workspace folder it goes in ("" for the workspace itself), not its name. */
+  folder?: string;
+  outside?: boolean;
+  name?: string;
 }
 
 export interface ContextUpdate {

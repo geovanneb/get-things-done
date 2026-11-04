@@ -1,5 +1,6 @@
 import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
@@ -8,6 +9,7 @@ import { findCommand } from './aiToolDetection';
 import { ContextUpdateService, proposalTarget, updateId } from './contextUpdateService';
 import { GATE_TOOL, readGateLog, removeApprovalGate, writeApprovalGate, type ApprovalGate } from './approvalGate';
 import { processAlive, setAnalysisRunning } from './runState';
+import { stepsFromMessage, type RunStep } from './runSteps';
 import { parseMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
 
@@ -61,7 +63,15 @@ export interface AgentRun {
   usage_usd: number | null;
   /** The process that ran it, so a restart can tell a finished run from one still going. */
   pid?: number | null;
+  /**
+   * While a run this dashboard started is going: its last steps and how many there were (#246). Kept in memory for
+   * the run only, never in the saved record.
+   */
+  steps?: RunStep[];
+  step_count?: number;
 }
+
+export type { RunStep };
 
 export type ProblemCode = 'not_installed' | 'not_logged_in' | 'not_subscription' | 'auth_unknown' | 'not_trusted' | 'workspace_auth';
 
@@ -100,8 +110,11 @@ export interface AgentRunnerAdapter {
   id: string;
   label: string;
   status(workspace: string): Promise<RunnerStatus>;
-  /** With `gate`, every permission prompt goes to the approval gate instead of being refused. */
-  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate): RunHandle;
+  /**
+   * With `gate`, every permission prompt goes to the approval gate instead of being refused. `onStep` hears each tool
+   * call as the run makes it (#246), as a step with no contents.
+   */
+  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate, onStep?: (step: RunStep) => void): RunHandle;
 }
 
 const MAX_TURNS = 80;
@@ -111,6 +124,7 @@ const PROBE_TIMEOUT_MS = 15_000;
 const KILL_GRACE_MS = 3_000;
 const STDERR_KEEP = 4096;
 const MAX_LINE = 1024 * 1024;
+const MAX_HEARD = 500;
 
 /** Variables that would make Claude Code use an API account or another provider instead of the user's plan. */
 const BILLING_OVERRIDES = [
@@ -293,7 +307,7 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
     return { ...base, installed: true, logged_in: loggedIn, trusted, problems };
   }
 
-  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate): RunHandle {
+  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate, onStep?: (step: RunStep) => void): RunHandle {
     const bin = this.binary();
     if (!bin) throw httpError(409, 'Claude Code is not installed on this computer.');
     // Without a gate every prompt is refused (dontAsk). With one, prompts go to it: the only MCP server loaded.
@@ -309,6 +323,11 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
     let pending = '';
     let stopped: StopReason | undefined;
     let finished = false;
+    // Tool paths may come as the workspace path or its real path (a symlinked folder, /var on macOS).
+    const roots = [workspace];
+    try { roots.push(fs.realpathSync(workspace)); } catch { /* the workspace path alone */ }
+    // Tool calls already heard, by id: the last MAX_HEARD only, so a long run stays small.
+    const heard = new Set<string>();
 
     const stop = (reason: StopReason): Promise<void> => {
       stopped ??= reason;
@@ -323,6 +342,14 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
       if (m['type'] === 'result') result = m as RunOutcome['result'];
       // Started with an API key after all (from somewhere the runner cannot see): stop before any work is billed.
       if (m['type'] === 'system' && m['subtype'] === 'init' && m['apiKeySource'] && m['apiKeySource'] !== 'none') void stop('api_key');
+      if (onStep && !finished) {
+        for (const { id, step } of stepsFromMessage(m, roots)) {
+          if (id.length > 200 || heard.has(id)) continue;
+          heard.add(id);
+          if (heard.size > MAX_HEARD) heard.delete(heard.values().next().value!);
+          onStep(step);
+        }
+      }
     };
     child.stdout?.setEncoding('utf-8');
     child.stdout?.on('data', (chunk: string) => {
@@ -430,6 +457,9 @@ interface Active {
   /** For an apply: the approval gate (removed after the run) and the accepted changes the run started with. */
   gate: ApprovalGate | null;
   accepted: AcceptedChange[];
+  /** The run's last steps (at most KEEP_STEPS) and how many there were; in memory only. */
+  steps: RunStep[];
+  stepCount: number;
   /** Record writes for this run, one after the other, so an older one never lands after a newer one. */
   writes: Promise<void>;
   done: Promise<void>;
@@ -437,6 +467,8 @@ interface Active {
 }
 
 let active: Active | null = null;
+/** The steps shown while a run goes: the last ones, so a long run stays small. */
+const KEEP_STEPS = 50;
 /** How each update's last run ended, also when its record could not be saved. Keyed by workspace and update. */
 const recent = new Map<string, AgentRun>();
 const recentKey = (workspace: string, id: string) => `${workspace}\0${id}`;
@@ -508,7 +540,9 @@ export class AgentRunnerService {
   async get(id: string): Promise<AgentRun | null> {
     const uid = updateId(id);
     const workspace = workspaceService.getWorkspacePath();
-    if (active && active.workspace === workspace && active.run.update_id === uid) return active.run;
+    if (active && active.workspace === workspace && active.run.update_id === uid) {
+      return active.run.status === 'running' ? { ...active.run, steps: [...active.steps], step_count: active.stepCount } : active.run;
+    }
     // The saved record, unless it could not be saved or is older than what this dashboard last saw.
     const saved = await this.readRecord(workspace, uid);
     const remembered = recent.get(recentKey(workspace, uid)) ?? null;
@@ -592,7 +626,7 @@ export class AgentRunnerService {
       message: command === 'analyze' ? `${this.adapter.label} is analyzing the material.` : `${this.adapter.label} is writing your accepted changes.`,
       refused: 0, turns: null, usage_usd: null, pid: null,
     };
-    const current: Active = { workspace, run, handle: null, stopRequested: null, terminal: false, gate: null, accepted: [], writes: Promise.resolve(), done, resolveDone };
+    const current: Active = { workspace, run, handle: null, stopRequested: null, terminal: false, gate: null, accepted: [], steps: [], stepCount: 0, writes: Promise.resolve(), done, resolveDone };
     active = current;
     recent.delete(recentKey(workspace, uid));
     setAnalysisRunning(workspace, uid, true);
@@ -629,7 +663,11 @@ export class AgentRunnerService {
       const prompt = command === 'analyze' ? `/gtd-context-analyze ${uid}` : `/gtd-context-apply ${uid}`;
       current.handle = this.adapter.start(workspace, prompt, (outcome) => {
         void this.finish(current, { ...outcome, stopped: outcome.stopped ?? current.stopRequested ?? undefined });
-      }, gate);
+      }, gate, (step) => {
+        if (current.terminal) return;
+        current.stepCount += 1;
+        current.steps = [...current.steps.slice(1 - KEEP_STEPS), step];
+      });
       if (!current.terminal) {
         current.run = { ...current.run, pid: current.handle.pid };
         await this.record(current).catch(() => {});
@@ -641,7 +679,10 @@ export class AgentRunnerService {
       release();
       throw err;
     }
-    return current.run;
+    // Answered as `get` would: a run this dashboard owns comes with its steps (none yet), so the page offers Stop.
+    return active === current && current.run.status === 'running'
+      ? { ...current.run, steps: [...current.steps], step_count: current.stepCount }
+      : current.run;
   }
 
   /** Records how a run ended. A failed save never crashes the dashboard: the outcome stays in memory until then. */

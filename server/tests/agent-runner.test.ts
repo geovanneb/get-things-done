@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { AgentRunnerService, ClaudeCodeAdapter, childEnv, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
+import { stepsFromMessage, type RunStep } from '../src/services/runSteps';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
 
 /** A throwaway fictional workspace with one context update; the services read its path from ESB_WORKSPACE_PATH. */
@@ -32,16 +33,18 @@ function fakeAdapter(options: { problems?: { code: 'not_logged_in'; message: str
   const calls: { workspace: string; prompt: string }[] = [];
   const stops: StopReason[] = [];
   let finish: ((o: RunOutcome) => void) | null = null;
+  let step: ((s: RunStep) => void) | undefined;
   const adapter: AgentRunnerAdapter = {
     id: 'fake', label: 'Fake tool',
     status: async () => { await options.beforeStatus?.(); return { id: 'fake', label: 'Fake tool', installed: true, logged_in: true, problems: options.problems ?? [] }; },
-    start: (workspace, prompt, done) => {
+    start: (workspace, prompt, done, _gate, onStep) => {
       calls.push({ workspace, prompt });
       finish = done;
+      step = onStep;
       return { pid: null, stop: async (reason) => { stops.push(reason); done({ exit_code: null, result: null, stderr: '', stopped: reason }); } };
     },
   };
-  return { adapter, calls, stops, end: (o: RunOutcome) => finish!(o) };
+  return { adapter, calls, stops, end: (o: RunOutcome) => finish!(o), step: (s: RunStep) => step!(s) };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 30));
@@ -130,6 +133,108 @@ test('a finished run is announced once, after its record is saved, with the upda
   assert.deepEqual(heard[0], { workspace: ws, update_id: 'CU-2026-0001', command: 'analyze', status: 'succeeded' });
   const saved = JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8'));
   assert.equal(saved.status, 'succeeded', 'the record says so before anyone is told');
+});
+
+test('while a run goes its last steps are shown, kept in memory only, and gone once it ends (#246)', async (t) => {
+  const ws = await workspace(t);
+  const fake = fakeAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+  const started = await service.startAnalysis('CU-2026-0001');
+  assert.deepEqual([started.steps, started.step_count], [[], 0], 'the start answer says this dashboard owns the run');
+  assert.deepEqual([(await service.get('CU-2026-0001'))?.steps, (await service.get('CU-2026-0001'))?.step_count], [[], 0]);
+  for (let i = 1; i <= 60; i++) fake.step({ kind: 'read', path: `context/note-${i}.md` });
+  const going = await service.get('CU-2026-0001');
+  assert.equal(going?.step_count, 60);
+  assert.equal(going?.steps?.length, 50, 'only the last steps');
+  assert.deepEqual([going?.steps?.[0]?.path, going?.steps?.at(-1)?.path], ['context/note-11.md', 'context/note-60.md']);
+  const record = JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8'));
+  assert.equal('steps' in record || 'step_count' in record, false, 'never in the saved record');
+
+  await setStatus(ws, 'in_review');
+  fake.end(success);
+  await ended();
+  fake.step({ kind: 'read', path: 'late.md' });
+  const done = await service.get('CU-2026-0001');
+  assert.equal(done?.status, 'succeeded');
+  assert.equal(done?.steps, undefined, 'gone once it ends');
+  const saved = JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8'));
+  assert.equal('steps' in saved, false);
+});
+
+test('a step names the tool call and an existing workspace path only: no contents, search terms, commands or outside paths', async (t) => {
+  const ws = await workspace(t);
+  const outside = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-outside-')));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  await fsp.mkdir(path.join(ws, 'context', 'risks', 'a'), { recursive: true });
+  await fsp.writeFile(path.join(ws, 'context', 'risks', 'a', 'note.md'), 'x');
+  await fsp.writeFile(path.join(outside, 'private.txt'), 'x');
+  await fsp.symlink(outside, path.join(ws, 'linked'));
+  await fsp.symlink(path.join(outside, 'private.txt'), path.join(ws, 'file-link.md'));
+  await fsp.symlink(path.join(outside, 'gone.md'), path.join(ws, 'dangling.md'));
+  const call = (name: string, input: unknown, id = name) => ({ type: 'tool_use', id, name, input });
+  const steps = (content: unknown[]) => stepsFromMessage({ type: 'assistant', message: { content } }, [ws]).map((s) => s.step);
+  assert.deepEqual(steps([
+    { type: 'text', text: 'what the agent writes to itself' },
+    { type: 'thinking', thinking: 'reasoning' },
+    call('Read', { file_path: path.join(ws, 'context', 'risks', 'a', 'note.md') }),
+    call('Write', { file_path: path.join(ws, 'context-updates', 'CU-2026-0001', 'materials', 'P-01.md'), content: 'secret contents' }),
+    call('Edit', { file_path: 'context-updates/CU-2026-0001/update.md', old_string: 'old secret', new_string: 'new secret' }),
+    call('Grep', { pattern: 'secret term', path: 'context' }),
+    call('Glob', { pattern: '**/*.md' }),
+    call('Bash', { command: 'cat secret.txt' }),
+    call('Skill', { skill: 'pdf' }),
+    call('TodoWrite', { todos: [{ content: 'secret plan' }] }),
+    call('WebSearch', { query: 'secret query' }),
+  ]), [
+    { kind: 'read', path: 'context/risks/a/note.md' },
+    { kind: 'write', path: null, folder: 'context-updates/CU-2026-0001/materials' },
+    { kind: 'edit', path: 'context-updates/CU-2026-0001/update.md' },
+    { kind: 'search', path: 'context' },
+    { kind: 'list', path: null },
+    { kind: 'command', path: null },
+    { kind: 'skill', path: null, name: 'pdf' },
+    { kind: 'other', path: null, name: 'WebSearch' },
+  ]);
+  assert.ok(!JSON.stringify(steps([call('Bash', { command: 'cat secret.txt' }), call('Grep', { pattern: 'secret', path: '.' })])).includes('secret'));
+  assert.deepEqual(steps([
+    call('Read', { file_path: 'The fictional access code is BLUEBIRD' }),
+    call('Write', { file_path: 'The fictional access code is BLUEBIRD.md' }),
+    call('Write', { file_path: 'no-such-folder/BLUEBIRD.md' }),
+  ]), [{ kind: 'read', path: null }, { kind: 'write', path: null, folder: '' }, { kind: 'write', path: null }], 'a name that is not an existing file is never shown: it could be copied content');
+  const away = { path: null, outside: true };
+  assert.deepEqual(steps([
+    call('Read', { file_path: '/etc/passwd' }),
+    call('Read', { file_path: '../outside.md' }),
+    call('Read', { file_path: path.join(ws, '..', 'other', 'x.md') }),
+    call('Read', { file_path: '~/private.txt' }),
+    call('Read', { file_path: '//server/share/private.txt' }),
+    call('Read', { file_path: 'linked/private.txt' }),
+    call('Read', { file_path: 'file-link.md' }),
+    call('Write', { file_path: 'linked/new.md' }),
+  ]).map((s) => ({ path: s.path, outside: s.outside })), Array(8).fill(away), 'outside the workspace, also through a symlink, is never shown');
+  assert.deepEqual(steps([call('Read', { file_path: 'dangling.md' }), call('Write', { file_path: 'dangling.md' }), call('Edit', { file_path: 'dangling.md' })]),
+    [{ kind: 'read', path: null }, { kind: 'write', path: null }, { kind: 'edit', path: null }], 'a dangling link is not shown, nor taken for a new file');
+  await fsp.writeFile(path.join(ws, 'hidden\u202Ename.md'), 'x');
+  await fsp.mkdir(path.join(ws, 'odd\u202Efolder'));
+  await fsp.symlink(path.join(ws, 'hidden\u202Ename.md'), path.join(ws, 'safe.md'));
+  await fsp.symlink(path.join(ws, 'odd\u202Efolder'), path.join(ws, 'safe-folder'));
+  assert.deepEqual(steps([call('Read', { file_path: 'safe.md' }), call('LS', { path: 'safe-folder' }), call('Write', { file_path: 'safe-folder/new.md' })]),
+    [{ kind: 'read', path: null }, { kind: 'list', path: null }, { kind: 'write', path: null }], 'a safe name leading to an unsafe one shows nothing');
+  if (path.sep === '/') {
+    assert.deepEqual(steps([call('Read', { file_path: 'C:\\Users\\Example\\private.txt' }), call('Read', { file_path: 'C:private.txt' })]).map((s) => s.outside), [true, true], 'Windows spellings off Windows');
+  }
+  assert.deepEqual(stepsFromMessage({ type: 'assistant', message: { content: [call('Read', { file_path: path.join(ws.replace(/^\/private/, ''), 'context', 'risks', 'a', 'note.md') })] } }, [ws.replace(/^\/private/, ''), ws]).map((s) => s.step.path),
+    ['context/risks/a/note.md'], 'the workspace path and its real path both count');
+  assert.deepEqual(steps([
+    call('Read', { file_path: 'context/risks/a/\u202Enote.md' }),
+    call('Read', { file_path: 'context\u0007/risks/a/note.md' }),
+    call('Skill', { skill: 'bad name; rm' }),
+    call('weird name!', {}),
+    call('Read', 'not an object'),
+    { type: 'tool_use', name: 'Read', input: { file_path: 'no-id.md' } },
+  ]), [{ kind: 'read', path: null }, { kind: 'read', path: null }, { kind: 'skill', path: null }, { kind: 'other', path: null }, { kind: 'read', path: null }], 'control and direction characters: nothing shown; odd names are not shown');
+  assert.deepEqual(stepsFromMessage({ type: 'user', message: { content: [call('Read', { file_path: 'x.md' })] } }, [ws]), [], 'only the agent\'s own calls');
+  assert.deepEqual(stepsFromMessage({ type: 'assistant', message: null }, [ws]), []);
 });
 
 test('startup checks the update again right before launch, and a Stop before launch means it never starts', async (t) => {
@@ -331,6 +436,20 @@ test('the ended state wins over a "running" record left on disk, and a fast exit
   assert.ok(await eventually(async () => await onDisk() === 'succeeded'), 'the end is saved');
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(await onDisk(), 'succeeded', 'the late "running" save did not land after the end');
+});
+
+test('the adapter hears each tool call once, as a step, from Claude Code\'s stream (#246)', posix, async (t) => {
+  const ws = await workspace(t);
+  const use = (id: string, file: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Read', input: { file_path: file } }] } });
+  const bin = await fakeCli(ws, signedIn, `
+process.stdout.write(${JSON.stringify(use('a', path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md')))} + '\\n');
+process.stdout.write(${JSON.stringify(use('a', path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md')))} + '\\n');
+process.stdout.write(${JSON.stringify(use('b', 'context-updates/CU-2026-0001/materials'))} + '\\n');
+process.stdout.write(${JSON.stringify(use('x'.repeat(300), 'context-updates/CU-2026-0001/update.md'))} + '\\n');
+process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', num_turns: 2 }) + '\\n');`);
+  const heard: RunStep[] = [];
+  await new Promise<RunOutcome>((resolve) => new ClaudeCodeAdapter(() => bin).start(ws, '/gtd-context-analyze CU-2026-0001', resolve, undefined, (s) => heard.push(s)));
+  assert.deepEqual(heard, [{ kind: 'read', path: 'context-updates/CU-2026-0001/update.md' }, { kind: 'read', path: 'context-updates/CU-2026-0001/materials' }], 'a repeated id once, an oversized id not at all');
 });
 
 test('stream lines that are not message objects are ignored, and a failed sign-in check start is reported, not thrown', posix, async (t) => {
