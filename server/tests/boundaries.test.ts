@@ -149,6 +149,48 @@ test('HTTP guard rejects untrusted browser requests before mutations and preserv
   assert.ok(!(await failure.text()).includes('secret.md'));
 });
 
+test('HTTP guard lets a page load from a link on another site open the dashboard, never the API', async (t) => {
+  const app = express();
+  let apiReads = 0;
+  app.use(localRequestGuard(3001));
+  app.get('/api/{*splat}', (_req, res) => { apiReads++; res.json({ secret: true }); });
+  app.post('/{*splat}', (_req, res) => { res.sendStatus(204); });
+  app.get('/{*splat}', (_req, res) => { res.type('html').send('<!doctype html><title>dashboard</title>'); });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  t.after(() => new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const base = `http://127.0.0.1:${address.port}`;
+  // What Chrome sends for a link clicked on another site, and again when that tab is reloaded.
+  const linked = { Host: 'localhost:3001', 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' };
+
+  for (const page of ['/', '/situation', '/meetings/MQ-2026-0001']) {
+    for (const method of ['GET', 'HEAD']) {
+      assert.equal((await httpFetch(base + page, { method, headers: linked })).status, 200, `${method} ${page}`);
+    }
+  }
+
+  type Init = { method?: string; headers: Record<string, string> };
+  const refused: [string, Init][] = [
+    // The API, however the path is spelled: Express matches routes without regard to case.
+    ...['/api/tasks', '/API/tasks', '/Api/tasks/', '/%61pi/tasks', '//api/tasks', '/api'].map((p): [string, Init] => [p, { headers: linked }]),
+    // Not a top-level page load: a frame, a script, a fetch.
+    ['/situation', { headers: { ...linked, 'Sec-Fetch-Dest': 'iframe' } }],
+    ['/situation', { headers: { ...linked, 'Sec-Fetch-Mode': 'no-cors', 'Sec-Fetch-Dest': 'script' } }],
+    ['/situation', { headers: { ...linked, 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Dest': 'empty' } }],
+    // A form posted from another site is a navigation too.
+    ['/situation', { method: 'POST', headers: linked }],
+    // The Host and Origin checks still apply to a page load.
+    ['/situation', { headers: { ...linked, Host: 'attacker.example:3001' } }],
+    ['/situation', { headers: { ...linked, Origin: 'https://attacker.example' } }],
+  ];
+  for (const [p, init] of refused) {
+    assert.equal((await httpFetch(base + p, init)).status, 403, `${init.method ?? 'GET'} ${p} ${JSON.stringify(init.headers)}`);
+  }
+  assert.equal(apiReads, 0);
+});
+
 
 test('Markdown is data only and does not cache mutable parsing results', () => {
   const globals = globalThis as typeof globalThis & { gtdParserExecuted?: boolean };
