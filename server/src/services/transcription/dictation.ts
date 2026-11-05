@@ -1,6 +1,7 @@
 import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import { beginStart } from '../appActivity';
 import { CATALOG, runnableModel, TranscriptionModelService } from '../transcriptionModels';
 import type { TranscriptionEngine } from './engine';
 import { readWavFormat, WavError } from './wav';
@@ -37,6 +38,15 @@ async function pickModel(models: TranscriptionModelService, asked: unknown): Pro
 }
 
 export async function dictate(engine: TranscriptionEngine, models: TranscriptionModelService, audio: unknown, model: unknown): Promise<DictationResult> {
+  const release = beginStart('A dictation is being transcribed');
+  try {
+    return await transcribeClip(engine, models, audio, model);
+  } finally {
+    release();
+  }
+}
+
+async function transcribeClip(engine: TranscriptionEngine, models: TranscriptionModelService, audio: unknown, model: unknown): Promise<DictationResult> {
   if (!Buffer.isBuffer(audio) || audio.length === 0) throw httpError(400, 'Send the recording as a WAV file (Content-Type audio/wav)');
   const id = await pickModel(models, model);
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-dictation-'));

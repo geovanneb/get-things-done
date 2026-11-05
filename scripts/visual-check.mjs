@@ -89,8 +89,10 @@ execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'init', '-y', '-d
   '--name', 'Alex Morgan', '--role', 'COO', '--org', 'Northwind Labs', '--ai', 'claude-code'], { env, stdio: 'pipe' });
 const server = spawn(process.execPath, [path.join(root, 'dist/server/index.js')], {
   env: { ...env, ESB_WORKSPACE_PATH: ws, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production', GTD_DISABLE_UPDATES: '1' },
-  stdio: 'ignore',
+  stdio: ['ignore', 'pipe', 'pipe'],
 });
+let serverLog = '';
+for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) => { serverLog = (serverLog + chunk).slice(-8000); });
 
 let browser;
 try {
@@ -98,7 +100,7 @@ try {
   for (let i = 0; i < 50 && !healthy; i++) {
     try { healthy = (await fetch(`${base}/health`)).ok; } catch { await new Promise((r) => setTimeout(r, 200)); }
   }
-  if (!healthy) throw new Error('the server did not start');
+  if (!healthy) throw new Error(`the server did not start: ${serverLog}`);
   execFileSync(process.execPath, [path.join(root, 'scripts/seed-demo.mjs'), base], { env, stdio: 'pipe' });
   for (const [endpoint, prefix] of [['/api/stakeholders', '/stakeholders/'], ['/api/context-updates', '/context/updates/']]) {
     const records = await (await fetch(base + endpoint)).json();
@@ -184,6 +186,44 @@ try {
             return before === after;
           });
           check(`nested cards keep their own padding @${width} ${theme}`, nested);
+        }
+        if (route === '/board') {
+          const edit = page.getByRole('button', { name: 'Edit columns…' });
+          await edit.focus();
+          await page.keyboard.press('Enter');
+          const dialog = page.getByRole('dialog', { name: 'Edit columns', exact: true });
+          await dialog.waitFor();
+          const press = async (name) => {
+            await dialog.getByRole('button', { name, exact: true }).focus();
+            await page.keyboard.press('Enter');
+            // Reordering/removal restores focus on the next animation frame. Let it finish before the next key.
+            await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          };
+          await press('Add column');
+          await page.waitForFunction(() => document.querySelectorAll('.gtd-modal input').length === 5 && document.activeElement === [...document.querySelectorAll('.gtd-modal input')].at(-1));
+          const names = dialog.getByRole('textbox', { name: 'Name' });
+          await names.last().focus();
+          await page.keyboard.press('ControlOrMeta+A');
+          await page.keyboard.type('Fictional waiting');
+          await press('Move Fictional waiting up');
+          check(`board editor: keyboard adds and reorders @${width} ${theme}`,
+            await names.nth(3).inputValue() === 'Fictional waiting');
+          const overflow = await dialog.locator('.gtd-modal__panel').evaluate((el) => el.scrollWidth - el.clientWidth);
+          check(`board editor: no sideways scroll @${width} ${theme}`, overflow <= 1, `${overflow}px overflow`);
+          await press('Save columns');
+          await dialog.waitFor({ state: 'hidden' });
+          const saved = await (await page.request.get(`${base}/api/workspace/board`)).json();
+          check(`board editor: saves the edited order @${width} ${theme}`,
+            saved.columns.length === 5 && saved.columns[3].label === 'Fictional waiting');
+          await edit.focus();
+          await page.keyboard.press('Enter');
+          await dialog.waitFor();
+          await press('Remove Fictional waiting');
+          await press('Cancel');
+          await dialog.waitFor({ state: 'hidden' });
+          const kept = await (await page.request.get(`${base}/api/workspace/board`)).json();
+          check(`board editor: Cancel preserves saved columns @${width} ${theme}`, kept.columns.length === 5);
+          await page.request.delete(`${base}/api/workspace/board`);
         }
         if (route === '/stakeholders?tab=charts') {
           await page.getByRole('tab', { name: 'Chart', exact: true }).focus();

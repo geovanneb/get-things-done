@@ -6,7 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { checkForUpdate, createUpdateInstaller, nextUpdateState, updatesEnabled, type DesktopUpdateState, type UpdateEvent } from './update-controller';
 
-let restart: (() => Promise<void>) | undefined;
+let restart: ReturnType<typeof createUpdateInstaller> | undefined;
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
@@ -20,6 +20,7 @@ let onRestartFailed: () => void = () => undefined;
 /** Restart to update did not go ahead: the page is told why, and the app carries on (`onRestartFailed`). */
 function restartFailed(message: string): void {
   restarting = false;
+  restart?.reset();
   apply({ type: 'restart-failed', message: `The restart did not work: ${message}` });
   onRestartFailed();
 }

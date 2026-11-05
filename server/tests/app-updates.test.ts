@@ -628,3 +628,35 @@ if (process.argv[2] === 'start') fs.writeFileSync(${JSON.stringify(path.join(dir
     assert.match(await npmInstallBlocked(cli, copy) ?? '', /can't be written/, 'a folder the user can\'t write');
   }
 });
+
+test('an unreadable run directory blocks updates instead of treating activity as idle', async (t) => {
+  const { ws } = await setup(t);
+  const f = fakeInstaller();
+  setInstallerForTests(f.installer, 'npm');
+  setLatestSourceForTests(async () => next);
+  await checkNow(ws);
+  const runs = path.join(ws, '.situation-board', 'runs');
+  await fsp.rm(runs, { recursive: true });
+  await fsp.writeFile(runs, 'fictional damaged directory');
+  const status = await updateStatus(ws);
+  assert.equal(status.can_install, false);
+  assert.match(status.busy ?? '', /could not be checked/);
+  await assert.rejects(install(next, ws), /could not be checked/);
+  assert.deepEqual(f.asked, []);
+  setInstallerForTests(f.installer, 'desktop');
+  await assert.rejects(prepareDesktopRestart(ws), /could not be checked/);
+  assert.doesNotThrow(refuseWhileUpdating, 'failed preparation reopens admission');
+});
+
+test('an unreadable meeting queue blocks update restarts', async (t) => {
+  const { ws } = await setup(t);
+  const f = fakeInstaller();
+  setInstallerForTests(f.installer, 'npm');
+  setLatestSourceForTests(async () => next);
+  await checkNow(ws);
+  await fsp.mkdir(path.join(ws, 'context-updates'), { recursive: true });
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue'), 'fictional damaged queue');
+  assert.match((await updateStatus(ws)).busy ?? '', /could not be checked/);
+  await assert.rejects(install(next, ws), /could not be checked/);
+  assert.deepEqual(f.asked, []);
+});

@@ -11,6 +11,7 @@ import { CATALOG, TranscriptionModelService, VAD } from '../src/services/transcr
 import { dictate, MAX_DICTATION_BYTES, MAX_DICTATION_SECONDS } from '../src/services/transcription/dictation';
 import type { WorkerReply, WorkerRequest } from '../src/services/transcription/protocol';
 import transcriptionRoutes from '../src/routes/transcription';
+import { busyReason, setUpdating } from '../src/services/appActivity';
 import { errorHandler } from '../src/middleware/errorHandler';
 
 type After = { after: (fn: () => Promise<void> | void) => void };
@@ -159,4 +160,27 @@ test('dictation over HTTP: only WAV bytes, with a size limit', async (t) => {
   const missing = await post(clip(1), 'audio/wav');
   assert.equal(missing.status, 409);
   assert.match(((await missing.json()) as { message: string }).message, /not downloaded yet/);
+});
+
+// Updating must see dictation even before the engine acquires its worker slot.
+test('dictation holds update admission during preparation and releases it after failure', async (t) => {
+  await modelsFolder(t);
+  t.after(() => setUpdating(false));
+  let resume!: () => void;
+  let entered!: () => void;
+  const preparing = new Promise<void>((r) => { entered = r; });
+  const gate = new Promise<void>((r) => { resume = r; });
+  const models = new TranscriptionModelService();
+  models.readSettings = async () => { entered(); await gate; throw new Error('fictional settings failure'); };
+  const pending = dictate(new TranscriptionEngine(models), models, clip(1), undefined);
+  const failed = assert.rejects(pending, /fictional settings failure/);
+  await preparing;
+  const reason = await busyReason(null);
+  resume();
+  await failed;
+  assert.equal(reason, 'A dictation is being transcribed');
+  assert.equal(await busyReason(null), null, 'failure releases the admission hold');
+  setUpdating(true);
+  await assert.rejects(dictate(new TranscriptionEngine(models), models, clip(1), undefined), /restarting for an update/);
+  setUpdating(false);
 });

@@ -601,7 +601,7 @@ async function describe(stored: Stored, workspace: string | null): Promise<Updat
   const how: UpdateStatus['how'] = kind === 'desktop' ? (process.env['GTD_UPDATES'] === 'on' ? 'self' : 'manual') : kind === 'source' ? 'manual' : 'command';
   const installed = kind === 'npm' ? installedNewer() : null;
   const target = installed ?? (newer ? result.latest! : 'latest');
-  const busy = await busyReason(workspace).catch(() => null);
+  const busy = await busyReason(workspace).catch(() => 'What runs could not be checked');
   const going = kind === 'npm' ? updateGoing() : null;
   const disk = kind === 'npm' ? onDisk() : null;
   // Offered only for a global npm install, a version newer than both the running and the installed one, nothing
@@ -667,7 +667,7 @@ export async function install(version: unknown, workspace: string | null = null)
     }
     if (updateGoing()) throw refuse(409, 'An update is being installed already');
     if (unresolved()) throw refuse(409, 'The last update was stopped while npm ran: finish it with the commands');
-    const busy = await busyReason(workspace).catch(() => null);
+    const busy = await busyReason(workspace).catch(() => 'What runs could not be checked');
     if (busy) throw refuse(409, `${busy}: update when it is done`);
     const blocked = await installBlocked(workspace, true);
     if (blocked) throw refuse(409, blocked);
@@ -675,7 +675,7 @@ export async function install(version: unknown, workspace: string | null = null)
     try {
       // Admission closes first, then what runs is checked again: nothing can start between the two.
       setUpdating(true);
-      const now = await busyReason(workspace).catch(() => null);
+      const now = await busyReason(workspace).catch(() => 'What runs could not be checked');
       if (now) throw refuse(409, `${now}: update when it is done`);
       // The workspace to start again on is the one open now (a switch may have finished during the checks).
       if (currentWorkspace() !== workspace) throw refuse(409, 'The workspace changed meanwhile: try again');

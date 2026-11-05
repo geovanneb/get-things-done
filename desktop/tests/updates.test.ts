@@ -118,3 +118,16 @@ test('one quit at a time, and none goes through while the server stops, for a qu
   update.reset();
   assert.equal(update.request(), false, 'after a failed restart, quitting is asked again');
 });
+
+test('an asynchronous installer failure can reset a completed handoff and retry', async () => {
+  let preparations = 0, installs = 0;
+  const restart = createUpdateInstaller(async () => { preparations++; }, () => { installs++; }, assert.fail);
+  await restart();
+  await restart();
+  assert.equal(installs, 1, 'a handed-off install stays coalesced until failure is reported');
+  // electron-updater reports installation failures through an event after quitAndInstall returns.
+  restart.reset();
+  await Promise.all([restart(), restart()]);
+  assert.equal(preparations, 2);
+  assert.equal(installs, 2, 'a retry performs the handoff again exactly once');
+});
