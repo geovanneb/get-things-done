@@ -883,6 +883,20 @@ try {
     check('dictation takes only a WAV clip, a catalog model and at most five minutes',
       dictationJson.status === 400 && dictationModel.status === 400 && dictationLarge.status === 413,
       `json=${dictationJson.status} model=${dictationModel.status} large=${dictationLarge.status}`);
+    // A failed activity scan must never offer a restart that may interrupt work.
+    const runsDir = path.join(ws, '.situation-board', 'runs');
+    const savedRuns = `${runsDir}.smoke-backup`;
+    const hadRuns = fs.existsSync(runsDir);
+    if (hadRuns) fs.renameSync(runsDir, savedRuns);
+    try {
+      fs.writeFileSync(runsDir, 'fictional damaged run directory');
+      const update = await (await fetch(`${base}/api/app/update`)).json();
+      check('updates fail closed when running activity cannot be read',
+        update.can_install === false && /could not be checked/.test(update.busy ?? ''), JSON.stringify(update.busy));
+    } finally {
+      fs.rmSync(runsDir, { force: true });
+      if (hadRuns) fs.renameSync(savedRuns, runsDir);
+    }
     // Recognize known voices (#287): off by default, nothing remembered, and nothing is remembered without the model
     // and a confirmed stakeholder name; requests that could reach a path are refused before anything is read.
     const voices = await (await fetch(`${base}/api/voiceprints`)).json();

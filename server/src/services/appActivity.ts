@@ -3,6 +3,7 @@ import * as path from 'path';
 import { anyAnalysisRunning, processAlive } from './runState';
 import { TranscriptionEngine } from './transcription/engine';
 import { MeetingDigestService } from './meetingDigestService';
+import { withWorkspacePath } from './workspace';
 
 let updating = false;
 
@@ -49,11 +50,15 @@ export async function busyReason(workspace: string | null): Promise<string | nul
   if (TranscriptionEngine.isBusy()) return 'A transcription is running';
   if (anyAnalysisRunning()) return 'An AI tool run is going';
   if (!workspace) return null;
-  const recording = await new MeetingDigestService().readQueue()
-    .then((q) => q.meetings.some((m) => m.live?.state === 'recording'), () => false);
-  if (recording) return 'A meeting is being recorded';
+  // Use the same workspace as the run scan, even outside an HTTP request or inside another workspace's context.
+  const queue = await withWorkspacePath(workspace, () => new MeetingDigestService().readQueue());
+  if (queue.meetings.some((m) => m.live?.state === 'recording')) return 'A meeting is being recorded';
+  if (queue.problems.length) return 'Meeting activity could not be checked; repair the meeting queue before updating';
   const runs = path.join(workspace, '.situation-board', 'runs');
-  const names = await fsp.readdir(runs).catch(() => [] as string[]);
+  const names = await fsp.readdir(runs).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return [] as string[];
+    throw err;
+  });
   for (const name of names.filter((n) => n.endsWith('.json') && n !== 'runner-settings.json')) {
     // A damaged record is skipped, never the ones after it.
     let record: unknown;

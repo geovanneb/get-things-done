@@ -8,7 +8,19 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-05
+
+Update from the app, customize your board, and dictate offline.
+
+This minor release adds new capabilities to 0.10.0. Existing task statuses remain compatible;
+`board_column` is optional. Run `gtd upgrade` for the updated workspace task schema (the dashboard
+also refreshes it when opening a workspace).
+
 ### Added
+
+- **Update from Settings.** A global npm installation can install the checked version and restart,
+  with recovery if installation fails. Signed desktop builds show download progress and offer
+  **Restart to update**. Both wait for active work before restarting.
 
 - **Edit the board's columns.** **Edit columns…** on the Kanban board renames, adds, removes and
   reorders columns (drag a row, or use Move up and Move down). Each column says which status a task
@@ -27,10 +39,17 @@ minor versions may include breaking changes.
   a stakeholder's What matters and Notes. It is transcribed offline, on this computer, with any
   transcription model you downloaded in Settings > Transcription (pick one next to the button when
   you have several; the choice is remembered in this browser), in the language set there. The clip
-  is never stored. Up to five minutes at a time. While it records, the field shows the same red dot,
-  time and Stop as a meeting recording in the top bar.
+  is removed from temporary storage after transcription. Up to five minutes at a time. While it
+  records, the field shows the same red dot, time and Stop as a meeting recording in the top bar.
 
 ### Fixed
+
+- Update restarts wait for dictation preparation and transcription; new dictation requests are
+  refused once an update starts. Unreadable run directories or meeting queues block updates instead
+  of being treated as idle.
+- Retrying a desktop update after an asynchronous installer failure performs a new installation attempt.
+- Run-finished notices keep the opened update tied to the workspace where it ran.
+- Links from other websites can open the dashboard while cross-site API requests remain blocked.
 
 - **The dashboard no longer opens as a blank page after a burst of requests.** The local request
   budget (3000 a minute, against runaway scripts) now counts the API only. It also counted the
@@ -848,7 +867,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/geovanneb/get-things-done/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/geovanneb/get-things-done/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/geovanneb/get-things-done/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/geovanneb/get-things-done/compare/v0.7.0...v0.8.0

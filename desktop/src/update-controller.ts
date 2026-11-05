@@ -3,15 +3,17 @@ export function updatesEnabled(packaged: boolean, signedRelease: unknown, disabl
   return packaged && signedRelease === true && disabled !== '1';
 }
 
-export function createUpdateInstaller(prepare: () => Promise<void>, install: () => void, report: (error: unknown) => void): () => Promise<void> {
+export function createUpdateInstaller(prepare: () => Promise<void>, install: () => void, report: (error: unknown) => void): (() => Promise<void>) & { reset: () => void } {
   let pending: Promise<void> | undefined;
-  return () => {
+  const restart = () => {
     pending ??= Promise.resolve().then(prepare).then(install).catch((error) => {
       pending = undefined;
       report(error);
     });
     return pending;
   };
+  // quitAndInstall can return successfully and emit an error later. That event must release the handoff too.
+  return Object.assign(restart, { reset: () => { pending = undefined; } });
 }
 
 /** checkForUpdates resolves before its separate background download promise. Consume both failures. */
