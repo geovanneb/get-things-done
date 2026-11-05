@@ -21,6 +21,21 @@ minor versions may include breaking changes.
   back the four columns. The workspace task schema gains `board_column`; the dashboard updates it
   when a workspace opens (or run `gtd upgrade`).
 
+- **Dictate into text fields.** **Dictate** (the microphone icon of **Record**) under a field
+  records your voice and adds the words to the field when you press **Stop**: a new task's
+  Objective, a context note's Content, the Notes for the agent of an imported context update, and
+  a stakeholder's What matters and Notes. It is transcribed offline, on this computer, with any
+  transcription model you downloaded in Settings > Transcription (pick one next to the button when
+  you have several; the choice is remembered in this browser), in the language set there. The clip
+  is never stored. Up to five minutes at a time. While it records, the field shows the same red dot,
+  time and Stop as a meeting recording in the top bar.
+
+### Fixed
+
+- **The dashboard no longer opens as a blank page after a burst of requests.** The local request
+  budget (3000 a minute, against runaway scripts) now counts the API only. It also counted the
+  page's own scripts and styles, and a refused one left an empty page with no message.
+
 ## [0.10.0] - 2026-11-04
 
 Get Things Done now **runs the next step for you and tells you when it is your move**. A context

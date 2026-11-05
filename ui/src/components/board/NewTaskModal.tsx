@@ -13,6 +13,8 @@ import { apiPost } from '@/utils/api';
 import { useApi } from '@/hooks/useApi';
 import { formatStatusLabel, formatPriorityLabel } from '@/utils/format';
 import MentionTextarea from '../common/MentionTextarea';
+import DictateButton from '@/components/common/DictateButton';
+import { withDictation } from '@/utils/dictation';
 import { DropZone } from '@/components/context-updates/ImportUpdateModal';
 import { formatBytes } from '@/components/context-updates/shared';
 import type { Task, Stakeholder, NewTaskDraft, ClaudeAgent } from '@/types';
@@ -102,6 +104,11 @@ export default function NewTaskModal({
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
+
+  // Added to what the field holds when the text arrives, not when recording began: typing meanwhile is kept.
+  const addDictation = React.useCallback((text: string) => {
+    setForm((prev) => ({ ...prev, objective: withDictation(prev.objective, text) }));
+  }, []);
 
   const addDeliverable = () => {
     // No format here — it comes from the output template the user picks.
@@ -250,6 +257,7 @@ export default function NewTaskModal({
                   onChange={(v) => setField('objective', v)}
                   placeholder="Describe the goal or context for this task"
                 />
+                <DictateButton fieldName="objective" onText={addDictation} />
               </Field>
 
               <div style={{ marginBottom: 'var(--space-6)' }}>

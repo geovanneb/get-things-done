@@ -22,6 +22,8 @@ import UpdatesList from '@/components/context-updates/UpdatesList';
 import UpdateDetail from '@/components/context-updates/UpdateDetail';
 import { filterUpdates, HISTORY_PAGE, waitingCounts, waitingLabel, type TypeFilter } from '@/utils/updateTypes';
 import type { ContextNote, ContextUpdate, QueuedMeeting } from '@/types';
+import DictateButton from '@/components/common/DictateButton';
+import { withDictation } from '@/utils/dictation';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -145,6 +147,7 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
         <Field label="Content" hint="Markdown is supported." htmlFor="context-note-body">
           <MarkdownEditor id="context-note-body" value={form.body} onChange={(v) => set('body', v)} rows={8}
             placeholder="What an agent should know about this" />
+          <DictateButton fieldName="content" onText={(text) => setForm((f) => ({ ...f, body: withDictation(f.body, text) }))} />
         </Field>
         {effectiveNote?.id && (
           <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label="Attached files" />

@@ -6,6 +6,8 @@ import { apiPost } from '@/utils/api';
 import { ParticipantsField } from '@/components/meetings/ParticipantsField';
 import type { ContextUpdate, MeetingParticipant, QueuedMeeting } from '@/types';
 import { HelpBox, formatBytes, hardToRead } from './shared';
+import DictateButton from '@/components/common/DictateButton';
+import { withDictation } from '@/utils/dictation';
 
 const MAX_FILE = 50 * 1024 * 1024;
 /** A meeting recording, queued for transcription: up to 4 GB (decimal), as the server accepts. */
@@ -274,7 +276,8 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
           <div>
             <label style={labelStyle}>Notes for the agent</label>
             <p style={hintStyle}>Optional. What this is, who was there, what to trust or ignore. For example: "Budget figures are a first draft."</p>
-            <Textarea value={notes} onChange={setNotes} rows={3} placeholder="Anything the agent should know..." aria-label="Notes for the agent" />
+            <Textarea value={notes} onChange={setNotes} rows={3} placeholder="Anything the agent should know..." aria-label="Notes for the agent"
+              footer={<DictateButton fieldName="notes for the agent" onText={(text) => setNotes((n) => withDictation(n, text))} />} />
           </div>
         )}
 

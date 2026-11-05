@@ -17,6 +17,8 @@ import OrgChartsPanel from '@/components/stakeholders/OrgChartsPanel';
 import { apiDelete, apiPost, apiPut } from '@/utils/api';
 import type { RememberedVoice, Stakeholder } from '@/types';
 import { useRememberedVoices, VoiceBadge } from '@/components/stakeholders/VoiceTag';
+import DictateButton from '@/components/common/DictateButton';
+import { withDictation } from '@/utils/dictation';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,9 +197,11 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
           <Input label="Organization" value={form.organization} onChange={(v) => setField('organization', v)} placeholder="Acme Corp" />
           <Input label="Email" type="email" autoComplete="off" value={form.email} onChange={(v) => setField('email', v)} placeholder="jane@acme.com" style={{ gridColumn: '1 / -1' }} />
           <Textarea label="What matters" value={form.what_matters} onChange={(v) => setField('what_matters', v)}
-            placeholder="What this person cares about most" rows={3} style={{ gridColumn: '1 / -1' }} />
+            placeholder="What this person cares about most" rows={3} style={{ gridColumn: '1 / -1' }}
+            footer={<DictateButton fieldName="what matters" onText={(text) => setForm((f) => ({ ...f, what_matters: withDictation(f.what_matters, text) }))} />} />
           <Textarea label="Notes" hint="Markdown is supported." value={form.notes} onChange={(v) => setField('notes', v)}
-            placeholder="Context, history, how the relationship works" rows={4} style={{ gridColumn: '1 / -1' }} />
+            placeholder="Context, history, how the relationship works" rows={4} style={{ gridColumn: '1 / -1' }}
+            footer={<DictateButton fieldName="notes" onText={(text) => setForm((f) => ({ ...f, notes: withDictation(f.notes, text) }))} />} />
         </div>
       </form>
     </Modal>

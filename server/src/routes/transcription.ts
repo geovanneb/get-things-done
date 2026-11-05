@@ -1,9 +1,10 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import { TranscriptionModelService } from '../services/transcriptionModels';
 import { TranscriptionEngine } from '../services/transcription/engine';
 
 import { runSpeedTest } from '../services/transcription/speedTest';
+import { dictate, MAX_DICTATION_BYTES } from '../services/transcription/dictation';
 
 const router = Router();
 const service = new TranscriptionModelService();
@@ -47,6 +48,11 @@ router.post('/models/:id/speed-test', async (req: Request, res: Response) => {
     return;
   }
   res.json(await runSpeedTest(engine, id));
+});
+
+// POST /api/transcription/dictation?model=<id>  a short WAV clip (audio/wav) to text, offline; the clip is not kept
+router.post('/dictation', express.raw({ type: 'audio/wav', limit: MAX_DICTATION_BYTES, inflate: false }), async (req: Request, res: Response) => {
+  res.json(await dictate(engine, service, req.body, req.query['model']));
 });
 
 // DELETE /api/transcription/models/:id  removes the model's files

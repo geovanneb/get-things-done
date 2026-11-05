@@ -218,7 +218,9 @@ function createApp(port: number, options: StartServerOptions, sseClients: Set<Re
 
   // Every client is this machine, so this is one shared budget. It is far above what the dashboard
   // needs and only stops a runaway local script from flooding the workspace with file operations.
-  app.use(rateLimit({ windowMs: 60_000, limit: 3000, standardHeaders: 'draft-8', legacyHeaders: false }));
+  // Only the API counts: the page's own files are read-only, and a refused script or stylesheet
+  // leaves a blank page with no message, while a refused API call shows its error.
+  app.use('/api', rateLimit({ windowMs: 60_000, limit: 3000, standardHeaders: 'draft-8', legacyHeaders: false }));
 
   if (options.logRequests !== false) app.use(morgan('dev'));
 
