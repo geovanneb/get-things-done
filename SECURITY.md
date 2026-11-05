@@ -49,7 +49,9 @@ your workspace files. Reports are most useful when they show:
 
 Use the dashboard on `http://127.0.0.1:<port>` or `http://localhost:<port>`.
 The API validates Host and Origin headers and rejects cross-site browser requests
-before parsing request bodies. Development origins use ports 3000, 5173 and 4173.
+before parsing request bodies. Only a top-level page load of the dashboard (a link
+from another site) passes; it serves the page and its files, never an `/api` path, and
+`frame-ancestors 'none'` keeps other sites from framing it. Development origins use ports 3000, 5173 and 4173.
 Requests without an Origin remain available to local CLI clients; this is not
 an authentication system. Do not expose the API through a public reverse proxy.
 

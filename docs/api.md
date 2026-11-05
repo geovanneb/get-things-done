@@ -14,7 +14,10 @@ Alex Morgan and colleagues). Responses are shortened with `…` where they are l
 - **Local requests only.** Every request must use the host `127.0.0.1:<port>` or
   `localhost:<port>`. A request with another `Host`, a foreign `Origin` or
   `Sec-Fetch-Site: cross-site` gets `403 Forbidden`. This protects against DNS rebinding
-  and browser form posts from other sites.
+  and browser form posts from other sites. The one cross-site request let through is a
+  page load of the dashboard (`GET` or `HEAD`, `Sec-Fetch-Mode: navigate`,
+  `Sec-Fetch-Dest: document`, outside `/api`), so a link to it from another site opens it;
+  every `/api` path stays refused.
 - **No authentication.** Anything that can reach the loopback port can use the API, so do
   not expose it through a proxy or tunnel.
 - **JSON in, JSON out.** Send `Content-Type: application/json`. Bodies can be up to 10 MB.

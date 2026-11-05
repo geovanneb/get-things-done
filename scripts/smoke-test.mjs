@@ -67,6 +67,23 @@ try {
 
   const forbidden = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { Origin: 'https://untrusted.example' } });
   check('untrusted origins are rejected before routes run', forbidden.status === 403);
+  // Chrome's headers for a link to the dashboard clicked on another site (and for reloading that tab). Sent with
+  // node:http, because fetch always replaces Sec-Fetch-Mode with "cors".
+  const { request } = await import('node:http');
+  const linked = (p) => new Promise((resolve, reject) => {
+    const req = request(`${base}${p}`, { headers: { 'Sec-Fetch-Site': 'cross-site', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' } }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  const linkedPage = await linked('/situation');
+  check('a link from another site opens the dashboard', linkedPage.status === 200 && linkedPage.body.includes('<div id="root"'), linkedPage.status);
+  const linkedApi = await linked('/api/tasks');
+  check('a link from another site never reaches the API', linkedApi.status === 403, linkedApi.status);
   const page = await fetch(`${base}/`);
   const pageCsp = page.headers.get('content-security-policy') ?? '';
   check('the dashboard is served with a restrictive CSP',
