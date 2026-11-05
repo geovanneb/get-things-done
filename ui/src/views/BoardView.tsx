@@ -1,8 +1,10 @@
-import { useState, useCallback, useMemo, createContext, useContext } from 'react';
+import { useState, useCallback, useEffect, useMemo, createContext, useContext } from 'react';
 import Page from '@/components/common/Page';
 import { SearchInput } from '@/components/common/Input';
 import { CountBadge, SegmentedControl, Tabs } from '@/components/common/Tabs';
 import IconButton, { icons } from '@/components/common/IconButton';
+import Button from '@/components/common/Button';
+import BoardColumnsEditor from '@/components/board/BoardColumnsEditor';
 import { useNotify } from '@/hooks/useNotify';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -14,6 +16,7 @@ import EmptyState from '../components/common/EmptyState';
 import { useAppDispatch, useAppState, useDataVersion } from '../store';
 import { apiPut } from '../utils/api';
 import { formatDate, formatDueStatus, formatStatusLabel, formatPriorityLabel } from '../utils/format';
+import { DEFAULT_BOARD, dropUpdate, placeTasks, type BoardColumn, type BoardColumns } from '../utils/boardColumns';
 
 type ViewTab = 'kanban' | 'list' | 'archive';
 type PriorityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -251,19 +254,6 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
 }
 
 /* ---- Kanban column ------------------------------------------------- */
-interface KanbanColumn {
-  id: string;
-  label: string;
-  statuses: Task['status'][];
-}
-
-const KANBAN_COLUMNS: KanbanColumn[] = [
-  { id: 'backlog', label: 'Backlog', statuses: ['backlog', 'ready'] },
-  { id: 'in_progress', label: 'In Progress', statuses: ['in_progress', 'blocked', 'review'] },
-  { id: 'needs_review', label: 'Needs Review', statuses: ['in_review'] },
-  { id: 'done', label: 'Done', statuses: ['done', 'approved'] },
-];
-
 function KanbanCol({
   column,
   tasks,
@@ -271,11 +261,11 @@ function KanbanCol({
   onDrop,
   onAddTask,
 }: {
-  column: KanbanColumn;
+  column: BoardColumn;
   tasks: Task[];
   onCardClick: (id: string) => void;
-  onDrop: (taskId: string, status: Task['status']) => void;
-  onAddTask: (defaultStatus: Task['status']) => void;
+  onDrop: (taskId: string, column: BoardColumn) => void;
+  onAddTask: (column: BoardColumn) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
 
@@ -289,9 +279,8 @@ function KanbanCol({
         const taskId = e.dataTransfer.getData('text/plain');
         // Dropping within the same column keeps the task's own status (e.g. `blocked` stays blocked).
         if (tasks.some((t) => t.id === taskId)) return;
-        // A column's first status is its canonical one: backlog, in_progress, in_review, done.
-        // (Using the second one made a drop into In Progress set `blocked` and into Done set `approved`.)
-        onDrop(taskId, column.statuses[0]);
+        // The task gets the column's own status (never a legacy spelling such as `approved`).
+        onDrop(taskId, column);
       }}
       style={{
         flex: '1 1 0',
@@ -311,10 +300,10 @@ function KanbanCol({
         borderBottom: '1px solid var(--color-border)',
         flexShrink: 0,
       }}>
-        <h2 style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{column.label}</h2>
+        <h2 title={column.label} style={{ fontWeight: 600, fontSize: 'var(--text-sm)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{column.label}</h2>
         <CountBadge count={tasks.length} label={`${tasks.length} tasks`} />
         <div style={{ flex: 1 }} />
-        <IconButton label={`Add a task to ${column.label}`} icon={icons.plus} onClick={() => onAddTask(column.statuses[0])} />
+        <IconButton label={`Add a task to ${column.label}`} icon={icons.plus} onClick={() => onAddTask(column)} />
       </div>
 
       {/* Cards */}
@@ -444,9 +433,23 @@ export default function BoardView() {
     [stakeholders],
   );
 
+  // The board's columns are saved in the workspace (utils/boardColumns.ts). A failed load shows the default four
+  // rather than an empty board; `savedColumns` shows a save at once, without waiting for a refetch.
+  const workspacePath = useAppState().workspace?.path;
+  const { data: board, loading: boardLoading } = useApi<BoardColumns>('/api/workspace/board', [workspacePath]);
+  const [savedColumns, setSavedColumns] = useState<BoardColumn[] | null>(null);
+  useEffect(() => setSavedColumns(null), [board]);
+  const columns = savedColumns ?? board?.columns ?? DEFAULT_BOARD.columns;
+  const [editingColumns, setEditingColumns] = useState(false);
+
   const openNewTask = useCallback((defaultStatus: Task['status']) => {
     dispatch({ type: 'OPEN_NEW_TASK_MODAL', payload: defaultStatus });
   }, [dispatch]);
+
+  const openNewTaskIn = useCallback((column: BoardColumn) => {
+    const { status, board_column } = dropUpdate(column, columns);
+    dispatch({ type: 'OPEN_NEW_TASK_MODAL', payload: status, boardColumn: board_column ?? undefined });
+  }, [dispatch, columns]);
 
   const tasks = (data ?? []).filter((t) => {
     if (tab === 'archive') return t.status === 'archived';
@@ -462,16 +465,18 @@ export default function BoardView() {
     return true;
   });
 
-  const handleDrop = useCallback(async (taskId: string, status: Task['status']) => {
+  const placed = placeTasks(filtered, columns);
+
+  const handleDrop = useCallback(async (taskId: string, column: BoardColumn) => {
     try {
-      await apiPut(`/api/tasks/${taskId}`, { status });
+      await apiPut(`/api/tasks/${taskId}`, dropUpdate(column, columns));
       dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     } catch (err) {
       // The card goes back to its column on the next refresh; say why it did not move.
       notify.error(err, 'Could not move the task. Try again.');
       dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     }
-  }, [dispatch, notify]);
+  }, [dispatch, notify, columns]);
 
   const priorities: PriorityFilter[] = ['all', 'critical', 'high', 'medium', 'low'];
 
@@ -491,23 +496,35 @@ export default function BoardView() {
           <span role="status" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
             {filtered.length} task{filtered.length !== 1 ? 's' : ''}
           </span>
+          {tab === 'kanban' && placed.unplaced.length > 0 && (
+            // The user removed the only column for these statuses. The tasks are not lost: the List view has them.
+            <Button variant="ghost" size="sm" onClick={() => setTab('list')}
+              title="No column shows the status of these tasks. Open the List view to see them, or edit the columns.">
+              {placed.unplaced.length} not in a column
+            </Button>
+          )}
+          {tab === 'kanban' && (
+            <Button variant="ghost" size="sm" icon={icons.edit} onClick={() => setEditingColumns(true)}>
+              Edit columns…
+            </Button>
+          )}
         </div>
       )}
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {loading && <LoadingSpinner text="Loading tasks…" />}
+        {(loading || (tab === 'kanban' && boardLoading)) && <LoadingSpinner text="Loading tasks…" />}
 
-        {!loading && tab === 'kanban' && (
+        {!loading && !boardLoading && tab === 'kanban' && (
           <div id="board-panel" role="tabpanel" aria-labelledby="board-tab-kanban" style={{ flex: 1, display: 'flex', gap: 'var(--space-4)', padding: 'var(--space-4) var(--page-gutter)', overflowX: 'auto', overflowY: 'hidden', minHeight: 0 }}>
-            {KANBAN_COLUMNS.map((col) => (
+            {columns.map((col) => (
               <KanbanCol
                 key={col.id}
                 column={col}
-                tasks={filtered.filter((t) => col.statuses.includes(t.status))}
+                tasks={placed.byColumn.get(col.id) ?? []}
                 onCardClick={(id) => navigate(`/board/task/${id}`)}
                 onDrop={handleDrop}
-                onAddTask={openNewTask}
+                onAddTask={openNewTaskIn}
               />
             ))}
           </div>
@@ -544,6 +561,17 @@ export default function BoardView() {
         )}
       </div>
 
+      <BoardColumnsEditor
+        isOpen={editingColumns}
+        columns={columns}
+        tasks={tasks}
+        onClose={() => setEditingColumns(false)}
+        onSaved={(saved) => {
+          setSavedColumns(saved);
+          setEditingColumns(false);
+          notify.success('Columns saved.');
+        }}
+      />
     </Page>
     <Outlet context={{ refetchTasks: refetch }} />
     </StakeholderLookup.Provider>

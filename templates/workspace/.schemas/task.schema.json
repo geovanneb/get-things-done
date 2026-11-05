@@ -18,6 +18,7 @@
     "review_date": {"type": "string", "format": "date"},
     "start_date": {"type": "string", "anyOf": [{"format": "date-time"}, {"format": "date"}]},
     "done_date": {"type": "string", "anyOf": [{"format": "date-time"}, {"format": "date"}]},
+    "board_column": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,39}$", "description": "Set by the dashboard: the board column the task was dropped in, when several columns share a status. Leave it as it is; the status decides where the task is, and a column that no longer fits is ignored."},
     "objective": {"type": "string"},
     "description": {"type": "string"},
     "stakeholder_refs": {"type": "array", "items": {"type": "string", "pattern": "^STK-\\d{4}$"}},

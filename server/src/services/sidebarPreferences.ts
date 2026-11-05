@@ -1,7 +1,4 @@
-import * as fsp from 'fs/promises';
-import * as path from 'path';
-import { atomicWrite } from '../utils/atomicWrite';
-import { workspaceEntry } from '../utils/files';
+import { readUiPreference, saveUiPreference } from './uiPreferences';
 
 /**
  * The user's own sidebar order, kept per workspace (issue #191) so it follows the workspace between the
@@ -20,7 +17,6 @@ export class InvalidSidebarPreferencesError extends Error {}
 const ID = /^[a-z][a-z0-9-]{0,39}$/;
 const MAX_GROUPS = 8;
 const MAX_IDS = 40;
-const PREFERENCES_FILE = path.join('.situation-board', 'ui-preferences.json');
 
 export const EMPTY_SIDEBAR: SidebarPreferences = { order: {}, hidden: [] };
 
@@ -45,28 +41,8 @@ export function parseSidebarPreferences(value: unknown): SidebarPreferences {
   return { order: Object.fromEntries(parsed), hidden: idList(hidden, 'hidden') };
 }
 
-async function preferencesPath(workspacePath: string): Promise<string> {
-  // No symbolic links anywhere below the workspace: the file is written in place.
-  return workspaceEntry(workspacePath, path.join(workspacePath, PREFERENCES_FILE), true);
-}
-
-async function readFileObject(file: string): Promise<Record<string, unknown>> {
-  const raw = await fsp.readFile(file, 'utf-8').catch((err: NodeJS.ErrnoException) => {
-    if (err.code === 'ENOENT') return null;
-    throw err;
-  });
-  if (raw === null) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch {
-    // A broken file (for example a bad merge) falls back to the defaults instead of breaking the sidebar.
-    return {};
-  }
-}
-
 export async function readSidebarPreferences(workspacePath: string): Promise<SidebarPreferences> {
-  const stored = (await readFileObject(await preferencesPath(workspacePath)))['sidebar'];
+  const stored = await readUiPreference(workspacePath, 'sidebar');
   try {
     return stored === undefined ? EMPTY_SIDEBAR : parseSidebarPreferences(stored);
   } catch {
@@ -74,20 +50,7 @@ export async function readSidebarPreferences(workspacePath: string): Promise<Sid
   }
 }
 
-// Saves from this server run one at a time, so two quick changes cannot interleave their read and write.
-// Another program editing the file at the same moment can still lose a change: the replace is atomic, not merged.
-let queue: Promise<unknown> = Promise.resolve();
-
 /** Replaces the sidebar part of the file and keeps every other key as it was. */
 export function saveSidebarPreferences(workspacePath: string, value: unknown): Promise<SidebarPreferences> {
-  const prefs = parseSidebarPreferences(value);
-  const run = queue.then(async () => {
-    const file = await preferencesPath(workspacePath);
-    const current = await readFileObject(file);
-    await fsp.mkdir(path.dirname(file), { recursive: true });
-    await atomicWrite(file, JSON.stringify({ ...current, sidebar: prefs }, null, 2) + '\n');
-    return prefs;
-  });
-  queue = run.catch(() => undefined);
-  return run;
+  return saveUiPreference(workspacePath, 'sidebar', parseSidebarPreferences(value));
 }

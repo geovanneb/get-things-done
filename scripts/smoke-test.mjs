@@ -120,6 +120,25 @@ try {
   });
   check('an invalid sidebar order is refused', sidebarBad.status === 400);
 
+  // Board columns: saved under `board` in the same file, keeping the sidebar; an invalid board is refused; reset removes it.
+  const boardColumns = { columns: [
+    { id: 'backlog', label: 'Backlog', status: 'backlog' },
+    { id: 'col-smoke1', label: 'Waiting on others', status: 'in_progress' },
+    { id: 'in_progress', label: 'In Progress', status: 'in_progress' },
+    { id: 'needs_review', label: 'Needs Review', status: 'in_review' },
+  ] };
+  const putBoard = (body) => fetch(`${base}/api/workspace/board`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const boardDefault = await (await fetch(`${base}/api/workspace/board`)).json();
+  const boardSaved = await putBoard(boardColumns);
+  const prefsWithBoard = JSON.parse(fs.readFileSync(path.join(ws, '.situation-board', 'ui-preferences.json'), 'utf-8'));
+  check('the board columns are saved in the workspace next to the sidebar and read back',
+    boardDefault.columns?.length === 4 && boardSaved.ok &&
+    JSON.stringify(await (await fetch(`${base}/api/workspace/board`)).json()) === JSON.stringify(boardColumns) &&
+    JSON.stringify(prefsWithBoard.board) === JSON.stringify(boardColumns) && JSON.stringify(prefsWithBoard.sidebar) === JSON.stringify(sidebarPrefs));
+  check('an invalid board is refused', (await putBoard({ columns: [{ id: '../x', label: 'X', status: 'archived' }] })).status === 400);
+
   // Workspace picture: a cropped PNG kept in the home config, never in the workspace folder.
   const putIcon = (image) => fetch(`${base}/api/workspace/icon`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }),
@@ -204,6 +223,22 @@ try {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }),
   })).json();
   check('moving a task to done stamps done_date', Boolean(moved.done_date));
+
+  // A task dropped in a column that shares its status remembers the column; a bad column id is refused.
+  const dropped = await (await fetch(`${base}/api/tasks/${task.id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'in_progress', board_column: 'col-smoke1' }),
+  })).json();
+  const badDrop = await fetch(`${base}/api/tasks/${task.id}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done', board_column: '../x' }),
+  });
+  const droppedValidation = await (await fetch(`${base}/api/workspace/validate`)).json();
+  check('a task remembers the board column it was dropped in, and stays valid',
+    dropped.board_column === 'col-smoke1' && /board_column: col-smoke1/.test(fs.readFileSync(path.join(ws, 'tasks', 'active', task.id, 'task.md'), 'utf8')) &&
+    badDrop.status === 400 && !droppedValidation.some((r) => r.level === 'error' && JSON.stringify(r).includes('board_column')),
+    JSON.stringify(droppedValidation.filter((r) => r.level === 'error')).slice(0, 300));
+  const boardReset = await fetch(`${base}/api/workspace/board`, { method: 'DELETE' });
+  check('resetting the board removes the saved columns',
+    boardReset.ok && !('board' in JSON.parse(fs.readFileSync(path.join(ws, '.situation-board', 'ui-preferences.json'), 'utf-8'))));
 
   // A task reopened by editing task.md keeps a stale done_date on disk; the app
   // must not carry it over when the task is completed again.

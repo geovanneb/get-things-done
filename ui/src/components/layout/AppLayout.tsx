@@ -46,6 +46,7 @@ export default function AppLayout() {
       <NewTaskModal
         isOpen={newTaskModal.open}
         defaultStatus={newTaskModal.defaultStatus}
+        boardColumn={newTaskModal.boardColumn}
         draft={newTaskModal.draft}
         onClose={() => dispatch({ type: 'CLOSE_NEW_TASK_MODAL' })}
         onCreated={(task, uploadErrors, existing) => {

@@ -14,6 +14,8 @@ export interface Task {
   due_date?: string;
   start_date?: string;
   done_date?: string;
+  /** The board column the task was dropped in, when columns share a status (see services/boardColumns.ts). */
+  board_column?: string;
   tags: string[];
   stakeholder_refs: string[];
   template_ref?: string;

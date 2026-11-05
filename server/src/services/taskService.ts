@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
 import { DONE_STATUSES } from './taskStatus';
+import { BOARD_COLUMN_ID } from './boardColumns';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { reservedSequence } from './idReservations';
@@ -20,6 +21,18 @@ const SERVER_FIELDS = ['meeting_action', 'meeting_action_source'] as const;
 /** Which version of a meeting record a task was made from, and which original action item it stands for. */
 export interface MeetingActionSource { update_id: string; record_id: string; revision: string; root_index: number }
 const workspaceService = new WorkspaceService();
+
+/**
+ * `board_column` (optional) is the board column a task was dropped in, for columns that share a status (see
+ * boardColumns.ts). Request bodies are not typed at runtime: only a well-formed column id is written, and `null`
+ * on update removes the field. The status stays the source of truth; the board ignores a column that no longer fits.
+ */
+function checkBoardColumn(value: unknown, allowNull: boolean): void {
+  if (value === undefined || (allowNull && value === null)) return;
+  if (typeof value !== 'string' || !BOARD_COLUMN_ID.test(value)) {
+    throw Object.assign(new Error('Invalid board_column: use a board column id such as in_progress'), { statusCode: 400 });
+  }
+}
 
 interface TaskFilters {
   status?: TaskStatus;
@@ -244,6 +257,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
         throw Object.assign(new Error('Invalid routine_ref/routine_occurrence: set both, as RT-NNNN and YYYY-MM-DDTHH:MM'), { statusCode: 400 });
       }
     }
+    checkBoardColumn(rawData['board_column'], false);
     const id = await this.generateTaskId();
     const now = new Date().toISOString();
     const taskDir = path.join(this.getActiveDir(), topLevelName(id));
@@ -282,6 +296,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     for (const key of OPTIONAL_CREATE_FIELDS) {
       if (rawData[key] !== undefined && rawData[key] !== null) task[key] = rawData[key];
     }
+    if (typeof rawData['board_column'] === 'string') task.board_column = rawData['board_column'];
     if (routineRef !== undefined) {
       task['routine_ref'] = routineRef;
       task['routine_occurrence'] = occurrence;
@@ -301,6 +316,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async updateTask(id: string, data: Partial<Task>): Promise<Task> {
+    checkBoardColumn((data as Record<string, unknown>)['board_column'], true);
     const existing = await this.getTask(id);
     const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
     const { content: existingContent } = await fileService.readMarkdown<Task>(taskFile);
@@ -314,6 +330,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     };
 
     stampStatusDates(existing.status, updated, now);
+    if (updated['board_column'] === null) delete updated['board_column'];
     // What the server recorded about the task's origin stays as it was, whatever the request says.
     for (const key of SERVER_FIELDS) {
       if (key in existing) (updated as Record<string, unknown>)[key] = (existing as Record<string, unknown>)[key];
