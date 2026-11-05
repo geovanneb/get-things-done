@@ -10,50 +10,73 @@ minor versions may include breaking changes.
 
 ## [0.11.0] - 2026-11-05
 
-Update from the app, customize your board, and dictate offline.
+Get Things Done now **updates itself from the app**, lets you **shape the Kanban board** the way
+you work, and lets you **dictate into text fields**, transcribed offline on your computer.
 
-This minor release adds new capabilities to 0.10.0. Existing task statuses remain compatible;
-`board_column` is optional. Run `gtd upgrade` for the updated workspace task schema (the dashboard
-also refreshes it when opening a workspace).
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.11.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.11.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.11.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.11.0` (or, from 0.11.0 on, **Update and restart** in
+Settings). The workspace task schema gains an optional `board_column` field. The dashboard adds it
+when it opens a workspace, or run `gtd upgrade`. Existing tasks and statuses keep working as they are.
 
 ### Added
 
-- **Update from Settings.** A global npm installation can install the checked version and restart,
-  with recovery if installation fails. Signed desktop builds show download progress and offer
-  **Restart to update**. Both wait for active work before restarting.
+#### Update from the app
+
+- **Update and restart from Settings.** When Get Things Done was installed with `npm install -g`,
+  **Settings > Updates** and the new version notice offer **Update and restart**: it installs the
+  version it found, runs `gtd upgrade` and starts the dashboard again, and the page reconnects by
+  itself. If npm fails, the version you had starts again and Settings says why. It works for a
+  dashboard started with `gtd start`; elsewhere it says why not, and **How to update** still shows
+  the commands to run yourself. (#296)
+- **Restart to update in the desktop app.** A signed desktop app downloads a new version by itself,
+  shows the progress in Settings > Updates, and offers **Restart to update** when it is ready. If
+  the installer fails, **Restart to update** tries again. (#297)
+- **It waits for what is running.** An update never restarts in the middle of a recording, a
+  transcription, a dictation or an AI tool run. It waits until they finish, and new ones can't
+  start once it begins. When the app can't tell whether something is running, it does not
+  restart. (#296, #297)
+
+#### Your board, your columns
 
 - **Edit the board's columns.** **Edit columns…** on the Kanban board renames, adds, removes and
-  reorders columns (drag a row, or use Move up and Move down). Each column says which status a task
-  gets when you drop it there, so tasks, agents, Insights and the Agent Floor keep the statuses they
-  know. Two columns can share a status ("In Progress" and "Waiting on others"): a task dropped in one
-  records it in the new optional `board_column` field and stays there. A new column only holds the
-  tasks you drop in it; a removed column never changes a task, and tasks no column shows stay in the
-  List view ("N not in a column"). The columns are saved per workspace in
-  `.situation-board/ui-preferences.json`, next to the sidebar order; **Reset to default** brings
-  back the four columns. The workspace task schema gains `board_column`; the dashboard updates it
-  when a workspace opens (or run `gtd upgrade`).
+  reorders columns (drag a row, or use **Move up** and **Move down**). Each column says which
+  status a task gets when you drop it there, so tasks, agents, Insights and the Agent Floor keep
+  the statuses they know. (#301)
+- **Two columns, one status.** "In Progress" and "Waiting on others" can both mean in progress: a
+  task dropped in one remembers it in the new optional `board_column` field and stays there. (#301)
+- **Nothing gets lost.** A new column only holds the tasks you drop in it. Removing a column never
+  changes a task, and tasks no column shows stay in the List view ("N not in a column"). Columns
+  are saved per workspace in `.situation-board/ui-preferences.json`, next to the sidebar order;
+  **Reset to default** brings back the four columns. (#301)
 
-- **Dictate into text fields.** **Dictate** (the microphone icon of **Record**) under a field
-  records your voice and adds the words to the field when you press **Stop**: a new task's
-  Objective, a context note's Content, the Notes for the agent of an imported context update, and
-  a stakeholder's What matters and Notes. It is transcribed offline, on this computer, with any
-  transcription model you downloaded in Settings > Transcription (pick one next to the button when
-  you have several; the choice is remembered in this browser), in the language set there. The clip
-  is removed from temporary storage after transcription. Up to five minutes at a time. While it
-  records, the field shows the same red dot, time and Stop as a meeting recording in the top bar.
+#### Dictate instead of typing
+
+- **Dictate into text fields.** **Dictate** (the microphone icon) under a field records your voice
+  and adds the words when you press **Stop**: a new task's Objective, a context note's Content, the
+  Notes for the agent of an imported context update, and a stakeholder's What matters and Notes.
+  Up to five minutes at a time. While it records, the field shows the same red dot, time and
+  **Stop** as a meeting recording. (#302)
+- **Offline, on this computer.** It uses a transcription model you downloaded in **Settings >
+  Transcription**, in the language set there (pick one next to the button when you have several;
+  the choice is remembered in this browser). The clip goes to a private temporary file and is
+  removed once it is transcribed. (#302)
 
 ### Fixed
 
-- Update restarts wait for dictation preparation and transcription; new dictation requests are
-  refused once an update starts. Unreadable run directories or meeting queues block updates instead
-  of being treated as idle.
-- Retrying a desktop update after an asynchronous installer failure performs a new installation attempt.
-- Run-finished notices keep the opened update tied to the workspace where it ran.
-- Links from other websites can open the dashboard while cross-site API requests remain blocked.
-
 - **The dashboard no longer opens as a blank page after a burst of requests.** The local request
   budget (3000 a minute, against runaway scripts) now counts the API only. It also counted the
-  page's own scripts and styles, and a refused one left an empty page with no message.
+  page's own scripts and styles, and a refused one left an empty page with no message. (#299)
+- **Links from other websites open the dashboard.** A link to the dashboard from another
+  site (a chat, a wiki) now opens it, while requests to the API from other sites stay blocked.
+  (#299)
+- **A run-finished notice opens the update in the right workspace.** When you switched workspaces
+  after starting a run, a click on its notice now opens the update in the workspace where it ran.
+  (#298)
 
 ## [0.10.0] - 2026-11-04
 

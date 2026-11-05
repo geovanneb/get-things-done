@@ -3,7 +3,7 @@
 [Back to the project overview](../README.md) · [HTTP API](api.md) · [Architecture](architecture.md)
 
 Detailed setup, task execution, meeting recording, memory review and workspace reference.
-This guide accompanies 0.10.0; see the [changelog](../CHANGELOG.md).
+This guide accompanies 0.11.0; see the [changelog](../CHANGELOG.md).
 
 ## Install
 
