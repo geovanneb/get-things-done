@@ -30,6 +30,12 @@ minor versions may include breaking changes.
   is never stored. Up to five minutes at a time. While it records, the field shows the same red dot,
   time and Stop as a meeting recording in the top bar.
 
+### Fixed
+
+- **The dashboard no longer opens as a blank page after a burst of requests.** The local request
+  budget (3000 a minute, against runaway scripts) now counts the API only. It also counted the
+  page's own scripts and styles, and a refused one left an empty page with no message.
+
 ## [0.10.0] - 2026-11-04
 
 Get Things Done now **runs the next step for you and tells you when it is your move**. A context

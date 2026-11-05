@@ -88,8 +88,10 @@ try {
   const pageCsp = page.headers.get('content-security-policy') ?? '';
   check('the dashboard is served with a restrictive CSP',
     pageCsp.includes("script-src 'self'") && pageCsp.includes("frame-ancestors 'none'"), pageCsp);
-  check('API requests are rate limited', Boolean(page.headers.get('ratelimit-policy')));
-  const setupStatus = await (await fetch(`${base}/api/setup`)).json();
+  const setupResponse = await fetch(`${base}/api/setup`);
+  check('API requests are rate limited, and the page itself is not',
+    Boolean(setupResponse.headers.get('ratelimit-policy')) && page.headers.get('ratelimit-policy') === null);
+  const setupStatus = await setupResponse.json();
   check('setup reports the open workspace, so the dashboard skips the setup screen',
     setupStatus.configured === true && setupStatus.ai_tools?.length === 3);
   const malformed = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
