@@ -9,6 +9,7 @@ import { checkNow, compareVersions, dismiss, feedFile, globalDirs, install, inst
 import { getAppVersion } from '../src/services/scaffold';
 import { startUpdateHelper } from '../src/services/updateHelper';
 import { beginStart, refuseWhileUpdating } from '../src/services/appActivity';
+import { withWorkspacePath } from '../src/services/workspace';
 import { RUN_RECORD } from '../src/services/watcherService';
 
 /** A fresh state file, and the update environment restored afterwards. */
@@ -16,6 +17,8 @@ async function state(t: { after: (fn: () => Promise<void> | void) => void }): Pr
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-updates-'));
   const keep = Object.fromEntries(['GTD_UPDATES_PATH', 'GTD_INSTALL', 'GTD_UPDATES', 'GTD_UPDATE_CHANNEL', 'GTD_DISABLE_UPDATES', 'ESB_WORKSPACE_PATH', 'GTD_UPDATE_HELPER'].map((k) => [k, process.env[k]]));
   process.env['GTD_UPDATES_PATH'] = path.join(dir, 'updates.json');
+  // Never fall back to the developer's configured workspace, even before one is created by the test.
+  process.env['ESB_WORKSPACE_PATH'] = path.join(dir, 'unconfigured');
   t.after(async () => {
     for (const [k, v] of Object.entries(keep)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
     setLatestSourceForTests(null);
@@ -169,6 +172,21 @@ test('the status says when something important runs, so no notice comes meanwhil
   assert.equal((await updateStatus(ws)).busy, 'An AI tool run is going');
   await fsp.writeFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0001.json'), JSON.stringify({ status: 'done', pid: process.pid }));
   assert.equal((await updateStatus(ws)).busy, null);
+});
+
+test('activity checks use the requested workspace for meetings, independent of ambient configuration', async (t) => {
+  const dir = await state(t);
+  const clean = path.join(dir, 'clean');
+  const damaged = path.join(dir, 'damaged');
+  await fsp.mkdir(clean);
+  await fsp.mkdir(path.join(damaged, 'context-updates'), { recursive: true });
+  await fsp.writeFile(path.join(damaged, 'context-updates', 'meeting-queue'), 'fictional damaged queue');
+  process.env['ESB_WORKSPACE_PATH'] = damaged;
+  assert.equal((await updateStatus(clean)).busy, null, 'another workspace cannot block this one');
+  await withWorkspacePath(clean, async () => {
+    assert.match((await updateStatus(damaged)).busy ?? '', /could not be checked/, 'an ambient request cannot hide damage in the requested workspace');
+    assert.equal((await updateStatus(clean)).busy, null, 'the activity check does not change its caller workspace');
+  });
 });
 
 test('a run\'s record is watched, so other dashboards learn at once that a run started or ended', () => {
