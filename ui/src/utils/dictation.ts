@@ -38,9 +38,9 @@ export function saveDictationModel(id: string): void {
   try { localStorage.setItem(MODEL_KEY, id); } catch { /* private mode: chosen again next time */ }
 }
 
-/** The recorded 16-bit mono blocks as one WAV file. */
+/** Cap by samples: browser timers and the final worklet flush can arrive after the five-minute limit. */
 export function wavFile(blocks: readonly Uint8Array[], rate = DICTATION_RATE): Uint8Array<ArrayBuffer> {
-  const length = blocks.reduce((n, b) => n + b.length, 0);
+  const length = Math.min(blocks.reduce((n, b) => n + b.length, 0), MAX_DICTATION_SECONDS * rate * 2);
   const out = new Uint8Array(44 + length);
   const view = new DataView(out.buffer);
   const ascii = (at: number, text: string) => { for (let i = 0; i < text.length; i++) out[at + i] = text.charCodeAt(i); };
@@ -49,7 +49,12 @@ export function wavFile(blocks: readonly Uint8Array[], rate = DICTATION_RATE): U
   view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
   ascii(36, 'data'); view.setUint32(40, length, true);
   let at = 44;
-  for (const block of blocks) { out.set(block, at); at += block.length; }
+  for (const block of blocks) {
+    const kept = block.subarray(0, out.length - at);
+    out.set(kept, at);
+    at += kept.length;
+    if (at === out.length) break;
+  }
   return out;
 }
 

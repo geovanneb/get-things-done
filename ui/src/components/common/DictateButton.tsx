@@ -27,6 +27,7 @@ interface Recording {
   timer: ReturnType<typeof setInterval>;
   /** Stop was pressed (or the time ran out): the last block is on its way. */
   stopping: boolean;
+  fallback?: ReturnType<typeof setTimeout>;
 }
 
 function microphoneMessage(err: unknown): string {
@@ -82,12 +83,14 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
     recording.current = null;
     if (!r) return;
     clearInterval(r.timer);
+    clearTimeout(r.fallback);
+    r.node.port.onmessage = null;
     for (const track of r.stream.getTracks()) track.stop();
     void r.context.close().catch(() => {});
   };
 
   const transcribe = useCallback(async (blocks: Uint8Array[]) => {
-    if (!model) return;
+    if (!model || !mounted.current) return;
     setPhase('transcribing');
     setAnnouncement('Transcribing.');
     const controller = new AbortController();
@@ -118,17 +121,17 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
     r.node.port.postMessage('stop');
     let finished = false;
     const finish = () => {
-      if (finished) return;
+      if (finished || !mounted.current || recording.current !== r) return;
       finished = true;
       const blocks = r.blocks;
       release();
       void transcribe(blocks);
     };
-    const fallback = setTimeout(finish, 1000);
+    r.fallback = setTimeout(finish, 1000);
     const previous = r.node.port.onmessage;
     r.node.port.onmessage = (event: MessageEvent<{ samples?: ArrayBuffer; done?: boolean }>) => {
       previous?.call(r.node.port, event);
-      if (event.data.done) { clearTimeout(fallback); finish(); }
+      if (event.data.done) finish();
     };
   }, [transcribe]);
 
