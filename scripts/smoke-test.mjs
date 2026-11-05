@@ -869,6 +869,18 @@ try {
       stt.models?.some((m) => m.id === 'whisper-large-v3-turbo') && stt.settings?.model && stt.speakers?.id === 'speaker-detection' && stt.speakers.size > 0 && !stt.models.some((m) => m.id === 'speaker-detection') && stt.settings.speakers === true && stt.models.every((m) => m.pros.length && m.cons.length && m.size > 0)
       && ['auto', 'en', 'ja'].includes(stt.settings.language) && badLanguage.status === 400,
       `models=${stt.models?.map((m) => m.id).join(',')} bad=${badLanguage.status}`);
+    // Dictation into a text field: a WAV clip only, a catalog model only, a size limit; refused before any model runs.
+    const dictate = (body, type, query = '') => fetch(`${base}/api/transcription/dictation${query}`, { method: 'POST', headers: { 'Content-Type': type }, body });
+    const wavHeader = Buffer.alloc(44);
+    wavHeader.write('RIFF', 0, 'ascii'); wavHeader.writeUInt32LE(36, 4); wavHeader.write('WAVEfmt ', 8, 'ascii'); wavHeader.writeUInt32LE(16, 16);
+    wavHeader.writeUInt16LE(1, 20); wavHeader.writeUInt16LE(1, 22); wavHeader.writeUInt32LE(16000, 24); wavHeader.writeUInt32LE(32000, 28);
+    wavHeader.writeUInt16LE(2, 32); wavHeader.writeUInt16LE(16, 34); wavHeader.write('data', 36, 'ascii');
+    const dictationJson = await dictate(JSON.stringify({ audio: 'x' }), 'application/json');
+    const dictationModel = await dictate(wavHeader, 'audio/wav', '?model=..%2F..%2Fetc');
+    const dictationLarge = await dictate(Buffer.alloc(5 * 60 * 32000 + 2048), 'audio/wav');
+    check('dictation takes only a WAV clip, a catalog model and at most five minutes',
+      dictationJson.status === 400 && dictationModel.status === 400 && dictationLarge.status === 413,
+      `json=${dictationJson.status} model=${dictationModel.status} large=${dictationLarge.status}`);
     // Recognize known voices (#287): off by default, nothing remembered, and nothing is remembered without the model
     // and a confirmed stakeholder name; requests that could reach a path are refused before anything is read.
     const voices = await (await fetch(`${base}/api/voiceprints`)).json();

@@ -184,6 +184,11 @@ Tasks move `backlog` → `in_progress` → `in_review` → `done`. Agents set
 `in_progress` when they pick work up and `in_review` when they finish. **Only you set
 `done`**, and only after reading the output.
 
+**Dictate the objective.** In the New task form, **Dictate** under the Objective field
+records your voice; press **Stop** and the words are added to the field. It runs offline,
+with a speech-to-text model downloaded in **Settings > Transcription** (choose which one
+next to the button when you have several), and the recording is not kept.
+
 ---
 
 ## Running a task with an AI agent
