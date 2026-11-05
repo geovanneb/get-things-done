@@ -8,7 +8,10 @@
  * existing workspace carries, so both spellings count as finished.
  */
 
-/** Which kanban pile a task belongs to. Mirrors the columns in BoardView. */
+/**
+ * Which kanban pile a task belongs to. Mirrors the default board columns; the user may rename, split or remove
+ * columns (boardColumns.ts), but a pile is about the status, so it never changes with them.
+ */
 export type Pile = 'backlog' | 'active' | 'review' | 'done';
 
 export const BACKLOG_STATUSES = new Set(['backlog', 'ready']);

@@ -17,6 +17,9 @@ import {
 import {
   InvalidSidebarPreferencesError, readSidebarPreferences, saveSidebarPreferences,
 } from '../services/sidebarPreferences';
+import {
+  InvalidBoardColumnsError, readBoardColumns, resetBoardColumns, saveBoardColumns,
+} from '../services/boardColumns';
 
 const router = Router();
 const workspaceService = new WorkspaceService();
@@ -209,6 +212,29 @@ router.put('/sidebar', async (req: Request, res: Response) => {
     }
     throw err;
   }
+});
+
+// GET /api/workspace/board — the task board's columns for this workspace (the default four when none are saved)
+router.get('/board', async (_req: Request, res: Response) => {
+  res.json(await readBoardColumns(workspaceService.getWorkspacePath()));
+});
+
+// PUT /api/workspace/board — save them: { columns: [{ id, label, status }] }
+router.put('/board', async (req: Request, res: Response) => {
+  try {
+    res.json(await saveBoardColumns(workspaceService.getWorkspacePath(), req.body));
+  } catch (err) {
+    if (err instanceof InvalidBoardColumnsError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// DELETE /api/workspace/board — back to the default columns
+router.delete('/board', async (_req: Request, res: Response) => {
+  res.json(await resetBoardColumns(workspaceService.getWorkspacePath()));
 });
 
 // POST /api/workspace/init

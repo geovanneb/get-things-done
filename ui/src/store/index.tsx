@@ -81,7 +81,8 @@ interface AppState {
   isSearchOpen: boolean;
   activeView: string;
   notifications: Notification[];
-  newTaskModal: { open: boolean; defaultStatus: Task['status']; draft?: NewTaskDraft };
+  /** `boardColumn`: the board column the task is created from, when it shares its status with another column. */
+  newTaskModal: { open: boolean; defaultStatus: Task['status']; boardColumn?: string; draft?: NewTaskDraft };
   /** Bumped whenever a slice of data changes, so views can refetch. */
   dataVersions: DataVersions;
   /** Experimental: show the Agent Floor visualisation in the nav. */
@@ -106,7 +107,7 @@ type Action =
   | { type: 'SET_ACTIVE_VIEW'; payload: string }
   | { type: 'ADD_NOTIFICATION'; payload: Omit<Notification, 'id' | 'timestamp'> }
   | { type: 'REMOVE_NOTIFICATION'; payload: string }
-  | { type: 'OPEN_NEW_TASK_MODAL'; payload?: Task['status'] }
+  | { type: 'OPEN_NEW_TASK_MODAL'; payload?: Task['status']; boardColumn?: string }
   | { type: 'OPEN_NEW_TASK_DRAFT'; payload: NewTaskDraft }
   | { type: 'CLOSE_NEW_TASK_MODAL' }
   | { type: 'DATA_CHANGED'; payload: DataScope }
@@ -170,7 +171,7 @@ export function reducer(state: AppState, action: Action): AppState {
         notifications: state.notifications.filter((n) => n.id !== action.payload),
       };
     case 'OPEN_NEW_TASK_MODAL':
-      return { ...state, newTaskModal: { open: true, defaultStatus: action.payload ?? 'backlog' } };
+      return { ...state, newTaskModal: { open: true, defaultStatus: action.payload ?? 'backlog', boardColumn: action.boardColumn } };
     case 'OPEN_NEW_TASK_DRAFT':
       return { ...state, newTaskModal: { open: true, defaultStatus: 'backlog', draft: action.payload } };
     case 'CLOSE_NEW_TASK_MODAL':

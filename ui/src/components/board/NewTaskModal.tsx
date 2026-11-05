@@ -37,6 +37,8 @@ interface NewTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultStatus?: Task['status'];
+  /** The board column the form was opened from. Sent only if the status is left as opened, or it would not fit. */
+  boardColumn?: string;
   /** Starting values, applied each time the form opens. */
   draft?: NewTaskDraft;
   /**
@@ -70,6 +72,7 @@ export default function NewTaskModal({
   isOpen,
   onClose,
   defaultStatus,
+  boardColumn,
   draft,
   onCreated,
 }: NewTaskModalProps) {
@@ -141,6 +144,7 @@ export default function NewTaskModal({
       const payload = {
         title: form.title.trim(),
         status: form.status,
+        board_column: boardColumn && form.status === defaultStatus ? boardColumn : undefined,
         priority: form.priority,
         task_type: 'ad_hoc',
         due_date: form.due_date || undefined,

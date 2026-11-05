@@ -36,6 +36,8 @@ const taskSchema = {
     // stampStatusDates() and the workspace rules write full ISO timestamps; plain dates are still accepted.
     start_date: { type: 'string', anyOf: [{ format: 'date' }, { format: 'date-time' }] },
     done_date: { type: 'string', anyOf: [{ format: 'date' }, { format: 'date-time' }] },
+    // Set by the board when a task is dropped in a column (boardColumns.ts). A column that no longer exists is not an error.
+    board_column: { type: 'string', pattern: '^[a-z][a-z0-9_-]{0,39}$' },
     created_at: { type: 'string', format: 'date-time' },
     updated_at: { type: 'string', format: 'date-time' },
   },

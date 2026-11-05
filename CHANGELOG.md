@@ -8,6 +8,19 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Edit the board's columns.** **Edit columns…** on the Kanban board renames, adds, removes and
+  reorders columns (drag a row, or use Move up and Move down). Each column says which status a task
+  gets when you drop it there, so tasks, agents, Insights and the Agent Floor keep the statuses they
+  know. Two columns can share a status ("In Progress" and "Waiting on others"): a task dropped in one
+  records it in the new optional `board_column` field and stays there. A new column only holds the
+  tasks you drop in it; a removed column never changes a task, and tasks no column shows stay in the
+  List view ("N not in a column"). The columns are saved per workspace in
+  `.situation-board/ui-preferences.json`, next to the sidebar order; **Reset to default** brings
+  back the four columns. The workspace task schema gains `board_column`; the dashboard updates it
+  when a workspace opens (or run `gtd upgrade`).
+
 ## [0.10.0] - 2026-11-04
 
 Get Things Done now **runs the next step for you and tells you when it is your move**. A context

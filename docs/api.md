@@ -115,6 +115,9 @@ The stream sends a comment line every 30 seconds to keep the connection open.
 
 Task statuses are `backlog`, `ready`, `in_progress`, `blocked`, `review`, `in_review`,
 `approved`, `done` and `archived`. Priorities are `critical`, `high`, `medium` and `low`.
+The optional `board_column` is the board column a task was dropped in, when several columns
+share a status (see `/api/workspace/board`); `null` removes it. Any other value than a column id
+is refused with `400`.
 
 ```text
 GET /api/tasks?status=in_progress
@@ -728,6 +731,9 @@ is selected.
 |---|---|---|
 | `GET` | `/api/workspace` | The current workspace: path, name, settings and whether it is a git repository |
 | `PUT` | `/api/workspace` | Rename the workspace. Body: `{ "name": "…" }` |
+| `GET` | `/api/workspace/board` | The task board's columns: `{ "columns": [{ "id", "label", "status" }] }`, the default four when none are saved |
+| `PUT` | `/api/workspace/board` | Save the columns (1 to 12; unique ids and names; `status` is `backlog`, `in_progress`, `blocked`, `in_review` or `done`). Returns `400` and changes nothing when the body is invalid |
+| `DELETE` | `/api/workspace/board` | Back to the default columns |
 | `POST` | `/api/workspace/init` | Create a workspace in an existing folder. Body: `path`. Returns `201` |
 | `POST` | `/api/workspace/switch` | Point the app at another folder. Returns `409` with `needs_init: true` if it is not a workspace yet; send `initialize: true` to create one |
 | `GET` | `/api/workspace/recent` | Workspaces opened on this machine |
@@ -746,6 +752,11 @@ is selected.
 | `GET` | `/api/workspace/git/enabled` | Whether git features are usable (`git_enabled`: a repository and git installed) and whether git is installed (`git_installed`) |
 | `GET` | `/api/workspace/files/<path>` | Serve any file inside the workspace. Add `?download=1` to save it. Paths that leave the workspace are refused |
 
+Board columns are saved under `board` in `.situation-board/ui-preferences.json`, next to the
+other dashboard preferences, so they follow the workspace through git. A column is a view over
+task statuses: its `status` is what a task gets when it is dropped there. Tasks keep their
+statuses; a deleted or renamed column never changes a task.
+
 `switch`, `recent/forget`, `pick-folder`, `open` and `open-claude` return
 `{ "error": "…" }` on failure.
 
@@ -762,6 +773,14 @@ GET /api/workspace
 PUT /api/workspace
 {"name":"Northwind ops"}
 → 200 {"path":"/Users/alex/gtd-demo","name":"Northwind ops", …}
+
+PUT /api/workspace/board
+{"columns":[{"id":"backlog","label":"Backlog","status":"backlog"},
+            {"id":"col-k3x9q2","label":"Waiting on others","status":"in_progress"},
+            {"id":"in_progress","label":"In Progress","status":"in_progress"},
+            {"id":"needs_review","label":"Needs Review","status":"in_review"},
+            {"id":"done","label":"Done","status":"done"}]}
+→ 200 {"columns":[…]}
 
 POST /api/workspace/init
 {"path":"/Users/alex/gtd-demo"}

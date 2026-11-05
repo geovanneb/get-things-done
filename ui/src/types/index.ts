@@ -37,6 +37,8 @@ export interface Task {
   }>;
   contexts: string[];
   preferred_agent?: string;
+  /** The board column the task was dropped in, when columns share a status (see utils/boardColumns.ts). */
+  board_column?: string;
   /** Set when a routine created the task. */
   routine_ref?: string;
   routine_occurrence?: string;
