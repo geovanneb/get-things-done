@@ -220,11 +220,21 @@ select.gtd-control { padding-right: 6px; cursor: pointer; }
 .gtd-field__hint { font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--color-text-muted); }
 .gtd-field__error { font-size: var(--text-xs); line-height: var(--leading-normal); color: var(--color-critical); }
 
-/* Dictate into a field (DictateButton): the button, the model, and a short note on one line that wraps on a phone. */
+/* A recording that runs (RecordingPill): red dot, time and Stop, in the top bar and in a field being dictated. */
+.gtd-recording-pill {
+  display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 4px 0 10px; flex-shrink: 0;
+  border-radius: var(--radius-md); border: 1px solid color-mix(in oklch, var(--color-critical) 40%, transparent);
+  background: var(--color-critical-subtle);
+}
+.gtd-recording-pill__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-critical); flex-shrink: 0; }
+.gtd-recording-pill__time { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--color-critical); font-variant-numeric: tabular-nums; }
+.gtd-recording-pill .gtd-recording-pill__stop,
+.gtd-recording-pill .gtd-recording-pill__stop:hover { height: 22px; padding: 0 8px; color: var(--color-critical); }
+
+/* Dictate into a field (DictateButton): the button or the recording, the model, and a short note; wraps on a phone. */
 .gtd-dictate { display: flex; flex-direction: column; gap: var(--space-1); }
 .gtd-dictate__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .gtd-dictate__row .gtd-field { margin: 0; }
-.gtd-dictate__clock { font-variant-numeric: tabular-nums; }
 .gtd-dictate__note { font-size: var(--text-xs); color: var(--color-text-muted); }
 
 /* Label beside value on wide screens (settings), stacked on a phone. */

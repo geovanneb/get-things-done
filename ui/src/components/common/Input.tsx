@@ -170,6 +170,8 @@ interface TextareaProps extends FieldFrameProps {
   id?: string;
   mono?: boolean;
   textareaStyle?: React.CSSProperties;
+  /** Shown right under the box, above the hint: for example a DictateButton. */
+  footer?: React.ReactNode;
 }
 
 export function Textarea({
@@ -188,6 +190,7 @@ export function Textarea({
   id: idProp,
   mono,
   textareaStyle,
+  footer,
 }: TextareaProps) {
   const a11y = useFieldProps(idProp, { error, hint, required });
   return (
@@ -204,6 +207,7 @@ export function Textarea({
         className="gtd-control"
         style={{ ...(mono ? { fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' } : {}), ...textareaStyle }}
       />
+      {footer}
     </Field>
   );
 }

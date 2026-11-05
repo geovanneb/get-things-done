@@ -1,7 +1,7 @@
 /**
  * Unit tests for dictation. Run with: npm run test:dictation --workspace=ui
  */
-import { clock, dictationModels, pickDictationModel, wavFile, withDictation } from './dictation';
+import { dictationModels, pickDictationModel, wavFile, withDictation } from './dictation';
 import type { Transcription, TranscriptionModel } from '../types';
 
 let failures = 0;
@@ -50,8 +50,6 @@ check('a blank field gets the text', withDictation('  \n', 'Fictional goal.') ==
 check('after text, a space apart', withDictation('First idea.', 'Second idea.') === 'First idea. Second idea.');
 check('after a space or a new line, nothing more', withDictation('First idea.\n', 'Second.') === 'First idea.\nSecond.' && withDictation('First ', 'Second.') === 'First Second.');
 check('nothing heard: the field is unchanged', withDictation('Kept.', '   ') === 'Kept.');
-
-check('a clock', clock(0) === '0:00' && clock(9.9) === '0:09' && clock(75) === '1:15' && clock(300) === '5:00');
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);

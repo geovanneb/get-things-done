@@ -3,8 +3,9 @@ import Button from '@/components/common/Button';
 import { Select } from '@/components/common/Input';
 import { apiGet, errorMessage } from '@/utils/api';
 import { microphoneAccess } from '@/utils/desktop';
+import { MicIcon, RecordingPill } from '@/components/recording/RecordingParts';
 import {
-  clock, DICTATION_RATE, dictationModels, MAX_DICTATION_SECONDS, pickDictationModel, saveDictationModel, savedDictationModel, wavFile,
+  DICTATION_RATE, dictationModels, MAX_DICTATION_SECONDS, pickDictationModel, saveDictationModel, savedDictationModel, wavFile,
   type DictationModel,
 } from '@/utils/dictation';
 import type { Transcription } from '@/types';
@@ -27,18 +28,6 @@ interface Recording {
   /** Stop was pressed (or the time ran out): the last block is on its way. */
   stopping: boolean;
 }
-
-const MIC = (
-  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-    <rect x="5" y="1.5" width="4" height="7" rx="2" stroke="currentColor" strokeWidth="1.3" />
-    <path d="M3 6.5a4 4 0 008 0M7 10.5V12.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-  </svg>
-);
-const STOP = (
-  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-    <rect x="3.5" y="3.5" width="7" height="7" rx="1" fill="currentColor" />
-  </svg>
-);
 
 function microphoneMessage(err: unknown): string {
   const name = (err as DOMException)?.name;
@@ -65,6 +54,9 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
   const recording = useRef<Recording | null>(null);
   const request = useRef<AbortController | null>(null);
   const mounted = useRef(true);
+  // The field's latest handler: the text goes into what the field holds when it arrives, typing meanwhile included.
+  const onTextRef = useRef(onText);
+  onTextRef.current = onText;
 
   useEffect(() => {
     mounted.current = true;
@@ -108,7 +100,7 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
       if (!res.ok) throw new Error(errorMessage(body, `Dictation failed (${res.status}).`));
       const text = (body as { text?: string } | null)?.text?.trim() ?? '';
       if (!mounted.current) return;
-      if (text) { onText(text); setAnnouncement('Text added.'); }
+      if (text) { onTextRef.current(text); setAnnouncement('Text added.'); }
       else setError('No speech was heard. Check the microphone, then try again.');
     } catch (err) {
       if (controller.signal.aborted || !mounted.current) return;
@@ -116,7 +108,7 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
     } finally {
       if (mounted.current) setPhase('idle');
     }
-  }, [model, onText]);
+  }, [model]);
 
   const stop = useCallback(() => {
     const r = recording.current;
@@ -191,12 +183,11 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
     <div className="gtd-dictate">
       <div className="gtd-dictate__row">
         {phase === 'recording' ? (
-          <Button size="sm" variant="primary" icon={STOP} onClick={stop} aria-label={`Stop dictating, ${clock(elapsed)} recorded`}>
-            Stop <span className="gtd-dictate__clock">{clock(elapsed)}</span>
-          </Button>
+          <RecordingPill label={`Dictating the ${fieldName}`} elapsed={elapsed} onStop={stop}
+            stopLabel={`Stop and add the words to the ${fieldName}`} stopTitle="Stop and add the words" />
         ) : (
-          <Button size="sm" variant="secondary" icon={MIC} onClick={() => void start()} loading={busy} disabled={phase === 'loading' || noModel}
-            aria-label={`Dictate the ${fieldName}`} title={noModel ? 'Download a model in Settings > Transcription to dictate' : undefined}>
+          <Button size="sm" variant="secondary" icon={<MicIcon />} onClick={() => void start()} loading={busy} disabled={phase === 'loading' || noModel}
+            aria-label={`Dictate the ${fieldName}`} title={noModel ? 'Download a model in Settings > Transcription to dictate' : `Dictate the ${fieldName}`}>
             {phase === 'transcribing' ? 'Transcribing…' : 'Dictate'}
           </Button>
         )}
