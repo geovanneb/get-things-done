@@ -122,7 +122,9 @@ jobs:
 
   design:
     name: Design (browser)
-    runs-on: ubuntu-latest
+    # Pinned: Playwright 1.57 has no Chromium for ubuntu-latest's Ubuntu 26.04, and the Linux screenshot
+    # baselines were made on 24.04. Move both together when upgrading.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
