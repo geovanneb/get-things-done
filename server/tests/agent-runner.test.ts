@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { AgentRunnerService, ClaudeCodeAdapter, childEnv, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
+import { AgentRunnerService, ClaudeCodeAdapter, childEnv, claudeProjectKey, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { stepsFromMessage, type RunStep } from '../src/services/runSteps';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
@@ -84,8 +84,91 @@ test('runs inherit no API key or provider setting, and trust is read from Claude
   assert.equal(await workspaceTrusted(ws, { CLAUDE_CONFIG_DIR: config }), null, 'unreadable settings: unknown');
   await trusted({ [ws]: { hasTrustDialogAccepted: false } });
   assert.equal(await workspaceTrusted(ws, { CLAUDE_CONFIG_DIR: config }), false);
-  await trusted({ [path.dirname(ws)]: { hasTrustDialogAccepted: true } });
-  assert.equal(await workspaceTrusted(ws, { CLAUDE_CONFIG_DIR: config }), true, 'a trusted parent folder counts');
+  await trusted({ [ws]: { hasTrustDialogAccepted: true } });
+  assert.equal(await workspaceTrusted(ws, { CLAUDE_CONFIG_DIR: config }), true);
+});
+
+// Claude Code lets a session start under a trusted folder further up, but applies a project's allow rules only when
+// the trust is filed under the project's own key. The dashboard said "trusted" for such a workspace, and every run
+// then stopped on Claude Code's own warning within a second.
+test('trust counts only where Claude Code files it: the workspace folder, or its repository\'s root, never a folder above', async (t) => {
+  const root = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-trust-')));
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const config = path.join(root, 'claude-config');
+  await fsp.mkdir(config);
+  const env = { CLAUDE_CONFIG_DIR: config };
+  // Keys as Claude Code writes them (forward slashes on Windows).
+  const trustOnly = (...dirs: string[]) => fsp.writeFile(path.join(config, '.claude.json'),
+    JSON.stringify({ projects: Object.fromEntries(dirs.map((d) => [claudeProjectKey(d), { hasTrustDialogAccepted: true }])) }));
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+
+  // Outside a repository: the folder itself.
+  const desktop = path.join(root, 'Desktop');
+  const plain = path.join(desktop, 'Northwind Workspace');
+  await fsp.mkdir(plain, { recursive: true });
+  await trustOnly(desktop);
+  assert.equal(await workspaceTrusted(plain, env), false, 'a trusted folder above the workspace does not count');
+  await trustOnly(plain);
+  assert.equal(await workspaceTrusted(plain, env), true);
+  // Claude Code runs in the real folder: a link reads as its target, and trust filed under the link's path is unused.
+  const link = path.join(root, 'workspace-link');
+  await fsp.symlink(plain, link, linkType);
+  assert.equal(await workspaceTrusted(link, env), true, 'a link to the trusted folder reads the same');
+  await trustOnly(link);
+  assert.equal(await workspaceTrusted(link, env), false, 'trust filed under the link\'s own path does not count');
+
+  // An accented name kept decomposed on disk (as macOS does) is filed in composed form (NFC).
+  const accented = path.join(desktop, 'Reunio\u0303es');
+  await fsp.mkdir(accented);
+  await trustOnly(accented.normalize('NFC'));
+  assert.equal(await workspaceTrusted(accented, env), true, 'trust is filed under the composed spelling');
+  await trustOnly(accented);
+  assert.equal(await workspaceTrusted(accented, env), false, 'a decomposed key is not one Claude Code reads');
+
+  // Inside a repository: the repository's root, wherever the workspace sits in it.
+  const repo = path.join(root, 'northwind-notes');
+  const inner = path.join(repo, 'teams', 'workspace');
+  await fsp.mkdir(path.join(repo, '.git'), { recursive: true });
+  await fsp.mkdir(inner, { recursive: true });
+  await trustOnly(inner);
+  assert.equal(await workspaceTrusted(inner, env), false, 'inside a repository the trust is filed under its root');
+  await trustOnly(repo);
+  assert.equal(await workspaceTrusted(inner, env), true);
+  assert.equal(await workspaceTrusted(repo, env), true);
+  // A link inside the trusted repository to a folder outside it is that outside folder.
+  const outside = path.join(root, 'elsewhere', 'workspace');
+  await fsp.mkdir(outside, { recursive: true });
+  await fsp.symlink(outside, path.join(repo, 'linked-workspace'), linkType);
+  assert.equal(await workspaceTrusted(path.join(repo, 'linked-workspace'), env), false, 'a link out of the repository leaves it');
+
+  // A linked worktree: the main checkout's root, as `git worktree add` lays it out.
+  const worktree = path.join(root, 'northwind-notes-review');
+  const admin = path.join(repo, '.git', 'worktrees', 'northwind-notes-review');
+  await fsp.mkdir(admin, { recursive: true });
+  await fsp.mkdir(worktree);
+  await fsp.writeFile(path.join(worktree, '.git'), `gitdir: ${admin}\n`);
+  await fsp.writeFile(path.join(admin, 'commondir'), '../..\n');
+  await fsp.writeFile(path.join(admin, 'gitdir'), `${path.join(worktree, '.git')}\n`);
+  assert.equal(await workspaceTrusted(worktree, env), true, 'a worktree is trusted with its main checkout');
+  await trustOnly(worktree);
+  assert.equal(await workspaceTrusted(worktree, env), false);
+  // Claude Code follows the worktree's bookkeeping only through regular files: a linked one leaves the worktree its own key.
+  if (process.platform !== 'win32') {
+    await fsp.rename(path.join(admin, 'gitdir'), path.join(admin, 'gitdir-copy'));
+    await fsp.symlink(path.join(admin, 'gitdir-copy'), path.join(admin, 'gitdir'));
+    assert.equal(await workspaceTrusted(worktree, env), true, 'a linked bookkeeping file is not followed');
+  }
+  // A .git file that is not a worktree of a checkout (a submodule's, say) leaves the folder its own key.
+  const submodule = path.join(repo, 'vendor', 'fictional-lib');
+  await fsp.mkdir(submodule, { recursive: true });
+  await fsp.writeFile(path.join(submodule, '.git'), 'gitdir: ../../.git/modules/fictional-lib\n');
+  await trustOnly(submodule);
+  assert.equal(await workspaceTrusted(submodule, env), true);
+});
+
+test('on Windows Claude Code files trust with forward slashes', () => {
+  assert.equal(claudeProjectKey('C:\\Users\\Alex Morgan\\Northwind Workspace', 'win32'), 'C:/Users/Alex Morgan/Northwind Workspace');
+  assert.equal(claudeProjectKey('/Users/alex/Northwind Workspace', 'darwin'), '/Users/alex/Northwind Workspace');
 });
 
 test('an analysis runs the workspace\'s own command, one at a time, and locks the update while it runs', async (t) => {

@@ -369,10 +369,12 @@ rules the app installs it can write into `context-updates/` and `tasks/`, never 
 `context/`, `stakeholders/` or your profile. Your personal Claude Code settings, hooks
 and MCP servers are left out of the run. Before it starts, the dashboard checks that
 Claude Code is signed in with a Claude plan (not an API account), that the workspace sets
-no API key, and that Claude Code trusts the workspace folder: the first time, open a
+no API key, and that Claude Code trusts the workspace folder itself (inside a git
+repository, the repository's root). Trusting another folder further up is not enough:
+Claude Code would then ignore the workspace's permission rules. The first time, open a
 terminal in the workspace folder, run `claude` once and accept "trust this folder". One
-analysis runs at a time, the update is locked while it runs, and **Stop analysis** ends it
-with everything it started.
+analysis runs at a time, the update is locked while it runs, and **Stop analysis** ends
+it with everything it started.
 
 While it runs, the same box shows how long it has been going and the step it is on, for
 example "Step 7 · Reading `context/risks/…/note.md`". **Show details** lists one line per step
