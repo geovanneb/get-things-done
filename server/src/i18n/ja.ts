@@ -204,6 +204,7 @@ export default {
   "searchPlaceholder": "タスク、関係者、コンテキストを検索...",
   "actions": "アクション",
   "noResultsFor": "「{query}」の結果はありません",
+  "searchFailed": "検索できませんでした。もう一度入力してください。続く場合は Get Things Done を再起動してください。",
   "searchHint": "入力すると、タスク、関係者、コンテキスト、出力、エージェントを検索します。",
   "navigateKey": "移動",
   "openOrRun": "開く / 実行",
