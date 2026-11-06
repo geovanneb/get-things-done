@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React, { useId } from 'react';
 
 /**
@@ -31,13 +32,14 @@ export function Field({
   style,
   children,
 }: FieldFrameProps & { htmlFor?: string; children: React.ReactNode }) {
+  const { t } = useLanguage();
   return (
     <div className="gtd-field" style={style}>
       {label && (
         <label htmlFor={htmlFor} className="gtd-field__label">
           {label}
           {required && <span className="gtd-field__required" aria-hidden="true">*</span>}
-          {optional && !required && <span className="gtd-field__optional">(optional)</span>}
+          {optional && !required && <span className="gtd-field__optional">{t('optional')}</span>}
         </label>
       )}
       {children}

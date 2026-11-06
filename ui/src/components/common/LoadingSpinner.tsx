@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 interface LoadingSpinnerProps {
   /** What is loading, as "Loading tasks…". Announced to screen readers. */
   text?: string;
@@ -8,6 +9,7 @@ interface LoadingSpinnerProps {
 
 /** The loading state of a page, card or list. See docs/design-system.md, "States". */
 export default function LoadingSpinner({ text, size = 20, inline }: LoadingSpinnerProps) {
+  const { t } = useLanguage();
   return (
     <div
       role="status"
@@ -26,7 +28,7 @@ export default function LoadingSpinner({ text, size = 20, inline }: LoadingSpinn
         <circle cx="12" cy="12" r="10" stroke="var(--color-border-strong)" strokeWidth="3" />
         <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-accent)" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      {text ? <span>{text}</span> : <span className="sr-only">Loading…</span>}
+      {text ? <span>{text}</span> : <span className="sr-only">{t('loading')}</span>}
     </div>
   );
 }

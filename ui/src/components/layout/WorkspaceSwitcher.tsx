@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -26,6 +27,7 @@ function IconChevron() {
  * Open Recent). `healthColor` is the validation dot that used to sit next to the name.
  */
 export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel }: { collapsed: boolean; healthColor: string; healthLabel: string }) {
+  const { t } = useLanguage();
   const { workspace } = useAppState();
   const navigate = useNavigate();
   const [open, setOpen] = React.useState(false);
@@ -36,7 +38,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
   const menuRef = React.useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = React.useState<{ top: number; left: number } | null>(null);
 
-  const name = workspace?.name ?? 'Workspace';
+  const name = workspace?.name ?? t('workspace');
   const path = workspace?.path ?? '';
 
   // Browser tabs and the window switcher say which workspace each tab shows.
@@ -101,13 +103,13 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.needs_init ? `${target.name} is no longer a workspace. Open it from Settings to set it up again.` : body.error || `HTTP ${res.status}`);
+        setError(body.needs_init ? t('workspaceGone', { name: target.name }) : body.error || `HTTP ${res.status}`);
         return;
       }
       // Reset cached data and leave entity URLs whose IDs belong to the previous workspace.
       window.location.assign('/situation');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not switch workspace.');
+      setError(err instanceof Error ? err.message : t('switchFailed'));
     } finally {
       setSwitching(null);
     }
@@ -117,7 +119,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
     try {
       setRecent(await apiPost<RecentWorkspace[]>('/api/workspace/recent/forget', { path: target.path }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove it from the list.');
+      setError(err instanceof Error ? err.message : t('removeFromListFailed'));
     }
   };
 
@@ -133,7 +135,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
       onClick={toggle}
       aria-haspopup="menu"
       aria-expanded={open}
-      aria-label={`Workspace: ${name}. ${healthLabel}. Switch workspace`}
+      aria-label={t('workspaceTrigger', { name, health: healthLabel })}
       title={collapsed ? `${name} (${path})` : path}
       style={{
         position: 'relative', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
@@ -172,7 +174,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Switch workspace"
+          aria-label={t('switchWorkspace')}
           style={{
             position: 'fixed', top: anchor.top, left: anchor.left, zIndex: 'var(--z-popover)', width: 300, maxWidth: 'calc(100vw - 24px)',
             maxHeight: 'min(70vh, 480px)', overflowY: 'auto', padding: 6,
@@ -180,9 +182,9 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
           }}
         >
           <div style={{ padding: '6px 8px 4px', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Workspaces
+            {t('workspaces')}
           </div>
-          {recent === null && <div style={{ padding: 8, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Loading...</div>}
+          {recent === null && <div style={{ padding: 8, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('loading')}</div>}
           {(recent ?? []).map((w) => (
             <div key={w.path} style={{ display: 'flex', alignItems: 'center', borderRadius: 'var(--radius-md)' }}>
               <button
@@ -208,22 +210,22 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
                 <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                   <span className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: w.current ? 600 : 500 }}>{w.name}</span>
                   <span className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {w.available || w.current ? shortPath(w.path) : 'Folder not found'}
+                    {w.available || w.current ? shortPath(w.path) : t('folderNotFound')}
                   </span>
                 </span>
                 {w.current && (
-                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-accent)', flexShrink: 0 }}>Current</span>
+                  <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-accent)', flexShrink: 0 }}>{t('current')}</span>
                 )}
                 {switching === w.path && (
-                  <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>Opening...</span>
+                  <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>{t('opening')}</span>
                 )}
               </button>
               {!w.current && (
                 <button
                   type="button"
                   onClick={() => void forget(w)}
-                  aria-label={`Remove ${w.name} from this list`}
-                  title="Remove from this list (the folder stays on disk)"
+                  aria-label={t('removeNamedFromList', { name: w.name })}
+                  title={t('removeFromListTitle')}
                   style={{ width: 26, height: 26, flexShrink: 0, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-base)' }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-critical)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; }}
@@ -235,7 +237,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
           ))}
           {recent !== null && others.length === 0 && (
             <p style={{ margin: 0, padding: '6px 8px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 1.45 }}>
-              Workspaces you open show up here, so you can switch back in one click.
+              {t('workspacesEmpty')}
             </p>
           )}
           {error && (
@@ -254,7 +256,7 @@ export default function WorkspaceSwitcher({ collapsed, healthColor, healthLabel 
             onBlur={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
             <span aria-hidden="true" style={{ width: 26, textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-base)' }}>+</span>
-            Open another folder...
+            {t('openAnotherFolder')}
           </button>
         </div>,
         document.body,

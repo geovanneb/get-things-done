@@ -35,6 +35,7 @@ test('all catalogs have matching keys and placeholders; interpolation treats con
     }
     assert.equal(translator(catalog, locale)('validationErrors', { count: 2 }), plural(locale, 2, catalog.validationErrors));
     assert.ok(translator(catalog)('automatic', { language: '<日本語>' }).includes('<日本語>'));
+    assert.ok(translator(catalog, locale)('gitButton', { count: 2, branch: 'main' }).includes('main'));
   }
   assert.equal(translator({ ...en, language: '' })('language'), 'Language');
 });

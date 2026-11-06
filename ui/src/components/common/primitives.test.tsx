@@ -13,6 +13,9 @@ import Page, { PageHeader, Section } from './Page';
 import { CountBadge, SegmentedControl, Tabs } from './Tabs';
 import EmptyState from './EmptyState';
 import LoadingSpinner from './LoadingSpinner';
+import { rich } from '../../i18n/rich';
+import { translator } from '../../../../server/src/i18n/messages';
+import { en } from '../../../../server/src/i18n/en';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -98,6 +101,11 @@ check('an empty state offers the way forward', empty.includes('New routine') && 
 check('an empty state without a title leaves no empty heading', !/<p[^>]*><\/p>/.test(html(<EmptyState description="Nothing here." />)));
 const spinner = html(<LoadingSpinner />);
 check('a loading state is announced, even without visible text', attr(spinner, 'role') === 'status' && spinner.includes('Loading…'));
+
+// A translated sentence keeps its own word order around the nodes placed in it.
+const sentence = html(<p>{rich(translator({ ...en, cleanupIntro: 'before {routine} after' }), 'cleanupIntro', { routine: <strong>X</strong> })}</p>);
+check('rich text puts a node where the translation asks', sentence === '<p>before <strong>X</strong> after</p>', sentence);
+check('rich text leaves no marker behind', !sentence.includes('\u0000') && html(<p>{rich(translator(en), 'cleanupIntro', { routine: 'X' })}</p>).includes('The built-in X routine'));
 
 console.log(failures ? `\n${failures} failure(s)` : '\nAll primitive checks passed');
 process.exit(failures ? 1 : 0);

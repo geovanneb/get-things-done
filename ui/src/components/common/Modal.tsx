@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React, { useId } from 'react';
 import ReactDOM from 'react-dom';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
@@ -32,6 +33,7 @@ interface ModalProps {
 }
 
 export default function Modal({ isOpen, onClose, title, description, children, footer, size = 'md', keepWhileTyping, role = 'dialog' }: ModalProps) {
+  const { t } = useLanguage();
   const titleId = useId();
   const descriptionId = useId();
   const panelRef = useDialogFocus(isOpen, onClose, keepWhileTyping);
@@ -54,7 +56,7 @@ export default function Modal({ isOpen, onClose, title, description, children, f
               <h2 id={titleId} className="gtd-modal__title">{title}</h2>
               {description && <p id={descriptionId} className="gtd-modal__description">{description}</p>}
             </div>
-            <IconButton label="Close dialog" icon={icons.close} onClick={onClose} />
+            <IconButton label={t('closeDialog')} icon={icons.close} onClick={onClose} />
           </div>
         )}
         <div className="gtd-modal__body">{children}</div>

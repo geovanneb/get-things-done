@@ -51,7 +51,7 @@ export default function Header() {
       await apiPost<{ opened: boolean; command: string }>('/api/workspace/open-claude');
       dispatch({
         type: 'ADD_NOTIFICATION',
-        payload: { type: 'success', message: 'Claude Code opened in a new terminal window.' },
+        payload: { type: 'success', message: t('claudeOpened') },
       });
     } catch (err) {
       // Terminal launch failed — fall back to handing the user the command.
@@ -68,8 +68,8 @@ export default function Header() {
         payload: {
           type: 'warning',
           message: copied
-            ? `Could not open a terminal automatically. Command copied to clipboard: ${command}`
-            : `Could not open a terminal automatically. Run: ${command}`,
+            ? t('terminalCopied', { command })
+            : t('terminalRun', { command }),
         },
       });
       void err;

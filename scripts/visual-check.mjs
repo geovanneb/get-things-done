@@ -97,8 +97,11 @@ for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) =
 let browser;
 try {
   let healthy = false;
-  for (let i = 0; i < 50 && !healthy; i++) {
-    try { healthy = (await fetch(`${base}/health`)).ok; } catch { await new Promise((r) => setTimeout(r, 200)); }
+  // A busy CI runner can take well over ten seconds to load the server for the first time.
+  const startDeadline = Date.now() + 60_000;
+  while (!healthy && Date.now() < startDeadline) {
+    try { healthy = (await fetch(`${base}/health`)).ok; } catch { /* not listening yet */ }
+    if (!healthy) await new Promise((r) => setTimeout(r, 200));
   }
   if (!healthy) throw new Error(`the server did not start: ${serverLog}`);
   execFileSync(process.execPath, [path.join(root, 'scripts/seed-demo.mjs'), base], { env, stdio: 'pipe' });
@@ -408,6 +411,7 @@ try {
       const language = page.getByLabel('言語', { exact: true });
       await language.waitFor({ state: 'visible' });
       check(`language: Japanese automatic ${width} ${theme}`, await language.inputValue() === 'auto' && await page.locator('h1').textContent() === '設定');
+      check(`language: Settings and the shell are translated ${width} ${theme}`, await page.getByRole('heading', { name: '通知', exact: true }).isVisible() && await page.getByRole('button', { name: 'ワークスペースを検証', exact: true }).isVisible());
       check(`language: no overflow ${width} ${theme}`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await language.scrollIntoViewIfNeeded();
       await page.screenshot({ path: path.join(outDir, `language-ja-${width}-${theme}.png`) });

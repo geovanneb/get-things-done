@@ -1,3 +1,5 @@
+import type { Translate } from '../../../../server/src/i18n/messages';
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNotify } from '@/hooks/useNotify';
 import { useConfirm } from '@/components/common/ConfirmDialog';
@@ -37,6 +39,7 @@ async function responseError(res: Response, fallback: string): Promise<Error> {
  * Each subfolder starts collapsed, showing its name and file count; clicking it shows its files.
  */
 export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFilesProps) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
   const [files, setFiles] = useState<AttachedFile[]>([]);
@@ -83,24 +86,24 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
       const form = new FormData();
       form.append('file', file);
       const res = await fetch(baseUrl, { method: 'POST', body: form });
-      if (!res.ok) throw await responseError(res, 'Upload failed');
+      if (!res.ok) throw await responseError(res, t('uploadFailed'));
       const saved = await res.json();
       setFiles((prev) => [saved, ...prev.filter((f) => f.name !== saved.name)]);
-    } catch (err) { notify.error(err, 'Could not upload the file. Try again.'); }
+    } catch (err) { notify.error(err, t('uploadFailedRetry')); }
     finally { setUploading(false); if (inputRef.current) inputRef.current.value = ''; }
   };
 
   const handleDelete = async (name: string) => {
-    if (!(await confirm({ title: `Remove "${name}"?`, message: 'The file is deleted from the workspace.', confirmLabel: 'Remove file', tone: 'danger' }))) return;
+    if (!(await confirm({ title: t('removeFileConfirm', { name }), message: t('removeFileMessage'), confirmLabel: t('removeFile'), tone: 'danger' }))) return;
     try {
       const res = await fetch(fileUrl(name), { method: 'DELETE' });
-      if (!res.ok) throw await responseError(res, 'Remove failed');
+      if (!res.ok) throw await responseError(res, t('removeFailed'));
       setFiles((prev) => prev.filter((f) => f.name !== name));
-    } catch (err) { notify.error(err, 'Could not remove the file. Try again.'); }
+    } catch (err) { notify.error(err, t('removeFailedRetry')); }
   };
 
-  if (loading) return <LoadingSpinner text="Loading attached files…" />;
-  if (error) return <Notice tone="critical" title="Could not load attached files." action={<Button size="sm" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}>Check the connection and try again.</Notice>;
+  if (loading) return <LoadingSpinner text={t('loadingAttachedFiles')} />;
+  if (error) return <Notice tone="critical" title={t('attachedFilesLoadError')} action={<Button size="sm" onClick={() => setAttempt((n) => n + 1)}>{t('retry')}</Button>}>{t('checkConnectionRetry')}</Notice>;
 
   return (
     <div>
@@ -109,21 +112,21 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
         <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleUpload} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {archiveUrl && files.length > 0 && (
-            <a href={archiveUrl} download title="Download everything in this folder as one .zip"
-              onClick={(e) => { e.preventDefault(); void downloadArchive(archiveUrl).catch((err) => notify.error(err, 'Could not download the files. Try again.')); }}
+            <a href={archiveUrl} download title={t('downloadZipTitle')}
+              onClick={(e) => { e.preventDefault(); void downloadArchive(archiveUrl, t).catch((err) => notify.error(err, 'Could not download the files. Try again.')); }}
               style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', textDecoration: 'none', whiteSpace: 'nowrap' }}
               onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
               onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
-              Download all (.zip)
+              {t('downloadAllZip')}
             </a>
           )}
           <Button variant="secondary" size="sm" loading={uploading} onClick={() => inputRef.current?.click()}>
-            Attach file
+            {t('attachFile')}
           </Button>
         </div>
       </div>
       {files.length === 0 ? (
-        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>No files attached.</p>
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>{t('noFilesAttached')}</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {groups.map((g) => {
@@ -132,7 +135,7 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
               <div key={g.folder || '.'} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {g.folder && (
                   <button type="button" onClick={() => toggleFolder(g.folder)} aria-expanded={open}
-                    title={`${open ? 'Hide' : 'Show'} the ${g.items.length} file${g.items.length === 1 ? '' : 's'} directly in ${g.folder}/. Files in subfolders can be opened and downloaded here; change them in the workspace folder`}
+                    title={t(open ? 'hideFolderFiles' : 'showFolderFiles', { count: g.items.length, folder: g.folder })}
                     style={{ display: 'flex', alignItems: 'center', gap: 6, maxWidth: '100%', marginTop: 4, padding: '2px 0', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)' }}>
                     <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true"
                       style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : 'none', transition: reduceMotion ? undefined : 'transform 120ms ease' }}>
@@ -148,7 +151,7 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
                   <FileRow key={f.name} file={f} url={fileUrl(f.name)}
                     label={g.folder ? f.name.slice(g.folder.length + 1) : f.name}
                     onRemove={g.folder || f.removable === false ? undefined : () => handleDelete(f.name)}
-                    note={!g.folder && f.removable === false ? 'This name can only be changed or removed in the workspace folder' : undefined} />
+                    note={!g.folder && f.removable === false ? t('fileNameLocked') : undefined} />
                 ))}
               </div>
             );
@@ -161,13 +164,14 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
 
 /** One file: name opens it in a new tab, then size, download and (top-level files only) remove. */
 function FileRow({ file, url, label, onRemove, note }: { file: AttachedFile; url: string; label: string; onRemove?: () => void; note?: string }) {
+  const { t } = useLanguage();
   return (
     <div title={note} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', marginLeft: file.name.includes('/') ? 18 : 0, background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
         <path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5.5L9 1.5Z" stroke="currentColor" strokeWidth="1.2" />
         <path d="M9 1.5V5.5h4" stroke="currentColor" strokeWidth="1.2" />
       </svg>
-      <a href={url} target="_blank" rel="noopener noreferrer" title={`Open ${file.name} in a new tab`}
+      <a href={url} target="_blank" rel="noopener noreferrer" title={t('openFileNewTab', { name: file.name })}
         style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text)', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
         onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
         onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
@@ -175,13 +179,13 @@ function FileRow({ file, url, label, onRemove, note }: { file: AttachedFile; url
       </a>
       <OfficeCheckBadge check={file.officeCheck} />
       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', flexShrink: 0 }}>{(file.size / 1024).toFixed(1)} KB</span>
-      <a href={`${url}?download=1`} download={label} title="Download" aria-label={`Download ${file.name}`} className="gtd-icon-btn gtd-icon-btn--sm">
+      <a href={`${url}?download=1`} download={label} title={t('download')} aria-label={t('downloadFile', { name: file.name })} className="gtd-icon-btn gtd-icon-btn--sm">
         <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
           <path d="M7 1.5v8M3.5 6.5 7 10l3.5-3.5M2 12.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </a>
       {onRemove ? (
-        <IconButton onClick={onRemove} label={`Remove ${file.name}`} icon={icons.close} tone="danger" />
+        <IconButton onClick={onRemove} label={t('removeNamedFile', { name: file.name })} icon={icons.close} tone="danger" />
       ) : <span style={{ width: 'var(--control-height-sm)', flexShrink: 0 }} />}
     </div>
   );
@@ -191,11 +195,11 @@ function FileRow({ file, url, label, onRemove, note }: { file: AttachedFile; url
  * Fetches the folder's ZIP and saves it. When the server refuses (too many files, a name a ZIP cannot hold),
  * it throws with the server's message, which the caller shows instead of a failed or half-empty download.
  */
-async function downloadArchive(url: string): Promise<void> {
+async function downloadArchive(url: string, t: Translate): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) {
     const body = await res.json().catch(() => null) as { message?: string } | null;
-    throw new Error(body?.message?.replace(/^Invalid: /, '') ?? `Download failed (${res.status})`);
+    throw new Error(body?.message?.replace(/^Invalid: /, '') ?? t('downloadFailedStatus', { status: res.status }));
   }
   const name = /filename="?([^";]+)"?/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'files.zip';
   const link = document.createElement('a');

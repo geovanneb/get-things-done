@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { lazy, Suspense } from 'react';
 
 const MarkdownRenderer = lazy(() => import('./MarkdownRenderer'));
@@ -17,9 +18,10 @@ interface MarkdownViewProps {
  *
  * The renderer is loaded on first use; until then the raw text is shown, as before.
  */
-export default function MarkdownView({ content, emptyText = 'No content', compact = false }: MarkdownViewProps) {
+export default function MarkdownView({ content, emptyText, compact = false }: MarkdownViewProps) {
+  const { t } = useLanguage();
   if (!content || !content.trim()) {
-    return <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>{emptyText}</span>;
+    return <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>{emptyText ?? t('noContent')}</span>;
   }
   return (
     <div className={compact ? 'markdown-view markdown-view--compact' : 'markdown-view'}>

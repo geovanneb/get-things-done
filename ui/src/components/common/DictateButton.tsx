@@ -1,3 +1,5 @@
+import type { Translate } from '../../../../server/src/i18n/messages';
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Button from '@/components/common/Button';
 import { Select } from '@/components/common/Input';
@@ -30,12 +32,12 @@ interface Recording {
   fallback?: ReturnType<typeof setTimeout>;
 }
 
-function microphoneMessage(err: unknown): string {
+function microphoneMessage(err: unknown, t: Translate): string {
   const name = (err as DOMException)?.name;
-  if (name === 'NotAllowedError') return 'The microphone is blocked. Allow it for this app in your browser or system settings, then try again.';
-  if (name === 'NotFoundError') return 'No microphone was found.';
-  if (name === 'NotReadableError') return 'The microphone is in use by another app, or cannot be opened.';
-  return (err as Error)?.message || 'Dictation could not start.';
+  if (name === 'NotAllowedError') return t('micBlocked');
+  if (name === 'NotFoundError') return t('micMissing');
+  if (name === 'NotReadableError') return t('micBusy');
+  return (err as Error)?.message || t('dictationCouldNotStart');
 }
 
 interface DictateButtonProps {
@@ -46,6 +48,7 @@ interface DictateButtonProps {
 }
 
 export default function DictateButton({ onText, fieldName }: DictateButtonProps) {
+  const { t } = useLanguage();
   const [phase, setPhase] = useState<Phase>('loading');
   const [models, setModels] = useState<DictationModel[]>([]);
   const [model, setModel] = useState<string | null>(null);
@@ -92,7 +95,7 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
   const transcribe = useCallback(async (blocks: Uint8Array[]) => {
     if (!model || !mounted.current) return;
     setPhase('transcribing');
-    setAnnouncement('Transcribing.');
+    setAnnouncement(t('transcribingStatus'));
     const controller = new AbortController();
     request.current = controller;
     try {
@@ -100,18 +103,18 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
         method: 'POST', headers: { 'Content-Type': 'audio/wav', Accept: 'application/json' }, body: new Blob([wavFile(blocks)]), signal: controller.signal,
       });
       const body: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(errorMessage(body, `Dictation failed (${res.status}).`));
+      if (!res.ok) throw new Error(errorMessage(body, t('dictationFailed', { status: res.status })));
       const text = (body as { text?: string } | null)?.text?.trim() ?? '';
       if (!mounted.current) return;
-      if (text) { onTextRef.current(text); setAnnouncement('Text added.'); }
-      else setError('No speech was heard. Check the microphone, then try again.');
+      if (text) { onTextRef.current(text); setAnnouncement(t('textAdded')); }
+      else setError(t('noSpeech'));
     } catch (err) {
       if (controller.signal.aborted || !mounted.current) return;
       setError((err as Error).message);
     } finally {
       if (mounted.current) setPhase('idle');
     }
-  }, [model]);
+  }, [model, t]);
 
   const stop = useCallback(() => {
     const r = recording.current;
@@ -142,12 +145,12 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
     try {
-      if (!window.isSecureContext || !navigator.mediaDevices) throw new Error('Dictation works when the dashboard is opened on this computer, at localhost.');
+      if (!window.isSecureContext || !navigator.mediaDevices) throw new Error(t('dictationLocalOnly'));
       const access = await microphoneAccess();
       if (access !== 'granted') throw new Error(access);
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       context = new AudioContext({ sampleRate: DICTATION_RATE });
-      if (context.sampleRate !== DICTATION_RATE) throw new Error('This browser cannot record at 16 kHz. Use the desktop app, Chrome or Edge.');
+      if (context.sampleRate !== DICTATION_RATE) throw new Error(t('dictationNo16k'));
       await context.audioWorklet.addModule('/recorder-worklet.js');
       const node = new AudioWorkletNode(context, 'recorder', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       context.createMediaStreamSource(stream).connect(node);
@@ -167,13 +170,13 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
       recording.current = { stream, context, node, blocks, startedAt, timer, stopping: false };
       setElapsed(0);
       setPhase('recording');
-      setAnnouncement('Listening. Press Stop when you are done.');
+      setAnnouncement(t('listeningStop'));
     } catch (err) {
       for (const track of stream?.getTracks() ?? []) track.stop();
       void context?.close().catch(() => {});
       if (!mounted.current) return;
       setPhase('idle');
-      setError(microphoneMessage(err));
+      setError(microphoneMessage(err, t));
     }
   };
 
@@ -186,24 +189,24 @@ export default function DictateButton({ onText, fieldName }: DictateButtonProps)
     <div className="gtd-dictate">
       <div className="gtd-dictate__row">
         {phase === 'recording' ? (
-          <RecordingPill label={`Dictating the ${fieldName}`} elapsed={elapsed} onStop={stop}
-            stopLabel={`Stop and add the words to the ${fieldName}`} stopTitle="Stop and add the words" />
+          <RecordingPill label={t('dictatingField', { field: fieldName })} elapsed={elapsed} onStop={stop}
+            stopLabel={t('stopAddToField', { field: fieldName })} stopTitle={t('stopAddWords')} />
         ) : (
           <Button size="sm" variant="secondary" icon={<MicIcon />} onClick={() => void start()} loading={busy} disabled={phase === 'loading' || noModel}
-            aria-label={`Dictate the ${fieldName}`} title={noModel ? 'Download a model in Settings > Transcription to dictate' : `Dictate the ${fieldName}`}>
-            {phase === 'transcribing' ? 'Transcribing…' : 'Dictate'}
+            aria-label={t('dictateField', { field: fieldName })} title={noModel ? t('dictationNoModelTitle') : t('dictateField', { field: fieldName })}>
+            {phase === 'transcribing' ? t('transcribing') : t('dictate')}
           </Button>
         )}
         {models.length > 1 && (
-          <Select size="sm" aria-label="Dictation model" value={model ?? ''} onChange={choose} disabled={phase !== 'idle'}
+          <Select size="sm" aria-label={t('dictationModel')} value={model ?? ''} onChange={choose} disabled={phase !== 'idle'}
             options={models.map((m) => ({ value: m.id, label: m.name }))} />
         )}
         <span className="gtd-dictate__note">
           {noModel
-            ? 'Download a model in Settings > Transcription to dictate.'
+            ? t('dictationNoModelNote')
             : phase === 'recording'
-              ? `Listening… up to ${MAX_DICTATION_SECONDS / 60} minutes.`
-              : current && models.length === 1 ? `Offline, with ${current.name}.` : 'Offline, on this computer.'}
+              ? t('listeningUpTo', { minutes: MAX_DICTATION_SECONDS / 60 })
+              : current && models.length === 1 ? t('offlineWith', { model: current.name }) : t('offlineHere')}
         </span>
       </div>
       {error && <span className="gtd-field__error" role="alert">{error}</span>}

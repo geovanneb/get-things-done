@@ -1,3 +1,5 @@
+import type { PlainMessageKey } from '../../../../server/src/i18n/messages';
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { apiGet } from '@/utils/api';
@@ -12,12 +14,12 @@ export interface MentionCandidate {
   confidentiality?: string;
 }
 
-const GROUPS: { type: MentionCandidate['type']; title: string }[] = [
-  { type: 'stakeholder', title: 'Stakeholders' },
-  { type: 'template', title: 'Output templates' },
-  { type: 'context', title: 'Context notes' },
-  { type: 'task', title: 'Tasks' },
-  { type: 'meeting', title: 'Meetings' },
+const GROUPS: { type: MentionCandidate['type']; title: PlainMessageKey }[] = [
+  { type: 'stakeholder', title: 'stakeholders' },
+  { type: 'template', title: 'outputs' },
+  { type: 'context', title: 'contextNotes' },
+  { type: 'task', title: 'tasks' },
+  { type: 'meeting', title: 'meetings' },
 ];
 
 /** In the "All" tab, at most this many results per type; the rest sit behind "Show N more". */
@@ -45,6 +47,7 @@ interface MentionTextareaProps {
  * to keys, so Enter confirms the conversion instead of picking an item.
  */
 export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, placeholder, style, id, className }: MentionTextareaProps) {
+  const { t } = useLanguage();
   const ref = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
   const [trigger, setTrigger] = useState<{ start: number; query: string } | null>(null);
@@ -147,29 +150,29 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
       {trigger && (
         <div
           role="listbox"
-          aria-label="Mention a stakeholder, template, context note or task"
+          aria-label={t('mentionList')}
           className="mention-picker"
         >
-          <div className="mention-picker__tabs" role="tablist" aria-label="Filter by type">
-            {([{ type: 'all', title: 'All' }, ...GROUPS] as { type: MentionCandidate['type'] | 'all'; title: string }[]).map((t) => (
+          <div className="mention-picker__tabs" role="tablist" aria-label={t('filterByType')}>
+            {([{ type: 'all', title: 'all' }, ...GROUPS] as { type: MentionCandidate['type'] | 'all'; title: PlainMessageKey }[]).map((tab) => (
               <button
-                key={t.type}
+                key={tab.type}
                 type="button"
                 role="tab"
-                aria-selected={typeFilter === t.type}
-                className={typeFilter === t.type ? 'mention-picker__tab is-active' : 'mention-picker__tab'}
+                aria-selected={typeFilter === tab.type}
+                className={typeFilter === tab.type ? 'mention-picker__tab is-active' : 'mention-picker__tab'}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  setTypeFilter(t.type);
+                  setTypeFilter(tab.type);
                   setActive(0);
                 }}
               >
-                {t.title}
+                {t(tab.title)}
               </button>
             ))}
           </div>
           {results.length === 0 ? (
-            <div className="mention-picker__empty">No matches</div>
+            <div className="mention-picker__empty">{t('noMatches')}</div>
           ) : (
             GROUPS.map((g) => {
               const items = results.filter((c) => c.type === g.type);
@@ -178,7 +181,7 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
                 <div key={g.type}>
                   <div className="mention-picker__group">
                     <MentionIcon type={g.type} size={12} />
-                    {g.title}
+                    {t(g.title)}
                   </div>
                   {items.map((c) => {
                     const idx = results.indexOf(c);
@@ -198,7 +201,7 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
                         <span className="mention-picker__id">{c.id}</span>
                         {c.detail && <span className="mention-picker__detail">{c.detail}</span>}
                         {c.confidentiality && (
-                          <span className="mention-picker__conf" title="This task is marked confidential or restricted">
+                          <span className="mention-picker__conf" title={t('confidentialTask')}>
                             {c.confidentiality}
                           </span>
                         )}
@@ -215,7 +218,7 @@ export default function MentionTextarea({ value, onChange, rows = 6, autoFocus, 
                         setActive(0);
                       }}
                     >
-                      Show {hidden(g.type)} more
+                      {t('showMore', { count: hidden(g.type) })}
                     </button>
                   )}
                 </div>

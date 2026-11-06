@@ -1,3 +1,5 @@
+import type { PlainMessageKey } from '../../../../server/src/i18n/messages';
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -11,12 +13,21 @@ interface SearchOverlayProps {
   onClose: () => void;
 }
 
-const typeLabels: Record<string, string> = {
-  task: 'Task',
-  stakeholder: 'Stakeholder',
-  context: 'Context',
-  output: 'Output',
-  agent: 'Agent',
+const typeLabels: Record<string, PlainMessageKey> = {
+  task: 'task',
+  stakeholder: 'resultStakeholder',
+  context: 'context',
+  output: 'resultOutput',
+  agent: 'resultAgent',
+};
+
+// A group heading is its own word in each language, never a singular plus "s".
+const groupLabels: Record<string, PlainMessageKey> = {
+  task: 'tasks',
+  stakeholder: 'stakeholders',
+  context: 'resultContexts',
+  output: 'resultOutputs',
+  agent: 'resultAgents',
 };
 
 const typePaths: Record<string, (id: string) => string> = {
@@ -63,6 +74,7 @@ function groupResults(results: SearchResult[]) {
 }
 
 export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
+  const { t } = useLanguage();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -112,9 +124,9 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   const allResults = results;
 
   const recordAction: QuickAction | null = recorder.status === 'recording'
-    ? { id: 'stop-recording', label: 'Stop recording', hint: `Stop and save ${recorder.title}`, words: 'stop recording record meeting microphone mic audio save', run: () => void recorder.stop() }
+    ? { id: 'stop-recording', label: t('stopRecording'), hint: t('stopAndSave', { title: recorder.title }), words: 'stop recording record meeting microphone mic audio save', run: () => void recorder.stop() }
     : recorder.active ? null
-    : { id: 'record-meeting', label: 'Record a meeting', hint: 'Start recording from the microphone', words: 'record recording a meeting microphone mic audio start', run: openRecordDialog };
+    : { id: 'record-meeting', label: t('recordMeeting'), hint: t('recordFromMic'), words: 'record recording a meeting microphone mic audio start', run: openRecordDialog };
   const actions = recordAction && actionMatches(recordAction, query) ? [recordAction] : [];
   const itemCount = actions.length + allResults.length;
 
@@ -152,7 +164,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Search"
+      aria-label={t('searchLabel')}
       style={{
         position: 'fixed',
         inset: 0,
@@ -204,8 +216,8 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }}
             onKeyDown={handleKeyDown}
-            placeholder="Search tasks, stakeholders, context..."
-            aria-label="Search"
+            placeholder={t('searchPlaceholder')}
+            aria-label={t('searchLabel')}
             aria-autocomplete="list"
             aria-controls="search-results"
             style={{
@@ -244,7 +256,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
           {actions.length > 0 && (
             <div>
               <div style={{ padding: '8px 16px 4px', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Actions
+                {t('actions')}
               </div>
               {actions.map((action, idx) => (
                 <button key={action.id} role="option" aria-selected={idx === activeIndex}
@@ -261,12 +273,12 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
           )}
           {query && results.length === 0 && actions.length === 0 && !loading && (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-              No results for "{query}"
+              {t('noResultsFor', { query })}
             </div>
           )}
           {!query && (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
-              Type to search across tasks, stakeholders, context, outputs, and agents.
+              {t('searchHint')}
             </div>
           )}
           {Object.entries(groups).map(([type, items]) => {
@@ -281,7 +293,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                 }}>
-                  {typeLabels[type] ?? type}s
+                  {groupLabels[type] ? t(groupLabels[type]) : type}
                 </div>
                 {items.map((r, i) => {
                   const idx = startIndex + i;
@@ -310,7 +322,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
                       onMouseEnter={() => setActiveIndex(idx)}
                     >
                       <Badge variant={typeBadgeVariant(r.type)} size="sm">
-                        {typeLabels[r.type] ?? r.type}
+                        {typeLabels[r.type] ? t(typeLabels[r.type]) : r.type}
                       </Badge>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 'var(--text-sm)', fontWeight: 500, color: 'var(--color-text)' }} className="truncate">
@@ -344,9 +356,9 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
           fontSize: 'var(--text-xs)',
           color: 'var(--color-text-muted)',
         }}>
-          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>↑↓</kbd> navigate</span>
-          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>↵</kbd> open or run</span>
-          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>Esc</kbd> close</span>
+          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>↑↓</kbd> {t('navigateKey')}</span>
+          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>↵</kbd> {t('openOrRun')}</span>
+          <span><kbd style={{ fontFamily: 'var(--font-mono)' }}>Esc</kbd> {t('closeKey')}</span>
         </div>
       </div>
     </div>,

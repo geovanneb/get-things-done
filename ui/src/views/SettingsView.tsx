@@ -1,3 +1,4 @@
+import { rich } from '@/i18n/rich';
 import { useLanguage } from '../i18n/LanguageProvider';
 import LanguageSettings from '../components/settings/LanguageSettings';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -115,8 +116,9 @@ const TEXT_SIZE_OPTIONS: Array<SegmentOption<TextSize>> = [
 ];
 
 function AccentPicker({ value, onChange }: { value: string; onChange: (next: typeof ACCENTS[number]['name']) => void }) {
+  const { t } = useLanguage();
   return (
-    <div role="radiogroup" aria-label="Accent colour" style={{ display: 'flex', gap: '10px' }}>
+    <div role="radiogroup" aria-label={t('accentColour')} style={{ display: 'flex', gap: '10px' }}>
       {ACCENTS.map(accent => {
         const selected = accent.name === value;
         return (
@@ -165,27 +167,28 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (next: typ
 
 /** Retention lives with the routine that enforces it; Settings only says where, and what it does now. */
 function CleanupPointer() {
+  const { t } = useLanguage();
   const { data, error } = useApi<SystemCleanup>('/api/routines/system-cleanup', []);
   return (
     <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.5, maxWidth: '62ch' }}>
       <p style={{ margin: 0 }}>
-        The built-in <strong style={{ fontWeight: 600 }}>System cleanup</strong> routine reviews your memory and, only for the rules
-        you turn on, archives or removes old finished items and empties the trash.
+        {rich(t, 'cleanupIntro', { routine: <strong style={{ fontWeight: 600 }}>{t('systemCleanup')}</strong> })}
       </p>
       {data && (
         <p style={{ margin: '8px 0 0' }}>
-          Now: {data.settings.enabled ? `${data.summary}.` : 'paused.'} {data.settings.memory_review.enabled ? 'Memory review on.' : 'Memory review off.'} {cleanupSummary(data.settings)}
+          {t('nowStatus', { status: data.settings.enabled ? `${data.summary}.` : t('paused') })} {data.settings.memory_review.enabled ? t('memoryReviewOn') : t('memoryReviewOff')} {cleanupSummary(data.settings)}
         </p>
       )}
       {error && <p role="alert" style={{ margin: '8px 0 0', color: 'var(--color-critical)' }}>{error}</p>}
       <p style={{ margin: '8px 0 0' }}>
-        <Link to="/routines#system-cleanup" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>Change it under Routines</Link>
+        <Link to="/routines#system-cleanup" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{t('changeUnderRoutines')}</Link>
       </p>
     </div>
   );
 }
 
 function ValidationResultsList({ results }: { results: ValidationResult[] }) {
+  const { t } = useLanguage();
   const grouped = groupValidationResults(results);
   const order: Array<'error' | 'warning' | 'info'> = ['error', 'warning', 'info'];
 
@@ -208,7 +211,7 @@ function ValidationResultsList({ results }: { results: ValidationResult[] }) {
             color: 'var(--color-success)',
           }}
         >
-          No issues found. Workspace is valid.
+          {t('noIssues')}
         </div>
       ) : (
         order.flatMap(level => {
@@ -328,6 +331,7 @@ function FileGroup({ label, files, color, subtleBg }: { label: string; files: st
 }
 
 function GitStatusPanel({ status }: { status: GitStatus }) {
+  const { t } = useLanguage();
   return (
     <div
       style={{
@@ -352,24 +356,24 @@ function GitStatusPanel({ status }: { status: GitStatus }) {
         <Badge variant="default">{status.branch}</Badge>
         {status.ahead > 0 && (
           <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: 'var(--color-success)', fontWeight: 500 }}>
-            {status.ahead} ahead
+            {t('gitAhead', { count: status.ahead })}
           </span>
         )}
         {status.behind > 0 && (
           <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: 'var(--color-warning)', fontWeight: 500 }}>
-            {status.behind} behind
+            {t('gitBehind', { count: status.behind })}
           </span>
         )}
       </div>
 
       {/* File lists */}
       <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <FileGroup label="Staged"    files={status.staged}    color="var(--color-success)"      subtleBg="var(--color-success-subtle)"  />
-        <FileGroup label="Modified"  files={status.modified}  color="var(--color-warning)"      subtleBg="var(--color-warning-subtle)"  />
-        <FileGroup label="Untracked" files={status.untracked} color="var(--color-text-muted)"   subtleBg="var(--color-surface-hover)"   />
+        <FileGroup label={t('staged')}    files={status.staged}    color="var(--color-success)"      subtleBg="var(--color-success-subtle)"  />
+        <FileGroup label={t('modified')}  files={status.modified}  color="var(--color-warning)"      subtleBg="var(--color-warning-subtle)"  />
+        <FileGroup label={t('untracked')} files={status.untracked} color="var(--color-text-muted)"   subtleBg="var(--color-surface-hover)"   />
         {status.staged.length === 0 && status.modified.length === 0 && status.untracked.length === 0 && (
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
-            Working tree is clean.
+            {t('treeClean')}
           </p>
         )}
       </div>
@@ -388,7 +392,7 @@ function GitStatusPanel({ status }: { status: GitStatus }) {
               marginBottom: '10px',
             }}
           >
-            Recent Commits
+            {t('recentCommits')}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {status.recent_commits.slice(0, 5).map(commit => (
@@ -493,11 +497,11 @@ export default function SettingsView() {
       setConfig(data);
       setWorkspaceName(data.name);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load workspace config.');
+      setError(err instanceof Error ? err.message : t('configLoadFailed'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchConfig();
@@ -521,7 +525,7 @@ export default function SettingsView() {
       setShowReinitModal(false);
       await fetchConfig();
     } catch (err) {
-      setReinitError(err instanceof Error ? err.message : 'Re-initialization failed.');
+      setReinitError(err instanceof Error ? err.message : t('reinitFailed'));
     } finally {
       setReinitializing(false);
     }
@@ -552,7 +556,7 @@ export default function SettingsView() {
         setNeedsInit(false);
       }
     } catch (err) {
-      setChangeError(err instanceof Error ? err.message : 'Could not open the folder picker.');
+      setChangeError(err instanceof Error ? err.message : t('folderPickerFailed'));
     } finally {
       setPicking(false);
     }
@@ -580,7 +584,7 @@ export default function SettingsView() {
       // Every view caches data from the old workspace, so a full reload is the simplest reset.
       window.location.reload();
     } catch (err) {
-      setChangeError(err instanceof Error ? err.message : 'Failed to change workspace.');
+      setChangeError(err instanceof Error ? err.message : t('changeWorkspaceFailed'));
     } finally {
       setSwitching(false);
     }
@@ -595,7 +599,7 @@ export default function SettingsView() {
       setValidationResults(results);
       setLastValidated(new Date());
     } catch (err) {
-      setValidationError(err instanceof Error ? err.message : 'Validation failed.');
+      setValidationError(err instanceof Error ? err.message : t('validationFailed'));
     } finally {
       setLoadingValidation(false);
     }
@@ -636,7 +640,7 @@ export default function SettingsView() {
     if (!file) return;
     setIconError(null);
     if (file.size > 25 * 1024 * 1024) {
-      setIconError('This picture is larger than 25 MB. Choose a smaller one.');
+      setIconError(t('pictureTooLarge'));
       return;
     }
     setIconFile(file);
@@ -648,7 +652,7 @@ export default function SettingsView() {
       await apiDelete('/api/workspace/icon');
       applyIconVersion(null);
     } catch (err) {
-      setIconError(err instanceof Error ? err.message : 'Could not remove the picture.');
+      setIconError(err instanceof Error ? err.message : t('pictureRemoveFailed'));
     }
   };
 
@@ -665,7 +669,7 @@ export default function SettingsView() {
       const status = await apiGet<GitStatus>('/api/workspace/git/status');
       setGitStatus(status);
     } catch (err) {
-      setGitError(err instanceof Error ? err.message : 'Failed to fetch git status.');
+      setGitError(err instanceof Error ? err.message : t('gitFetchFailed'));
     } finally {
       setLoadingGit(false);
     }
@@ -673,14 +677,14 @@ export default function SettingsView() {
 
   // ---- Render: loading ----
 
-  if (loading) return <LoadingSpinner text="Loading settings…" />;
+  if (loading) return <LoadingSpinner text={t('loadingSettings')} />;
 
   // ---- Render: error ----
 
   if (error) {
     return (
       <Page width="narrow">
-        <Notice tone="critical" title="Could not load the settings." action={<Button size="sm" onClick={fetchConfig}>Try again</Button>}>{error}</Notice>
+        <Notice tone="critical" title={t('settingsLoadError')} action={<Button size="sm" onClick={fetchConfig}>{t('retry')}</Button>}>{error}</Notice>
       </Page>
     );
   }
@@ -691,8 +695,8 @@ export default function SettingsView() {
     <Page width="narrow">
 
       {/* Section 1: Workspace */}
-      <Card title="Workspace">
-        <FieldRow label="Workspace path">
+      <Card title={t('workspace')}>
+        <FieldRow label={t('workspacePath')}>
           <div
             title={config?.path ?? ''}
             style={{
@@ -713,11 +717,11 @@ export default function SettingsView() {
             {config?.path ?? ''}
           </div>
           <Button variant="ghost" onClick={openChangeModal}>
-            Change
+            {t('change')}
           </Button>
         </FieldRow>
 
-        <FieldRow label="Workspace name" htmlFor="settings-workspace-name">
+        <FieldRow label={t('workspaceName')} htmlFor="settings-workspace-name">
           <Input
             id="settings-workspace-name"
             value={workspaceName}
@@ -728,17 +732,17 @@ export default function SettingsView() {
           />
           {nameSaving && (
             <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
-              Saving…
+              {t('saving')}
             </span>
           )}
           {nameSaved && (
             <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: 'var(--color-success)', fontWeight: 500 }}>
-              Saved
+              {t('saved')}
             </span>
           )}
         </FieldRow>
 
-        <FieldRow label="Workspace picture">
+        <FieldRow label={t('workspacePicture')}>
           <WorkspaceAvatar name={workspaceName || config?.name || ''} path={config?.path ?? ''} iconVersion={config?.icon_version} size={36} />
           <input
             ref={iconInputRef}
@@ -748,27 +752,27 @@ export default function SettingsView() {
             style={{ display: 'none' }}
           />
           <Button variant="ghost" onClick={() => iconInputRef.current?.click()}>
-            {config?.icon_version ? 'Change…' : 'Choose picture…'}
+            {config?.icon_version ? t('changePicture') : t('choosePicture')}
           </Button>
           {config?.icon_version && (
             <Button variant="ghost" onClick={handleRemoveIcon}>
-              Remove
+              {t('remove')}
             </Button>
           )}
           <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: iconError ? 'var(--color-critical)' : 'var(--color-text-muted)', minWidth: 0 }}>
-            {iconError ?? 'Helps you tell workspaces apart in the sidebar. Stays on this computer.'}
+            {iconError ?? t('pictureHint')}
           </span>
         </FieldRow>
 
         <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <Button variant="secondary" onClick={handleOpenInFinder}>
-            Open in Finder
+            {t('openInFinder')}
           </Button>
           <Button variant="secondary" onClick={handleValidate} disabled={loadingValidation}>
-            {loadingValidation ? 'Validating…' : 'Validate workspace'}
+            {loadingValidation ? t('validating') : t('validateWorkspace')}
           </Button>
           <Button variant="danger" onClick={() => { setReinitError(null); setShowReinitModal(true); }}>
-            Re-initialize workspace
+            {t('reinitWorkspace')}
           </Button>
         </div>
 
@@ -786,19 +790,19 @@ export default function SettingsView() {
         {config?.git_enabled === false ? (
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
             {config.git_installed === false
-              ? 'Git is not installed on this computer, so git features are hidden. Everything else works without it.'
-              : 'Git is not enabled for this workspace.'}
+              ? t('gitMissing')
+              : t('gitDisabled')}
           </p>
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '4px' }}>
               <span style={{ fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
-                Git enabled
+                {t('gitEnabled')}
               </span>
-              <Badge variant="success">Active</Badge>
+              <Badge variant="success">{t('active')}</Badge>
               <div style={{ marginLeft: 'auto' }}>
                 <Button variant="secondary" onClick={handleViewGitStatus} disabled={loadingGit}>
-                  {loadingGit ? 'Loading…' : gitStatus ? 'Hide git status' : 'View git status'}
+                  {loadingGit ? t('loading') : gitStatus ? t('hideGitStatus') : t('viewGitStatus')}
                 </Button>
               </div>
             </div>
@@ -813,15 +817,15 @@ export default function SettingsView() {
       </Card>
 
       {/* Section 3: Appearance */}
-      <Card title="Cleanup and retention">
+      <Card title={t('cleanupRetention')}>
         <CleanupPointer />
       </Card>
 
-      <Card title="Notifications">
+      <Card title={t('notifications')}>
         <RunNoticeSettings />
       </Card>
 
-      <Card title="Transcription">
+      <Card title={t('transcription')}>
         <TranscriptionSettings />
       </Card>
 
@@ -884,7 +888,7 @@ export default function SettingsView() {
       </Card>
 
       {/* Section 4: Experimental */}
-      <Card title="Experimental">
+      <Card title={t('experimental')}>
         <div
           style={{
             display: 'flex',
@@ -905,7 +909,7 @@ export default function SettingsView() {
                 cursor: 'pointer',
               }}
             >
-              Agentic Visual Mode
+              {t('agenticMode')}
             </label>
             <p
               style={{
@@ -917,16 +921,12 @@ export default function SettingsView() {
                 maxWidth: '62ch',
               }}
             >
-              Adds an <strong style={{ fontWeight: 600 }}>Agent Floor</strong> item to the sidebar,
-              under Automation. It draws your workspace as a pixel-art office: the backlog is a stack of
-              paper on a desk, agents walk over to pick up a task, read it, research it at the
-              bookshelf and the terminal, then carry the finished sheet to the Done desk. Everything
-              on screen is driven by real task files and live file-change events.
+              {rich(t, 'agenticModeHint', { floor: <strong style={{ fontWeight: 600 }}>{t('agent-floor')}</strong> })}
             </p>
           </div>
           <Toggle
             id="agentic-visual-mode"
-            label="Agentic Visual Mode"
+            label={t('agenticMode')}
             checked={agenticVisualMode}
             onChange={(next) => dispatch({ type: 'SET_AGENTIC_VISUAL_MODE', payload: next })}
           />
@@ -934,19 +934,19 @@ export default function SettingsView() {
       </Card>
 
       <div id="updates">
-        <Card title="Updates">
+        <Card title={t('updates')}>
           <UpdatesSettings />
         </Card>
       </div>
 
       {/* Section 5: About */}
-      <Card title="About">
-        <AboutRow label="Version"        value={config?.app_version ?? ''} />
+      <Card title={t('about')}>
+        <AboutRow label={t('version')}        value={config?.app_version ?? ''} />
         <AboutRow label="API"            value={window.location.host} mono />
-        <AboutRow label="Workspace path" value={config?.path ?? ''} mono />
+        <AboutRow label={t('workspacePath')} value={config?.path ?? ''} mono />
         <AboutRow
-          label="Last validated"
-          value={lastValidated ? formatDate(lastValidated.toISOString()) : 'Never'}
+          label={t('lastValidated')}
+          value={lastValidated ? formatDate(lastValidated.toISOString()) : t('never')}
         />
       </Card>
 
@@ -954,14 +954,14 @@ export default function SettingsView() {
       <Modal
         isOpen={showChangeModal}
         onClose={() => { if (!switching) setShowChangeModal(false); }}
-        title="Change workspace"
-        description="Point Get Things Done at another folder. Your current workspace stays on disk, untouched."
+        title={t('changeWorkspace')}
+        description={t('changeWorkspaceHint')}
         footer={
           <FormActions>
-            <Button variant="ghost" onClick={() => setShowChangeModal(false)} disabled={switching}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setShowChangeModal(false)} disabled={switching}>{t('cancel')}</Button>
             <Button variant="primary" onClick={handleSwitchWorkspace} loading={switching}
               disabled={!newPath.trim() || newPath.trim() === config?.path}>
-              {needsInit ? 'Initialize and switch' : 'Switch workspace'}
+              {needsInit ? t('initAndSwitch') : t('switchWorkspace')}
             </Button>
           </FormActions>
         }
@@ -969,7 +969,7 @@ export default function SettingsView() {
         <div className="gtd-stack">
           <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <Input
-              label="Workspace folder"
+              label={t('workspaceFolder')}
               value={newPath}
               onChange={v => { setNewPath(v); setNeedsInit(false); }}
               onKeyDown={e => { if (e.key === 'Enter' && newPath.trim() && !switching) handleSwitchWorkspace(); }}
@@ -979,12 +979,12 @@ export default function SettingsView() {
               style={{ flex: '1 1 260px' }}
               inputStyle={{ fontFamily: 'var(--font-mono)' }}
             />
-            <Button variant="secondary" onClick={handleBrowse} loading={picking} disabled={switching}>Browse…</Button>
+            <Button variant="secondary" onClick={handleBrowse} loading={picking} disabled={switching}>{t('browse')}</Button>
           </div>
 
           {needsInit && (
-            <Notice tone="warning" title="This folder is not a workspace yet.">
-              Initialize it to create the workspace structure (tasks, stakeholders, context and so on). Existing files are kept.
+            <Notice tone="warning" title={t('notWorkspaceYet')}>
+              {t('initFolderHint')}
             </Notice>
           )}
 
@@ -1002,20 +1002,19 @@ export default function SettingsView() {
       <Modal
         isOpen={showReinitModal}
         onClose={() => { if (!reinitializing) setShowReinitModal(false); }}
-        title="Re-initialize this workspace?"
+        title={t('reinitConfirm')}
         size="sm"
         role="alertdialog"
         footer={
           <FormActions>
-            <Button variant="ghost" onClick={() => setShowReinitModal(false)} disabled={reinitializing} autoFocus>Cancel</Button>
-            <Button variant="danger" onClick={handleReinitialize} loading={reinitializing}>Re-initialize</Button>
+            <Button variant="ghost" onClick={() => setShowReinitModal(false)} disabled={reinitializing} autoFocus>{t('cancel')}</Button>
+            <Button variant="danger" onClick={handleReinitialize} loading={reinitializing}>{t('reinit')}</Button>
           </FormActions>
         }
       >
         <div className="gtd-stack">
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 'var(--leading-normal)' }}>
-            The workspace configuration goes back to its initial state, and custom settings may be overwritten.
-            Tasks, stakeholders and context notes are kept.
+            {t('reinitMessage')}
           </p>
           {reinitError && <Notice tone="critical">{reinitError}</Notice>}
         </div>

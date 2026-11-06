@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiGet } from '@/utils/api';
@@ -29,6 +30,7 @@ const serverWorkspace = () => apiGet<WorkspaceConfig>('/api/workspace').then((w)
  *   with the same id.
  */
 export default function RunFinishedNotifier() {
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const tab = React.useMemo(() => Math.random().toString(36).slice(2), []);
@@ -65,7 +67,7 @@ export default function RunFinishedNotifier() {
 
   const open = React.useCallback(async (id: string, where: string) => {
     if ((await serverWorkspace()) !== where) {
-      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: `${id} is in another workspace (${where}). Switch to it, then open the update.` } });
+      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: t('runInOtherWorkspace', { id, where }) } });
       return;
     }
     navigate(`/context/updates/${id}`, { state: { workspace: where } });

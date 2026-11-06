@@ -60,8 +60,11 @@ server.stderr.on('data', (d) => { serverLog += d; });
 
 try {
   let healthy = false;
-  for (let i = 0; i < 50 && !healthy; i++) {
-    try { healthy = (await fetch(`${base}/health`)).ok; } catch { await new Promise((r) => setTimeout(r, 200)); }
+  // A busy CI runner can take well over ten seconds to load the server for the first time.
+  const startDeadline = Date.now() + 60_000;
+  while (!healthy && Date.now() < startDeadline) {
+    try { healthy = (await fetch(`${base}/health`)).ok; } catch { /* not listening yet */ }
+    if (!healthy) await new Promise((r) => setTimeout(r, 200));
   }
   check('server answers /health', healthy);
   if (!healthy) throw new Error('server did not start');

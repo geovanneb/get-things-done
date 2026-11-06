@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { useAppState, useAppDispatch } from '../../store';
@@ -12,6 +13,7 @@ const ACCENT: Record<string, string> = {
 };
 
 function Toast({ id, type, message }: { id: string; type: string; message: string }) {
+  const { t } = useLanguage();
   const dispatch = useAppDispatch();
 
   React.useEffect(() => {
@@ -44,7 +46,7 @@ function Toast({ id, type, message }: { id: string; type: string; message: strin
       </span>
       <button
         onClick={() => dispatch({ type: 'REMOVE_NOTIFICATION', payload: id })}
-        aria-label="Dismiss"
+        aria-label={t('dismiss')}
         style={{
           display: 'flex',
           alignItems: 'center',

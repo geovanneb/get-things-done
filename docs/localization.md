@@ -1,9 +1,11 @@
 # Localization
 
 Issue [#286](https://github.com/geovanneb/get-things-done/issues/286) is a staged migration.
-This first slice implements personal language selection, automatic detection, navigation
-labels and page titles, Appearance controls, and concise translated READMEs. It does not
-claim full application translation. Settings explains that some screens remain English.
+The work so far covers personal language selection, automatic detection, the app shell
+(navigation, header, sidebar editor, workspace switcher), shared components (dialogs, search,
+attachments, dictation, mentions, the Markdown editor) and the main Settings page, plus concise
+translated READMEs. It does not claim full application translation. Settings explains that some
+screens remain English.
 
 ## Language policy
 
@@ -55,7 +57,10 @@ arguments; tests check non-empty translations and placeholder parity in every pl
 Missing or empty strings fall back to English. Each plural contains whole phrases keyed by
 CLDR category, with `other` required; `Intl.PluralRules` selects a form and
 `Intl.NumberFormat` formats the count. This deliberately small format is **not ICU syntax**.
-Use a maintained ICU library if nested selects, ordinals or rich text become necessary.
+A plural may carry other placeholders besides `count`. For a sentence with an element inside it,
+`ui/src/i18n/rich.tsx` places React nodes at named placeholders, so the whole sentence stays one
+message. Never split a sentence around a `<strong>` or a value.
+Use a maintained ICU library if nested selects or ordinals become necessary.
 Never implement an ICU parser or assemble grammar with English singular conditionals.
 
 Translator notes for this slice:
@@ -74,7 +79,10 @@ source revision. Native review, especially Spanish, remains welcome before relea
 
 ## Next independently reviewable slices
 
-- Finish shell controls and Settings translation, then migrate feature screens by area.
+- Finish Settings: the Transcription, Updates and remembered-voice panels, and `UpdateBanner`.
+  Their model names, summaries and pros and cons come from the server, so they need ids first.
+- Migrate feature screens by area: Board, Meetings, Context, Stakeholders, Routines, Agents,
+  Situation, Insights, Outputs, Profile and Setup. `DictateButton` callers then translate `fieldName`.
 - Add a hard-coded-string ratchet and a development-only expanded pseudo-locale.
 - Migrate date, duration, number and sorting call sites to shared `Intl` formatters with
   the chosen locale; do not change stored ISO dates or machine-readable identifiers.

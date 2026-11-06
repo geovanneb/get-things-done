@@ -1,8 +1,10 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useState, useRef, useEffect } from 'react';
 import { useApi } from '../../hooks/useApi';
 import { GitStatus } from '../../types';
 
 export default function GitIndicator() {
+  const { t } = useLanguage();
   const { data: git } = useApi<GitStatus>('/api/workspace/git/status', []);
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -33,7 +35,7 @@ export default function GitIndicator() {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="true"
-        aria-label={`Git: ${git.branch}, ${totalChanged} changed files`}
+        aria-label={t('gitButton', { count: totalChanged, branch: git.branch })}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -75,7 +77,7 @@ export default function GitIndicator() {
         <div
           ref={popoverRef}
           role="dialog"
-          aria-label="Git status"
+          aria-label={t('gitStatus')}
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
@@ -90,7 +92,7 @@ export default function GitIndicator() {
           }}
         >
           <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--color-border)' }}>
-            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Git status</div>
+            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{t('gitStatus')}</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)', marginTop: 2 }}>
               {git.branch}
               {git.ahead > 0 && ` ↑${git.ahead}`}
@@ -100,17 +102,17 @@ export default function GitIndicator() {
 
           <div style={{ maxHeight: 280, overflowY: 'auto', padding: '8px 14px' }}>
             {git.staged.length > 0 && (
-              <FileGroup label="Staged" files={git.staged} color="var(--color-success)" />
+              <FileGroup label={t('staged')} files={git.staged} color="var(--color-success)" />
             )}
             {git.modified.length > 0 && (
-              <FileGroup label="Modified" files={git.modified} color="var(--color-warning)" />
+              <FileGroup label={t('modified')} files={git.modified} color="var(--color-warning)" />
             )}
             {git.untracked.length > 0 && (
-              <FileGroup label="Untracked" files={git.untracked} color="var(--color-text-muted)" />
+              <FileGroup label={t('untracked')} files={git.untracked} color="var(--color-text-muted)" />
             )}
             {totalChanged === 0 && (
               <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', padding: '8px 0' }}>
-                Working tree is clean.
+                {t('treeClean')}
               </div>
             )}
           </div>

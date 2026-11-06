@@ -7,7 +7,7 @@ export type Catalog = { [K in MessageKey]: (typeof en)[K] extends string ? strin
 type Placeholders<S extends string> = S extends `${string}{${infer P}}${infer Rest}` ? P | Placeholders<Rest> : never;
 export type Arguments<K extends MessageKey> = (typeof en)[K] extends string
   ? [Placeholders<(typeof en)[K] & string>] extends [never] ? [] : [Record<Placeholders<(typeof en)[K] & string>, string | number>]
-  : [{ count: number }];
+  : (typeof en)[K] extends { other: infer Other extends string } ? [{ count: number } & Record<Exclude<Placeholders<Other>, 'count'>, string | number>] : never;
 export type PlainMessageKey = { [K in MessageKey]: Arguments<K> extends [] ? K : never }[MessageKey];
 export type Translate = <K extends MessageKey>(key: K, ...args: Arguments<K>) => string;
 
