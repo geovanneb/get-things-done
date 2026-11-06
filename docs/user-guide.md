@@ -852,10 +852,11 @@ Instead the app records a SHA-256 of every file it installs in
 |---|---|
 | File is missing | Installed |
 | Hash still matches the manifest | You never touched it — replaced silently |
-| Hash differs | **You edited it.** Yours is kept; the new version is written as `<file>.new` |
+| Hash differs | **You edited it.** Yours is kept; the new version is written as `<file>.new`. A `.new` the app wrote in an earlier release is replaced by the current version while it is still as the app wrote it; one you changed is kept |
 
-So customize `CLAUDE.md` freely. You will never lose your changes, and you will never
-be stuck on an old version without knowing it. `gtd upgrade` prints exactly which
+So customize `CLAUDE.md` freely: an upgrade keeps your changes, and you will never
+be stuck on an old version without knowing it. Don't save these files while the app is
+upgrading them: a save at that exact moment can be overwritten. `gtd upgrade` prints exactly which
 files fell into which bucket.
 
 ---
