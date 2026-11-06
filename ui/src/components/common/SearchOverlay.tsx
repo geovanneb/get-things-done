@@ -4,7 +4,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import Badge from './Badge';
+import Notice from './Notice';
 import { SearchResult } from '../../types';
+import { arrangeResults, clampIndex, latestOnly } from '../../utils/searchResults';
 import { useRecorder } from '../recording/RecordingProvider';
 import { useRecordLauncher } from '../recording/RecordLauncher';
 
@@ -64,24 +66,17 @@ function actionMatches(action: QuickAction, query: string): boolean {
   return query.trim().toLowerCase().split(/\s+/).filter(Boolean).every((q) => words.some((w) => w.startsWith(q)));
 }
 
-function groupResults(results: SearchResult[]) {
-  const groups: Record<string, SearchResult[]> = {};
-  for (const r of results) {
-    if (!groups[r.type]) groups[r.type] = [];
-    groups[r.type].push(r);
-  }
-  return groups;
-}
-
 export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   const { t } = useLanguage();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const debounceRef = useRef<number | null>(null);
+  const latestRef = useRef(latestOnly());
   const recorder = useRecorder();
   const { openRecordDialog } = useRecordLauncher();
 
@@ -89,46 +84,65 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
     if (isOpen) {
       setQuery('');
       setResults([]);
+      setFailed(false);
       setActiveIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
 
   const search = useCallback(async (q: string) => {
-    if (!q.trim()) {
-      setResults([]);
-      return;
-    }
+    const latest = latestRef.current;
+    const id = latest.start();
     setLoading(true);
+    let found: SearchResult[] | null = null;
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       if (res.ok) {
         const data = await res.json();
-        setResults(data.results ?? data ?? []);
+        found = data.results ?? data ?? [];
       }
     } catch {
-      // ignore
-    } finally {
-      setLoading(false);
+      // Shown below as a failed search.
     }
+    // A slower answer to an earlier query never replaces a newer one.
+    if (!latest.isLatest(id)) return;
+    setLoading(false);
+    setResults(found ?? []);
+    setFailed(found === null);
   }, []);
 
   useEffect(() => {
+    // Any search still on its way is for an older query, or for an overlay that has closed: drop it now, not after the
+    // debounce, so its answer can never fill the list.
+    const latest = latestRef.current;
+    latest.cancel();
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!isOpen || !query.trim()) {
+      setResults([]);
+      setFailed(false);
+      setLoading(false);
+      return;
+    }
     debounceRef.current = window.setTimeout(() => search(query), 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      latest.cancel();
     };
-  }, [query, search]);
+  }, [query, isOpen, search]);
 
-  const allResults = results;
+  // Rows are grouped by type, so the highlight, the mouse and Enter all use the displayed order.
+  const { groups, ordered } = arrangeResults(results);
 
   const recordAction: QuickAction | null = recorder.status === 'recording'
     ? { id: 'stop-recording', label: t('stopRecording'), hint: t('stopAndSave', { title: recorder.title }), words: 'stop recording record meeting microphone mic audio save', run: () => void recorder.stop() }
     : recorder.active ? null
     : { id: 'record-meeting', label: t('recordMeeting'), hint: t('recordFromMic'), words: 'record recording a meeting microphone mic audio start', run: openRecordDialog };
   const actions = recordAction && actionMatches(recordAction, query) ? [recordAction] : [];
-  const itemCount = actions.length + allResults.length;
+  const itemCount = actions.length + ordered.length;
+
+  useEffect(() => {
+    setActiveIndex((i) => clampIndex(i, itemCount));
+  }, [itemCount]);
 
   const runAction = (action: QuickAction) => {
     onClose();
@@ -140,7 +154,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, itemCount - 1));
+      setActiveIndex((i) => clampIndex(i + 1, itemCount));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
@@ -149,7 +163,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
         runAction(actions[activeIndex]);
         return;
       }
-      const r = allResults[activeIndex - actions.length];
+      const r = ordered[activeIndex - actions.length];
       if (!r) return;
       navigate(typePaths[r.type]?.(r.id) ?? r.path);
       onClose();
@@ -157,8 +171,6 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
   };
 
   if (!isOpen) return null;
-
-  const groups = groupResults(results);
 
   return ReactDOM.createPortal(
     <div
@@ -271,7 +283,12 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
               ))}
             </div>
           )}
-          {query && results.length === 0 && actions.length === 0 && !loading && (
+          {query && failed && !loading && (
+            <div style={{ padding: 'var(--space-3) var(--space-4)' }}>
+              <Notice tone="critical">{t('searchFailed')}</Notice>
+            </div>
+          )}
+          {query && !failed && results.length === 0 && actions.length === 0 && !loading && (
             <div style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>
               {t('noResultsFor', { query })}
             </div>
@@ -281,8 +298,7 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
               {t('searchHint')}
             </div>
           )}
-          {Object.entries(groups).map(([type, items]) => {
-            const startIndex = actions.length + allResults.indexOf(items[0]);
+          {groups.map(({ type, items }) => {
             return (
               <div key={type}>
                 <div style={{
@@ -295,8 +311,8 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
                 }}>
                   {groupLabels[type] ? t(groupLabels[type]) : type}
                 </div>
-                {items.map((r, i) => {
-                  const idx = startIndex + i;
+                {items.map(({ result: r, index }) => {
+                  const idx = actions.length + index;
                   const isActive = idx === activeIndex;
                   return (
                     <button

@@ -206,6 +206,7 @@ export default {
   "searchPlaceholder": "Buscar tarefas, partes interessadas, contexto...",
   "actions": "Ações",
   "noResultsFor": "Nenhum resultado para \"{query}\"",
+  "searchFailed": "A busca não funcionou. Digite de novo para tentar outra vez; se continuar falhando, reinicie o Get Things Done.",
   "searchHint": "Digite para buscar em tarefas, partes interessadas, contexto, saídas e agentes.",
   "navigateKey": "navegar",
   "openOrRun": "abrir ou executar",

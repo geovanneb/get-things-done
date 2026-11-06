@@ -205,6 +205,7 @@ export const en = {
   "searchPlaceholder": "Search tasks, stakeholders, context...",
   "actions": "Actions",
   "noResultsFor": "No results for \"{query}\"",
+  "searchFailed": "Search did not work. Type again to retry; if it keeps failing, restart Get Things Done.",
   "searchHint": "Type to search across tasks, stakeholders, context, outputs, and agents.",
   "navigateKey": "navigate",
   "openOrRun": "open or run",
