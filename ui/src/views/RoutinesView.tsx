@@ -1,3 +1,7 @@
+import { scheduleText } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { currentLocale, tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '@/hooks/useApi';
@@ -19,25 +23,26 @@ import { apiDelete, apiPatch, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
 import type { MeetingDigest, Routine, RoutineRun, SystemCleanup } from '@/types';
 
-const TRIGGER_LABEL: Record<RoutineRun['trigger'], string> = {
-  startup: 'Dashboard started',
-  timer: 'On schedule',
+const TRIGGER_LABEL = (): Record<RoutineRun['trigger'], string> => ({
+  startup: tr('routines.dashboardStarted'),
+  timer: tr('routines.onSchedule'),
   cli: 'gtd routines run',
-  scheduler: 'System scheduler',
-  manual: 'Run now',
-};
+  scheduler: tr('routines.systemScheduler'),
+  manual: tr('systemCleanup.runNow'),
+});
 
 function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString(currentLocale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function dueText(r: Routine): string {
   const d = r.task.due_offset_days;
   if (d === null) return '';
-  return d === 0 ? ', due the same day' : `, due ${d} day${d === 1 ? '' : 's'} later`;
+  return d === 0 ? tr('routines.dueTheSameDay') : tr('routines.dueDaysLater', { count: d });
 }
 
 function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit: () => void; onChanged: () => void }) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const [busy, setBusy] = React.useState<'toggle' | 'run' | 'delete' | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
@@ -58,16 +63,16 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
 
   if (routine.problem) {
     return (
-      <Notice tone="critical" title={`${routine.id} does not run: its file cannot be read.`}
+      <Notice tone="critical" title={t('routines.doesNotRunItsFile', { id: routine.id })}
         action={
           <Button size="sm" variant="danger" loading={busy === 'delete'}
             onClick={() => act('delete', async () => {
               if (await confirm({ title: `Delete ${routine.id}?`, message: `routines/${routine.id}.md is deleted from the workspace.`, confirmLabel: 'Delete routine', tone: 'danger' })) await apiDelete(`/api/routines/${routine.id}`);
             })}>
-            Delete
+            {t('updateDetail.delete')}
           </Button>
         }>
-        {routine.problem} Fix routines/{routine.id}.md in the workspace folder, or delete it.
+        {routine.problem} {t('routines.fixRoutines')}{routine.id}{t('routines.mdInTheWorkspaceFolder')}
         {notice && <div>{notice.text}</div>}
       </Notice>
     );
@@ -80,20 +85,20 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>{routine.title}</h3>
-            {!routine.enabled && <Badge size="sm">Paused</Badge>}
+            {!routine.enabled && <Badge size="sm">{t('meetingDigest.paused')}</Badge>}
             {routine.enabled && routine.paused_until && routine.paused_until > new Date().toLocaleDateString('en-CA') && (
-              <Badge size="sm">Paused until {routine.paused_until}</Badge>
+              <Badge size="sm">{rich(t, 'routines.pausedUntil', { paused_until: routine.paused_until })}</Badge>
             )}
-            {failed && <Badge variant="critical" size="sm">Last run failed</Badge>}
+            {failed && <Badge variant="critical" size="sm">{t('meetingDigest.lastRunFailed')}</Badge>}
           </div>
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 4 }}>
-            {routine.summary}{dueText(routine)}
+            {scheduleText(routine.summary)}{dueText(routine)}
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span>Next: {routine.enabled ? (routine.next_run_at ? formatWhen(routine.next_run_at) : 'no more runs') : 'paused'}</span>
+            <span>{rich(t, 'meetingDigest.next', { value: routine.enabled ? (routine.next_run_at ? formatWhen(routine.next_run_at) : t('meetingDigest.noMoreRuns')) : 'paused' })}</span>
             {routine.state.last_run_at && (
               <span title={routine.state.last_message}>
-                Last: {formatRelativeTime(routine.state.last_run_at)}
+                {t('routines.last')} {formatRelativeTime(routine.state.last_run_at)}
                 {routine.state.last_task_id && (
                   <> · <Link to={`/board/task/${routine.state.last_task_id}`} className="gtd-link">{routine.state.last_task_id}</Link></>
                 )}
@@ -102,12 +107,12 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
           </div>
           {failed && routine.state.last_message && (
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-critical)', marginTop: 6 }}>
-              {routine.state.last_message} It will try again on the next check.
+              {rich(t, 'routines.itWillTryAgainOn', { last_message: routine.state.last_message })}
             </div>
           )}
         </div>
         <Toggle
-          label={routine.enabled ? `Pause ${routine.title}` : `Resume ${routine.title}`}
+          label={routine.enabled ? t('routines.pause', { title: routine.title }) : t('routines.resume', { title: routine.title })}
           checked={routine.enabled}
           disabled={busy !== null}
           onChange={(on) => act('toggle', async () => { await apiPatch(`/api/routines/${routine.id}`, { enabled: on }); })}
@@ -115,17 +120,17 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <Button size="sm" variant="secondary" loading={busy === 'run'} disabled={busy !== null}
-          title="Create the task now, without waiting for the schedule"
+          title={t('routines.createTheTaskNowWithout')}
           onClick={() => act('run', async () => (await apiPost<RoutineRun>(`/api/routines/${routine.id}/run`)).message)}>
-          Run now
+          {t('systemCleanup.runNow')}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>Edit</Button>
+        <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>{t('routines.edit')}</Button>
         <Button size="sm" variant="ghost" loading={busy === 'delete'} disabled={busy !== null}
           onClick={() => act('delete', async () => {
             const ok = await confirm({ title: `Delete "${routine.title}"?`, message: 'The routine stops. Tasks it already created stay on the board.', confirmLabel: 'Delete routine', tone: 'danger' });
             if (ok) await apiDelete(`/api/routines/${routine.id}`);
           })}>
-          Delete
+          {t('updateDetail.delete')}
         </Button>
         {notice && (
           <span role={notice.error ? 'alert' : 'status'} style={{ fontSize: 'var(--text-xs)', color: notice.error ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
@@ -138,8 +143,9 @@ function RoutineCard({ routine, onEdit, onChanged }: { routine: Routine; onEdit:
 }
 
 function RunHistory({ runs }: { runs: RoutineRun[] }) {
+  const { t } = useLanguage();
   if (runs.length === 0) {
-    return <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>No runs yet. Runs appear here when a routine creates a task or fails.</p>;
+    return <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>{t('routines.noRunsYetRunsAppear')}</p>;
   }
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' }}>
@@ -151,19 +157,19 @@ function RunHistory({ runs }: { runs: RoutineRun[] }) {
             <strong style={{ fontWeight: 600 }}>{run.routine_title}</strong>{' '}
             <span style={{ color: run.status === 'ok' ? 'var(--color-text-secondary)' : 'var(--color-critical)' }}>
               {run.routine_id === 'SYSTEM-CLEANUP'
-                ? <>{run.message}{run.context_update && <> <Link to={`/context/updates/${run.context_update}`} className="gtd-link">Open {run.context_update}</Link></>}</>
+                ? <>{run.message}{run.context_update && <> <Link to={`/context/updates/${run.context_update}`} className="gtd-link">{rich(t, 'routines.open', { context_update: run.context_update })}</Link></>}</>
                 : run.created.length > 0
-                ? <>created {run.created.map((id, j) => <React.Fragment key={id}>{j > 0 && ', '}<Link to={`/board/task/${id}`} className="gtd-link">{id}</Link></React.Fragment>)}</>
+                ? <>{t('routines.created')} {run.created.map((id, j) => <React.Fragment key={id}>{j > 0 && ', '}<Link to={`/board/task/${id}`} className="gtd-link">{id}</Link></React.Fragment>)}</>
                 : run.message}
-              {run.created.length > 0 && run.skipped.length > 0 && ` (${run.skipped.length} missed run${run.skipped.length === 1 ? '' : 's'} skipped)`}
+              {run.created.length > 0 && run.skipped.length > 0 && t('routines.missedRunsSkipped', { count: run.skipped.length })}
               {run.caught_up && run.caught_up.length > 0 && (
                 <span style={{ color: 'var(--color-text-muted)' }}>
-                  {' '}· caught up, was due {run.caught_up.map((k) => formatWhen(k)).join(', ')}
+                  {' '}{t('routines.caughtUpWasDue')} {run.caught_up.map((k) => formatWhen(k)).join(', ')}
                 </span>
               )}
             </span>
           </span>
-          <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', flexShrink: 0 }}>{TRIGGER_LABEL[run.trigger] ?? run.trigger}</span>
+          <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)', flexShrink: 0 }}>{TRIGGER_LABEL()[run.trigger] ?? run.trigger}</span>
         </li>
       ))}
     </ul>
@@ -171,6 +177,7 @@ function RunHistory({ runs }: { runs: RoutineRun[] }) {
 }
 
 export default function RoutinesView() {
+  const { t } = useLanguage();
   const routinesVersion = useDataVersion('routines');
   const tasksVersion = useDataVersion('tasks');
   const { data: routines, loading, error, refetch } = useApi<Routine[]>('/api/routines', [routinesVersion, tasksVersion]);
@@ -185,36 +192,34 @@ export default function RoutinesView() {
   const refresh = React.useCallback(() => { refetch(); refetchRuns(); refetchCleanup(); refetchDigest(); }, [refetch, refetchRuns, refetchCleanup, refetchDigest]);
   const openEditor = (routine: Routine | null) => { setEditing(routine); setEditorOpen(true); };
 
-  if (loading && !routines) return <LoadingSpinner text="Loading routines…" />;
+  if (loading && !routines) return <LoadingSpinner text={t('routines.loadingRoutines')} />;
 
   return (
     <Page width="narrow">
       <PageHeader
         description={<>
-          Recurring tasks that land on your backlog by themselves. Routines run while the dashboard is open, and catch up
-          when it starts again after the computer was off. To run them without the dashboard, use{' '}
-          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>gtd routines run</code>.
+          {rich(t, 'routines.recurringTasksThatLandOn', { code: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>gtd routines run</code> })}
         </>}
-        actions={<Button variant="primary" icon={icons.plus} onClick={() => openEditor(null)}>New routine</Button>}
+        actions={<Button variant="primary" icon={icons.plus} onClick={() => openEditor(null)}>{t('routineEditor.newRoutine')}</Button>}
       />
 
-      {error && <Notice tone="critical" title="Could not load your routines.">{error}</Notice>}
+      {error && <Notice tone="critical" title={t('routines.couldNotLoadYourRoutines')}>{error}</Notice>}
 
-      <Section id="built-in" title="Built-in">
-        {cleanupError && <Notice tone="critical" title="System cleanup does not run.">{cleanupError}</Notice>}
+      <Section id="built-in" title={t('meetingDigest.builtIn')}>
+        {cleanupError && <Notice tone="critical" title={t('routines.systemCleanupDoesNotRun')}>{cleanupError}</Notice>}
         {cleanup && <SystemCleanupCard job={cleanup} onEdit={() => setCleanupOpen(true)} onChanged={refresh} />}
-        {digestError && <Notice tone="critical" title="Meeting digest does not run.">{digestError}</Notice>}
+        {digestError && <Notice tone="critical" title={t('routines.meetingDigestDoesNotRun')}>{digestError}</Notice>}
         {digest && <MeetingDigestCard job={digest} onEdit={() => setDigestOpen(true)} onChanged={refresh} />}
       </Section>
 
-      <Section id="your-routines" title="Your routines">
+      <Section id="your-routines" title={t('routines.yourRoutines')}>
         {routines && routines.length === 0 ? (
           <Card>
             <EmptyState
               size="compact"
-              title="No routines yet"
-              description="Set up a task once and let it come back on schedule: meeting prep every other Monday, a weekly report every Friday, a monthly review on the first Monday."
-              action={{ label: 'New routine', onClick: () => openEditor(null) }}
+              title={t('routines.noRoutinesYet')}
+              description={t('routines.setUpATaskOnce')}
+              action={{ label: t('routineEditor.newRoutine'), onClick: () => openEditor(null) }}
             />
           </Card>
         ) : (
@@ -222,7 +227,7 @@ export default function RoutinesView() {
         )}
       </Section>
 
-      <Section id="run-history" title="Run history" description="Every task a routine created, and every run that failed. Checks with nothing to do are not listed.">
+      <Section id="run-history" title={t('routines.runHistory')} description={t('routines.everyTaskARoutineCreated')}>
         <RunHistory runs={runs ?? []} />
       </Section>
 

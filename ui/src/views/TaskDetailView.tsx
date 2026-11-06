@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import TaskMeetingSources from '@/components/board/TaskMeetingSources';
 import TaskMeetingAction from '@/components/board/TaskMeetingAction';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
@@ -45,6 +47,7 @@ function SidebarField({ label, children }: { label: string; children: React.Reac
 // Edits go straight into the task draft, so the header's "Save changes" saves them
 // with everything else. "Done" only switches back to the rendered view.
 function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { label: string; content: string; onChange: (v: string) => void; closeSignal?: number; mentions?: boolean }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [original, setOriginal] = useState(content);
 
@@ -59,21 +62,21 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { 
         </h3>
         {editing ? (
           <>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Done editing</Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>{t('taskDetail.doneEditing')}</Button>
             <Button size="sm" variant="ghost"
               onClick={() => { onChange(original); setEditing(false); }}
             >
-              Discard changes
+              {t('taskDetail.discardChanges')}
             </Button>
           </>
         ) : (
-          <Button size="sm" variant="ghost" onClick={() => { setOriginal(content); setEditing(true); }} aria-label={`Edit ${label.toLowerCase()}`}>
-            Edit
+          <Button size="sm" variant="ghost" onClick={() => { setOriginal(content); setEditing(true); }} aria-label={t('taskDetail.edit', { toLowerCase: label.toLowerCase() })}>
+            {t('routines.edit')}
           </Button>
         )}
       </div>
       {editing ? (
-        <MarkdownEditor value={content} onChange={onChange} rows={10} autoFocus mentions={mentions} placeholder={mentions ? 'Type @ to mention a stakeholder, template, context note, task or meeting' : undefined} />
+        <MarkdownEditor value={content} onChange={onChange} rows={10} autoFocus mentions={mentions} placeholder={mentions ? t('taskDetail.typeToMentionAStakeholder') : undefined} />
       ) : (
         <MarkdownView content={content} />
       )}
@@ -83,6 +86,7 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { 
 
 /* ---- Slash command field ------------------------------------------ */
 function SlashCommandField({ taskId }: { taskId: string }) {
+  const { t } = useLanguage();
   const command = `/gtd-task ${taskId}`;
   const [copied, setCopied] = React.useState(false);
 
@@ -108,7 +112,7 @@ function SlashCommandField({ taskId }: { taskId: string }) {
       </code>
       <button
         onClick={handleCopy}
-        title="Copy command"
+        title={t('updateDetail.copyCommand')}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           width: 28, height: 28, border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
@@ -141,6 +145,7 @@ function nextDeliverableId(deliverables: Task['deliverables']): string {
 }
 
 function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number; pinError: string | null; onPinned: () => void }) {
+  const { t } = useLanguage();
   const { data: allStakeholders } = useApi<Stakeholder[]>('/api/stakeholders');
 
   const saveField = (field: string) => (value: unknown) => onFieldChange(field, value);
@@ -170,7 +175,7 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task
     <div className="gtd-detail">
       <div className="gtd-detail__main">
         {task.meeting_action && <TaskMeetingAction taskId={task.id} refreshKey={savedCount} />}
-        <MarkdownSection label="Objective" content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
+        <MarkdownSection label={t('newTaskModal.objective')} content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
         {/\]\(\/meetings\//.test(task.body ?? '') && <TaskMeetingSources taskId={task.id} refreshKey={savedCount} pinError={pinError} onPinned={onPinned} />}
         <div style={{ marginBottom: 'var(--space-6)' }}>
           <DeliverableList
@@ -182,14 +187,14 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task
         </div>
       </div>
 
-      <aside className="gtd-detail__aside" aria-label="Task fields">
-        <Select label="Status" size="sm" value={task.status} onChange={(v) => onFieldChange('status', v)}
+      <aside className="gtd-detail__aside" aria-label={t('newTaskModal.taskFields')}>
+        <Select label={t('newTaskModal.status')} size="sm" value={task.status} onChange={(v) => onFieldChange('status', v)}
           options={(['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'] as Task['status'][]).map((s) => ({ value: s, label: formatStatusLabel(s) }))} />
-        <Select label="Priority" size="sm" value={task.priority} onChange={(v) => onFieldChange('priority', v)}
+        <Select label={t('newTaskModal.priority')} size="sm" value={task.priority} onChange={(v) => onFieldChange('priority', v)}
           options={(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => ({ value: p, label: formatPriorityLabel(p) }))} />
-        <Input label="Due date" type="date" size="sm" value={task.due_date ? task.due_date.slice(0, 10) : ''}
+        <Input label={t('newTaskModal.dueDate')} type="date" size="sm" value={task.due_date ? task.due_date.slice(0, 10) : ''}
           onChange={(v) => onFieldChange('due_date', v || null)} />
-        <SidebarField label="Slash command">
+        <SidebarField label={t('taskDetail.slashCommand')}>
           <SlashCommandField taskId={task.id} />
         </SidebarField>
         <StakeholderPicker
@@ -205,6 +210,7 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task
 /* ---- Context package tab ------------------------------------------ */
 /* ---- Files tab ----------------------------------------------------- */
 function FilesTab({ taskId }: { taskId: string }) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
   const { data: files, loading, refetch } = useApi<Array<{ name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }>>(`/api/tasks/${taskId}/files`);
@@ -222,7 +228,7 @@ function FilesTab({ taskId }: { taskId: string }) {
       if (!res.ok) throw new Error(await res.text());
       refetch();
     } catch (err) {
-      notify.error(err, 'Could not upload the file. Try again.');
+      notify.error(err, t('uploadFailedRetry'));
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -230,13 +236,13 @@ function FilesTab({ taskId }: { taskId: string }) {
   };
 
   const handleDelete = async (name: string) => {
-    if (!(await confirm({ title: `Remove "${name}" from this task?`, message: 'The file is deleted from the task folder.', confirmLabel: 'Remove file', tone: 'danger' }))) return;
+    if (!(await confirm({ title: t('taskDetail.removeFromThisTask', { name }), message: t('taskDetail.theFileIsDeletedFrom'), confirmLabel: t('removeFile'), tone: 'danger' }))) return;
     try {
       const res = await fetch(`/api/tasks/${taskId}/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await res.text());
       refetch();
     } catch (err) {
-      notify.error(err, 'Could not remove the file. Try again.');
+      notify.error(err, t('removeFailedRetry'));
     }
   };
 
@@ -247,11 +253,11 @@ function FilesTab({ taskId }: { taskId: string }) {
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
         <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleUpload} />
         <Button size="sm" variant="secondary" loading={uploading} onClick={() => inputRef.current?.click()}>
-          Attach file
+          {t('attachFile')}
         </Button>
       </div>
       {(!files || files.length === 0) ? (
-        <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', padding: 4 }}>No files attached.</div>
+        <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', padding: 4 }}>{t('noFilesAttached')}</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {files.map((f) => (
@@ -275,7 +281,7 @@ function FilesTab({ taskId }: { taskId: string }) {
                 {formatDate(f.modified)}
               </span>
               <Badge size="sm">{f.type}</Badge>
-              <IconButton onClick={() => handleDelete(f.name)} label={`Remove ${f.name}`} icon={icons.close} tone="danger" />
+              <IconButton onClick={() => handleDelete(f.name)} label={t('removeNamedFile', { name: f.name })} icon={icons.close} tone="danger" />
             </div>
           ))}
         </div>
@@ -288,6 +294,7 @@ function FilesTab({ taskId }: { taskId: string }) {
 
 /* ---- Main view ----------------------------------------------------- */
 export default function TaskDetailView() {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -350,7 +357,7 @@ export default function TaskDetailView() {
 
   const handleDelete = useCallback(async () => {
     if (!id || !localTask) return;
-    if (!(await confirm({ title: `Delete "${localTask.title}"?`, message: 'The task and its files are deleted. This cannot be undone.', confirmLabel: 'Delete task', tone: 'danger' }))) return;
+    if (!(await confirm({ title: t('context.delete2', { title: localTask.title }), message: t('taskDetail.theTaskAndItsFiles'), confirmLabel: t('taskDetail.deleteTask'), tone: 'danger' }))) return;
     setDeleting(true);
     try {
       await apiDelete(`/api/tasks/${id}`);
@@ -359,16 +366,16 @@ export default function TaskDetailView() {
     } catch {
       setDeleting(false);
     }
-  }, [id, localTask, navigate, refetchTasks]);
+  }, [id, localTask, navigate, refetchTasks, t]);
 
   const isDirty = JSON.stringify(task) !== JSON.stringify(localTask);
 
   const tabs: { key: TaskTab; label: string }[] = [
-    { key: 'work', label: 'Work' },
-    { key: 'files', label: 'Files' },
+    { key: 'work', label: t('groupWork') },
+    { key: 'files', label: t('newTaskModal.files') },
   ];
 
-  const frame = (body: React.ReactNode, label = 'Task details') => ReactDOM.createPortal(
+  const frame = (body: React.ReactNode, label = t('taskDetail.taskDetails')) => ReactDOM.createPortal(
     <div className="gtd-modal" role="dialog" aria-modal="true" aria-label={label}>
       <div className="gtd-modal__scrim" aria-hidden="true" onClick={close} />
       <div ref={panelRef} tabIndex={-1} className="gtd-modal__panel gtd-modal__panel--detail">{body}</div>
@@ -376,12 +383,12 @@ export default function TaskDetailView() {
     document.body
   );
 
-  if (loading) return frame(<LoadingSpinner text="Loading task…" />);
+  if (loading) return frame(<LoadingSpinner text={t('taskDetail.loadingTask')} />);
 
   if (!localTask) return frame(
     <div style={{ padding: 'var(--space-6)' }}>
-      <EmptyState title="Task not found" description="It may have been deleted or archived. Check the board or the archive."
-        action={{ label: 'Back to the board', onClick: close }} />
+      <EmptyState title={t('taskDetail.taskNotFound')} description={t('taskDetail.itMayHaveBeenDeleted')}
+        action={{ label: t('taskDetail.backToTheBoard'), onClick: close }} />
     </div>
   );
 
@@ -397,19 +404,19 @@ export default function TaskDetailView() {
           {isMeetingPrepTask(localTask) && (
             <Button
               variant="secondary" size="sm" disabled={recorder.active || !people || peopleLoading || !!peopleError}
-              title={recorder.active ? 'A recording is running' : peopleError ? 'Could not load the stakeholders. Reload the page to try again.' : undefined}
+              title={recorder.active ? t('taskDetail.aRecordingIsRunning') : peopleError ? t('taskDetail.couldNotLoadTheStakeholders') : undefined}
               onClick={() => { if (people) openRecordDialogFor(recordPrefillFromTask(localTask, people)); }}
             >
-              Record this meeting
+              {t('taskDetail.recordThisMeeting')}
             </Button>
           )}
-          {isDirty && <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>Save changes</Button>}
-          <IconButton label="Delete task" icon={icons.trash} tone="danger" outline onClick={handleDelete} disabled={deleting} />
-          <IconButton label="Close task" icon={icons.close} onClick={close} />
+          {isDirty && <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>{t('orgChartDialogs.saveChanges')}</Button>}
+          <IconButton label={t('taskDetail.deleteTask')} icon={icons.trash} tone="danger" outline onClick={handleDelete} disabled={deleting} />
+          <IconButton label={t('taskDetail.closeTask')} icon={icons.close} onClick={close} />
         </div>
         <input
           type="text"
-          aria-label="Task title"
+          aria-label={t('newTaskModal.taskTitle')}
           className="gtd-title-input"
           value={localTask.title}
           onChange={(e) => handleFieldChange('title', e.target.value)}
@@ -422,12 +429,12 @@ export default function TaskDetailView() {
             {formatStatusLabel(localTask.status)}
           </Badge>
           {localTask.due_date && (
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Due {formatDate(localTask.due_date)}</span>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{rich(t, 'attentionQueue.due', { due_date: formatDate(localTask.due_date) })}</span>
           )}
         </div>
       </div>
 
-      <Tabs label="Task sections" value={tab} onChange={setTab} idPrefix="task" items={tabs.map((t) => ({ id: t.key, label: t.label }))}
+      <Tabs label={t('taskDetail.taskSections')} value={tab} onChange={setTab} idPrefix="task" items={tabs.map((t) => ({ id: t.key, label: t.label }))}
         style={{ padding: '0 var(--space-5)', flexShrink: 0 }} />
 
       <div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${tab}`}

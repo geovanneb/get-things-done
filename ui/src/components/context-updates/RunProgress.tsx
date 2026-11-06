@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { useEffect, useState } from 'react';
 import Button from '@/components/common/Button';
 import type { AgentRun } from '@/types';
@@ -23,6 +25,7 @@ export default function RunProgress({ run, runnerLabel, stopping, onStop }: {
   stopping: boolean;
   onStop: () => void;
 }) {
+  const { t } = useLanguage();
   const [now, setNow] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -46,14 +49,14 @@ export default function RunProgress({ run, runnerLabel, stopping, onStop }: {
         </svg>
         <div style={{ flex: '1 1 220px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontSize: 'var(--text-sm)' }}>
-            <strong>{apply ? 'Applying' : 'Analyzing'} with {runnerLabel}</strong>
+            <strong>{rich(t, 'runProgress.with', { value: apply ? t('runProgress.applying') : t('runProgress.analyzing'), runnerLabel: runnerLabel })}</strong>
             {Number.isFinite(since) && <span style={{ color: 'var(--color-text-muted)' }}> · {elapsed(now - since)}</span>}
           </span>
           {steps ? (
             // One line, a long path cut with an ellipsis; the whole step is in the title and the details.
             <span role="status" aria-live="polite" title={current ? stepText(current, true) : undefined}
               style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {current ? <>Step {count} · <Words words={stepWords(current, true)} /></> : 'Starting…'}
+              {current ? <>{t('runProgress.step')} {count} · <Words words={stepWords(current, true)} /></> : t('starting')}
             </span>
           ) : (
             // A run this dashboard did not start (from before a restart): its message says what to do, in full.
@@ -61,13 +64,13 @@ export default function RunProgress({ run, runnerLabel, stopping, onStop }: {
           )}
         </div>
         {/* Only a run this dashboard started can be stopped from here; it is the one that sends its steps. */}
-        {steps && <Button variant="secondary" size="sm" loading={stopping} onClick={onStop}>{apply ? 'Stop applying' : 'Stop analysis'}</Button>}
+        {steps && <Button variant="secondary" size="sm" loading={stopping} onClick={onStop}>{apply ? t('runProgress.stopApplying') : t('runProgress.stopAnalysis')}</Button>}
       </div>
       {steps && steps.length > 0 && (
         <details open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-          <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 500 }}>{open ? 'Hide details' : 'Show details'}</summary>
+          <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 500 }}>{open ? t('runProgress.hideDetails') : t('runProgress.showDetails')}</summary>
           <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', fontSize: 'var(--text-sm)' }}>
-            {first > 1 && <p style={{ margin: '0 0 4px', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>Steps 1 to {first - 1} are not listed.</p>}
+            {first > 1 && <p style={{ margin: '0 0 4px', color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>{rich(t, 'runProgress.steps1ToAreNot', { value: first - 1 })}</p>}
             <ol start={first} style={{ margin: 0, paddingLeft: '2.5em', display: 'flex', flexDirection: 'column', gap: 4 }}>
               {steps.map((step, i) => {
                 const last = i === steps.length - 1;
@@ -81,12 +84,12 @@ export default function RunProgress({ run, runnerLabel, stopping, onStop }: {
             </ol>
           </div>
           <p style={{ margin: '8px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            Tool names, and the names of files and folders already in your workspace. File contents, searches, commands and what the agent writes to itself are never shown or kept.
+            {t('runProgress.toolNamesAndTheNames')}
           </p>
         </details>
       )}
       <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-        You can leave this page; it updates by itself. With notifications on (Settings &gt; Notifications) and allowed, you are told when the {apply ? 'apply' : 'analysis'} is done.
+        {rich(t, 'runProgress.youCanLeaveThisPage', { value: apply ? 'apply' : 'analysis' })}
       </p>
     </div>
   );

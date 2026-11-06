@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import {
   DESKS,
   LANE_BOTTOM,
@@ -53,16 +54,16 @@ function stationFor(activity: Activity, agent: FloorAgent): Station | null {
   switch (activity) {
     case 'pickup':
     case 'reading':
-      return DESKS.backlog;
+      return DESKS().backlog;
     case 'browsing':
-      return SHELF;
+      return SHELF();
     case 'searching':
     case 'thinking':
     case 'writing':
       return WORKSTATIONS[hashSeed(agent.id) % WORKSTATIONS.length];
     case 'delivering':
     case 'celebrating':
-      return agent.destination === 'done' ? DESKS.done : DESKS.review;
+      return agent.destination === 'done' ? DESKS().done : DESKS().review;
     default:
       return null;
   }
@@ -90,16 +91,16 @@ function carryingFor(activity: Activity): FloorAgent['carrying'] {
 /** Short label describing an activity, used in the HUD and the ticker. */
 export function describeActivity(activity: Activity): string {
   switch (activity) {
-    case 'idle': return 'waiting for work';
-    case 'walk': return 'crossing the floor';
-    case 'pickup': return 'taking a task off the backlog';
-    case 'reading': return 'reading the task brief';
-    case 'browsing': return 'pulling context and stakeholder notes';
-    case 'searching': return 'researching at the terminal';
-    case 'thinking': return 'working out the approach';
-    case 'writing': return 'writing the deliverable';
-    case 'delivering': return 'handing the work in';
-    case 'celebrating': return 'handed in';
+    case 'idle': return tr('simulation.waitingForWork');
+    case 'walk': return tr('simulation.crossingTheFloor');
+    case 'pickup': return tr('simulation.takingATaskOffThe');
+    case 'reading': return tr('simulation.readingTheTaskBrief');
+    case 'browsing': return tr('simulation.pullingContextAndStakeholderNotes');
+    case 'searching': return tr('simulation.researchingAtTheTerminal');
+    case 'thinking': return tr('simulation.workingOutTheApproach');
+    case 'writing': return tr('simulation.writingTheDeliverable');
+    case 'delivering': return tr('simulation.handingTheWorkIn');
+    case 'celebrating': return tr('simulation.handedIn');
     default: return activity;
   }
 }
@@ -343,14 +344,14 @@ function stepWalk(agent: FloorAgent, dtSec: number): boolean {
 function onEnterPhase(world: WorldState, agent: FloorAgent, activity: Activity): void {
   if (activity === 'pickup') {
     world.effects.push(makeEffect('exclaim', agent.pos.x, agent.pos.y - 30, 900));
-    pushTicker(world, `${agent.agentName} picked up ${agent.taskId}`, true);
+    pushTicker(world, tr('simulation.pickedUp', { agentName: agent.agentName, taskId: agent.taskId }), true);
   }
   if (activity === 'delivering') {
     world.delivered += 1;
     world.effects.push(makeEffect('sparkle', agent.pos.x + 10, agent.pos.y - 40, 900));
     pushTicker(
       world,
-      `${agent.taskId} moved to ${agent.destination === 'done' ? 'Done' : 'Needs Review'}`,
+      tr('simulation.movedTo', { taskId: agent.taskId, value: agent.destination === 'done' ? tr('done') : tr('simulation.needsReview') }),
       true,
     );
   }
@@ -408,14 +409,14 @@ export function syncSnapshot(world: WorldState, snapshot: AgentActivitySnapshot)
       if (existing.stage === 'handover' || existing.stage === 'leaving') {
         existing.stage = 'working';
         existing.expired = false;
-        pushTicker(world, `${task.id} is back in progress — ${existing.agentName} resumed`, true);
+        pushTicker(world, tr('simulation.isBackInProgressResumed', { id: task.id, agentName: existing.agentName }), true);
         goTo(world, existing, nextWorkStep(existing, task));
       }
       continue;
     }
     const agent = spawnAgent(world, task);
     world.agents.push(agent);
-    pushTicker(world, `${agent.agentName} started ${task.id}`, true);
+    pushTicker(world, tr('simulation.started', { agentName: agent.agentName, id: task.id }), true);
     goTo(world, agent, 'pickup');
   }
 
@@ -431,7 +432,7 @@ export function syncSnapshot(world: WorldState, snapshot: AgentActivitySnapshot)
     } else {
       // Sent back to the backlog, archived or deleted. Nothing was handed in,
       // so the agent just leaves.
-      pushTicker(world, `${agent.taskId} left In Progress`, true);
+      pushTicker(world, tr('simulation.leftInProgress', { taskId: agent.taskId }), true);
       leaveFloor(world, agent);
     }
   }
@@ -446,14 +447,14 @@ export function syncSnapshot(world: WorldState, snapshot: AgentActivitySnapshot)
  */
 export function classifyEvent(path: string): { activity: Activity | null; label: string } {
   const p = path.replace(/\\/g, '/');
-  if (p.includes('/executions/')) return { activity: null, label: 'execution log written' };
-  if (p.includes('/deliverables/')) return { activity: 'writing', label: 'deliverable written' };
-  if (p.includes('/context/')) return { activity: 'browsing', label: 'context note read' };
-  if (p.includes('/stakeholders/')) return { activity: 'browsing', label: 'stakeholder file read' };
-  if (p.includes('/outputs/')) return { activity: 'writing', label: 'output template touched' };
-  if (p.includes('/kaizen/')) return { activity: 'thinking', label: 'kaizen note written' };
-  if (/\/tasks\/.*task\.md$/.test(p)) return { activity: null, label: 'task file updated' };
-  return { activity: null, label: 'workspace file changed' };
+  if (p.includes('/executions/')) return { activity: null, label: tr('simulation.executionLogWritten') };
+  if (p.includes('/deliverables/')) return { activity: 'writing', label: tr('simulation.deliverableWritten') };
+  if (p.includes('/context/')) return { activity: 'browsing', label: tr('simulation.contextNoteRead') };
+  if (p.includes('/stakeholders/')) return { activity: 'browsing', label: tr('simulation.stakeholderFileRead') };
+  if (p.includes('/outputs/')) return { activity: 'writing', label: tr('simulation.outputTemplateTouched') };
+  if (p.includes('/kaizen/')) return { activity: 'thinking', label: tr('simulation.kaizenNoteWritten') };
+  if (/\/tasks\/.*task\.md$/.test(p)) return { activity: null, label: tr('simulation.taskFileUpdated') };
+  return { activity: null, label: tr('simulation.workspaceFileChanged') };
 }
 
 /**

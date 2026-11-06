@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import MarkdownView from '../common/MarkdownView';
 
@@ -6,6 +7,7 @@ import MarkdownView from '../common/MarkdownView';
  * Markdown is shown rendered; Copy always copies the raw text.
  */
 export default function TextDeliverableAccordion({ filePath, markdown = false }: { filePath: string; markdown?: boolean }) {
+  const { t } = useLanguage();
   const [open, setOpen] = React.useState(false);
   const [content, setContent] = React.useState<string | null>(null);
   const [fetching, setFetching] = React.useState(false);
@@ -56,12 +58,12 @@ export default function TextDeliverableAccordion({ filePath, markdown = false }:
           <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span style={{ flex: 1, fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
-          {markdown ? 'Preview' : 'Generated text'}
+          {markdown ? t('preview') : t('textDeliverableAccordion.generatedText')}
         </span>
         {content && (
           <button
             onClick={(e) => { e.stopPropagation(); handleCopy(); }}
-            title="Copy text"
+            title={t('meetingText.copyText')}
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
               fontSize: 'var(--text-xs)', fontWeight: 600,
@@ -80,7 +82,7 @@ export default function TextDeliverableAccordion({ filePath, markdown = false }:
                 <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                   <path d="M2 6l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                Copied
+                {t('shared.copied')}
               </>
             ) : (
               <>
@@ -88,7 +90,7 @@ export default function TextDeliverableAccordion({ filePath, markdown = false }:
                   <rect x="3.5" y="3.5" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.2" />
                   <path d="M2.5 7H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" stroke="currentColor" strokeWidth="1.2" />
                 </svg>
-                Copy
+                {t('shared.copy2')}
               </>
             )}
           </button>
@@ -119,7 +121,7 @@ export default function TextDeliverableAccordion({ filePath, markdown = false }:
               {content}
             </pre>
           ) : (
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>Could not load content.</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>{t('textDeliverableAccordion.couldNotLoadContent')}</span>
           )}
         </div>
       )}

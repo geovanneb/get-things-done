@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { desktopBridge, microphoneAccess, reportLanguageMenu, reportRecording, type SuggestedLanguage } from '@/utils/desktop';
@@ -106,7 +108,7 @@ async function sendBlock(meetingId: string, token: string, offset: number, block
   if (res.status >= 500 && res.status !== 507) return { ok: false, retry: true };
   if (res.status === 429) return { ok: false, retry: true };
   const body = await res.json().catch(() => ({})) as { message?: string; details?: { offset?: number } };
-  return { ok: false, retry: false, message: body.message ?? `The server refused the audio (${res.status})`, offset: body.details?.offset };
+  return { ok: false, retry: false, message: body.message ?? tr('recordingProvider.theServerRefusedTheAudio', { status: res.status }), offset: body.details?.offset };
 }
 
 /**
@@ -116,24 +118,25 @@ async function sendBlock(meetingId: string, token: string, offset: number, block
 async function captureSystemAudio(): Promise<MediaStream> {
   const display = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true }).catch((err: unknown) => {
     throw new Error((err as DOMException)?.name === 'NotAllowedError'
-      ? "The computer's sound is blocked, so only the microphone is recorded. Allow it for Get Things Done in the system's privacy settings (on a Mac: System Settings > Privacy & Security > System Audio Recording), then start again."
-      : "The computer's sound cannot be recorded here, so only the microphone is recorded.");
+      ? tr('recordingProvider.theComputerSSoundIs')
+      : tr('recordingProvider.theComputerSSoundCannot'));
   });
   for (const track of display.getVideoTracks()) track.stop();
   const audio = display.getAudioTracks().filter((t) => t.readyState === 'live');
-  if (audio.length === 0) throw new Error("The computer's sound cannot be recorded here, so only the microphone is recorded.");
+  if (audio.length === 0) throw new Error(tr('recordingProvider.theComputerSSoundCannot'));
   return new MediaStream(audio);
 }
 
 function microphoneMessage(err: unknown): string {
   const name = (err as DOMException)?.name;
-  if (name === 'NotAllowedError') return 'The microphone is blocked. Allow it for this app in your browser or system settings, then try again.';
-  if (name === 'NotFoundError') return 'No microphone was found.';
-  if (name === 'NotReadableError') return 'The microphone is in use by another app, or cannot be opened.';
-  return (err as Error)?.message || 'The recording could not start.';
+  if (name === 'NotAllowedError') return tr('micBlocked');
+  if (name === 'NotFoundError') return tr('micMissing');
+  if (name === 'NotReadableError') return tr('micBusy');
+  return (err as Error)?.message || tr('recordingProvider.theRecordingCouldNotStart');
 }
 
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useLanguage();
   const [state, setState] = useState<RecorderState>(idle);
   const session = useRef<Session | null>(null);
   const phase = useRef<Phase>('idle');
@@ -177,7 +180,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     let context: AudioContext | null = null;
     let created: string | null = null;
     try {
-      if (!window.isSecureContext || !navigator.mediaDevices) throw new Error('Recording works when the dashboard is opened on this computer, at localhost.');
+      if (!window.isSecureContext || !navigator.mediaDevices) throw new Error(t('recordingProvider.recordingWorksWhenTheDashboard'));
       // First, while the click still counts: the system asks for this only with a fresh click.
       let systemNote: string | null = null;
       if (systemAudio) {
@@ -193,7 +196,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       });
       context = new AudioContext({ sampleRate: 16_000 });
       // Never store audio under the wrong rate: a browser that cannot do 16 kHz is told so.
-      if (context.sampleRate !== 16_000) throw new Error('This browser cannot record at 16 kHz. Use the desktop app, Chrome or Edge.');
+      if (context.sampleRate !== 16_000) throw new Error(t('dictationNo16k'));
       await context.audioWorklet.addModule('/recorder-worklet.js');
       const node = new AudioWorkletNode(context, 'recorder', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       const meters = mixSources(context, node, stream, system);
@@ -232,24 +235,24 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         uploader.add(new Uint8Array(event.data.samples));
       };
       for (const track of stream.getAudioTracks()) {
-        track.addEventListener('ended', () => note('The microphone went away. Stop to save what was recorded.'));
-        const muted = 'The microphone stopped giving sound. Stop to save what was recorded.';
+        track.addEventListener('ended', () => note(t('recordingProvider.theMicrophoneWentAwayStop')));
+        const muted = t('recordingProvider.theMicrophoneStoppedGivingSound');
         track.addEventListener('mute', () => note(muted));
         // It came back: the banner says so, and that a moment may be missing, instead of a warning that no longer holds.
         track.addEventListener('unmute', () => {
           const at = lost.indexOf(muted);
           if (at >= 0) lost.splice(at, 1);
-          note('The microphone stopped for a moment and came back; that moment may be missing.');
+          note(t('recordingProvider.theMicrophoneStoppedForA'));
         });
       }
       for (const track of system?.getAudioTracks() ?? []) {
         // The microphone goes on: only the other side of a call is missing from here on.
-        track.addEventListener('ended', () => { systemOn = false; note("The computer's sound stopped being recorded. The microphone goes on."); });
+        track.addEventListener('ended', () => { systemOn = false; note(t('recordingProvider.theComputerSSoundStopped')); });
       }
       // It may have ended while the microphone and the server were being set up.
       if (system && system.getAudioTracks().every((t) => t.readyState === 'ended')) {
         systemOn = false;
-        note("The computer's sound stopped being recorded. The microphone goes on.");
+        note(t('recordingProvider.theComputerSSoundStopped'));
       }
       // The microphone's own silence, read often: the other side of a call must not hide a muted microphone.
       const listen = setInterval(() => { if (meters.microphone() > SILENCE_LEVEL) running.lastSound = Date.now(); }, 200);
@@ -267,14 +270,14 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         const gap = elapsed - captured > GAP_SECONDS ? elapsed - captured : 0;
         // Audio at risk comes first.
         let warning: string | null = null;
-        if (uploader.unsaved > 30 * BYTES_PER_SECOND) warning = `The server is not answering: ${Math.round(uploader.unsaved / BYTES_PER_SECOND)} s of audio waits in this page and is lost if it closes.`;
-        else if (at - running.lastBlock > 5000) warning = 'No audio is arriving from the microphone.';
-        else if (at - running.lastSound > SILENCE_MS) warning = 'No sound from the microphone for a while. Is it the right one, and is it muted?';
+        if (uploader.unsaved > 30 * BYTES_PER_SECOND) warning = t('recordingProvider.theServerIsNotAnswering', { round: Math.round(uploader.unsaved / BYTES_PER_SECOND) });
+        else if (at - running.lastBlock > 5000) warning = t('recordingProvider.noAudioIsArrivingFrom');
+        else if (at - running.lastSound > SILENCE_MS) warning = t('recordingProvider.noSoundFromTheMicrophone');
         if (uploader.failed) {
           if (phase.current === 'stopping') return; // Stop is on it, and says what happened
           release(running);
           ended();
-          update({ status: 'failed', error: `${uploader.failed} See the meeting on the Meetings page.`, warning: null, saved: uploader.saved / BYTES_PER_SECOND, level: 0 });
+          update({ status: 'failed', error: t('recordingProvider.seeTheMeetingOnThe', { failed: uploader.failed }), warning: null, saved: uploader.saved / BYTES_PER_SECOND, level: 0 });
           return;
         }
         const systemLevel = meters.system && systemOn ? meters.system() : null;
@@ -289,7 +292,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       ended();
       update({ ...idle, status: 'failed', error: microphoneMessage(err), title });
     }
-  }, [ended, release, update]);
+  }, [ended, release, update, t]);
 
   /** A change of language or an answer is done: reads made meanwhile are not used, and the suggestion is read again. */
   const settled = useCallback(() => {
@@ -311,12 +314,12 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         // What was heard before says nothing about the language set now: the server dropped the suggestion too.
         if (session.current === s) update({ language: changed.language, languageError: null, suggestion: null });
       } catch (err) {
-        if (session.current === s) update({ languageError: `The language was not changed: ${(err as Error).message}` });
+        if (session.current === s) update({ languageError: t('recordingProvider.theLanguageWasNotChanged', { message: (err as Error).message }) });
       }
     };
     s.languageChange = s.languageChange.then(change).finally(settled);
     return s.languageChange;
-  }, [update, settled]);
+  }, [update, settled, t]);
 
   const stop = useCallback((): Promise<void> => {
     if (stopping.current) return stopping.current;
@@ -342,20 +345,20 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       await uploader.flush().catch(() => {});
       clearInterval(showSaved);
       if (uploader.failed) {
-        update({ status: 'failed', error: `${uploader.failed} See the meeting on the Meetings page.` });
+        update({ status: 'failed', error: t('recordingProvider.seeTheMeetingOnThe', { failed: uploader.failed }) });
         return;
       }
       await apiPost(`/api/meeting-queue/${meetingId}/recording/finish`, { token, offset: uploader.saved, generation, queue: true });
-      const notCaptured = gap > 90 ? `About ${Math.round(gap / 60)} min of the meeting was not captured.` : gap > GAP_SECONDS ? `About ${Math.round(gap)} s of the meeting was not captured.` : '';
-      const missing = [notCaptured, complete ? '' : 'The last moments may be missing.'].filter(Boolean).map((m) => ` ${m}`).join('');
-      setState((current) => ({ ...idle, notice: `"${current.title}" is saved and waits for its transcript.${missing}`, lastMeetingId: meetingId }));
+      const notCaptured = gap > 90 ? t('recordingProvider.aboutMinOfTheMeeting', { round: Math.round(gap / 60) }) : gap > GAP_SECONDS ? t('recordingProvider.aboutSOfTheMeeting', { gap: Math.round(gap) }) : '';
+      const missing = [notCaptured, complete ? '' : t('recordingProvider.theLastMomentsMayBe')].filter(Boolean).map((m) => ` ${m}`).join('');
+      setState((current) => ({ ...idle, notice: t('recordingProvider.isSavedAndWaitsFor', { title: current.title, missing }), lastMeetingId: meetingId }));
     };
     const running = run()
-      .catch((err: Error) => update({ status: 'failed', error: `${err.message} The audio is saved: finish it on the Meetings page.` }))
+      .catch((err: Error) => update({ status: 'failed', error: t('recordingProvider.theAudioIsSavedFinish', { message: err.message }) }))
       .finally(ended);
     stopping.current = running;
     return running;
-  }, [ended, release, update]);
+  }, [ended, release, update, t]);
 
   const discard = useCallback(async () => {
     if (phase.current === 'starting' || phase.current === 'stopping' || phase.current === 'discarding') return;
@@ -366,11 +369,11 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     const res = id ? await fetch(`/api/meeting-queue/${id}`, { method: 'DELETE' }).catch(() => null) : null;
     ended();
     if (id && !res?.ok) {
-      update({ status: 'failed', error: 'The recording could not be deleted just now. It is on the Meetings page: remove it there.', warning: null });
+      update({ status: 'failed', error: t('recordingProvider.theRecordingCouldNotBe'), warning: null });
       return;
     }
     setState(idle);
-  }, [ended, release, state.meetingId, update]);
+  }, [ended, release, state.meetingId, update, t]);
 
   const dismiss = useCallback(() => setState((s) => ({ ...idle, lastMeetingId: s.lastMeetingId })), []);
 
@@ -426,12 +429,12 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (err) {
         // Refused: it is no longer the current suggestion (the language was changed meanwhile); read it again.
-        if (session.current === s) update({ suggestion: null, languageError: answer === 'switch' ? `The language was not changed: ${(err as Error).message}` : null });
+        if (session.current === s) update({ suggestion: null, languageError: answer === 'switch' ? t('recordingProvider.theLanguageWasNotChanged', { message: (err as Error).message }) : null });
       }
     };
     s.languageChange = s.languageChange.then(send).finally(settled);
     return s.languageChange;
-  }, [update, settled]);
+  }, [update, settled, t]);
 
   // In a browser, a suggestion made while the tab is in the background is said once by the system, if allowed. The
   // desktop app says it from the menu bar instead.
@@ -441,8 +444,8 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     notified.current = suggestion.id;
     if (!document.hidden || Notification.permission !== 'granted') return;
     const current = languages.find((l) => l.id === language)?.label ?? language;
-    new Notification(suggestion.mode === 'auto' ? `Most speech sounds like ${suggestion.label}` : `This sounds like ${suggestion.label}`, {
-      body: suggestion.mode === 'auto' ? `Set ${suggestion.label} for a more accurate transcript.` : `The recording is set to ${current}. Open the dashboard to switch.`,
+    new Notification(suggestion.mode === 'auto' ? t('recordingProvider.mostSpeechSoundsLike', { label: suggestion.label }) : t('recordingProvider.thisSoundsLike', { label: suggestion.label }), {
+      body: suggestion.mode === 'auto' ? t('recordingProvider.setForAMoreAccurate', { label: suggestion.label }) : t('recordingProvider.theRecordingIsSetTo', { current }),
       tag: `gtd-language-${suggestion.id}`,
     });
   }, [suggestion, language, languages]);
@@ -452,7 +455,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (status !== 'recording' || languages.length === 0) return;
     const shown = languages.filter((l) => l.common || l.id === language).map(({ id, label }) => ({ id, label }));
-    reportLanguageMenu({ current: language, options: [{ id: 'auto', label: 'Auto' }, ...shown], ...(suggestion ? { suggested: suggestion } : {}) });
+    reportLanguageMenu({ current: language, options: [{ id: 'auto', label: t('recordingBanner.auto') }, ...shown], ...(suggestion ? { suggested: suggestion } : {}) });
   }, [status, language, languages, suggestion]);
 
   const value = useMemo(() => ({ ...state, active, start, stop, setLanguage, answerSuggestion, discard, dismiss }), [state, active, start, stop, setLanguage, answerSuggestion, discard, dismiss]);

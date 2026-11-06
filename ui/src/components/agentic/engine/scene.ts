@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * Fixed layout of the Agent Floor room, in logical pixels.
  *
@@ -37,29 +38,29 @@ export interface Station {
 }
 
 /** The three paper desks: where work waits, waits for review, and lands. */
-export const DESKS = {
+export const DESKS = () => ({
   backlog: {
     id: 'desk-backlog',
     sprite: { x: 36, y: 150 },
     anchor: { x: 60, y: 194 },
     lane: LANE_BOTTOM,
-    label: 'BACKLOG',
+    label: tr('scene.backlog'),
   } as Station,
   review: {
     id: 'desk-review',
     sprite: { x: 216, y: 150 },
     anchor: { x: 240, y: 194 },
     lane: LANE_BOTTOM,
-    label: 'REVIEW',
+    label: tr('scene.review'),
   } as Station,
   done: {
     id: 'desk-done',
     sprite: { x: 396, y: 150 },
     anchor: { x: 420, y: 194 },
     lane: LANE_BOTTOM,
-    label: 'DONE',
+    label: tr('scene.done'),
   } as Station,
-};
+});
 
 /** Where a paper stack sits on a desk, relative to the desk sprite origin. */
 export const STACK_OFFSET: Point = { x: 19, y: 4 };
@@ -69,13 +70,13 @@ export const STACK_STEP = 3;
 export const STACK_MAX_SHEETS = 12;
 
 /** The bookshelf — context notes, stakeholder files, everything the agent reads. */
-export const SHELF: Station = {
+export const SHELF = (): Station => ({
   id: 'shelf',
   sprite: { x: 86, y: 40 },
   anchor: { x: 106, y: LANE_TOP },
   lane: LANE_TOP,
-  label: 'CONTEXT',
-};
+  label: tr('scene.context'),
+});
 
 /** Three CRT workstations: research and output generation happen here. */
 export const WORKSTATIONS: Station[] = [

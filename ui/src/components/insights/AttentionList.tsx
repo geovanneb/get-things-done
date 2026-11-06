@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
 import { Link } from 'react-router-dom';
 import type { InsightsAttentionItem } from '@/types';
 import { STATUS } from './palette';
@@ -8,15 +10,15 @@ import { formatDays } from './format';
  * carried by an icon and a label as well as the colour, so it never depends on
  * colour alone.
  */
-const REASON: Record<
+const REASON = (): Record<
   InsightsAttentionItem['reason'],
   { label: string; color: string; icon: string }
-> = {
-  overdue: { label: 'Overdue', color: STATUS.overdue, icon: '!' },
-  review: { label: 'Waiting on you', color: STATUS.review, icon: '◆' },
-  due_soon: { label: 'Due soon', color: STATUS.due_soon, icon: '•' },
-  stalled: { label: 'Stalled', color: STATUS.stalled, icon: '–' },
-};
+> => ({
+  overdue: { label: tr('attentionList.overdue'), color: STATUS.overdue, icon: '!' },
+  review: { label: tr('attentionList.waitingOnYou'), color: STATUS.review, icon: '◆' },
+  due_soon: { label: tr('attentionList.dueSoon'), color: STATUS.due_soon, icon: '•' },
+  stalled: { label: tr('attentionList.stalled'), color: STATUS.stalled, icon: '–' },
+});
 
 const PRIORITY_COLOR: Record<string, string> = {
   critical: 'var(--priority-critical)',
@@ -28,15 +30,16 @@ const PRIORITY_COLOR: Record<string, string> = {
 /** The urgency line on the right of each row. */
 function timing(item: InsightsAttentionItem): string {
   if (item.reason === 'overdue' && item.days_to_due !== undefined) {
-    return `${formatDays(Math.abs(item.days_to_due))} late`;
+    return tr('attentionList.late', { abs: formatDays(Math.abs(item.days_to_due)) });
   }
   if (item.reason === 'due_soon' && item.days_to_due !== undefined) {
-    return item.days_to_due <= 0 ? 'due today' : `due in ${formatDays(item.days_to_due)}`;
+    return item.days_to_due <= 0 ? tr('attentionList.dueToday') : tr('attentionList.dueIn', { days_to_due: formatDays(item.days_to_due) });
   }
-  return item.waiting_days <= 0 ? 'since today' : `waiting ${formatDays(item.waiting_days)}`;
+  return item.waiting_days <= 0 ? tr('attentionList.sinceToday') : tr('attentionList.waiting', { waiting_days: formatDays(item.waiting_days) });
 }
 
 export default function AttentionList({ items }: { items: InsightsAttentionItem[] }) {
+  const { t } = useLanguage();
   if (items.length === 0) {
     return (
       <div
@@ -47,10 +50,10 @@ export default function AttentionList({ items }: { items: InsightsAttentionItem[
         }}
       >
         <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginBottom: 4 }}>
-          Nothing is waiting on you
+          {t('attentionList.nothingIsWaitingOnYou')}
         </div>
         <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-          No task is in review, overdue, or due in the next three days.
+          {t('attentionList.noTaskIsInReview')}
         </div>
       </div>
     );
@@ -59,7 +62,7 @@ export default function AttentionList({ items }: { items: InsightsAttentionItem[
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
       {items.map((item, i) => {
-        const reason = REASON[item.reason];
+        const reason = REASON()[item.reason];
         return (
           <li
             key={item.id}
@@ -119,14 +122,14 @@ export default function AttentionList({ items }: { items: InsightsAttentionItem[
                   }}
                 >
                   <span style={{ color: reason.color, fontWeight: 600 }}>{reason.label}</span>
-                  {item.stakeholders.length > 0 && ` · for ${item.stakeholders.join(', ')}`}
+                  {item.stakeholders.length > 0 && t('attentionList.for', { join: item.stakeholders.join(', ') })}
                   {` · ${item.id}`}
                 </span>
               </span>
 
               <span
                 aria-hidden
-                title={`Priority: ${item.priority}`}
+                title={t('attentionList.priority', { priority: item.priority })}
                 style={{
                   width: 6,
                   height: 6,

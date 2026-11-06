@@ -1,45 +1,47 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
 import { forwardRef, useState } from 'react';
 import Badge from '@/components/common/Badge';
 import type { ContextUpdateStatus } from '@/types';
 import { typeMeta, updateType } from '@/utils/updateTypes';
 
 /** What each status means to the user, and what they should do next. */
-export const STATUS_META: Record<ContextUpdateStatus, { label: string; color: string; subtle: string; step: number; next: string }> = {
+export const STATUS_META = (): Record<ContextUpdateStatus, { label: string; color: string; subtle: string; step: number; next: string }> => ({
   ready: {
-    label: 'Run the analyze command', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 1,
-    next: 'Materials are saved. Run the analysis: the agent reads everything and proposes changes; nothing in your context changes yet.',
+    label: tr('shared.runTheAnalyzeCommand'), color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 1,
+    next: tr('shared.materialsAreSavedRunThe'),
   },
   analyzing: {
-    label: 'Analyzing…', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 1,
-    next: 'The agent is reading the materials and your current context. This page updates by itself when the proposals are ready.',
+    label: tr('shared.analyzing'), color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 1,
+    next: tr('shared.theAgentIsReadingThe'),
   },
   in_review: {
-    label: 'Ready for your review', color: 'var(--color-warning)', subtle: 'var(--color-warning-subtle)', step: 2,
-    next: 'Check each proposal and tick the ones you accept. Unticked proposals are rejected. When you are done, approve the selection.',
+    label: tr('shared.readyForYourReview'), color: 'var(--color-warning)', subtle: 'var(--color-warning-subtle)', step: 2,
+    next: tr('shared.checkEachProposalAndTick'),
   },
   approved: {
-    label: 'Approved: run the apply command', color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 3,
-    next: 'Your selection is locked. Apply it: the agent writes the accepted changes into your context.',
+    label: tr('shared.approvedRunTheApplyCommand'), color: 'var(--color-info)', subtle: 'var(--color-info-subtle)', step: 3,
+    next: tr('shared.yourSelectionIsLockedApply'),
   },
   applying: {
-    label: 'Applying…', color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 3,
-    next: 'The agent is writing the accepted changes. This page updates by itself when it is done.',
+    label: tr('shared.applying'), color: 'var(--color-accent)', subtle: 'var(--color-accent-subtle)', step: 3,
+    next: tr('shared.theAgentIsWritingThe'),
   },
   done: {
-    label: 'Done', color: 'var(--color-success)', subtle: 'var(--color-success-subtle)', step: 4,
-    next: 'Finished. The record below shows what was proposed and decided. The uploaded materials were deleted to keep your workspace small.',
+    label: tr('done'), color: 'var(--color-success)', subtle: 'var(--color-success-subtle)', step: 4,
+    next: tr('shared.finishedTheRecordBelowShows'),
   },
-};
+});
 
-export const STEPS = [
-  { label: 'Collect', hint: 'You upload material' },
-  { label: 'Analyze', hint: 'Agent proposes changes' },
-  { label: 'Review', hint: 'You accept or reject' },
-  { label: 'Apply', hint: 'Agent writes accepted changes' },
-];
+export const STEPS = () => ([
+  { label: tr('shared.collect'), hint: tr('shared.youUploadMaterial') },
+  { label: tr('shared.analyze'), hint: tr('shared.agentProposesChanges') },
+  { label: tr('shared.review'), hint: tr('shared.youAcceptOrReject') },
+  { label: tr('analysisRun.apply'), hint: tr('shared.agentWritesAcceptedChanges') },
+]);
 
 export function StatusPill({ status }: { status: ContextUpdateStatus }) {
-  const meta = STATUS_META[status];
+  const meta = STATUS_META()[status];
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 8px', borderRadius: 'var(--radius-sm)', background: meta.subtle, color: meta.color, fontSize: 'var(--text-xs)', fontWeight: 600, whiteSpace: 'nowrap' }}>
       {(status === 'analyzing' || status === 'applying') && (
@@ -52,10 +54,11 @@ export function StatusPill({ status }: { status: ContextUpdateStatus }) {
 
 /** Collect, Analyze, Review, Apply: where this update is, so the user always knows the next move. */
 export function StepIndicator({ status }: { status: ContextUpdateStatus }) {
-  const current = STATUS_META[status].step;
+  const { t } = useLanguage();
+  const current = STATUS_META()[status].step;
   return (
-    <ol aria-label="Progress" style={{ display: 'flex', gap: 0, listStyle: 'none', margin: 0, padding: 0, flexWrap: 'wrap', rowGap: 8 }}>
-      {STEPS.map((step, i) => {
+    <ol aria-label={t('shared.progress')} style={{ display: 'flex', gap: 0, listStyle: 'none', margin: 0, padding: 0, flexWrap: 'wrap', rowGap: 8 }}>
+      {STEPS().map((step, i) => {
         const done = i < current;
         const active = i === current;
         const color = done ? 'var(--color-success)' : active ? 'var(--color-accent)' : 'var(--color-text-muted)';
@@ -69,7 +72,7 @@ export function StepIndicator({ status }: { status: ContextUpdateStatus }) {
               <span style={{ fontSize: 'var(--text-sm)', fontWeight: active ? 700 : 500, color: active ? 'var(--color-text)' : 'var(--color-text-secondary)' }}>{step.label}</span>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{step.hint}</span>
             </span>
-            {i < STEPS.length - 1 && <span aria-hidden="true" style={{ flex: 1, height: 1, minWidth: 12, background: done ? 'var(--color-success)' : 'var(--color-border)', margin: '0 8px' }} />}
+            {i < STEPS().length - 1 && <span aria-hidden="true" style={{ flex: 1, height: 1, minWidth: 12, background: done ? 'var(--color-success)' : 'var(--color-border)', margin: '0 8px' }} />}
           </li>
         );
       })}
@@ -94,6 +97,7 @@ export async function copyText(text: string): Promise<boolean> {
  */
 export const CommandBox = forwardRef<HTMLButtonElement, { command: string; label: string; emphasis?: boolean; onCopied?: () => void }>(
   function CommandBox({ command, label, emphasis = false, onCopied }, ref) {
+    const { t } = useLanguage();
     const [copied, setCopied] = useState(false);
     const copy = async () => {
       if (!(await copyText(command))) return;
@@ -108,14 +112,14 @@ export const CommandBox = forwardRef<HTMLButtonElement, { command: string; label
           <code style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '8px 10px', color: 'var(--color-text)', overflowX: 'auto', whiteSpace: 'nowrap', userSelect: 'all' }}>
             {command}
           </code>
-          <button ref={ref} type="button" onClick={copy} aria-label={`Copy ${command}`} data-next-action={emphasis ? '' : undefined}
+          <button ref={ref} type="button" onClick={copy} aria-label={t('shared.copy', { command })} data-next-action={emphasis ? '' : undefined}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, height: 36, padding: '0 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)', fontWeight: emphasis ? 600 : 500, cursor: 'pointer',
               border: `1px solid ${copied ? 'var(--color-border)' : emphasis ? 'var(--color-accent)' : 'var(--color-border)'}`,
               background: copied ? 'var(--color-success-subtle)' : emphasis ? 'var(--color-accent)' : 'var(--color-surface)',
               color: copied ? 'var(--color-success)' : emphasis ? 'var(--color-text-on-accent)' : 'var(--color-text)',
             }}>
-            {copied ? 'Copied' : emphasis ? 'Copy command' : 'Copy'}
+            {copied ? t('shared.copied') : emphasis ? t('updateDetail.copyCommand') : t('shared.copy2')}
           </button>
         </div>
       </div>

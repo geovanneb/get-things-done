@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React, { useState } from 'react';
 import Notice from '@/components/common/Notice';
 import Page, { PageHeader } from '@/components/common/Page';
@@ -17,12 +20,12 @@ import { useApi } from '@/hooks/useApi';
 import { useDataVersion } from '@/store';
 import type { InsightsData } from '@/types';
 
-const WINDOW_LABEL: Record<WindowValue, string> = {
-  '7': 'last 7 days',
-  '30': 'last 30 days',
-  '90': 'last 90 days',
-  all: 'all time',
-};
+const WINDOW_LABEL = (): Record<WindowValue, string> => ({
+  '7': tr('insights.last7Days'),
+  '30': tr('insights.last30Days'),
+  '90': tr('insights.last90Days'),
+  all: tr('insights.allTime'),
+});
 
 const GRID_TWO_COL: React.CSSProperties = {
   display: 'grid',
@@ -32,6 +35,7 @@ const GRID_TWO_COL: React.CSSProperties = {
 };
 
 export default function InsightsView() {
+  const { t } = useLanguage();
   const [window, setWindow] = useState<WindowValue>('30');
   // Task files are the source for every panel, so the SSE watcher's `tasks`
   // scope is what should trigger a refresh.
@@ -41,7 +45,7 @@ export default function InsightsView() {
     [tasksVersion],
   );
 
-  if (loading && !data) return <LoadingSpinner text="Loading insights…" />;
+  if (loading && !data) return <LoadingSpinner text={t('insights.loadingInsights')} />;
 
   // Only fall back to the empty state when there is nothing to show. A failed
   // background refetch (the SSE watcher fires one on every file change) must not
@@ -50,66 +54,64 @@ export default function InsightsView() {
     return (
       <Page width="wide">
         {error
-          ? <Notice tone="critical" title="Could not load insights.">{error}</Notice>
-          : <EmptyState title="No insights yet" description="Insights appear once tasks move across the board." />}
+          ? <Notice tone="critical" title={t('insights.couldNotLoadInsights')}>{error}</Notice>
+          : <EmptyState title={t('insights.noInsightsYet')} description={t('insights.insightsAppearOnceTasksMove')} />}
       </Page>
     );
   }
 
   const s = data.summary;
-  const windowLabel = WINDOW_LABEL[window];
+  const windowLabel = WINDOW_LABEL()[window];
 
   return (
     // Hold the previous render at reduced opacity while a refetch is in flight,
     // rather than flashing a skeleton and jumping the layout.
     <Page width="wide" aria-busy={loading || undefined} style={{ gap: 'var(--space-4)', opacity: loading ? 0.6 : 1, transition: 'opacity 120ms ease' }}>
       {/* One filter row, scoping everything below it. */}
-      <PageHeader description="Delivery, effort and quality across your workspace." actions={<WindowFilter value={window} onChange={setWindow} />} />
+      <PageHeader description={t('insights.deliveryEffortAndQualityAcross')} actions={<WindowFilter value={window} onChange={setWindow} />} />
 
-      {error && <Notice tone="warning" title="Could not refresh.">{error}. Showing the last loaded data.</Notice>}
+      {error && <Notice tone="warning" title={t('insights.couldNotRefresh')}>{rich(t, 'insights.showingTheLastLoadedData', { error: error })}</Notice>}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <StatTile
-          label="Waiting on you"
+          label={t('attentionList.waitingOnYou')}
           value={String(s.awaiting_review)}
           sub={
             s.awaiting_review === 0
-              ? 'review queue is clear'
-              : `oldest ${formatDays(s.awaiting_review_oldest_days)}`
+              ? t('insights.reviewQueueIsClear')
+              : t('insights.oldest', { awaiting_review_oldest_days: formatDays(s.awaiting_review_oldest_days) })
           }
           tone={s.awaiting_review > 0 ? 'critical' : 'success'}
         />
         <StatTile
-          label="Completed"
+          label={t('flowChart.completed')}
           value={String(s.completed)}
-          sub={`${s.open} still open · ${windowLabel}`}
+          sub={t('insights.stillOpen', { open: s.open, windowLabel })}
         />
         <StatTile
-          label="Median turnaround"
+          label={t('insights.medianTurnaround')}
           value={formatHours(s.median_turnaround_hours)}
-          sub={`90% within ${formatHours(s.p90_turnaround_hours)}`}
+          sub={t('insights.90Within', { p90_turnaround_hours: formatHours(s.p90_turnaround_hours) })}
         />
         <StatTile
-          label="First-pass rate"
+          label={t('insights.firstPassRate')}
           value={formatRate(s.first_pass_rate)}
           sub={
             s.first_pass_rate === null
-              ? 'no completed tasks yet'
-              : `${Math.round(s.first_pass_rate * s.first_pass_of)} of ${
-                  s.first_pass_of
-                } needed one run`
+              ? t('insights.noCompletedTasksYet')
+              : t('insights.ofNeededOneRun', { round: Math.round(s.first_pass_rate * s.first_pass_of), first_pass_of: s.first_pass_of })
           }
         />
         <StatTile
-          label="On time"
+          label={t('insights.onTime')}
           value={formatRate(s.on_time_rate)}
-          sub={`of ${s.on_time_of} with a due date`}
+          sub={t('insights.ofWithADueDate', { on_time_of: s.on_time_of })}
         />
       </div>
 
       <Panel
-        title="Needs your attention"
-        hint="Agents stop at Needs Review by design, so nothing closes until you look at it."
+        title={t('insights.needsYourAttention')}
+        hint={t('insights.agentsStopAtNeedsReview')}
       >
         <AttentionList items={data.attention} />
       </Panel>
@@ -120,70 +122,70 @@ export default function InsightsView() {
 
       <div style={GRID_TWO_COL}>
         <Panel
-          title="Who your work is for"
-          hint="Tasks per stakeholder. A single tall bar means your output is concentrated."
+          title={t('insights.whoYourWorkIsFor')}
+          hint={t('insights.tasksPerStakeholderASingle')}
         >
           <BarList
             rows={data.by_stakeholder}
             coloring={{ mode: 'emphasis', lead: EMPHASIS.lead, rest: EMPHASIS.rest }}
-            emptyMessage="No tasks reference a stakeholder in this window."
+            emptyMessage={t('insights.noTasksReferenceAStakeholder')}
             showShare
           />
         </Panel>
 
         <Panel
-          title="What you produce"
-          hint="Tasks per output template, not raw file format."
+          title={t('insights.whatYouProduce')}
+          hint={t('insights.tasksPerOutputTemplateNot')}
         >
           <BarList
             rows={data.by_output}
             coloring={{ mode: 'single', color: SERIES.completed }}
-            emptyMessage="No deliverables reference an output template in this window."
+            emptyMessage={t('insights.noDeliverablesReferenceAnOutput')}
           />
         </Panel>
       </div>
 
       <div style={GRID_TWO_COL}>
         <Panel
-          title="Rework watchlist"
-          hint="Tasks an agent had to run more than once. Usually a sign the brief was ambiguous."
+          title={t('insights.reworkWatchlist')}
+          hint={t('insights.tasksAnAgentHadTo')}
         >
           <BarList
             rows={data.rework}
             coloring={{ mode: 'ramp', step: (i, n) => rampStep(n - 1 - i, n) }}
-            emptyMessage="Every task was done in a single run."
+            emptyMessage={t('insights.everyTaskWasDoneIn')}
             unit="runs"
           />
         </Panel>
 
         <Panel
-          title="Lessons captured"
-          hint="Kaizen entries by area. The tall bar is what keeps going wrong."
+          title={t('insights.lessonsCaptured')}
+          hint={t('insights.kaizenEntriesByAreaThe')}
         >
           <BarList
             rows={data.kaizen}
             coloring={{ mode: 'single', color: SERIES.completed }}
-            emptyMessage="No kaizen entries yet."
+            emptyMessage={t('insights.noKaizenEntriesYet')}
           />
         </Panel>
       </div>
 
       <div style={GRID_TWO_COL}>
         <Panel
-          title="Created vs completed"
-          hint="Per week. Created running ahead of completed means the backlog is growing."
+          title={t('insights.createdVsCompleted')}
+          hint={t('insights.perWeekCreatedRunningAhead')}
         >
           <FlowChart data={data.weekly} />
         </Panel>
 
         <Panel
-          title="Turnaround distribution"
+          title={t('insights.turnaroundDistribution')}
           hint={
             s.median_review_hours === null
-              ? 'From writing a task to signing it off.'
-              : `From writing a task to signing it off. Of that, a median ${formatHours(
+              ? t('insights.fromWritingATaskTo')
+              : t('insights.fromWritingATaskTo2', { median_review_hours: formatHours(
                   s.median_review_hours,
-                )} was waiting on your review.`
+                ) })
           }
         >
           <TurnaroundChart data={data.turnaround_buckets} />

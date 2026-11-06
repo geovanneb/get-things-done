@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useCallback, useEffect } from 'react';
 import { useAppDispatch, useAppState } from '@/store';
 import { apiGet, apiPut } from '@/utils/api';
@@ -19,14 +20,15 @@ export function useLoadSidebar(): void {
 
 /** Shows a change at once and saves it to the workspace. A failed save reloads what is really saved. */
 export function useSaveSidebar(): (next: SidebarPrefs) => void {
+  const { t } = useLanguage();
   const dispatch = useAppDispatch();
   return useCallback((next: SidebarPrefs) => {
     dispatch({ type: 'SET_SIDEBAR', payload: next });
     apiPut('/api/workspace/sidebar', next).catch(() => {
-      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'error', message: 'Could not save the sidebar order.' } });
+      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'error', message: t('useSidebar.couldNotSaveTheSidebar') } });
       apiGet<SidebarPrefs>('/api/workspace/sidebar')
         .then((saved) => dispatch({ type: 'SET_SIDEBAR', payload: saved }))
         .catch(() => undefined);
     });
-  }, [dispatch]);
+  }, [dispatch, t]);
 }

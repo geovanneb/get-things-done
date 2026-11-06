@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import React from 'react';
 import { PlusIcon } from './icons';
 
@@ -7,7 +8,7 @@ interface AddButtonProps {
 }
 
 /** The small text "+ Add" button used above a Deliverables (or similar) list. */
-export default function AddButton({ onClick, children = 'Add' }: AddButtonProps) {
+export default function AddButton({ onClick, children = tr('orgChartsPanel.add') }: AddButtonProps) {
   return (
     <button
       type="button"

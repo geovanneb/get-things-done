@@ -1,3 +1,5 @@
+import { scheduleText } from '@/i18n/serverText';
+import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
 import { useLanguage } from '../i18n/LanguageProvider';
 import LanguageSettings from '../components/settings/LanguageSettings';
@@ -103,23 +105,23 @@ const ICON_MONITOR = (
   </svg>
 );
 
-const THEME_OPTIONS: Array<SegmentOption<ThemeMode>> = [
-  { value: 'light',  label: 'Light',  icon: ICON_SUN },
-  { value: 'dark',   label: 'Dark',   icon: ICON_MOON },
-  { value: 'system', label: 'System', icon: ICON_MONITOR },
-];
+const THEME_OPTIONS = (): Array<SegmentOption<ThemeMode>> => ([
+  { value: 'light',  label: tr('light'),  icon: ICON_SUN },
+  { value: 'dark',   label: tr('dark'),   icon: ICON_MOON },
+  { value: 'system', label: tr('system'), icon: ICON_MONITOR },
+]);
 
-const TEXT_SIZE_OPTIONS: Array<SegmentOption<TextSize>> = [
-  { value: 'small',   label: 'Small' },
-  { value: 'default', label: 'Default' },
-  { value: 'large',   label: 'Large' },
-];
+const TEXT_SIZE_OPTIONS = (): Array<SegmentOption<TextSize>> => ([
+  { value: 'small',   label: tr('small') },
+  { value: 'default', label: tr('default') },
+  { value: 'large',   label: tr('large') },
+]);
 
-function AccentPicker({ value, onChange }: { value: string; onChange: (next: typeof ACCENTS[number]['name']) => void }) {
+function AccentPicker({ value, onChange }: { value: string; onChange: (next: ReturnType<typeof ACCENTS>[number]['name']) => void }) {
   const { t } = useLanguage();
   return (
     <div role="radiogroup" aria-label={t('accentColour')} style={{ display: 'flex', gap: '10px' }}>
-      {ACCENTS.map(accent => {
+      {ACCENTS().map(accent => {
         const selected = accent.name === value;
         return (
           <button
@@ -176,7 +178,7 @@ function CleanupPointer() {
       </p>
       {data && (
         <p style={{ margin: '8px 0 0' }}>
-          {t('nowStatus', { status: data.settings.enabled ? `${data.summary}.` : t('paused') })} {data.settings.memory_review.enabled ? t('memoryReviewOn') : t('memoryReviewOff')} {cleanupSummary(data.settings)}
+          {t('nowStatus', { status: data.settings.enabled ? `${scheduleText(data.summary)}.` : t('paused') })} {data.settings.memory_review.enabled ? t('memoryReviewOn') : t('memoryReviewOff')} {cleanupSummary(data.settings)}
         </p>
       )}
       {error && <p role="alert" style={{ margin: '8px 0 0', color: 'var(--color-critical)' }}>{error}</p>}
@@ -835,7 +837,7 @@ export default function SettingsView() {
           <SegmentedControl
             label={t('theme')}
             value={theme}
-            options={THEME_OPTIONS.map(option => ({ ...option, label: t(option.value) }))}
+            options={THEME_OPTIONS().map(option => ({ ...option, label: t(option.value) }))}
             onChange={next => dispatch({ type: 'SET_THEME', payload: next })}
           />
           {theme === 'system' && (
@@ -856,7 +858,7 @@ export default function SettingsView() {
           <SegmentedControl
             label={t('textSize')}
             value={textSize}
-            options={TEXT_SIZE_OPTIONS.map(option => ({ ...option, label: t(option.value) }))}
+            options={TEXT_SIZE_OPTIONS().map(option => ({ ...option, label: t(option.value) }))}
             onChange={next => dispatch({ type: 'SET_TEXT_SIZE', payload: next })}
           />
         </FieldRow>

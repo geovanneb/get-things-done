@@ -1,3 +1,6 @@
+import { serverText } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import Button from '@/components/common/Button';
 import { usePageApi } from '@/hooks/usePageApi';
@@ -49,6 +52,7 @@ export default forwardRef<AnalysisRunHandle, {
   /** A start failed: the page brings the box (and its message) into view. */
   onStartFailed?: () => void;
 }>(function AnalysisRun({ updateId, status, onChange, onRunning, startable = true, manual, onAction, onStartFailed }, handle) {
+  const { t } = useLanguage();
   // The page's requests: bound to the workspace it was opened for, when it was opened from a notice.
   const api = usePageApi();
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
@@ -129,7 +133,7 @@ export default forwardRef<AnalysisRunHandle, {
       onChange();
     } catch (err) {
       if (mine === generation.current) {
-        setError(err instanceof Error ? err.message : 'Could not start the analysis.');
+        setError(err instanceof Error ? err.message : t('analysisRun.couldNotStartTheAnalysis'));
         onStartFailed?.();
       }
     } finally { if (mine === generation.current) setBusy(false); }
@@ -144,14 +148,14 @@ export default forwardRef<AnalysisRunHandle, {
       await load();
       onChange();
     } catch (err) {
-      if (mine === generation.current) setError(err instanceof Error ? err.message : 'Could not stop the analysis.');
+      if (mine === generation.current) setError(err instanceof Error ? err.message : t('analysisRun.couldNotStopTheAnalysis'));
     } finally { if (mine === generation.current) setBusy(false); }
   };
 
-  const problem = runner?.problems[0]?.message;
+  const problem = serverText(runner?.problems[0]?.message);
   const ended = run && !running ? run : null;
   const command = startable ? COMMAND_FOR[status] : undefined;
-  const noun = (ended ?? run)?.command === 'apply' ? 'Apply' : 'Analysis';
+  const noun = (ended ?? run)?.command === 'apply' ? t('analysisRun.apply') : t('analysisRun.analysis');
   // The dashboard runs it: one primary button, the command one click away. Otherwise copying it is the main action.
   const action: NextAction = running ? 'running'
     : !command ? 'none'
@@ -162,64 +166,64 @@ export default forwardRef<AnalysisRunHandle, {
   useEffect(() => { onAction?.(action); }, [action, onAction]);
   useEffect(() => () => onAction?.('none'), [onAction]);
   useImperativeHandle(handle, () => ({ start: () => { if (action === 'run') void start(); } }));
-  const label = command === 'analyze' ? 'Run analysis' : status === 'applying' ? 'Continue applying' : `Apply with ${runner?.label ?? 'Claude Code'}`;
+  const label = command === 'analyze' ? t('analysisRun.runAnalysis') : status === 'applying' ? t('analysisRun.continueApplying') : t('analysisRun.applyWith', { label: runner?.label ?? 'Claude Code' });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {running ? (
         <RunProgress run={run} runnerLabel={runner?.label ?? 'Claude Code'} stopping={busy} onStop={() => void stop()} />
       ) : action === 'checking' ? (
-        <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Checking whether the dashboard can run this here…</p>
+        <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('analysisRun.checkingWhetherTheDashboardCan')}</p>
       ) : runnable && runner ? (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             {/* data-next-action: the page moves focus here when this step becomes due. */}
             <Button data-next-action="" variant="primary" loading={busy} onClick={() => void start()}>{label}</Button>
             <span style={{ flex: '1 1 240px', minWidth: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-              Runs {runner.label} with your Claude plan, under this workspace&apos;s rules. You can leave this page; it updates when it is ready.
+              {rich(t, 'analysisRun.runsWithYourClaudePlan', { label: runner.label })}
             </span>
           </div>
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             {command === 'analyze'
-              ? 'The same command you would run yourself, in the background. Hooks and MCP servers are off for this run.'
-              : 'The same command you would run yourself, in the background. Where the workspace would ask you, the dashboard answers: yes only for the files you accepted, no for anything else.'}
+              ? t('analysisRun.theSameCommandYouWould')
+              : t('analysisRun.theSameCommandYouWould2')}
           </p>
           {manual && (
             <details>
-              <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 500 }}>Or run it yourself</summary>
+              <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--color-accent)', fontWeight: 500 }}>{t('analysisRun.orRunItYourself')}</summary>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>{manual(false)}</div>
             </details>
           )}
-          {!ended && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Last run: none yet</p>}
+          {!ended && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('analysisRun.lastRunNoneYet')}</p>}
         </>
       ) : (
         <>
           {action === 'copy' && problem && <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{problem}</p>}
           {action === 'copy' && runnerCheck === 'failed' && (
             <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              Could not check whether the dashboard can run this here, so run it yourself.
-              <Button size="sm" variant="ghost" onClick={() => void checkRunner()}>Check again</Button>
+              {t('analysisRun.couldNotCheckWhetherThe')}
+              <Button size="sm" variant="ghost" onClick={() => void checkRunner()}>{t('analysisRun.checkAgain')}</Button>
             </p>
           )}
           {manual && (!startable || action === 'copy') && manual(true)}
         </>
       )}
       {(running || !known) && lostContact && (
-        <HelpBox tone="warning">{running ? 'Lost contact with the dashboard for a moment. The run keeps going; trying again.' : 'Could not check whether something is running for this update; trying again.'}</HelpBox>
+        <HelpBox tone="warning">{running ? t('analysisRun.lostContactWithTheDashboard') : t('analysisRun.couldNotCheckWhetherSomething')}</HelpBox>
       )}
       {command && !running && runner && !problem && runner.trusted === null && (
         <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          Could not verify that {runner.label} trusts this workspace folder. If the run reports that it does not, follow its message.
+          {rich(t, 'analysisRun.couldNotVerifyThatTrusts', { label: runner.label })}
         </p>
       )}
       {ended && ended.status !== 'succeeded' && (
-        <HelpBox tone={ended.status === 'cancelled' ? 'warning' : 'critical'} title={ended.status === 'cancelled' ? `${noun} stopped` : `The ${noun.toLowerCase()} did not finish cleanly`}>
+        <HelpBox tone={ended.status === 'cancelled' ? 'warning' : 'critical'} title={ended.status === 'cancelled' ? t('analysisRun.stopped', { noun }) : t('analysisRun.theDidNotFinishCleanly', { toLowerCase: noun.toLowerCase() })}>
           {ended.message}
         </HelpBox>
       )}
       {ended && ended.status === 'succeeded' && (status === 'in_review' || status === 'done') && (
         <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          {ended.command === 'apply' ? `${ended.message} Applied` : 'Analyzed'} from the dashboard {formatRelativeDate(ended.ended_at ?? ended.started_at)}{ended.turns ? ` in ${ended.turns} turns` : ''}.
+          {rich(t, 'analysisRun.fromTheDashboard', { value: ended.command === 'apply' ? t('analysisRun.applied', { message: ended.message }) : t('analysisRun.analyzed'), ended_at: formatRelativeDate(ended.ended_at ?? ended.started_at), value2: ended.turns ? t('analysisRun.inTurns', { turns: ended.turns }) : '' })}
         </p>
       )}
       {error && <HelpBox tone="critical">{error}</HelpBox>}

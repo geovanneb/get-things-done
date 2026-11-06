@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * Date maths and summaries for the activity calendar.
  *
@@ -24,20 +25,20 @@ export function layoutFor(window: WindowValue): CalendarLayout {
   return 'years';
 }
 
-export const METRICS: Array<{ value: CalendarMetric; label: string; one: string; many: string }> = [
-  { value: 'activity', label: 'Activity', one: 'event', many: 'events' },
-  { value: 'completed', label: 'Completed', one: 'task completed', many: 'tasks completed' },
-  { value: 'created', label: 'Created', one: 'task created', many: 'tasks created' },
-  { value: 'runs', label: 'Agent runs', one: 'agent run', many: 'agent runs' },
-];
+export const METRICS = (): Array<{ value: CalendarMetric; label: string; one: string; many: string }> => ([
+  { value: 'activity', label: tr('calendarModel.activity'), one: tr('calendarModel.event'), many: tr('calendarModel.events') },
+  { value: 'completed', label: tr('flowChart.completed'), one: tr('calendarModel.taskCompleted'), many: tr('calendarModel.tasksCompleted') },
+  { value: 'created', label: tr('flowChart.created'), one: tr('calendarModel.taskCreated'), many: tr('calendarModel.tasksCreated') },
+  { value: 'runs', label: tr('dayTooltip.agentRuns'), one: tr('calendarModel.agentRun'), many: tr('calendarModel.agentRuns') },
+]);
 
-const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const MONTHS_LONG = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-export const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS_SHORT = () => ([tr('calendarModel.jan'), tr('calendarModel.feb'), tr('calendarModel.mar'), tr('calendarModel.apr'), tr('calendarModel.may'), tr('calendarModel.jun'), tr('calendarModel.jul'), tr('calendarModel.aug'), tr('calendarModel.sep'), tr('calendarModel.oct'), tr('calendarModel.nov'), tr('calendarModel.dec')]);
+const MONTHS_LONG = () => ([
+  tr('calendarModel.january'), tr('calendarModel.february'), tr('calendarModel.march'), tr('calendarModel.april'), tr('calendarModel.may'), tr('calendarModel.june'),
+  tr('calendarModel.july'), tr('calendarModel.august'), tr('calendarModel.september'), tr('calendarModel.october'), tr('calendarModel.november'), tr('calendarModel.december'),
+]);
+export const WEEKDAYS_SHORT = () => ([tr('calendarModel.sun'), tr('yearGrid.mon'), tr('calendarModel.tue'), tr('yearGrid.wed'), tr('calendarModel.thu'), tr('yearGrid.fri'), tr('calendarModel.sat')]);
+const WEEKDAYS_LONG = () => ([tr('calendarModel.sunday'), tr('calendarModel.monday'), tr('calendarModel.tuesday'), tr('calendarModel.wednesday'), tr('calendarModel.thursday'), tr('calendarModel.friday'), tr('calendarModel.saturday')]);
 
 export function dayKey(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -79,13 +80,13 @@ export function keysBetween(from: string, to: string): string[] {
 /** "Tue 14 Oct" */
 export function shortDay(key: string): string {
   const d = fromKey(key);
-  return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+  return `${WEEKDAYS_SHORT()[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT()[d.getMonth()]}`;
 }
 
 /** "Tuesday 14 October 2026" */
 export function longDay(key: string): string {
   const d = fromKey(key);
-  return `${WEEKDAYS_LONG[d.getDay()]} ${d.getDate()} ${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+  return `${WEEKDAYS_LONG()[d.getDay()]} ${d.getDate()} ${MONTHS_LONG()[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 /** First day of every month the range touches, oldest first. */
@@ -108,15 +109,15 @@ export function endOfMonth(key: string): string {
 
 export function monthLong(key: string): string {
   const d = fromKey(key);
-  return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
+  return `${MONTHS_LONG()[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 export function monthShort(i: number): string {
-  return MONTHS_SHORT[i];
+  return MONTHS_SHORT()[i];
 }
 
 export function weekdayLong(i: number): string {
-  return WEEKDAYS_LONG[i];
+  return WEEKDAYS_LONG()[i];
 }
 
 export function metricValue(day: InsightsCalendarDay | undefined, metric: CalendarMetric): number {
@@ -124,7 +125,7 @@ export function metricValue(day: InsightsCalendarDay | undefined, metric: Calend
 }
 
 export function countLabel(value: number, metric: CalendarMetric): string {
-  const m = METRICS.find((x) => x.value === metric)!;
+  const m = METRICS().find((x) => x.value === metric)!;
   return `${value} ${value === 1 ? m.one : m.many}`;
 }
 
@@ -183,7 +184,7 @@ export function summarize(
 
   const out: Callout[] = [];
   const busiest = days.reduce((best, d) => (value(d) > value(best) ? d : best));
-  out.push({ label: 'Busiest day', value: `${shortDay(busiest.date)} (${value(busiest)})` });
+  out.push({ label: tr('calendarModel.busiestDay'), value: `${shortDay(busiest.date)} (${value(busiest)})` });
 
   if (layout === 'years') {
     const byMonth = new Map<string, number>();
@@ -192,7 +193,7 @@ export function summarize(
       byMonth.set(key, (byMonth.get(key) ?? 0) + value(d));
     }
     const [top, n] = [...byMonth.entries()].reduce((best, e) => (e[1] > best[1] ? e : best));
-    out.push({ label: 'Busiest month', value: `${monthLong(top)} (${n})` });
+    out.push({ label: tr('calendarModel.busiestMonth'), value: `${monthLong(top)} (${n})` });
   }
 
   if (days.length >= 14) {
@@ -203,7 +204,7 @@ export function summarize(
       counts[weekday(d.date)] += 1;
     }
     const avg = sums.map((s, i) => (counts[i] ? s / counts[i] : 0));
-    out.push({ label: 'Busiest weekday', value: `${WEEKDAYS_LONG[avg.indexOf(Math.max(...avg))]}s` });
+    out.push({ label: tr('calendarModel.busiestWeekday'), value: `${WEEKDAYS_LONG()[avg.indexOf(Math.max(...avg))]}s` });
   }
 
   let best = 0;
@@ -212,8 +213,8 @@ export function summarize(
     run = value(d) > 0 ? run + 1 : 0;
     best = Math.max(best, run);
   }
-  if (best > 1) out.push({ label: 'Longest streak', value: `${best} days in a row` });
+  if (best > 1) out.push({ label: tr('calendarModel.longestStreak'), value: tr('calendarModel.daysInARow', { best }) });
 
-  out.push({ label: 'Total', value: countLabel(total, metric) });
+  out.push({ label: tr('calendarModel.total'), value: countLabel(total, metric) });
   return out;
 }

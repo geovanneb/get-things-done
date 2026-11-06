@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Button from '@/components/common/Button';
@@ -71,6 +73,7 @@ function useRestartWatch(going: string | null): { restarting: string | null; lat
  * own dialog instead (until it can say it here).
  */
 export default function UpdateBanner() {
+  const { t } = useLanguage();
   const [tick, setTick] = React.useState(0);
   // Asked again as soon as a run or a transcription starts or ends anywhere (an analysis changes its update, a task run
   // its task), so the notice gives way at once; the minute's poll catches the rest.
@@ -95,11 +98,11 @@ export default function UpdateBanner() {
   };
   if (restarting) {
     return (
-      <div role="status" aria-label="Updating" style={bar}>
+      <div role="status" aria-label={t('updateBanner.updating')} style={bar}>
         <span style={{ flex: '1 1 240px' }}>
           {late
-            ? <>Get Things Done has not come back here yet. Run <code>gtd status</code> in a terminal to see whether it runs and on which port (<code>gtd open</code> opens it), or <code>gtd start</code> to start it; the update&apos;s log is in <code>~/.gtd/update.log</code>.</>
-            : <>Updating Get Things Done to {restarting}… It stops and starts again; this page reconnects by itself.</>}
+            ? <>{rich(t, 'updateBanner.getThingsDoneHasNot', { code: <code>gtd status</code>, code2: <code>gtd open</code>, code3: <code>gtd start</code>, code4: <code>~/.gtd/update.log</code> })}</>
+            : <>{rich(t, 'updateBanner.updatingGetThingsDoneTo', { restarting: restarting })}</>}
         </span>
       </div>
     );
@@ -109,8 +112,8 @@ export default function UpdateBanner() {
   if (data?.kind === 'npm' && PAGE_VERSION && data.current !== PAGE_VERSION) {
     return (
       <div role="status" style={bar}>
-        <span style={{ flex: '1 1 240px' }}>Get Things Done is now {data.current}. Reload this page to use it.</span>
-        <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>Reload</Button>
+        <span style={{ flex: '1 1 240px' }}>{rich(t, 'updateBanner.getThingsDoneIsNow', { current: data.current })}</span>
+        <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>{t('updateBanner.reload')}</Button>
       </div>
     );
   }
@@ -129,13 +132,13 @@ export default function UpdateBanner() {
       void dismissDesktopUpdate(ready);
     };
     return (
-      <div role="status" aria-label="An update is ready" style={bar}>
+      <div role="status" aria-label={t('updateBanner.anUpdateIsReady')} style={bar}>
         <span style={{ flex: '1 1 240px' }}>
-          Get Things Done {ready} is ready.{failed ? <> {failed}</> : ' Restart to finish; your workspace stays as it is.'}
+          Get Things Done {ready} {t('updateBanner.isReady')}{failed ? <> {failed}</> : t('updateBanner.restartToFinishYourWorkspace')}
         </span>
-        {ready === data.latest && data.notes_url && <a href={data.notes_url} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>What&apos;s new</a>}
-        <Button size="sm" variant="secondary" loading={restartingApp && !desktop?.error} onClick={restart}>Restart to update</Button>
-        <Button size="sm" variant="ghost" onClick={putOff}>Later</Button>
+        {ready === data.latest && data.notes_url && <a href={data.notes_url} target="_blank" rel="noreferrer" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{t('updateBanner.whatSNew')}</a>}
+        <Button size="sm" variant="secondary" loading={restartingApp && !desktop?.error} onClick={restart}>{t('updateBanner.restartToUpdate')}</Button>
+        <Button size="sm" variant="ghost" onClick={putOff}>{t('updateBanner.later')}</Button>
       </div>
     );
   }  if (!data?.newer || !data.latest || data.latest === data.dismissed || data.latest === hidden || recorder.active || data.busy || data.installing) return null;
@@ -148,13 +151,13 @@ export default function UpdateBanner() {
   };
   const link: React.CSSProperties = { fontSize: 'var(--text-sm)', fontWeight: 600 };
   return (
-    <div role="status" aria-label="A new version is available" style={bar}>
-      <span style={{ flex: '1 1 240px' }}>{installed ? `Get Things Done ${data.latest} is installed. Restart it to finish.` : `Get Things Done ${data.latest} is available.`}</span>
-      {data.notes_url && <a href={data.notes_url} target="_blank" rel="noreferrer" style={link}>What&apos;s new</a>}
+    <div role="status" aria-label={t('updateBanner.aNewVersionIsAvailable')} style={bar}>
+      <span style={{ flex: '1 1 240px' }}>{installed ? t('updateBanner.getThingsDoneIsInstalled', { latest: data.latest }) : t('updateBanner.getThingsDoneIsAvailable', { latest: data.latest })}</span>
+      {data.notes_url && <a href={data.notes_url} target="_blank" rel="noreferrer" style={link}>{t('updateBanner.whatSNew')}</a>}
       {data.how === 'manual' && data.kind === 'desktop'
-        ? <a href={data.release_url} target="_blank" rel="noreferrer" style={link}>Download</a>
-        : <Link to="/settings#updates" style={link}>{installed ? 'How to restart' : data.can_install ? 'Update and restart' : 'How to update'}</Link>}
-      <Button size="sm" variant="ghost" onClick={later}>Later</Button>
+        ? <a href={data.release_url} target="_blank" rel="noreferrer" style={link}>{t('download')}</a>
+        : <Link to="/settings#updates" style={link}>{installed ? t('updateBanner.howToRestart') : data.can_install ? t('updateBanner.updateAndRestart') : t('updateBanner.howToUpdate')}</Link>}
+      <Button size="sm" variant="ghost" onClick={later}>{t('updateBanner.later')}</Button>
     </div>
   );
 }

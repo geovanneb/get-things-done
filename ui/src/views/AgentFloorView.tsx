@@ -1,3 +1,6 @@
+import { currentLocale } from '@/i18n/current';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '@/store';
@@ -95,6 +98,7 @@ function ControlChip({
 }
 
 export default function AgentFloorView() {
+  const { t } = useLanguage();
   const { agenticVisualMode } = useAppState();
   const navigate = useNavigate();
   const stageRef = useRef<StageHandle | null>(null);
@@ -163,7 +167,7 @@ export default function AgentFloorView() {
     return (
       <div style={{ padding: 24 }}>
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          Agentic Visual Mode is off. Turn it on under Settings to use the Agent Floor.
+          {t('agentFloor.agenticVisualModeIsOff')}
         </p>
       </div>
     );
@@ -172,7 +176,7 @@ export default function AgentFloorView() {
   const controls = (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <ControlChip active={paused} onClick={() => setPaused((p) => !p)}>
-              {paused ? '▶ RESUME' : '❚❚ PAUSE'}
+              {paused ? t('agentFloor.resume') : t('agentFloor.pause')}
             </ControlChip>
             {SPEEDS.map((s, i) => (
               <ControlChip key={s} active={speedIndex === i} onClick={() => setSpeedIndex(i)}>
@@ -181,16 +185,16 @@ export default function AgentFloorView() {
             ))}
             <span style={{ width: 8 }} />
             <ControlChip active={showLegend} onClick={() => setShowLegend((v) => !v)}>
-              LABELS
+              {t('agentFloor.labels')}
             </ControlChip>
             <ControlChip active={showBubbles} onClick={() => setShowBubbles((v) => !v)}>
-              BUBBLES
+              {t('agentFloor.bubbles')}
             </ControlChip>
             <ControlChip active={crtEffect} onClick={() => setCrtEffect((v) => !v)}>
               CRT
             </ControlChip>
             <ControlChip active={demo} onClick={() => setDemo((v) => !v)}>
-              DEMO
+              {t('agentFloor.demo')}
             </ControlChip>
             <span
               style={{
@@ -200,7 +204,7 @@ export default function AgentFloorView() {
                 fontFamily: 'var(--font-sans)',
               }}
             >
-              Click an agent to follow it
+              {t('agentFloor.clickAnAgentToFollow')}
             </span>
           </div>
   );
@@ -218,10 +222,10 @@ export default function AgentFloorView() {
     >
       {/* Header row: piles and the live indicator */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', flexWrap: 'wrap' }}>
-        <PileCard label="Backlog" value={hud.piles.backlog} colour="var(--color-text)" />
+        <PileCard label={t('routineEditor.backlog')} value={hud.piles.backlog} colour="var(--color-text)" />
         <PileCard label="In Progress" value={hud.piles.active} colour="var(--color-info)" />
-        <PileCard label="Needs Review" value={hud.piles.review} colour="var(--color-warning)" />
-        <PileCard label="Done" value={hud.piles.done} colour="var(--color-success)" />
+        <PileCard label={t('simulation.needsReview')} value={hud.piles.review} colour="var(--color-warning)" />
+        <PileCard label={t('done')} value={hud.piles.done} colour="var(--color-success)" />
         <div
           style={{
             display: 'flex',
@@ -255,15 +259,15 @@ export default function AgentFloorView() {
                 color: 'var(--color-text-secondary)',
               }}
             >
-              {demo ? 'DEMO DATA' : liveRecently ? 'LIVE FILE EVENTS' : 'NO RECENT CHANGES'}
+              {demo ? t('agentFloor.demoData') : liveRecently ? t('agentFloor.liveFileEvents') : t('agentFloor.noRecentChanges')}
             </span>
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             {demo
-              ? 'Sample tasks, not your workspace'
+              ? t('agentFloor.sampleTasksNotYourWorkspace')
               : lastEventAt > 0
-              ? `Last change ${new Date(lastEventAt).toLocaleTimeString()}`
-              : 'Waiting for the file watcher'}
+              ? t('agentFloor.lastChange', { toLocaleTimeString: new Date(lastEventAt).toLocaleTimeString(currentLocale()) })
+              : t('agentFloor.waitingForTheFileWatcher')}
           </div>
         </div>
       </div>
@@ -345,14 +349,12 @@ export default function AgentFloorView() {
                 color: 'var(--color-text-secondary)',
               }}
             >
-              On the floor ({hud.agents.length})
+              {rich(t, 'agentFloor.onTheFloor', { length: hud.agents.length })}
             </h2>
 
             {hud.agents.length === 0 ? (
               <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                Nothing is in progress. Move a task to In Progress, or run{' '}
-                <code style={{ fontFamily: 'var(--font-mono)' }}>/gtd-task</code>, and an agent walks
-                out to the backlog desk.
+                {rich(t, 'agentFloor.nothingIsInProgressMove', { code: <code style={{ fontFamily: 'var(--font-mono)' }}>/gtd-task</code> })}
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -410,7 +412,7 @@ export default function AgentFloorView() {
                             padding: '0 4px',
                           }}
                         >
-                          LIVE
+                          {t('agentFloor.live')}
                         </span>
                       )}
                     </div>
@@ -435,11 +437,11 @@ export default function AgentFloorView() {
                     >
                       {agent.agentName} —{' '}
                       {agent.blocked
-                        ? 'blocked, waiting'
+                        ? t('agentFloor.blockedWaiting')
                         : agent.stage === 'handover'
-                        ? `handing in to ${agent.destination === 'done' ? 'Done' : 'Needs Review'}`
+                        ? t('agentFloor.handingInTo', { value: agent.destination === 'done' ? t('done') : t('simulation.needsReview') })
                         : agent.stage === 'leaving'
-                        ? 'wrapping up, leaving the floor'
+                        ? t('agentFloor.wrappingUpLeavingTheFloor')
                         : describeActivity(agent.activity as Activity)}
                       {agent.outputFormat && !agent.blocked
                         ? ` (${agent.outputFormat.toUpperCase()})`
@@ -471,11 +473,11 @@ export default function AgentFloorView() {
                 color: 'var(--color-text-secondary)',
               }}
             >
-              Activity log
+              {t('agentFloor.activityLog')}
             </h2>
             {hud.ticker.length === 0 ? (
               <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                Nothing yet.
+                {t('agentFloor.nothingYet')}
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

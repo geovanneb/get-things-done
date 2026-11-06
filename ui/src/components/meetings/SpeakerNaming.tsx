@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
@@ -48,6 +50,7 @@ export function SpeakerNaming({ source, labels, names, suggestions = [], remembe
   onName: (label: string, person: Person | null) => Promise<void>;
   onChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const peopleVersion = useDataVersion('stakeholders');
   const voicesVersion = useDataVersion('voiceprints');
   const settingsVersion = useDataVersion('transcription');
@@ -84,19 +87,19 @@ export function SpeakerNaming({ source, labels, names, suggestions = [], remembe
   const acceptAll = () => run(async () => { for (const row of pending) await use(row); });
 
   return (
-    <section aria-label="Speakers" className="gtd-stack" style={{ gap: 'var(--space-2)' }}>
+    <section aria-label={t('updateDetail.speakers2')} className="gtd-stack" style={{ gap: 'var(--space-2)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
-        <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Speakers</span>
+        <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{t('updateDetail.speakers2')}</span>
         <span role="status" style={{ flex: '1 1 200px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{speakersSummary(rows)}</span>
         {editable && expanded && pending.length > 1 && (
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void acceptAll()}>Use all {pending.length} suggestions</Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void acceptAll()}>{rich(t, 'speakerNaming.useAllSuggestions', { length: pending.length })}</Button>
         )}
-        <Button size="sm" variant="ghost" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>{expanded ? 'Hide speakers' : editable ? 'Edit speakers' : 'Show speakers'}</Button>
+        <Button size="sm" variant="ghost" aria-expanded={expanded} onClick={() => setOpen(!expanded)}>{expanded ? t('speakerNaming.hideSpeakers') : editable ? t('speakerNaming.editSpeakers') : t('speakerNaming.showSpeakers')}</Button>
       </div>
       {hint && expanded && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{hint}</p>}
-      {error && <Notice tone="critical" title="That did not work.">{error}</Notice>}
+      {error && <Notice tone="critical" title={t('speakerNaming.thatDidNotWork')}>{error}</Notice>}
       {expanded && (
-        <ul className="gtd-list" aria-label="Speakers of this transcript" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+        <ul className="gtd-list" aria-label={t('speakerNaming.speakersOfThisTranscript')} style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
           {rows.map((row) => (
             <SpeakerRowView key={row.label} row={row} evidence={evidence.get(row.label)} editable={editable} busy={busy}
               options={personOptions({ label: row.label, choices, expected, names })}
@@ -127,6 +130,7 @@ function SpeakerRowView({ row, evidence, editable, busy, options, listening, can
   onPick: (person: Person | null) => void; onPickValue: (value: string) => Person | null;
   onUse: () => void; onDismiss: () => void; onRemember: () => void;
 }) {
+  const { t } = useLanguage();
   const [typing, setTyping] = React.useState(false);
   const [typed, setTyped] = React.useState('');
   const at = evidence ? secondsOfTime(evidence.first.time) : null;
@@ -136,24 +140,24 @@ function SpeakerRowView({ row, evidence, editable, busy, options, listening, can
     onPick(value === NOT_NAMED ? null : onPickValue(value));
   };
   const saveTyped = () => { if (typed.trim()) { onPick({ name: typed.trim() }); setTyping(false); } };
-  const name = row.named?.ref === 'me' ? 'You' : row.named?.name;
+  const name = row.named?.ref === 'me' ? t('updateDetail.you2') : row.named?.name;
   return (
     <li className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
       <div style={{ flex: '1 1 260px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
           <span className="gtd-chip">{row.label}</span>
-          <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: name ? 'var(--color-text)' : 'var(--color-text-muted)' }}>{name ?? 'Not named yet'}</span>
-          {row.remembered && <Badge variant="accent-subtle" size="sm">Voice remembered</Badge>}
+          <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: name ? 'var(--color-text)' : 'var(--color-text-muted)' }}>{name ?? t('speakerNaming.notNamedYet')}</span>
+          {row.remembered && <Badge variant="accent-subtle" size="sm">{t('speakerNaming.voiceRemembered')}</Badge>}
         </div>
         {evidence && (
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
             <span className="truncate" title={evidence.first.text} style={{ flex: '1 1 200px', minWidth: 0 }}>&ldquo;{evidence.first.text}&rdquo;</span>
             <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              first at {evidence.first.time.replace(/^00:/, '')} · {evidence.count} {evidence.count === 1 ? 'part' : 'parts'}
+              {rich(t, 'speakerNaming.firstAtParts', { count: evidence.count, replace: evidence.first.time.replace(/^00:/, '') })}
             </span>
             {canListen && at !== null && (
-              <Button size="sm" variant="ghost" aria-label={listening ? `Stop listening to ${row.label}` : `Listen to ${row.label}`} aria-pressed={listening} onClick={() => onListen(at)}>
-                {listening ? 'Stop' : 'Listen'}
+              <Button size="sm" variant="ghost" aria-label={listening ? t('speakerNaming.stopListeningTo', { label: row.label }) : t('speakerNaming.listenTo', { label: row.label })} aria-pressed={listening} onClick={() => onListen(at)}>
+                {listening ? t('meetingVersions.stop') : t('speakerNaming.listen')}
               </Button>
             )}
           </p>
@@ -162,24 +166,24 @@ function SpeakerRowView({ row, evidence, editable, busy, options, listening, can
       <div style={{ flex: '0 1 300px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         {editable && row.suggestion && (
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-md)', background: 'var(--color-accent-subtle)', fontSize: 'var(--text-sm)' }}>
-            <span style={{ flex: '1 1 140px' }}>Sounds like <strong>{row.suggestion.name}</strong></span>
-            <Button size="sm" variant="secondary" disabled={busy} aria-label={`Name ${row.label} ${row.suggestion.name}`} onClick={onUse}>Use</Button>
-            <Button size="sm" variant="ghost" disabled={busy} aria-label={`${row.label} is not ${row.suggestion.name}`} onClick={onDismiss}>Not them</Button>
+            <span style={{ flex: '1 1 140px' }}>{rich(t, 'speakerNaming.soundsLike', { strong: <strong>{row.suggestion.name}</strong> })}</span>
+            <Button size="sm" variant="secondary" disabled={busy} aria-label={t('speakerNaming.name', { label: row.label, name: row.suggestion.name })} onClick={onUse}>{t('speakerNaming.use')}</Button>
+            <Button size="sm" variant="ghost" disabled={busy} aria-label={t('speakerNaming.isNot', { label: row.label, name: row.suggestion.name })} onClick={onDismiss}>{t('speakerNaming.notThem')}</Button>
           </div>
         )}
         {editable && (typing ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 'var(--space-2)' }}>
-            <Input size="sm" label={`Name of ${row.label}`} value={typed} autoFocus placeholder="A name, not a stakeholder" onChange={setTyped}
+            <Input size="sm" label={t('speakerNaming.nameOf', { label: row.label })} value={typed} autoFocus placeholder={t('speakerNaming.aNameNotAStakeholder')} onChange={setTyped}
               onKeyDown={(e) => { if (e.key === 'Enter') saveTyped(); if (e.key === 'Escape') setTyping(false); }} style={{ flex: '1 1 160px' }} />
-            <Button size="sm" variant="ghost" onClick={() => setTyping(false)}>Cancel</Button>
-            <Button size="sm" variant="secondary" disabled={!typed.trim() || busy} onClick={saveTyped}>Save name</Button>
+            <Button size="sm" variant="ghost" onClick={() => setTyping(false)}>{t('cancel')}</Button>
+            <Button size="sm" variant="secondary" disabled={!typed.trim() || busy} onClick={saveTyped}>{t('speakerNaming.saveName')}</Button>
           </div>
         ) : (
-          <Select size="sm" aria-label={`Who is ${row.label}`} value={personValue(row.named)} options={options} disabled={busy} onChange={pick} />
+          <Select size="sm" aria-label={t('speakerNaming.whoIs', { label: row.label })} value={personValue(row.named)} options={options} disabled={busy} onChange={pick} />
         ))}
         {row.canRemember && (
-          <Button size="sm" variant="ghost" disabled={busy} aria-label={`Remember the voice of ${row.named!.name}`} onClick={onRemember} style={{ alignSelf: 'flex-start' }}>
-            Remember voice
+          <Button size="sm" variant="ghost" disabled={busy} aria-label={t('speakerNaming.rememberTheVoiceOf', { name: row.named!.name })} onClick={onRemember} style={{ alignSelf: 'flex-start' }}>
+            {t('speakerNaming.rememberVoice')}
           </Button>
         )}
       </div>
@@ -224,32 +228,31 @@ function useClip(url: string | undefined): { playing: string | null; toggle: (la
 function RememberVoiceDialog({ row, evidence, consentText, busy, minSeconds, onCancel, onConfirm, error }: {
   row: SpeakerRow; evidence: SpeakerEvidence | undefined; consentText: string; busy: boolean; minSeconds: number; error: string | null; onCancel: () => void; onConfirm: () => void;
 }) {
+  const { t } = useLanguage();
   const [agreed, setAgreed] = React.useState(false);
   const me = row.named!.ref === 'me';
   return (
-    <Modal isOpen onClose={onCancel} size="sm" title={me ? 'Remember your voice?' : `Remember ${row.named!.name}'s voice?`}
-      description="Then the app can suggest this name when it hears the voice again. It never names anyone by itself."
+    <Modal isOpen onClose={onCancel} size="sm" title={me ? t('speakerNaming.rememberYourVoice') : t('speakerNaming.rememberSVoice', { name: row.named!.name })}
+      description={t('speakerNaming.thenTheAppCanSuggest')}
       footer={<FormActions>
-        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button variant="primary" disabled={!agreed || busy} loading={busy} onClick={onConfirm}>Remember voice</Button>
+        <Button variant="ghost" onClick={onCancel}>{t('cancel')}</Button>
+        <Button variant="primary" disabled={!agreed || busy} loading={busy} onClick={onConfirm}>{t('speakerNaming.rememberVoice')}</Button>
       </FormActions>}>
       <div className="gtd-stack" style={{ gap: 'var(--space-3)', fontSize: 'var(--text-sm)' }}>
-        {error && <Notice tone="critical" title="The voice could not be remembered.">{error}</Notice>}
+        {error && <Notice tone="critical" title={t('speakerNaming.theVoiceCouldNotBe')}>{error}</Notice>}
         <p style={{ margin: 0 }}>
           From <strong>{row.label}</strong>{evidence ? <>, who first said &ldquo;{evidence.first.text.slice(0, 80)}{evidence.first.text.length > 80 ? '…' : ''}&rdquo;</> : ''}.
           Check this is {me ? 'you' : row.named!.name} before you go on.
         </p>
         <p style={{ margin: 0 }}>
-          A voice is biometric data. Remember it only with the person&apos;s consent. Only {row.label}&apos;s clear speech in this
-          recording is used, never parts where others talk at the same time. Suggestions start once there are {minSeconds} seconds of it.
+          {rich(t, 'speakerNaming.aVoiceIsBiometricData', { label: row.label, minSeconds: minSeconds })}
         </p>
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-2)' }}>
           <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} style={{ marginTop: 3 }} />
-          <span>{me ? 'I agree that my voice is remembered on this computer, to suggest my name in transcripts. It stays on this computer and can be forgotten at any time.' : consentFor(consentText, row.named!.name)}</span>
+          <span>{me ? t('speakerNaming.iAgreeThatMyVoice') : consentFor(consentText, row.named!.name)}</span>
         </label>
         <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
-          It stays on this computer, outside the workspace, and is never shared or given to AI tools. Manage or forget it
-          {me ? ' in Settings > Transcription' : ` on ${row.named!.name}'s page`}.
+          {rich(t, 'speakerNaming.itStaysOnThisComputer', { value: me ? t('speakerNaming.inSettingsTranscription') : t('speakerNaming.onSPage', { name: row.named!.name }) })}
         </p>
       </div>
     </Modal>

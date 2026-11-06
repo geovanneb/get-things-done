@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import { Link, Outlet } from 'react-router-dom';
 import { useApi } from '@/hooks/useApi';
@@ -27,6 +29,7 @@ const REFRESH_MS = 10_000;
  * answers, nothing is kept (the server reads an unanswered question as no). The answer can be changed in System cleanup.
  */
 function KeepTextQuestion({ days, onAnswered }: { days: number; onAnswered: () => void }) {
+  const { t } = useLanguage();
   const [keep, setKeep] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -42,26 +45,25 @@ function KeepTextQuestion({ days, onAnswered }: { days: number; onAnswered: () =
     }
   };
   return (
-    <Card title="Meetings can now keep their transcripts" description="Until now, a meeting's transcript and notes were deleted once its review was done. Choose before any is kept.">
+    <Card title={t('meetings.meetingsCanNowKeepTheir')} description={t('meetings.untilNowAMeetingS')}>
       <div className="gtd-stack" style={{ gap: 'var(--space-3)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
-          <Toggle id="keep-meeting-text" label="Keep meeting transcripts and notes" checked={keep} onChange={setKeep} />
+          <Toggle id="keep-meeting-text" label={t('meetings.keepMeetingTranscriptsAndNotes')} checked={keep} onChange={setKeep} />
           <label htmlFor="keep-meeting-text">
-            <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>Keep meeting transcripts and notes</span><br />
-            Only the meeting text, not the other materials. Recordings are kept with Keep recordings in Settings &gt; Transcription.
+            {rich(t, 'meetings.onlyTheMeetingTextNot', { part: <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{t('meetings.keepMeetingTranscriptsAndNotes')}</span>, part2: <br /> })}
           </label>
         </div>
         <ul style={{ margin: 0, paddingLeft: 'var(--space-5)' }}>
-          <li>Each meeting is kept {days} days from the day it took place or was imported, then moved to the trash. Change this in Routines &gt; System cleanup &gt; Meetings.</li>
-          <li>Mark a meeting <strong>Keep this meeting</strong> to keep it longer, or delete it yourself at any time.</li>
-          <li>The trash holds it 30 more days, so you can restore it. It stays on this computer until then.</li>
-          <li>Once its review is done, a meeting's text moves to its own folder under meetings/, which git leaves out. Agents are told to read it only when a task names the meeting, but they can read every file in your workspace.</li>
+          <li>{rich(t, 'meetings.eachMeetingIsKeptDays', { days: days })}</li>
+          <li>{rich(t, 'meetings.markAMeetingToKeep', { strong: <strong>{t('meetingDetail.keepThisMeeting')}</strong> })}</li>
+          <li>{t('meetings.theTrashHoldsIt30')}</li>
+          <li>{t('meetings.onceItsReviewIsDone')}</li>
         </ul>
-        <span>Meetings reviewed before this version keep their confirmed records, but their transcripts were already deleted.</span>
-        {error && <Notice tone="critical" title="Your choice was not saved.">{error} Try again.</Notice>}
+        <span>{t('meetings.meetingsReviewedBeforeThisVersion')}</span>
+        {error && <Notice tone="critical" title={t('meetings.yourChoiceWasNotSaved')}>{rich(t, 'meetings.tryAgain', { error: error })}</Notice>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
-          <Button variant="ghost" disabled={saving} onClick={() => void answer(false)}>Not now, keep deleting them</Button>
-          <Button variant="primary" loading={saving} onClick={() => void answer(keep)}>{keep ? 'Keep transcripts' : 'Save my choice'}</Button>
+          <Button variant="ghost" disabled={saving} onClick={() => void answer(false)}>{t('meetings.notNowKeepDeletingThem')}</Button>
+          <Button variant="primary" loading={saving} onClick={() => void answer(keep)}>{keep ? t('meetings.keepTranscripts') : t('meetings.saveMyChoice')}</Button>
         </div>
       </div>
     </Card>
@@ -73,6 +75,7 @@ function KeepTextQuestion({ days, onAnswered }: { days: number; onAnswered: () =
  * still open for review holds the next one back; it says so, and where to find it.
  */
 function DigestNow({ job, onDone }: { job: MeetingDigest; onDone: () => void }) {
+  const { t } = useLanguage();
   const [busy, setBusy] = React.useState(false);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
   const waiting = job.queue.filter((m) => m.status === 'queued' && !m.in_digest).length;
@@ -95,12 +98,12 @@ function DigestNow({ job, onDone }: { job: MeetingDigest; onDone: () => void }) 
   return (
     <>
       {job.open_digest
-        ? <span style={line}>Digest <Link to={`/context/updates/${job.open_digest}`} className="gtd-link">{job.open_digest}</Link> is open for review: the next one waits for it.</span>
-        : when && waiting > 0 && <span style={line}>Next digest {when}</span>}
+        ? <span style={line}>{rich(t, 'meetings.digestIsOpenForReview', { link: <Link to={`/context/updates/${job.open_digest}`} className="gtd-link">{job.open_digest}</Link> })}</span>
+        : when && waiting > 0 && <span style={line}>{rich(t, 'meetings.nextDigest', { when: when })}</span>}
       <Button size="sm" variant="secondary" loading={busy} disabled={busy || waiting === 0 || Boolean(job.open_digest)}
-        title={waiting === 0 ? 'No meeting waits for a digest' : 'Make a digest from the queue now, without waiting for the schedule'}
+        title={waiting === 0 ? t('meetings.noMeetingWaitsForA') : t('meetingDigest.makeADigestFromThe')}
         onClick={() => void run()}>
-        Make digest now
+        {t('meetingDigest.makeDigestNow')}
       </Button>
       {notice && <span role={notice.error ? 'alert' : 'status'} style={{ ...line, flexBasis: '100%', textAlign: 'right', color: notice.error ? 'var(--color-critical)' : line.color }}>{notice.text}</span>}
     </>
@@ -109,6 +112,7 @@ function DigestNow({ job, onDone }: { job: MeetingDigest; onDone: () => void }) 
 
 /** Recording, the live transcript, and the meetings on their way into a digest. The digest's schedule stays in Routines. */
 export default function MeetingsView() {
+  const { t } = useLanguage();
   const recorder = useRecorder();
   const { openRecordDialog } = useRecordLauncher();
   const routines = useDataVersion('routines');
@@ -145,12 +149,12 @@ export default function MeetingsView() {
 
   return (
     <Page width="default">
-      <PageHeader description="Every meeting, recorded here or imported: read it, see what was confirmed, and follow it into the next digest. The digest's schedule is in Routines." />
+      <PageHeader description={t('meetings.everyMeetingRecordedHereOr')} />
       {retention && retention.keep_text === null && <KeepTextQuestion days={retention.days} onAnswered={() => { refetchCleanup(); refetchHistory(); }} />}
       <Card
-        title={own ? recorder.title : elsewhere ? `${elsewhere.title}, recording in another page` : 'Recording'}
-        description={following ? undefined : 'Transcribed on this computer. With a live model in Settings > Transcription, the text appears here as people speak.'}
-        actions={!recorder.active && !elsewhere && <Button variant="primary" onClick={openRecordDialog}>Record a meeting</Button>}
+        title={own ? recorder.title : elsewhere ? t('meetings.recordingInAnotherPage', { title: elsewhere.title }) : t('queuedMeetingActions.recording')}
+        description={following ? undefined : t('meetings.transcribedOnThisComputerWith')}
+        actions={!recorder.active && !elsewhere && <Button variant="primary" onClick={openRecordDialog}>{t('recordMeeting')}</Button>}
       >
         {following ? <LiveTranscript meetingId={following} /> : null}
       </Card>
@@ -161,7 +165,7 @@ export default function MeetingsView() {
       )}
       {shown && !transcript && waiting && (
         <Card title={shown.title}>
-          <LoadingSpinner inline text="The transcript appears here when it is ready." />
+          <LoadingSpinner inline text={t('meetings.theTranscriptAppearsHereWhen')} />
         </Card>
       )}
       <MeetingsList job={data ?? null} history={history ?? null} error={error ?? historyError} retention={retention} onChanged={changed}

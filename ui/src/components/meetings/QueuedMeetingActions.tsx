@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Notice from '@/components/common/Notice';
 import { useConfirm } from '@/components/common/ConfirmDialog';
@@ -8,9 +11,9 @@ import { formatRelativeTime } from '@/utils/format';
 import type { MeetingDigest, QueuedMeeting, RecordingState, TranscriptionProgress } from '@/types';
 
 function minutes(seconds: number): string {
-  if (seconds < 60) return seconds < 1 ? 'a moment' : `${Math.max(1, Math.round(seconds))} s`;
+  if (seconds < 60) return seconds < 1 ? tr('queuedMeetingActions.aMoment') : `${Math.max(1, Math.round(seconds))} s`;
   const m = Math.round(seconds / 60);
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+  return m < 60 ? tr('queuedMeetingActions.min', { m }) : tr('queuedMeetingActions.hMin', { floor: Math.floor(m / 60), padStart: String(m % 60).padStart(2, '0') });
 }
 
 /** One recording of a queued meeting: where its transcription stands, and what can be done about it. */
@@ -23,6 +26,7 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   onAction: (action: 'stop' | 'retry' | 'accept' | 'use-live', message: string, body?: Record<string, string>, stopFirst?: boolean) => void;
   onRead: () => void;
 }) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   let text: string;
   let tone = 'var(--color-text-muted)';
@@ -34,28 +38,28 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   const switchTo = missing && chosen && chosen !== target && installed!.includes(chosen) ? chosen : null;
   if (state.status === 'running') {
     text = progress && progress.total > 0
-      ? `Transcribing: ${Math.min(99, Math.floor((progress.done / progress.total) * 100))}% of ${minutes(progress.total)}`
-      : progress ? 'Transcribing: loading the model' : 'Transcribing in another dashboard';
+      ? t('queuedMeetingActions.transcribingOf', { min: Math.min(99, Math.floor((progress.done / progress.total) * 100)), minutes: minutes(progress.total) })
+      : progress ? t('queuedMeetingActions.transcribingLoadingTheModel') : t('queuedMeetingActions.transcribingInAnotherDashboard');
   } else if (missing) {
-    text = `Waits for ${name(target!)}, which is not downloaded: download it in Settings > Transcription${switchTo ? `, or use ${name(switchTo)}` : ''}`;
+    text = t('queuedMeetingActions.waitsForWhichIsNot', { name: name(target!), value: switchTo ? t('queuedMeetingActions.orUse', { name: name(switchTo) }) : '' });
     tone = 'var(--color-warning)';
-  } else if (state.status === 'pending') text = 'Waits for transcription; one recording at a time';
-  else if (state.status === 'stopped') { text = 'Stopped: the meeting waits until you try again or remove it'; tone = 'var(--color-warning)'; }
-  else if (state.status === 'failed') { text = `Failed: ${state.error ?? 'unknown error'}`; tone = 'var(--color-critical)'; }
-  else if (state.accepted) text = 'Partial transcript, used as it is';
-  else { text = `Partial transcript${state.error ? ` (${state.error})` : ''}: use it as it is, or try again`; tone = 'var(--color-warning)'; }
+  } else if (state.status === 'pending') text = t('queuedMeetingActions.waitsForTranscriptionOneRecording');
+  else if (state.status === 'stopped') { text = t('queuedMeetingActions.stoppedTheMeetingWaitsUntil'); tone = 'var(--color-warning)'; }
+  else if (state.status === 'failed') { text = t('queuedMeetingActions.failed', { error: state.error ?? t('queuedMeetingActions.unknownError') }); tone = 'var(--color-critical)'; }
+  else if (state.accepted) text = t('queuedMeetingActions.partialTranscriptUsedAsIt');
+  else { text = t('queuedMeetingActions.partialTranscriptUseItAs', { value: state.error ? ` (${state.error})` : '' }); tone = 'var(--color-warning)'; }
   // A live transcript waits as a draft while the chosen model makes a more accurate one.
   const draft = state.draft;
   if (draft) {
     const accurate = state.status === 'running' ? text.replace(/^Transcribing/, 'being made')
-      : state.status === 'pending' ? (missing ? `waits for ${name(target!)}, which is not downloaded (Settings > Transcription)` : 'waits its turn')
+      : state.status === 'pending' ? (missing ? t('queuedMeetingActions.waitsForWhichIsNot2', { name: name(target!) }) : t('queuedMeetingActions.waitsItsTurn'))
         : state.status === 'stopped' ? 'stopped'
-          : state.status === 'failed' ? `failed (${state.error ?? 'unknown error'})`
+          : state.status === 'failed' ? t('queuedMeetingActions.failed2', { error: state.error ?? t('queuedMeetingActions.unknownError') })
             : 'partial: use one of them, or try again';
     // From Test speed, when the model was tested; a model that has not been gives no estimate.
     const speed = target ? speeds[target] : undefined;
-    const estimate = speed && state.status === 'pending' && tone !== 'var(--color-warning)' ? `, about ${minutes(draft.seconds / speed)} of work` : '';
-    text = `Live transcript ready. The more accurate one${target ? ` (${name(target)})` : ''}: ${accurate}${estimate}`;
+    const estimate = speed && state.status === 'pending' && tone !== 'var(--color-warning)' ? t('queuedMeetingActions.aboutOfWork', { minutes: minutes(draft.seconds / speed) }) : '';
+    text = t('queuedMeetingActions.liveTranscriptReadyTheMore', { value: target ? ` (${name(target)})` : '', accurate, estimate });
   }
   return (
     <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)' }}>
@@ -66,14 +70,14 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
           onClick={async () => {
             if (state.status === 'running' && !(await confirm({ title: `Stop transcribing ${file}?`, message: 'What was transcribed so far is not kept. You can start again later.', confirmLabel: 'Stop transcribing', tone: 'danger' }))) return;
             onAction('stop', `${file} will not be transcribed until you try again.`, state.generation ? { generation: state.generation } : undefined);
-          }}>Stop</Button>
+          }}>{t('meetingVersions.stop')}</Button>
       )}
       {switchTo && (
         <Button size="sm" variant="ghost" disabled={disabled}
-          onClick={() => onAction('retry', `${file} will be transcribed with ${name(switchTo)}.`, { model: switchTo })}>Use {name(switchTo)}</Button>
+          onClick={() => onAction('retry', `${file} will be transcribed with ${name(switchTo)}.`, { model: switchTo })}>{rich(t, 'queuedMeetingActions.use', { name: name(switchTo) })}</Button>
       )}
       {draft && (
-        <Button size="sm" variant="ghost" onClick={onRead}>Read it</Button>
+        <Button size="sm" variant="ghost" onClick={onRead}>{t('queuedMeetingActions.readIt')}</Button>
       )}
       {draft && (
         <Button size="sm" variant="ghost" disabled={disabled}
@@ -81,15 +85,15 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
             const running = state.status === 'running';
             if (running && !(await confirm({ title: 'Use the live transcript instead?', message: 'The more accurate transcript that is running now is stopped.', confirmLabel: 'Use the live transcript' }))) return;
             onAction('use-live', `${meeting.title} uses its live transcript and can go into a digest.`, { draft_sha256: draft.transcript_sha256, ...(state.generation ? { generation: state.generation } : {}) }, running);
-          }}>Use the live transcript</Button>
+          }}>{t('queuedMeetingActions.useTheLiveTranscript')}</Button>
       )}
       {state.status === 'partial' && !state.accepted && (
         <Button size="sm" variant="ghost" disabled={disabled}
-          onClick={() => onAction('accept', `${meeting.title} can now go into a digest with the partial transcript.`)}>Use this transcript</Button>
+          onClick={() => onAction('accept', `${meeting.title} can now go into a digest with the partial transcript.`)}>{t('queuedMeetingActions.useThisTranscript')}</Button>
       )}
       {(state.status === 'stopped' || state.status === 'failed' || (state.status === 'partial' && !state.accepted)) && (
         <Button size="sm" variant="ghost" disabled={disabled}
-          onClick={() => onAction('retry', `${file} waits for transcription again.`)}>Try again</Button>
+          onClick={() => onAction('retry', `${file} waits for transcription again.`)}>{t('retry')}</Button>
       )}
     </div>
   );
@@ -109,6 +113,7 @@ export function recordingElsewhere(m: QueuedMeeting | MeetingDigest['queue'][num
 export function QueuedMeetingActions({ meeting: m, job, onChanged, onRead, onRemoved }: {
   meeting: QueuedMeeting; job: MeetingDigest; onChanged: () => void; onRead: (file: string) => void; onRemoved: () => void;
 }) {
+  const { t } = useLanguage();
   const recorder = useRecorder();
   const confirm = useConfirm();
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -133,13 +138,13 @@ export function QueuedMeetingActions({ meeting: m, job, onChanged, onRead, onRem
 
   return (
     <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
-      {m.status === 'draft' && <Notice tone="warning" title="Not queued yet.">Its files are uploading, or the upload stopped. Remove it and add the meeting again if nothing changes.</Notice>}
+      {m.status === 'draft' && <Notice tone="warning" title={t('queuedMeetingActions.notQueuedYet')}>{t('queuedMeetingActions.itsFilesAreUploadingOr')}</Notice>}
       {m.live && !here && (
         <div style={line}>
           <span role="status" style={{ flex: '1 1 200px', minWidth: 0, color: 'var(--color-warning)' }}>
-            {m.live.state === 'damaged' ? 'Its record cannot be read; the audio is kept. Removing the meeting discards it.'
-              : recordingElsewhere(m) ? 'Being recorded in another page or dashboard.'
-              : `${minutes(m.live.saved_bytes / 32_000)} saved${m.live.last_block_at ? `, last audio ${formatRelativeTime(m.live.last_block_at)}` : ''}. It stays until you finish or discard it.`}
+            {m.live.state === 'damaged' ? t('queuedMeetingActions.itsRecordCannotBeRead')
+              : recordingElsewhere(m) ? t('queuedMeetingActions.beingRecordedInAnotherPage')
+              : t('queuedMeetingActions.savedItStaysUntilYou', { minutes: minutes(m.live.saved_bytes / 32_000), value: m.live.last_block_at ? t('queuedMeetingActions.lastAudio', { last_block_at: formatRelativeTime(m.live.last_block_at) }) : '' })}
           </span>
           {m.live.state !== 'damaged' && (
             <Button size="sm" variant="secondary" disabled={busy !== null}
@@ -149,28 +154,28 @@ export function QueuedMeetingActions({ meeting: m, job, onChanged, onRead, onRem
                   await apiPost(`/api/meeting-queue/${m.id}/recording/finish`, { recover: true, generation: m.live!.generation, queue: true });
                   return `${m.title} is saved and waits for its transcript.`;
                 });
-              }}>Finish recording</Button>
+              }}>{t('queuedMeetingActions.finishRecording')}</Button>
           )}
         </div>
       )}
       {m.held && !m.in_digest && (
         <div style={line}>
-          <span style={{ flex: '1 1 200px', color: 'var(--color-warning)' }}>On hold: {m.held}</span>
+          <span style={{ flex: '1 1 200px', color: 'var(--color-warning)' }}>{rich(t, 'queuedMeetingActions.onHold', { held: m.held })}</span>
           <Button size="sm" variant="secondary" disabled={busy !== null}
             onClick={() => act('queue', async () => { await apiPost(`/api/meeting-queue/${m.id}/queue`); return `${m.title} is queued again.`; })}>
-            Queue again
+            {t('queuedMeetingActions.queueAgain')}
           </Button>
         </div>
       )}
-      <ul aria-label="Files of this meeting" className="gtd-list" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+      <ul aria-label={t('queuedMeetingActions.filesOfThisMeeting')} className="gtd-list" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
         {m.files.map((f) => (
           <li key={f.name} className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
             <span className="mono truncate" style={{ flex: '1 1 200px', minWidth: 0 }}>{f.name}</span>
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{f.recording ? 'Recording' : 'File'}</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{f.recording ? t('queuedMeetingActions.recording') : t('queuedMeetingActions.file')}</span>
             {f.recording?.status === 'done' && f.recording.transcript && (
               <div style={{ ...line, flexBasis: '100%', color: 'var(--color-text-secondary)' }}>
-                Transcript ready{f.recording.accepted_live ? ' (the live one)' : ''}.
-                <Button size="sm" variant="ghost" onClick={() => onRead(f.name)}>Read it</Button>
+                {t('queuedMeetingActions.transcriptReady')}{f.recording.accepted_live ? ' (the live one)' : ''}.
+                <Button size="sm" variant="ghost" onClick={() => onRead(f.name)}>{t('queuedMeetingActions.readIt')}</Button>
               </div>
             )}
             {m.status === 'queued' && f.recording && f.recording.status !== 'done' && (
@@ -188,17 +193,17 @@ export function QueuedMeetingActions({ meeting: m, job, onChanged, onRead, onRem
             )}
           </li>
         ))}
-        {m.files.length === 0 && <li className="gtd-list__row" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No files yet.</li>}
+        {m.files.length === 0 && <li className="gtd-list__row" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('updateDetail.noFilesYet')}</li>}
       </ul>
       {notice && <Notice tone={notice.error ? 'critical' : 'success'}>{notice.text}</Notice>}
       <div>
         <Button size="sm" variant="danger" disabled={busy !== null || m.in_digest}
-          title={m.in_digest ? 'A digest is being made from it' : undefined}
+          title={m.in_digest ? t('queuedMeetingActions.aDigestIsBeingMade') : undefined}
           onClick={async () => {
             const ok = await confirm({ title: `Remove "${m.title}" from the queue?`, message: `The meeting of ${m.meeting_date} and its files are deleted. This cannot be undone.`, confirmLabel: 'Remove meeting', tone: 'danger' });
             if (!ok) return;
             void act('remove', async () => { await apiDelete(`/api/meeting-queue/${m.id}`); onRemoved(); });
-          }}>Remove from the queue</Button>
+          }}>{t('queuedMeetingActions.removeFromTheQueue')}</Button>
       </div>
     </div>
   );

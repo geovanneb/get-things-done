@@ -1,11 +1,10 @@
 # Localization
 
 Issue [#286](https://github.com/geovanneb/get-things-done/issues/286) is a staged migration.
-The work so far covers personal language selection, automatic detection, the app shell
-(navigation, header, sidebar editor, workspace switcher), shared components (dialogs, search,
-attachments, dictation, mentions, the Markdown editor) and the main Settings page, plus concise
-translated READMEs. It does not claim full application translation. Settings explains that some
-screens remain English.
+The dashboard is translated: every screen, dialog and notice in `ui/src`, plus the fixed text
+the server sends for models, languages, schedules and run checks. Translated READMEs are concise.
+`/design-system` stays English: it is a developer showcase. Settings says some text may remain
+English, because the gaps listed under "Next independently reviewable slices" still exist.
 
 ## Language policy
 
@@ -77,15 +76,19 @@ Spanish use sentence case and natural accents. Language choices use their native
 without flags. Short translated READMEs link to the full English guide and record their
 source revision. Native review, especially Spanish, remains welcome before release.
 
+## Three rules for translated code
+
+- Components use `useLanguage`. Code outside React uses `tr` from `ui/src/i18n/current.ts`, called when
+  the text is needed: a module constant holding text must be a function, or it keeps its first language.
+- Stored values are data, not labels. Note categories, default board columns and status ids stay English
+  on disk and are translated at display time (`categoryLabel`, `columnLabel`).
+- Fixed server English goes through `ui/src/i18n/serverText.ts`, which matches `server.*` messages and reads
+  the schedule sentence from `describeSchedule` back. Changing either text on the server needs the same
+  change there, or the text falls back to English.
+
 ## Next independently reviewable slices
 
-- Finish Settings: the Transcription, Updates and remembered-voice panels, and `UpdateBanner`.
-  Their model names, summaries and pros and cons come from the server, so they need ids first.
-- Migrate feature screens by area: Board, Meetings, Context, Stakeholders, Routines, Agents,
-  Situation, Insights, Outputs, Profile and Setup. `DictateButton` callers then translate `fieldName`.
 - Add a hard-coded-string ratchet and a development-only expanded pseudo-locale.
-- Migrate date, duration, number and sorting call sites to shared `Intl` formatters with
-  the chosen locale; do not change stored ISO dates or machine-readable identifiers.
 - Translate HTTP errors at the response edge **after** status classification and logging,
   using stable ids and request-local locale. Saved job errors need ids and arguments too.
 - Translate native menus, dialogs and notifications; rebuild them on preference changes.

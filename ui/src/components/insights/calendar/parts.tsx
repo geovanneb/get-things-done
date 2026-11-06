@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { SegmentedControl } from '@/components/common/Tabs';
 import React from 'react';
 import { RAMP } from '../palette';
@@ -52,10 +53,11 @@ export function Segmented<T extends string>({
 
 /** "Less [] [] [] More", with the value each step covers under its swatch. */
 export function Legend({ labels }: { labels: string[] }) {
+  const { t } = useLanguage();
   const text: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' };
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }} aria-label="Colour scale">
-      <span style={{ ...text, lineHeight: '12px' }}>Less</span>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }} aria-label={t('parts.colourScale')}>
+      <span style={{ ...text, lineHeight: '12px' }}>{t('parts.less')}</span>
       {['0', ...labels].map((label, step) => (
         <span key={step} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
           <span
@@ -69,7 +71,7 @@ export function Legend({ labels }: { labels: string[] }) {
           <span style={{ ...text, fontSize: 10, fontVariantNumeric: 'tabular-nums' }}>{label}</span>
         </span>
       ))}
-      <span style={{ ...text, lineHeight: '12px' }}>More</span>
+      <span style={{ ...text, lineHeight: '12px' }}>{t('more')}</span>
     </div>
   );
 }

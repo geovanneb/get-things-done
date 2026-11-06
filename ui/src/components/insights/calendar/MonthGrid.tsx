@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import type { InsightsCalendarDay } from '@/types';
 import {
@@ -29,10 +30,11 @@ export interface GridProps {
 
 /** A small red dot for days with overdue work. Always paired with text in the tooltip and label. */
 export function OverdueDot({ count }: { count: number }) {
+  const { t } = useLanguage();
   return (
     <span
       aria-hidden
-      title={`${count} overdue`}
+      title={t('monthGrid.overdue', { amount: count })}
       style={{
         position: 'absolute',
         top: 5,
@@ -68,13 +70,14 @@ export default function MonthGrid({
   step,
   cellProps,
 }: GridProps & { spanFrom: string; spanTo: string; compact?: boolean }) {
+  const { t } = useLanguage();
   const days = keysBetween(startOfWeek(spanFrom), addDays(startOfWeek(spanTo), 6));
   const cols: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 2 };
 
   return (
-    <div role="grid" aria-label={`Days from ${longDay(spanFrom)} to ${longDay(spanTo)}`}>
+    <div role="grid" aria-label={t('monthGrid.daysFromTo', { longDay: longDay(spanFrom), longDay2: longDay(spanTo) })}>
       <div role="row" style={{ ...cols, marginBottom: 4 }}>
-        {WEEKDAYS_SHORT.map((d) => (
+        {WEEKDAYS_SHORT().map((d) => (
           <span
             key={d}
             role="columnheader"
@@ -130,8 +133,8 @@ export default function MonthGrid({
                 type="button"
                 role="gridcell"
                 aria-selected={pinned === date}
-                aria-label={`${longDay(date)}: ${countLabel(value, metric)}${overdue ? `, ${overdue} overdue` : ''}${
-                  isToday ? ', today' : ''
+                aria-label={`${longDay(date)}: ${countLabel(value, metric)}${overdue ? t('monthGrid.overdue2', { overdue }) : ''}${
+                  isToday ? t('monthGrid.today') : ''
                 }`}
                 {...cellProps(date)}
                 style={{

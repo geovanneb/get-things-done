@@ -1,3 +1,6 @@
+import { languageName, serverText } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { describeSpeed, GPU_LIVE_X, gpuLiveOffer, recommendModel } from '@/utils/transcriptionSpeed';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import React from 'react';
@@ -31,6 +34,7 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
   onAction: (action: 'download' | 'cancel' | 'delete') => void;
   onTested: () => void;
 }) {
+  const { t } = useLanguage();
   const [speedTest, setSpeedTest] = React.useState<{ running: boolean; error?: string }>({ running: false });
   const runSpeedTest = async () => {
     setSpeedTest({ running: true });
@@ -38,7 +42,7 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
       const res = await fetch(`/api/transcription/models/${model.id}/speed-test`, { method: 'POST' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({})) as { message?: string };
-        throw new Error(body.message || `The speed test failed (${res.status})`);
+        throw new Error(body.message || t('transcriptionSettings.theSpeedTestFailed', { status: res.status }));
       }
       setSpeedTest({ running: false });
       onTested();
@@ -63,10 +67,10 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
   // The graphics-chip model can be chosen only after a speed test shows it runs there: said at the top, never only in a tooltip.
   const blocked = Boolean(model.gpu) && !model.gpu_ready && !chosen;
   const blockedWhy = !blocked ? null
-    : !model.installed ? 'Download it, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'
-      : model.speed ? 'The test ran, but not on the graphics chip: it cannot be chosen on this Mac.'
-        : vadMissing ? 'Download the voice-activity model below, then press Test speed: it can be chosen once the test shows it runs on the graphics chip.'
-          : 'Press Test speed below first: it can be chosen once the test shows it runs on the graphics chip.';
+    : !model.installed ? t('transcriptionSettings.downloadItThenPressTest')
+      : model.speed ? t('transcriptionSettings.theTestRanButNot')
+        : vadMissing ? t('transcriptionSettings.downloadTheVoiceActivityModel')
+          : t('transcriptionSettings.pressTestSpeedBelowFirst');
   const whyId = `model-${model.id}-why`;
   return (
     <div style={{
@@ -79,68 +83,68 @@ function ModelCard({ model, chosen, busy, saving, elsewhere, vadMissing, vadSize
         <span style={{ flex: 1 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ fontSize: 'var(--text-sm)' }}>{model.name}</strong>
-            {model.installed ? <Badge size="sm" variant="success">Downloaded</Badge> : null}
-            {chosen ? <Badge size="sm" variant="info">Used for transcription</Badge> : null}
-            {blocked && model.installed ? <Badge size="sm" variant="warning">{model.speed ? 'Not available on this Mac' : 'Test speed to use it'}</Badge> : null}
+            {model.installed ? <Badge size="sm" variant="success">{t('transcriptionSettings.downloaded')}</Badge> : null}
+            {chosen ? <Badge size="sm" variant="info">{t('transcriptionSettings.usedForTranscription')}</Badge> : null}
+            {blocked && model.installed ? <Badge size="sm" variant="warning">{model.speed ? t('transcriptionSettings.notAvailableOnThisMac') : t('transcriptionSettings.testSpeedToUseIt')}</Badge> : null}
           </span>
-          <span style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{model.summary}</span>
+          <span style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>{serverText(model.summary)}</span>
           {blockedWhy && <span id={whyId} style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--color-warning)', marginTop: 4 }}>{blockedWhy}</span>}
         </span>
       </label>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, fontSize: 'var(--text-xs)' }}>
-        <ul aria-label={`${model.name}: pluses`} style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {model.pros.map((p) => <li key={p}><span aria-hidden style={{ color: 'var(--color-success)', fontWeight: 700 }}>+ </span>{p}</li>)}
+        <ul aria-label={t('transcriptionSettings.pluses', { name: model.name })} style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {model.pros.map((p) => <li key={p}><span aria-hidden style={{ color: 'var(--color-success)', fontWeight: 700 }}>+ </span>{serverText(p)}</li>)}
         </ul>
-        <ul aria-label={`${model.name}: minuses`} style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {model.cons.map((c) => <li key={c}><span aria-hidden style={{ color: 'var(--color-warning)', fontWeight: 700 }}>− </span>{c}</li>)}
+        <ul aria-label={t('transcriptionSettings.minuses', { name: model.name })} style={{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {model.cons.map((c) => <li key={c}><span aria-hidden style={{ color: 'var(--color-warning)', fontWeight: 700 }}>− </span>{serverText(c)}</li>)}
         </ul>
       </div>
       {running && d && (
         <div aria-live="polite">
-          <div role="progressbar" aria-label={`Downloading ${model.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
+          <div role="progressbar" aria-label={t('transcriptionSettings.downloading', { name: model.name })} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
             style={{ height: 6, borderRadius: 3, background: 'var(--color-border)', overflow: 'hidden' }}>
             <div style={{ width: `${percent}%`, height: '100%', background: 'var(--color-accent)', transition: 'width 0.3s' }} />
           </div>
           <p style={hintStyle}>
-            {d.status === 'verifying' ? 'Checking the files…' : `${percent}%: ${size(d.received)} of ${size(d.total)}`}
+            {d.status === 'verifying' ? t('transcriptionSettings.checkingTheFiles') : t('transcriptionSettings.of', { percent, received: size(d.received), total: size(d.total) })}
           </p>
         </div>
       )}
-      {queued && <p role="status" style={hintStyle}>Waiting for the download before it. It starts by itself.</p>}
+      {queued && <p role="status" style={hintStyle}>{t('transcriptionSettings.waitingForTheDownloadBefore')}</p>}
       {!running && d?.message && (
         <p role="alert" style={{ ...hintStyle, color: d.status === 'failed' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{d.message}</p>
       )}
       {model.speed && !speedTest.running && (
         <p role="status" style={hintStyle}>
           {model.gpu
-            ? `About ${model.speed.realtime_x}× real time here: an hour of meeting takes about ${Math.max(1, Math.round(60 / model.speed.realtime_x))} minutes after it. Next to a video call it shares the graphics chip with the call.`
+            ? t('transcriptionSettings.aboutRealTimeHereAn', { realtime_x: model.speed.realtime_x, max: Math.max(1, Math.round(60 / model.speed.realtime_x)) })
             : describeSpeed(model.speed.realtime_x).line}
         </p>
       )}
       {model.gpu && model.gpu_ready && !speedTest.running && (
         <p role="status" style={{ ...hintStyle, color: 'var(--color-success)' }}>
-          Runs on this Mac&apos;s graphics chip. It can also make the live transcript (choose it below): Whisper quality as people speak. With this model for both the live and the after-meeting transcript, and speaker detection off, a complete live transcript is used when you stop (catching up can take a moment); otherwise the recording is still transcribed after the meeting. If it ever fails on the graphics chip, the recording is transcribed with Whisper Turbo on the CPU instead.
+          {t('transcriptionSettings.runsOnThisMacS')}
         </p>
       )}
-      {speedTest.running && <p role="status" style={hintStyle}>Testing on a minute of speech… {model.memory_gb > 2 ? 'This one can take a minute or two.' : ''}</p>}
+      {speedTest.running && <p role="status" style={hintStyle}>{rich(t, 'transcriptionSettings.testingOnAMinuteOf', { value: model.memory_gb > 2 ? t('transcriptionSettings.thisOneCanTakeA') : '' })}</p>}
       {speedTest.error && <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{speedTest.error}</p>}
       {check.message && (
         <p role={check.ok ? 'status' : 'alert'} style={{ ...hintStyle, color: check.ok ? 'var(--color-success)' : 'var(--color-critical)' }}>{check.message}</p>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {running || queued
-          ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
+          ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>{t('cancel')}</Button>
           : model.installed
             ? <>
-              {model.gpu && model.gpu_ready && !chosen && <Button size="sm" variant="primary" disabled={saving} onClick={onChoose}>Use it for transcription</Button>}
-              {vadMissing && <Button size="sm" variant={blocked ? 'primary' : 'secondary'} disabled={busy} onClick={() => onAction('download')}>Download the missing voice-activity model ({size(vadSize)})</Button>}
-              {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={check.running} onClick={() => void runCheck()}>Check</Button>}
-              {!vadMissing && <Button size="sm" variant={blocked && !model.speed ? 'primary' : 'secondary'} disabled={busy || check.running || speedTest.running} loading={speedTest.running} onClick={() => void runSpeedTest()}>{model.speed ? 'Test speed again' : 'Test speed'}</Button>}
+              {model.gpu && model.gpu_ready && !chosen && <Button size="sm" variant="primary" disabled={saving} onClick={onChoose}>{t('transcriptionSettings.useItForTranscription')}</Button>}
+              {vadMissing && <Button size="sm" variant={blocked ? 'primary' : 'secondary'} disabled={busy} onClick={() => onAction('download')}>{rich(t, 'transcriptionSettings.downloadTheMissingVoiceActivity', { vadSize: size(vadSize) })}</Button>}
+              {!vadMissing && <Button size="sm" variant="secondary" disabled={busy || check.running || speedTest.running} loading={check.running} onClick={() => void runCheck()}>{t('transcriptionSettings.check')}</Button>}
+              {!vadMissing && <Button size="sm" variant={blocked && !model.speed ? 'primary' : 'secondary'} disabled={busy || check.running || speedTest.running} loading={speedTest.running} onClick={() => void runSpeedTest()}>{model.speed ? t('transcriptionSettings.testSpeedAgain') : t('transcriptionSettings.testSpeed')}</Button>}
               <Button size="sm" variant="ghost" disabled={busy || check.running || speedTest.running} onClick={() => onAction('delete')}
-                title={busy || check.running || speedTest.running ? 'Not while a download, check or speed test is running' : undefined}>Delete</Button>
+                title={busy || check.running || speedTest.running ? t('transcriptionSettings.notWhileADownloadCheck') : undefined}>{t('updateDetail.delete')}</Button>
             </>
             : <Button size="sm" variant="secondary" disabled={saving || elsewhere} onClick={() => onAction('download')}>
-              {model.partial > 0 ? `Continue download (${size(model.partial)} of ${size(model.size)})` : `Download (${size(model.size)})`}
+              {model.partial > 0 ? t('transcriptionSettings.continueDownloadOf', { partial: size(model.partial), size: size(model.size) }) : t('transcriptionSettings.download', { size: size(model.size) })}
             </Button>}
       </div>
     </div>
@@ -152,6 +156,7 @@ function SpeakerDetection({ speakers, enabled, saving, downloading, onToggle, on
   speakers: Transcription['speakers']; enabled: boolean; saving: boolean; downloading: boolean;
   onToggle: (on: boolean) => void; onAction: (action: 'download' | 'cancel' | 'delete') => void;
 }) {
+  const { t } = useLanguage();
   const d = speakers.download;
   const running = d?.status === 'downloading' || d?.status === 'verifying' || d?.status === 'queued';
   return (
@@ -160,26 +165,25 @@ function SpeakerDetection({ speakers, enabled, saving, downloading, onToggle, on
         ? (
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
             <input type="checkbox" checked={enabled} disabled={saving} onChange={(e) => onToggle(e.target.checked)} />
-            Tell speakers apart
+            {t('transcriptionSettings.tellSpeakersApart')}
           </label>
         )
-        : <span style={{ fontWeight: 600 }}>Tell speakers apart</span>}
+        : <span style={{ fontWeight: 600 }}>{t('transcriptionSettings.tellSpeakersApart')}</span>}
       <span style={hintStyle}>
-        Marks who spoke when, as Speaker 1 and Speaker 2, in a transcript made after a meeting. It runs on this computer, adds
-        about a tenth of the meeting&apos;s length, and keeps nothing of anyone&apos;s voice unless you ask it to remember one (below). A live transcript has no speakers.
+        {t('transcriptionSettings.marksWhoSpokeWhenAs')}
       </span>
       {d?.message && !running && <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{d.message}</p>}
       {running && (
         <p role="status" style={hintStyle}>
-          {d.status === 'queued' ? 'Waiting for the download before it.' : d.status === 'verifying' ? 'Checking the files…' : `${d.total ? Math.floor((d.received / d.total) * 100) : 0}%: ${size(d.received)} of ${size(d.total)}`}
+          {d.status === 'queued' ? t('transcriptionSettings.waitingForTheDownloadBefore2') : d.status === 'verifying' ? t('transcriptionSettings.checkingTheFiles') : t('transcriptionSettings.of2', { value: d.total ? Math.floor((d.received / d.total) * 100) : 0, received: size(d.received), total: size(d.total) })}
         </p>
       )}
       <div>
         {running
-          ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>Cancel</Button>
+          ? <Button size="sm" variant="secondary" onClick={() => onAction('cancel')}>{t('cancel')}</Button>
           : speakers.installed
-            ? <Button size="sm" variant="ghost" disabled={downloading} onClick={() => onAction('delete')} title={downloading ? 'Not while a download is running' : undefined}>Delete</Button>
-            : <Button size="sm" variant="secondary" disabled={saving} onClick={() => onAction('download')}>Download ({size(speakers.size)})</Button>}
+            ? <Button size="sm" variant="ghost" disabled={downloading} onClick={() => onAction('delete')} title={downloading ? t('transcriptionSettings.notWhileADownloadIs') : undefined}>{t('updateDetail.delete')}</Button>
+            : <Button size="sm" variant="secondary" disabled={saving} onClick={() => onAction('download')}>{rich(t, 'transcriptionSettings.download', { size: size(speakers.size) })}</Button>}
       </div>
     </div>
   );
@@ -190,6 +194,7 @@ function SpeakerDetection({ speakers, enabled, saving, downloading, onToggle, on
  * language. Models stay on this computer, outside the workspace.
  */
 export default function TranscriptionSettings() {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const { dataVersions } = useAppState();
   const { data, error, refetch } = useApi<Transcription>('/api/transcription', [dataVersions.transcription]);
@@ -214,7 +219,7 @@ export default function TranscriptionSettings() {
   };
   const act = async (model: Pick<TranscriptionModel, 'id' | 'name' | 'size'>, action: 'download' | 'cancel' | 'delete') => {
     setNotice(null);
-    if (action === 'delete' && !(await confirm({ title: `Delete ${model.name}?`, message: `${size(model.size)} is freed on this computer. You can download the model again later.`, confirmLabel: 'Delete model', tone: 'danger' }))) return;
+    if (action === 'delete' && !(await confirm({ title: t('transcriptionSettings.delete', { name: model.name }), message: t('transcriptionSettings.isFreedOnThisComputer', { size: size(model.size) }), confirmLabel: t('transcriptionSettings.deleteModel'), tone: 'danger' }))) return;
     try {
       if (action === 'download') await apiPost(`/api/transcription/models/${model.id}/download`);
       if (action === 'cancel') await apiPost(`/api/transcription/models/${model.id}/cancel`);
@@ -231,33 +236,32 @@ export default function TranscriptionSettings() {
   // it in the list rather than showing Auto as if it had been chosen.
   const languageMissing = chosen && data.settings.language !== 'auto' && !chosen.language_options?.some((l) => l.id === data.settings.language);
   const languageLabel = data.models.flatMap((m) => m.language_options ?? []).find((l) => l.id === data.settings.language)?.label ?? data.settings.language;
+  const languageShown = languageName(data.settings.language, languageLabel);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-        Meeting recordings will be transcribed on this computer, offline: nothing is sent anywhere. Choose a model and download
-        it once. <strong>{data.defaults.model === data.settings.model ? 'The default, ' : ''}{chosen?.name ?? 'The chosen model'}</strong>
-        {chosen && chosen.memory_gb > 2 ? ' is accurate but takes longer' : ' is fast and light'}; you can change it here at any time.
+        {rich(t, 'transcriptionSettings.meetingRecordingsWillBeTranscribed', { strong: <strong>{data.defaults.model === data.settings.model ? t('transcriptionSettings.theDefault') : ''}{chosen?.name ?? t('transcriptionSettings.theChosenModel')}</strong>, value: chosen && chosen.memory_gb > 2 ? t('transcriptionSettings.isAccurateButTakesLonger') : t('transcriptionSettings.isFastAndLight') })}
       </p>
       {data.downloading_elsewhere && (
         <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          Another dashboard on this computer is downloading a model; its progress shows there.
+          {t('transcriptionSettings.anotherDashboardOnThisComputer')}
         </p>
       )}
       {data.memory_hint && (
-        <p role="note" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-warning)' }}>{data.memory_hint}</p>
+        <p role="note" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-warning)' }}>{serverText(data.memory_hint)}</p>
       )}
       {(() => {
         const pick = recommendModel(data.models);
-        if (!pick) return <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Not sure which to use? Download a model and press <strong>Test speed</strong>: it tells you how it runs on this computer.</p>;
+        if (!pick) return <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{rich(t, 'transcriptionSettings.notSureWhichToUse', { strong: <strong>{t('transcriptionSettings.testSpeed')}</strong> })}</p>;
         return (
           <p role="note" style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
-            Recommended for this computer: <strong>{pick.name}</strong>, {pick.reason}.
-            {pick.id !== data.settings.model && <> <Button size="sm" variant="ghost" disabled={saving} onClick={() => void save({ model: pick.id })}>Use it</Button></>}
+            {t('transcriptionSettings.recommendedForThisComputer')} <strong>{pick.name}</strong>, {pick.reason}.
+            {pick.id !== data.settings.model && <> <Button size="sm" variant="ghost" disabled={saving} onClick={() => void save({ model: pick.id })}>{t('transcriptionSettings.useIt')}</Button></>}
           </p>
         );
       })()}
-      <div role="radiogroup" aria-label="Transcription model" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div role="radiogroup" aria-label={t('transcriptionSettings.transcriptionModel')} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {data.models.map((m) => (
           <ModelCard key={m.id} model={m} chosen={m.id === data.settings.model} busy={saving || (downloading && m.download?.status !== 'downloading')} saving={saving} elsewhere={data.downloading_elsewhere}
             vadMissing={!data.vad_installed} vadSize={data.vad_size}
@@ -265,48 +269,43 @@ export default function TranscriptionSettings() {
         ))}
       </div>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
-        <span style={{ fontWeight: 600 }}>Language</span>
-        <select aria-label="Transcription language" value={data.settings.language} disabled={saving}
+        <span style={{ fontWeight: 600 }}>{t('language')}</span>
+        <select aria-label={t('transcriptionSettings.transcriptionLanguage')} value={data.settings.language} disabled={saving}
           onChange={(e) => void save({ language: e.target.value as TranscriptionLanguage })}
           style={{ maxWidth: 420, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }}>
-          <option value="auto">Auto (each part of the meeting in its own language)</option>
-          {languageMissing && <option value={data.settings.language}>{languageLabel} (not in {chosen.name})</option>}
-          {chosen?.language_options?.filter((l) => l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+          <option value="auto">{t('transcriptionSettings.autoEachPartOfThe')}</option>
+          {languageMissing && <option value={data.settings.language}>{rich(t, 'transcriptionSettings.notIn', { languageLabel: languageShown, name: chosen.name })}</option>}
+          {chosen?.language_options?.filter((l) => l.common).map((l) => <option key={l.id} value={l.id}>{languageName(l.id, l.label)}</option>)}
           {chosen?.language_options?.some((l) => !l.common) && (
-            <optgroup label="Other languages">
-              {chosen.language_options.filter((l) => !l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+            <optgroup label={t('recordMeetingModal.otherLanguages')}>
+              {chosen.language_options.filter((l) => !l.common).map((l) => <option key={l.id} value={l.id}>{languageName(l.id, l.label)}</option>)}
             </optgroup>
           )}
         </select>
         {languageMissing && (
           <span role="alert" style={{ maxWidth: 560, color: 'var(--color-warning)' }}>
-            {chosen.name} does not know {languageLabel}: it reads it as Auto, and speech in {languageLabel} can come out
-            empty. Choose a Whisper model for {languageLabel}.
+            {rich(t, 'transcriptionSettings.doesNotKnowItReads', { name: chosen.name, languageLabel: languageShown })}
           </span>
         )}
         <span role="note" style={{ maxWidth: 560, padding: '6px 10px', borderLeft: '3px solid var(--color-accent)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontWeight: 600, color: 'var(--color-text)' }}>
-          For the most accurate transcript of a meeting in one language, choose that language.
+          {t('transcriptionSettings.forTheMostAccurateTranscript')}
         </span>
         <span style={hintStyle}>
-          Auto detects the language of each part of a meeting, so it suits a meeting that switches languages. It can pick
-          the wrong language for a very short remark.
-          {liveLanguageMissing && ` ${liveModel.name} does not have this language, so the live transcript detects it by itself.`}
+          {rich(t, 'transcriptionSettings.autoDetectsTheLanguageOf', { value: liveLanguageMissing && t('transcriptionSettings.doesNotHaveThisLanguage', { name: liveModel.name }) })}
         </span>
       </label>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--text-sm)' }}>
-        <span style={{ fontWeight: 600 }}>Live transcript while recording</span>
-        <select aria-label="Live transcript model" value={data.settings.live_model ?? ''} disabled={saving}
+        <span style={{ fontWeight: 600 }}>{t('transcriptionSettings.liveTranscriptWhileRecording')}</span>
+        <select aria-label={t('transcriptionSettings.liveTranscriptModel')} value={data.settings.live_model ?? ''} disabled={saving}
           onChange={(e) => void save({ live_model: e.target.value || null })}
           style={{ maxWidth: 420, padding: '6px 8px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'inherit' }}>
-          <option value="">Off: transcribe after the meeting</option>
+          <option value="">{t('transcriptionSettings.offTranscribeAfterTheMeeting')}</option>
           {data.models.filter((m) => m.installed && (!m.gpu || m.gpu_ready || m.id === data.settings.live_model)).map((m) => (
-            <option key={m.id} value={m.id}>{m.name}{m.speed ? ` (about ${m.speed.realtime_x}× real time here)` : ''}</option>
+            <option key={m.id} value={m.id}>{m.name}{m.speed ? t('transcriptionSettings.aboutRealTimeHere', { realtime_x: m.speed.realtime_x }) : ''}</option>
           ))}
         </select>
         <span style={hintStyle}>
-          The text appears on the Meetings page as people speak. Choose a model much faster than real time (see Test speed),
-          and try it next to a video call: how much room is left depends on the computer. If it is not the model chosen above,
-          the chosen model transcribes the recording again after the meeting, and its text replaces the live one.
+          {t('transcriptionSettings.theTextAppearsOnThe')}
         </span>
       </label>
       {(() => {
@@ -314,18 +313,16 @@ export default function TranscriptionSettings() {
         if (!offer) return null;
         const sameAfter = data.settings.model === offer.id;
         return (
-          <div role="note" aria-label="Live transcript on the graphics chip" style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', borderLeft: '3px solid var(--color-accent)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontSize: 'var(--text-sm)' }}>
-            <strong>Live transcript on the graphics chip</strong>
+          <div role="note" aria-label={t('transcriptionSettings.liveTranscriptOnTheGraphics')} style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', borderLeft: '3px solid var(--color-accent)', borderRadius: 'var(--radius-sm)', background: 'var(--color-surface-hover)', fontSize: 'var(--text-sm)' }}>
+            <strong>{t('transcriptionSettings.liveTranscriptOnTheGraphics')}</strong>
             <span>
-              The speed test showed {offer.name} runs on this Mac&apos;s graphics chip, at about {offer.realtime_x}× real time.
-              {offer.realtime_x >= GPU_LIVE_X
-                ? ' You can try it for the live transcript, with Whisper quality as people speak. Whether it keeps up during a video call depends on this computer: it shares the graphics chip with the call. SenseVoice stays the lighter choice.'
-                : ' That is too slow to follow a meeting as people speak: SenseVoice is the better live model here.'}
-              {sameAfter
-                ? ' It is also the model above: with speaker detection off, a complete live transcript can be used when you stop (catching up can take a moment).'
-                : ` ${chosen?.name ?? 'The model above'} still transcribes the recording after the meeting.`}
+              {rich(t, 'transcriptionSettings.theSpeedTestShowedRuns', { name: offer.name, realtime_x: offer.realtime_x, value: offer.realtime_x >= GPU_LIVE_X
+                ? t('transcriptionSettings.youCanTryItFor')
+                : t('transcriptionSettings.thatIsTooSlowTo'), value2: sameAfter
+                ? t('transcriptionSettings.itIsAlsoTheModel')
+                : t('transcriptionSettings.stillTranscribesTheRecordingAfter', { name: chosen?.name ?? t('transcriptionSettings.theModelAbove') }) })}
             </span>
-            {offer.realtime_x >= GPU_LIVE_X && <span><Button size="sm" variant="secondary" disabled={saving} onClick={() => void save({ live_model: offer.id })}>Use it for the live transcript</Button></span>}
+            {offer.realtime_x >= GPU_LIVE_X && <span><Button size="sm" variant="secondary" disabled={saving} onClick={() => void save({ live_model: offer.id })}>{t('transcriptionSettings.useItForTheLive')}</Button></span>}
           </div>
         );
       })()}
@@ -336,18 +333,15 @@ export default function TranscriptionSettings() {
         <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
           <input type="checkbox" checked={data.settings.keep_recordings} disabled={saving}
             onChange={(e) => void save({ keep_recordings: e.target.checked })} />
-          Keep recordings after transcription
+          {t('transcriptionSettings.keepRecordingsAfterTranscription')}
         </span>
         <span style={hintStyle}>
-          Off: a recording is removed once its complete transcript is safely in a digest. On: after review it is kept with
-          its meeting&apos;s transcript in the meeting&apos;s folder, until the Meetings rule in System cleanup removes it or
-          you delete the meeting. A partial transcript always keeps its recording until the digest is done.
+          {t('transcriptionSettings.offARecordingIsRemoved')}
         </span>
       </label>
       {notice && <p role="alert" style={{ margin: 0, color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{notice}</p>}
       <p style={hintStyle}>
-        Models are kept in <code style={{ overflowWrap: 'anywhere' }}>{data.models_dir}</code>, shared by every workspace. Speeds were measured on an Apple Silicon
-        Mac; other computers may be slower.
+        {rich(t, 'transcriptionSettings.modelsAreKeptInShared', { code: <code style={{ overflowWrap: 'anywhere' }}>{data.models_dir}</code> })}
       </p>
     </div>
   );

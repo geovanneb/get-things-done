@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useEffect, useRef, useState } from 'react';
 import Avatar from '@/components/common/Avatar';
 import type { Stakeholder } from '@/types';
@@ -41,6 +42,7 @@ function countBelow(node: OrgTreeNode): number {
 }
 
 export default function OrgChartTree(props: TreeProps) {
+  const { t } = useLanguage();
   const { roots, view, dragging, canDrop, onDrop } = props;
   const [topHover, setTopHover] = useState(false);
 
@@ -62,7 +64,7 @@ export default function OrgChartTree(props: TreeProps) {
         display: dragging ? 'block' : 'none',
       }}
     >
-      Drop here to place at the top of the chart
+      {t('orgChartTree.dropHereToPlaceAt')}
     </div>
   );
 
@@ -119,6 +121,7 @@ function OutlineList({ nodes, depth, ...props }: { nodes: OrgTreeNode[]; depth: 
 }
 
 function NodeCard({ node, compact, people, selected, collapsed, dragging, canDrop, hasManager, onSelect, onToggle, onDragStart, onDragEnd, onDrop, onAction, matches, currentMatch, titles, unitNames, placeholders }: { node: OrgTreeNode; compact: boolean } & TreeProps) {
+  const { t } = useLanguage();
   const person = people.get(node.ref);
   const name = person?.name ?? node.ref;
   const isSelected = selected === node.ref;
@@ -128,15 +131,15 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
   const isPh = placeholders?.has(node.ref) ?? false;
   const openProfile = person && !isPh ? () => onAction(node.ref, 'open') : undefined;
   const menu: Array<[NodeAction, string]> = [
-    ['add-report', 'Add a direct report…'],
-    ['change-manager', 'Change manager…'],
+    ['add-report', t('orgChartTree.addADirectReport')],
+    ['change-manager', t('orgChartTree.changeManager')],
     ...(isPh
-      ? [['edit-placeholder', 'Edit placeholder…'], ['make-stakeholder', 'Make stakeholder…'], ['link-stakeholder', 'Link to existing stakeholder…']] as Array<[NodeAction, string]>
-      : [['set-title', 'Title in this chart…']] as Array<[NodeAction, string]>),
-    ['set-unit', unitName ? 'Change unit…' : 'Add to a unit…'],
-    ...(hasManager(node.ref) ? [['top-level', 'Move to top of chart'] as [NodeAction, string]] : []),
-    ...(isPh ? [] : [['open', 'Open profile'] as [NodeAction, string]]),
-    ['remove', 'Remove from chart'],
+      ? [['edit-placeholder', t('orgChartTree.editPlaceholder')], ['make-stakeholder', t('orgChartTree.makeStakeholder')], ['link-stakeholder', t('orgChartTree.linkToExistingStakeholder')]] as Array<[NodeAction, string]>
+      : [['set-title', t('orgChartTree.titleInThisChart')]] as Array<[NodeAction, string]>),
+    ['set-unit', unitName ? t('orgChartTree.changeUnit') : t('orgChartTree.addToAUnit')],
+    ...(hasManager(node.ref) ? [['top-level', t('orgChartTree.moveToTopOfChart')] as [NodeAction, string]] : []),
+    ...(isPh ? [] : [['open', t('orgChartTree.openProfile')] as [NodeAction, string]]),
+    ['remove', t('orgChartTree.removeFromChart')],
   ];
   const isCollapsed = collapsed.has(node.ref);
   const [over, setOver] = useState(false);
@@ -192,29 +195,29 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
           {openProfile ? (
             // Mouse shortcut; keyboard users open the profile from the card menu.
             <button type="button" tabIndex={-1} className={`org-node__name ${compact ? 'org-node__line' : 'org-node__clamp'}`}
-              title={`Show ${name}'s profile`} onClick={(e) => { e.stopPropagation(); openProfile(); }}>
+              title={t('orgChartTree.showSProfile', { name })} onClick={(e) => { e.stopPropagation(); openProfile(); }}>
               {name}
             </button>
           ) : (
             <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: person ? 'var(--color-text)' : 'var(--color-critical)' }}>
-              {person ? name : `${node.ref} (missing)`}
+              {person ? name : t('orgChartTree.missing', { ref: node.ref })}
             </div>
           )}
           {(role || (compact && (person?.organization || unitName))) && (
             <div className={compact ? 'org-node__line' : 'org-node__clamp'} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}
-              title={chartTitle ? `Title in this chart${person?.role ? ` · profile role: ${person.role}` : ''}` : undefined}>
+              title={chartTitle ? t('orgChartTree.titleInThisChart2', { value: person?.role ? t('orgChartTree.profileRole', { role: person.role }) : '' }) : undefined}>
               {compact ? [role, unitName, person?.organization].filter(Boolean).join(' · ') : role}
             </div>
           )}
-          {isPh && <div className="org-node__unit org-node__unit--ph" title="Placeholder: not a stakeholder yet, or a vacant role">Placeholder</div>}
-          {unitName && !compact && <div className="org-node__unit" title={`Unit: ${unitName}`}>{unitName}</div>}
+          {isPh && <div className="org-node__unit org-node__unit--ph" title={t('orgChartTree.placeholderNotAStakeholderYet')}>{t('orgChartTree.placeholder')}</div>}
+          {unitName && !compact && <div className="org-node__unit" title={t('orgChartTree.unit', { unitName })}>{unitName}</div>}
         </div>
         {isSelected && (
           <button
             type="button"
             className={compact ? 'org-node__add' : 'org-node__add org-node__add--edge'}
-            aria-label={`Add a direct report to ${name}`}
-            title="Add a direct report"
+            aria-label={t('orgChartTree.addADirectReportTo', { name })}
+            title={t('orgChartTree.addADirectReport2')}
             onClick={(e) => { e.stopPropagation(); onAction(node.ref, 'add-report'); }}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
@@ -224,7 +227,7 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
           <button
             type="button"
             className="org-node__menu-btn"
-            aria-label={`Actions for ${name}`}
+            aria-label={t('orgChartTree.actionsFor', { name })}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}
@@ -251,9 +254,9 @@ function NodeCard({ node, compact, people, selected, collapsed, dragging, canDro
           type="button"
           className="org-node__toggle"
           onClick={(e) => { e.stopPropagation(); onToggle(node.ref); }}
-          aria-label={isCollapsed ? `Show ${name}'s reports` : `Hide ${name}'s reports`}
+          aria-label={isCollapsed ? t('orgChartTree.showSReports', { name }) : t('orgChartTree.hideSReports', { name })}
         >
-          {isCollapsed ? `+${hidden} below` : `${reports} ${reports === 1 ? 'report' : 'reports'}`}
+          {isCollapsed ? t('orgChartTree.below', { hidden }) : t('common.reportCount', { count: reports })}
         </button>
       )}
     </div>

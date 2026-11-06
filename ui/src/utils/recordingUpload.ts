@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * Sends recorded audio to the server, one block at a time, and keeps what is not stored yet. Nothing here touches the
  * browser's audio or the network directly, so every failure can be tested. `saved` only grows when the server says
@@ -51,7 +52,7 @@ export class RecordingUploader {
   add(bytes: Uint8Array): void {
     if (this.failed || this.cancelled) return;
     if (this.backlog + bytes.length > this.maxBacklog) {
-      this.fail('The server could not be reached for too long, so recording stopped. What was saved is kept.');
+      this.fail(tr('recordingUpload.theServerCouldNotBe'));
       return;
     }
     this.waiting.push(bytes);

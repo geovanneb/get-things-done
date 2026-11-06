@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
@@ -52,6 +54,7 @@ function Status({ status, label }: { status: RowStatus; label: string }) {
  * while there is nothing to ask (fewer than two characters) or no answer yet.
  */
 function useSaidSearch(query: string): { hits: Map<string, MeetingSearchHit> | null; searching: boolean; error: string | null } {
+  const { t } = useLanguage();
   const q = query.trim();
   const [state, setState] = React.useState<{ q: string; hits: Map<string, MeetingSearchHit> | null; error: string | null }>({ q: '', hits: null, error: null });
   React.useEffect(() => {
@@ -60,7 +63,7 @@ function useSaidSearch(query: string): { hits: Map<string, MeetingSearchHit> | n
     const timer = setTimeout(() => {
       fetch(`/api/meetings/search?q=${encodeURIComponent(q)}`, { signal: abort.signal })
         .then(async (res) => {
-          if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? `The search failed (${res.status}).`);
+          if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { message?: string } | null)?.message ?? t('meetingsList.theSearchFailed', { status: res.status }));
           return res.json() as Promise<{ results: MeetingSearchHit[] }>;
         })
         .then((body) => setState({ q, hits: new Map(body.results.map((h) => [h.id, h])), error: null }))
@@ -82,6 +85,7 @@ function Marked({ text, words }: { text: string; words: string[] }) {
 
 /** Where a meeting was found by what was said: the best place, and how many more. */
 function Said({ hit, words }: { hit: MeetingSearchHit; words: string[] }) {
+  const { t } = useLanguage();
   const s = hit.snippets[0];
   if (!s) return null;
   const more = hit.places - 1;
@@ -90,12 +94,13 @@ function Said({ hit, words }: { hit: MeetingSearchHit; words: string[] }) {
       {s.time ? <span className="mono">{clockLine(s.time)} </span> : null}
       {s.speaker ? <strong style={{ fontWeight: 600 }}>{s.speaker}: </strong> : null}
       <Marked text={s.text} words={words} />
-      {more > 0 && <span style={{ color: 'var(--color-text-muted)' }}> · {more === 1 ? '1 more place' : `${more} more places`}</span>}
+      {more > 0 && <span style={{ color: 'var(--color-text-muted)' }}> · {more === 1 ? t('meetingsList.1MorePlace') : t('meetingsList.morePlaces', { more })}</span>}
     </div>
   );
 }
 
 function Row({ row, now, selected, onSelect, said, words }: { row: MeetingRow; now: Date; selected: boolean; onSelect: (on: boolean) => void; said?: MeetingSearchHit | undefined; words: string[] }) {
+  const { t } = useLanguage();
   const selectable = canMakeDeliverable(row);
   // Found by what was said: open the file it was found in, finding the words of the query that place holds.
   const first = said?.snippets[0];
@@ -105,19 +110,19 @@ function Row({ row, now, selected, onSelect, said, words }: { row: MeetingRow; n
     <li className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 'var(--space-4)', rowGap: 'var(--space-2)' }}>
       {/* Every row keeps the same indent, also one that cannot be picked yet (its review is still open). */}
       <span style={{ flex: '0 0 20px' }}>
-        {selectable && <Checkbox checked={selected} onChange={onSelect} label={<span className="sr-only">Select {row.title}</span>} />}
+        {selectable && <Checkbox checked={selected} onChange={onSelect} label={<span className="sr-only">{rich(t, 'meetingsList.select', { title: row.title })}</span>} />}
       </span>
       <span className="mono" style={{ flex: '0 0 64px', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>{whenLabel(row, now)}</span>
       <div style={{ flex: '1 1 220px', minWidth: 0 }}>
         <Link to={href} className="gtd-link-strong truncate" style={{ display: 'block', fontSize: 'var(--text-sm)' }}>{row.title}</Link>
         <div className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           {row.source}{row.people.length ? ` · ${row.people.join(', ')}` : ''}
-          {row.textGone && <em> · transcript no longer kept</em>}
+          {row.textGone && <em> {t('meetingsList.transcriptNoLongerKept')}</em>}
         </div>
         {said && <Said hit={said} words={words} />}
       </div>
-      <Status status={row.processing} label="Processing" />
-      <Status status={row.review} label="Review" />
+      <Status status={row.processing} label={t('meetingsList.processing')} />
+      <Status status={row.review} label={t('shared.review')} />
     </li>
   );
 }
@@ -132,6 +137,7 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   retention: { keep_text: boolean | null; enabled: boolean; days: number; action: string } | null;
   actions?: React.ReactNode; onChanged: () => void;
 }) {
+  const { t } = useLanguage();
   const recorder = useRecorder();
   const confirm = useConfirm();
   const narrow = useNarrow(640);
@@ -163,11 +169,11 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   const picked = selected.flatMap((id) => rows.filter((r) => r.id === id && canMakeDeliverable(r)));
   const select = (id: string, on: boolean) => setSelected((prev) => (on ? [...prev.filter((x) => x !== id), id] : prev.filter((x) => x !== id)));
   const options: { value: MeetingFilter; label: string }[] = [
-    { value: 'all', label: `All ${count('all')}` },
-    { value: 'you', label: `Needs you ${count('you')}` },
-    { value: 'progress', label: `In progress ${count('progress')}` },
-    { value: 'review', label: `Waiting for review ${count('review')}` },
-    { value: 'reviewed', label: `Reviewed ${count('reviewed')}` },
+    { value: 'all', label: t('meetingsList.all', { amount: count('all') }) },
+    { value: 'you', label: t('meetingsList.needsYou', { amount: count('you') }) },
+    { value: 'progress', label: t('meetingsList.inProgress', { amount: count('progress') }) },
+    { value: 'review', label: t('meetingsList.waitingForReview', { amount: count('review') }) },
+    { value: 'reviewed', label: t('meetingsList.reviewed', { amount: count('reviewed') }) },
   ];
 
   const act = async (id: string, fn: () => Promise<string>) => {
@@ -177,74 +183,74 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   };
 
   return (
-    <Card title="Meetings" padding="none" actions={actions}>
-      {error && <div style={{ padding: 'var(--space-4) var(--space-5)' }}><Notice tone="critical" title="Could not load the meetings.">{error}</Notice></div>}
-      {!job && !history && !error && <LoadingSpinner text="Loading meetings…" />}
+    <Card title={t('meetings')} padding="none" actions={actions}>
+      {error && <div style={{ padding: 'var(--space-4) var(--space-5)' }}><Notice tone="critical" title={t('meetingsList.couldNotLoadTheMeetings')}>{error}</Notice></div>}
+      {!job && !history && !error && <LoadingSpinner text={t('meetingsList.loadingMeetings')} />}
       {job && history && (
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderBottom: '1px solid var(--color-border)' }}>
-            <SearchInput value={query} onChange={setQuery} placeholder="Search titles, people or what was said" size="sm" width={narrow ? '100%' : 300} />
+            <SearchInput value={query} onChange={setQuery} placeholder={t('meetingsList.searchTitlesPeopleOrWhat')} size="sm" width={narrow ? '100%' : 300} />
             {narrow
-              ? <Select label="Show" size="sm" value={filter} onChange={(v) => setFilter(v as MeetingFilter)} options={options} />
-              : <SegmentedControl label="Show" value={filter} onChange={setFilter} options={options} />}
+              ? <Select label={t('meetingsList.show')} size="sm" value={filter} onChange={(v) => setFilter(v as MeetingFilter)} options={options} />
+              : <SegmentedControl label={t('meetingsList.show')} value={filter} onChange={setFilter} options={options} />}
           </div>
           {said.error && (
             <div style={{ padding: 'var(--space-3) var(--space-5)' }}>
-              <Notice tone="warning" title="Could not search what was said.">{said.error} Titles, dates and people are still searched.</Notice>
+              <Notice tone="warning" title={t('meetingsList.couldNotSearchWhatWas')}>{rich(t, 'meetingsList.titlesDatesAndPeopleAre', { error: said.error })}</Notice>
             </div>
           )}
           {job.queue_problems.length > 0 && (
             <div style={{ padding: 'var(--space-3) var(--space-5)' }}>
-              <Notice tone="critical" title="Some meetings in the queue cannot be read.">{job.queue_problems.map((p) => `${p.id}: ${p.reason}`).join(' ')}</Notice>
+              <Notice tone="critical" title={t('meetingsList.someMeetingsInTheQueue')}>{job.queue_problems.map((p) => `${p.id}: ${p.reason}`).join(' ')}</Notice>
             </div>
           )}
           {rows.filter((r) => !r.inTrash).length === 0 ? (
-            <EmptyState size="compact" title="No meetings yet"
-              description="Record a meeting, or add a recording or transcript under Context > Updates. Each one stays here after its digest." />
+            <EmptyState size="compact" title={t('meetingsList.noMeetingsYet')}
+              description={t('meetingsList.recordAMeetingOrAdd')} />
           ) : found.length === 0 && said.searching ? (
-            <LoadingSpinner text="Searching what was said…" />
+            <LoadingSpinner text={t('meetingsList.searchingWhatWasSaid')} />
           ) : found.length === 0 ? (
-            <EmptyState size="compact" title={query ? `No meeting matches "${query}"` : 'No meetings here'}
-              description={query ? 'Try a title, a date, a name or words said in the meeting. Meetings whose transcript is no longer kept can only be found by title, date or people.' : 'Choose another filter to see the others.'}
-              action={query ? { label: 'Clear search', onClick: () => setQuery('') } : { label: 'Show all meetings', onClick: () => setFilter('all') }} />
+            <EmptyState size="compact" title={query ? t('meetingsList.noMeetingMatches', { query }) : t('meetingsList.noMeetingsHere')}
+              description={query ? t('meetingsList.tryATitleADate') : t('meetingsList.chooseAnotherFilterToSee')}
+              action={query ? { label: t('meetingsList.clearSearch'), onClick: () => setQuery('') } : { label: t('meetingsList.showAllMeetings'), onClick: () => setFilter('all') }} />
           ) : (
             groupRows(limited, now).map((g) => (
               <section key={g.label} aria-label={g.label}>
                 <h3 style={{ margin: 0, padding: 'var(--space-2) var(--space-5)', fontSize: 'var(--text-xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)', background: 'var(--color-bg)', borderBottom: '1px solid var(--color-border)' }}>{g.label}</h3>
-                <ul aria-label={`Meetings, ${g.label}`} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} selected={selected.includes(r.id)} onSelect={(on) => select(r.id, on)} said={said.hits?.get(r.id)} words={words} />)}</ul>
+                <ul aria-label={t('meetingsList.meetings', { label: g.label })} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} selected={selected.includes(r.id)} onSelect={(on) => select(r.id, on)} said={said.hits?.get(r.id)} words={words} />)}</ul>
               </section>
             ))
           )}
           {picked.length > 0 && (
-            <div role="region" aria-label="Selected meetings" style={{ position: 'sticky', bottom: 0, zIndex: 'var(--z-sticky)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
-              <span style={{ flex: '1 1 auto', fontSize: 'var(--text-sm)' }}>{picked.length === 1 ? '1 meeting selected' : `${picked.length} meetings selected`}</span>
-              <Button size="sm" variant="ghost" onClick={() => setSelected([])}>Clear</Button>
-              <Button size="sm" variant="primary" onClick={() => { dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: deliverableDraft(picked) }); setSelected([]); }}>Create deliverable</Button>
+            <div role="region" aria-label={t('meetingsList.selectedMeetings')} style={{ position: 'sticky', bottom: 0, zIndex: 'var(--z-sticky)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
+              <span style={{ flex: '1 1 auto', fontSize: 'var(--text-sm)' }}>{picked.length === 1 ? t('meetingsList.1MeetingSelected') : t('meetingsList.meetingsSelected', { length: picked.length })}</span>
+              <Button size="sm" variant="ghost" onClick={() => setSelected([])}>{t('updateDetail.clear')}</Button>
+              <Button size="sm" variant="primary" onClick={() => { dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: deliverableDraft(picked) }); setSelected([]); }}>{t('meetingsList.createDeliverable')}</Button>
             </div>
           )}
-          {hidden > 0 && <div style={{ padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)' }}><Button size="sm" variant="ghost" onClick={() => setAll(true)}>Show {hidden} older</Button></div>}
+          {hidden > 0 && <div style={{ padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)' }}><Button size="sm" variant="ghost" onClick={() => setAll(true)}>{rich(t, 'meetingsList.showOlder', { hidden: hidden })}</Button></div>}
           {trash.length > 0 && (
             <section aria-labelledby="meetings-trash" style={{ borderTop: '1px solid var(--color-border)', padding: 'var(--space-3) var(--space-5)' }}>
-              <h3 id="meetings-trash" style={{ margin: 0, fontSize: 'var(--text-sm)', fontWeight: 600 }}>In the trash ({trash.length})</h3>
+              <h3 id="meetings-trash" style={{ margin: 0, fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'meetingsList.inTheTrash', { length: trash.length })}</h3>
               <p style={{ margin: '2px 0 var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                The trash is not erasure: deleted meetings wait here, still on this computer, until you delete them for good{retention?.enabled ? ', or System cleanup does 30 days after they were deleted' : ''}. Their confirmed records stay with their update.
+                {rich(t, 'meetingsList.theTrashIsNotErasure', { value: retention?.enabled ? t('meetingsList.orSystemCleanupDoes30') : '' })}
               </p>
-              <ul aria-label="Meetings in the trash" className="gtd-list">
+              <ul aria-label={t('meetingsList.meetingsInTheTrash')} className="gtd-list">
                 {trash.map((r) => (
                   <li key={r.id} className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', paddingLeft: 0, paddingRight: 0 }}>
                     <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                       <div className="truncate" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{r.title}</div>
                       <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                        {whenLabel(r, now)} · moved to the trash {r.held?.deleted?.at ? new Date(r.held.deleted.at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : ''}{r.held?.deleted?.by === 'system-cleanup' ? ' by System cleanup' : ''}
+                        {rich(t, 'meetingsList.movedToTheTrash', { whenLabel: whenLabel(r, now), value: r.held?.deleted?.at ? new Date(r.held.deleted.at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '', value2: r.held?.deleted?.by === 'system-cleanup' ? t('meetingsList.bySystemCleanup') : '' })}
                       </div>
                     </div>
                     <Button size="sm" variant="secondary" loading={busy === `restore-${r.id}`} disabled={busy !== null}
-                      onClick={() => act(`restore-${r.id}`, async () => { await apiPost(`/api/meetings/${r.id}/restore`); return `${r.title} is back.`; })}>Restore</Button>
+                      onClick={() => act(`restore-${r.id}`, async () => { await apiPost(`/api/meetings/${r.id}/restore`); return `${r.title} is back.`; })}>{t('meetingsList.restore')}</Button>
                     <Button size="sm" variant="danger" disabled={busy !== null}
                       onClick={async () => {
                         if (!(await confirm({ title: `Delete "${r.title}" for good?`, message: 'Its transcript and notes are deleted from this computer. This cannot be undone. Its confirmed record stays with its update.', confirmLabel: 'Delete for good', tone: 'danger' }))) return;
                         void act(`purge-${r.id}`, async () => { await apiDelete(`/api/meetings/${r.id}/trash`); return `${r.title} is deleted for good.`; });
-                      }}>Delete for good</Button>
+                      }}>{t('meetingsList.deleteForGood')}</Button>
                   </li>
                 ))}
               </ul>
@@ -253,10 +259,10 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
           {notice && <div style={{ padding: '0 var(--space-5) var(--space-3)' }}><Notice tone={notice.error ? 'critical' : 'success'}>{notice.text}</Notice></div>}
           <p style={{ margin: 0, padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
             {!retention?.keep_text
-              ? 'Transcripts and notes are deleted when their review is done. Their confirmed records stay. Change this in Routines > System cleanup > Meetings.'
+              ? t('meetingsList.transcriptsAndNotesAreDeleted')
               : retention.enabled
-                ? `Transcripts and notes are kept after review, then ${retention.action === 'delete' ? 'deleted for good' : 'moved to the trash'} ${retention.days} days after the meeting (Routines > System cleanup > Meetings).`
-                : 'Transcripts and notes are kept after review until you delete them (the Meetings rule in Routines > System cleanup is off).'}
+                ? t('meetingsList.transcriptsAndNotesAreKept', { value: retention.action === 'delete' ? t('meetingsList.deletedForGood') : t('meetingsList.movedToTheTrash2'), days: retention.days })
+                : t('meetingsList.transcriptsAndNotesAreKept2')}
           </p>
         </>
       )}

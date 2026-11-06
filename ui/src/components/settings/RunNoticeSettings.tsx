@@ -1,3 +1,4 @@
+import { rich } from '@/i18n/rich';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import Button from '@/components/common/Button';
@@ -21,8 +22,7 @@ export default function RunNoticeSettings() {
         <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <label htmlFor="run-notices" style={{ fontSize: 'var(--text-sm)', cursor: 'pointer' }}>{t('runNoticeLabel')}</label>
           <span style={note}>
-            For runs started from the dashboard, while you are in another app or tab: what is ready, and a click opens it. Kept in this
-            {isDesktopApp() ? ' app' : ' browser'}.
+            {rich(t, 'runNoticeSettings.forRunsStartedFromThe', { value: isDesktopApp() ? t('runNoticeSettings.keptInApp') : t('runNoticeSettings.keptInBrowser') })}
           </span>
         </span>
       </div>

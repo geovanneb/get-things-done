@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import type { RememberedVoice, SpeakerName, SpeakerSuggestion, Stakeholder } from '@/types';
 
 /**
@@ -39,11 +40,11 @@ export function speakerRows(input: {
 
 /** The tag a remembered voice gets, and whether it is a warning. */
 export function voiceTag(v: Pick<RememberedVoice, 'damaged' | 'stakeholder' | 'stale_model' | 'ready'>): { text: string; warning: boolean } {
-  if (v.damaged) return { text: 'Cannot be read', warning: true };
-  if (!v.stakeholder) return { text: 'No longer a stakeholder', warning: true };
-  if (v.stale_model) return { text: 'Made with an older speaker model', warning: true };
-  if (!v.ready) return { text: 'Voice remembered, needs more speech', warning: false };
-  return { text: 'Voice remembered', warning: false };
+  if (v.damaged) return { text: tr('voiceprints.cannotBeRead'), warning: true };
+  if (!v.stakeholder) return { text: tr('voiceprints.noLongerAStakeholder'), warning: true };
+  if (v.stale_model) return { text: tr('voiceprints.madeWithAnOlderSpeaker'), warning: true };
+  if (!v.ready) return { text: tr('voiceprints.voiceRememberedNeedsMoreSpeech'), warning: false };
+  return { text: tr('speakerNaming.voiceRemembered'), warning: false };
 }
 
 /** The consent wording for one person (the server sends it with `{person}` for the name). */
@@ -53,7 +54,7 @@ export const consentFor = (text: string, person: string): string => text.split('
 export function speechLength(seconds: number): string {
   const s = Math.round(seconds);
   if (s < 60) return `${s} s`;
-  return `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`;
+  return tr('voiceprints.min', { floor: Math.floor(s / 60), value: s % 60 ? ` ${s % 60} s` : '' });
 }
 
 // ---- the speakers panel ----------------------------------------------------------------------------------------
@@ -101,13 +102,13 @@ export function personOptions(input: {
   const item = (person: { name: string; ref?: string }, shown: string, group: string) => {
     const value = valueOf(person);
     const other = takenBy.get(value);
-    return { value, label: other ? `${shown} · also ${other}` : shown, group };
+    return { value, label: other ? tr('voiceprints.also', { shown, other }) : shown, group };
   };
   const seen = new Set<string>();
   const expected: { value: string; label: string; group?: string }[] = [];
   const others: { value: string; label: string; group?: string }[] = [];
   const meChoice = input.choices.find((c) => c.person.ref === 'me');
-  const me = item(meChoice?.person ?? { name: 'Me', ref: 'me' }, meChoice ? `${meChoice.person.name} (you)` : 'You', 'Expected at this meeting');
+  const me = item(meChoice?.person ?? { name: tr('voiceprints.me'), ref: 'me' }, meChoice ? tr('updateDetail.you', { name: meChoice.person.name }) : tr('updateDetail.you2'), tr('voiceprints.expectedAtThisMeeting'));
   expected.push(me);
   seen.add(me.value);
   for (const c of input.choices) {
@@ -115,10 +116,10 @@ export function personOptions(input: {
     if (seen.has(value)) continue;
     seen.add(value);
     const isExpected = input.expected.has(c.person.ref ?? `name:${c.person.name.toLowerCase()}`);
-    (isExpected ? expected : others).push(item(c.person, c.option, isExpected ? 'Expected at this meeting' : 'Other stakeholders'));
+    (isExpected ? expected : others).push(item(c.person, c.option, isExpected ? tr('voiceprints.expectedAtThisMeeting') : tr('voiceprints.otherStakeholders')));
   }
-  const typed = current && !current.ref && !seen.has(valueOf(current)) ? [{ value: valueOf(current), label: current.name, group: 'Named by hand' }] : [];
-  return [{ value: NOT_NAMED, label: 'Not named yet' }, ...expected, ...others, ...typed, { value: SOMEONE_ELSE, label: 'Someone else…' }];
+  const typed = current && !current.ref && !seen.has(valueOf(current)) ? [{ value: valueOf(current), label: current.name, group: tr('voiceprints.namedByHand') }] : [];
+  return [{ value: NOT_NAMED, label: tr('speakerNaming.notNamedYet') }, ...expected, ...others, ...typed, { value: SOMEONE_ELSE, label: tr('voiceprints.someoneElse') }];
 }
 
 /** The person a picker value stands for; null for "not named". */
@@ -126,7 +127,7 @@ export function personOf(value: string, choices: { person: { name: string; ref?:
   if (value === NOT_NAMED || value === SOMEONE_ELSE) return null;
   const found = choices.find((c) => valueOf(c.person) === value)?.person ?? names.find((n) => valueOf(n) === value);
   if (found) return { name: found.name, ...(found.ref ? { ref: found.ref } : {}) };
-  if (value === 'ref:me') return { name: 'Me', ref: 'me' };
+  if (value === 'ref:me') return { name: tr('voiceprints.me'), ref: 'me' };
   return value.startsWith('name:') ? { name: value.slice(5) } : null;
 }
 
@@ -136,7 +137,7 @@ export function speakersSummary(rows: Pick<SpeakerRow, 'named' | 'suggestion'>[]
   const suggested = rows.filter((r) => !r.named && r.suggestion).length;
   return [
     `${rows.length} ${rows.length === 1 ? 'speaker' : 'speakers'}`,
-    named === rows.length ? 'all named' : `${named} named`,
-    ...(suggested ? [`${suggested} ${suggested === 1 ? 'suggestion' : 'suggestions'} to review`] : []),
+    named === rows.length ? tr('voiceprints.allNamed') : tr('voiceprints.named', { named }),
+    ...(suggested ? [tr('voiceprints.suggestionsToReview', { count: suggested })] : []),
   ].join(' · ');
 }

@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import type React from 'react';
 import type { InsightsCalendarDay } from '@/types';
 import { countLabel, longDay, metricValue, type CalendarMetric } from './calendarModel';
@@ -54,13 +56,14 @@ export function DayTooltip({
   metric: CalendarMetric;
   typical: number | null;
 }) {
+  const { t } = useLanguage();
   const value = metricValue(day, metric);
   const ratio = typical && value > 0 ? value / typical : null;
   const rows: Array<[string, number, string?]> = [
-    ['Created', day?.created ?? 0],
-    ['Completed', day?.completed ?? 0],
-    ['Agent runs', day?.runs ?? 0],
-    ['Due', day?.due ?? 0, day?.overdue ? `${day.overdue} overdue` : undefined],
+    [t('flowChart.created'), day?.created ?? 0],
+    [t('flowChart.completed'), day?.completed ?? 0],
+    [t('dayTooltip.agentRuns'), day?.runs ?? 0],
+    [t('dayPanel.due'), day?.due ?? 0, day?.overdue ? t('dayTooltip.overdue', { overdue: day.overdue }) : undefined],
   ];
   const empty = !day || (day.activity === 0 && day.due === 0);
 
@@ -68,12 +71,12 @@ export function DayTooltip({
     <Frame rect={rect}>
       <div style={{ ...strong, fontSize: 'var(--text-sm)', marginBottom: 2 }}>{longDay(date)}</div>
       {empty ? (
-        <div>Nothing happened.</div>
+        <div>{t('dayTooltip.nothingHappened')}</div>
       ) : (
         <>
           <div style={{ marginBottom: 8 }}>
             <span style={strong}>{countLabel(value, metric)}</span>
-            {ratio !== null && ` · ${ratio.toFixed(1)}x a typical day`}
+            {ratio !== null && t('dayTooltip.xATypicalDay', { toFixed: ratio.toFixed(1) })}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 2, marginBottom: 8 }}>
             {rows.map(([label, n, note]) => (
@@ -88,18 +91,18 @@ export function DayTooltip({
           </div>
           {day!.top_tasks.length > 0 && (
             <div style={{ marginBottom: 4 }}>
-              <span style={{ color: 'var(--color-text-muted)' }}>Top: </span>
+              <span style={{ color: 'var(--color-text-muted)' }}>{t('dayTooltip.top')} </span>
               {day!.top_tasks.map((t) => t.title).join(', ')}
-              {day!.task_count > day!.top_tasks.length && ` and ${day!.task_count - day!.top_tasks.length} more`}
+              {day!.task_count > day!.top_tasks.length && t('dayTooltip.andMore', { value: day!.task_count - day!.top_tasks.length })}
             </div>
           )}
           {day!.top_stakeholders.length > 0 && (
             <div style={{ marginBottom: 4 }}>
-              <span style={{ color: 'var(--color-text-muted)' }}>For: </span>
+              <span style={{ color: 'var(--color-text-muted)' }}>{t('dayPanel.for')} </span>
               {day!.top_stakeholders.map((s) => s.name).join(', ')}
             </div>
           )}
-          <div style={{ color: 'var(--color-text-muted)', marginTop: 6 }}>Click to see the full day</div>
+          <div style={{ color: 'var(--color-text-muted)', marginTop: 6 }}>{t('dayTooltip.clickToSeeTheFull')}</div>
         </>
       )}
     </Frame>
@@ -107,11 +110,12 @@ export function DayTooltip({
 }
 
 export function HourTooltip({ rect, date, hour, value }: { rect: DOMRect; date: string; hour: number; value: number }) {
+  const { t } = useLanguage();
   return (
     <Frame rect={rect}>
       <div style={{ ...strong, fontSize: 'var(--text-sm)', marginBottom: 2 }}>{longDay(date)}</div>
       <div>
-        {hourLabel(hour)} to {hourLabel((hour + 1) % 24)}: <span style={strong}>{countLabel(value, 'activity')}</span>
+        {rich(t, 'dayTooltip.to', { hourLabel: hourLabel(hour), hourLabel2: hourLabel((hour + 1) % 24), part: <span style={strong}>{countLabel(value, 'activity')}</span> })}
       </div>
     </Frame>
   );

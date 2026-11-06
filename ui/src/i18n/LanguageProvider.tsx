@@ -4,6 +4,7 @@ import { en } from '../../../server/src/i18n/en';
 import { loadCatalog, translator, type Translate } from '../../../server/src/i18n/messages';
 import { apiGet, apiPut } from '../utils/api';
 import { desktopBridge } from '../utils/desktop';
+import { setCurrentLanguage } from './current';
 
 interface LanguageState {
   locale: Locale;
@@ -39,8 +40,10 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     const catalog = await loadCatalog(locale);
     if (!live.current || request !== revision.current) return;
     document.documentElement.lang = locale;
+    const t = translator(catalog, locale);
+    setCurrentLanguage(t, locale);
     setState(current => current.locale === locale && current.detected === detected && current.preference === preference && !current.loading && !current.saving && !current.error
-      ? current : { locale, detected, preference, t: translator(catalog, locale), loading: false, saving: false, error: null });
+      ? current : { locale, detected, preference, t, loading: false, saving: false, error: null });
   }, []);
   const refresh = useCallback(async () => {
     if (saving.current) return;

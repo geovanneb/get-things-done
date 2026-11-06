@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * Appearance preferences: colour theme, accent hue and text scale.
  *
@@ -18,20 +19,20 @@ export const THEME_MODES: ThemeMode[] = ['light', 'dark', 'system'];
 export const TEXT_SIZES: TextSize[] = ['small', 'default', 'large'];
 
 /** Accent hue and chroma, mirroring the `[data-accent]` blocks in index.css. */
-export const ACCENTS: Array<{ name: AccentName; label: string; hue: number; chroma: number }> = [
-  { name: 'blue',   label: 'Blue',   hue: 255, chroma: 0.11 },
-  { name: 'violet', label: 'Violet', hue: 295, chroma: 0.12 },
-  { name: 'teal',   label: 'Teal',   hue: 195, chroma: 0.10 },
-  { name: 'green',  label: 'Green',  hue: 155, chroma: 0.12 },
-  { name: 'amber',  label: 'Amber',  hue: 70,  chroma: 0.13 },
-  { name: 'rose',   label: 'Rose',   hue: 15,  chroma: 0.14 },
-];
+export const ACCENTS = (): Array<{ name: AccentName; label: string; hue: number; chroma: number }> => ([
+  { name: 'blue',   label: tr('theme.blue'),   hue: 255, chroma: 0.11 },
+  { name: 'violet', label: tr('theme.violet'), hue: 295, chroma: 0.12 },
+  { name: 'teal',   label: tr('theme.teal'),   hue: 195, chroma: 0.10 },
+  { name: 'green',  label: tr('theme.green'),  hue: 155, chroma: 0.12 },
+  { name: 'amber',  label: tr('theme.amber'),  hue: 70,  chroma: 0.13 },
+  { name: 'rose',   label: tr('theme.rose'),   hue: 15,  chroma: 0.14 },
+]);
 
-const ACCENT_NAMES = ACCENTS.map(a => a.name);
+const ACCENT_NAMES = ACCENTS().map(a => a.name);
 
 /** A swatch for the settings picker, readable against either surface. */
 export function accentSwatch(name: AccentName): string {
-  const accent = ACCENTS.find(a => a.name === name) ?? ACCENTS[0];
+  const accent = ACCENTS().find(a => a.name === name) ?? ACCENTS()[0];
   return `oklch(0.58 ${accent.chroma} ${accent.hue})`;
 }
 

@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * The sidebar's default structure: grouped by the job each page does, ordered by how often
  * it is used (issue #191). Ids stay stable so a saved custom order can refer to them later.
@@ -32,37 +33,37 @@ export interface NavGroup {
 
 export function navGroups({ agentFloor }: { agentFloor: boolean }): NavGroup[] {
   const automation: NavEntry[] = [
-    { id: 'agents', path: '/agents', label: 'Agents & Skills' },
-    { id: 'routines', path: '/routines', label: 'Routines' },
+    { id: 'agents', path: '/agents', label: tr('agents') },
+    { id: 'routines', path: '/routines', label: tr('routines') },
   ];
   // Experimental view, shown only while the Settings switch is on.
-  if (agentFloor) automation.push({ id: 'agent-floor', path: '/agent-floor', label: 'Agent Floor' });
+  if (agentFloor) automation.push({ id: 'agent-floor', path: '/agent-floor', label: tr('agent-floor') });
 
   return [
     {
       id: 'work',
       items: [
-        { id: 'situation', path: '/situation', label: 'Situation' },
-        { id: 'board', path: '/board', label: 'Board' },
-        { id: 'meetings', path: '/meetings', label: 'Meetings' },
-        { id: 'insights', path: '/insights', label: 'Insights' },
+        { id: 'situation', path: '/situation', label: tr('situation') },
+        { id: 'board', path: '/board', label: tr('board') },
+        { id: 'meetings', path: '/meetings', label: tr('meetings') },
+        { id: 'insights', path: '/insights', label: tr('insights') },
       ],
     },
     {
       id: 'memory',
-      heading: 'Memory',
+      heading: tr('memory'),
       items: [
-        { id: 'context', path: '/context', label: 'Context' },
-        { id: 'stakeholders', path: '/stakeholders', label: 'Stakeholders' },
-        { id: 'outputs', path: '/outputs', label: 'Output templates' },
+        { id: 'context', path: '/context', label: tr('context') },
+        { id: 'stakeholders', path: '/stakeholders', label: tr('stakeholders') },
+        { id: 'outputs', path: '/outputs', label: tr('outputs') },
       ],
     },
-    { id: 'automation', heading: 'Automation', items: automation },
+    { id: 'automation', heading: tr('automation'), items: automation },
     {
       id: 'account',
       items: [
-        { id: 'profile', path: '/profile', label: 'Profile' },
-        { id: 'settings', path: '/settings', label: 'Settings' },
+        { id: 'profile', path: '/profile', label: tr('profile') },
+        { id: 'settings', path: '/settings', label: tr('settings') },
       ],
     },
   ];

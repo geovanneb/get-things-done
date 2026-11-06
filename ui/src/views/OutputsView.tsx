@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import Button from '@/components/common/Button';
 import Input, { SearchInput, Select, Textarea } from '@/components/common/Input';
@@ -65,6 +67,7 @@ interface TemplateModalProps {
 }
 
 function TemplateModal({ isOpen, onClose, initial, mode, onSaved }: TemplateModalProps) {
+  const { t } = useLanguage();
   const [name, setName] = useState('');
   const [format, setFormat] = useState('DOCX');
   const [description, setDescription] = useState('');
@@ -83,7 +86,7 @@ function TemplateModal({ isOpen, onClose, initial, mode, onSaved }: TemplateModa
   }, [isOpen, initial]);
 
   const handleSave = async () => {
-    if (!name.trim()) { setError('The template needs a name.'); return; }
+    if (!name.trim()) { setError(t('outputs.theTemplateNeedsAName')); return; }
     setSaving(true);
     setError(null);
     try {
@@ -96,7 +99,7 @@ function TemplateModal({ isOpen, onClose, initial, mode, onSaved }: TemplateModa
       }
       onSaved(saved);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not save the template. Try again.');
+      setError(err instanceof Error ? err.message : t('outputs.couldNotSaveTheTemplate'));
     } finally {
       setSaving(false);
     }
@@ -106,30 +109,30 @@ function TemplateModal({ isOpen, onClose, initial, mode, onSaved }: TemplateModa
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={mode === 'create' ? 'New output template' : 'Edit output template'}
+      title={mode === 'create' ? t('outputs.newOutputTemplate') : t('outputs.editOutputTemplate')}
       size="xl"
       keepWhileTyping
       footer={
         <FormActions>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
           <Button variant="primary" onClick={handleSave} loading={saving}>
-            {mode === 'create' ? 'Create template' : 'Save changes'}
+            {mode === 'create' ? t('outputs.createTemplate') : t('orgChartDialogs.saveChanges')}
           </Button>
         </FormActions>
       }
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
         {error && <Notice tone="critical">{error}</Notice>}
-        <Input label="Name" required value={name} onChange={setName} placeholder="Executive memo" autoFocus
-          error={error && !name.trim() ? 'Give the template a name.' : undefined} />
-        <Select label="Format" value={format} onChange={setFormat} options={FORMATS.map((f) => ({ value: f, label: f }))} />
-        <Textarea label="Description" value={description} onChange={setDescription} rows={3}
-          placeholder="What this template is for, in one sentence" />
-        <Textarea label="Style guide" value={styleGuide} onChange={setStyleGuide} rows={8} mono
-          placeholder="Required sections, structure, tone and formatting rules"
-          hint="Agents follow this when they write a deliverable in this template." />
+        <Input label={t('boardColumnsEditor.name')} required value={name} onChange={setName} placeholder={t('outputs.executiveMemo')} autoFocus
+          error={error && !name.trim() ? t('outputs.giveTheTemplateAName') : undefined} />
+        <Select label={t('outputs.format')} value={format} onChange={setFormat} options={FORMATS.map((f) => ({ value: f, label: f }))} />
+        <Textarea label={t('orgChartDialogs.description')} value={description} onChange={setDescription} rows={3}
+          placeholder={t('outputs.whatThisTemplateIsFor')} />
+        <Textarea label={t('outputs.styleGuide')} value={styleGuide} onChange={setStyleGuide} rows={8} mono
+          placeholder={t('outputs.requiredSectionsStructureToneAnd')}
+          hint={t('outputs.agentsFollowThisWhenThey')} />
         {mode === 'edit' && initial?.id && (
-          <AttachedFiles baseUrl={`/api/outputs/templates/${initial.id}/files`} archiveUrl={`/api/outputs/templates/${initial.id}/archive`} label="Files" />
+          <AttachedFiles baseUrl={`/api/outputs/templates/${initial.id}/files`} archiveUrl={`/api/outputs/templates/${initial.id}/archive`} label={t('newTaskModal.files')} />
         )}
       </div>
     </Modal>
@@ -148,16 +151,17 @@ interface TemplateCardProps {
 }
 
 function TemplateCard({ template, onClick, onEdit, onDelete }: TemplateCardProps) {
+  const { t } = useLanguage();
   return (
     <Card as="article" padding="compact" onClick={onClick}
       footer={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }} onClick={(e) => e.stopPropagation()}>
           <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            {template.updated_at && <>Updated {formatRelativeDate(template.updated_at)}</>}
+            {template.updated_at && <>{rich(t, 'context.updated', { updated_at: formatRelativeDate(template.updated_at) })}</>}
           </span>
           <div style={{ display: 'flex', gap: 2 }}>
-            <IconButton label={`Edit ${template.name}`} icon={icons.edit} onClick={onEdit} />
-            <IconButton label={`Delete ${template.name}`} icon={icons.trash} tone="danger" onClick={onDelete} />
+            <IconButton label={t('orgChartDialogs.edit', { name: template.name })} icon={icons.edit} onClick={onEdit} />
+            <IconButton label={t('agents.delete', { name: template.name })} icon={icons.trash} tone="danger" onClick={onDelete} />
           </div>
         </div>
       }
@@ -174,7 +178,7 @@ function TemplateCard({ template, onClick, onEdit, onDelete }: TemplateCardProps
           <span style={formatBadgeStyle(template.format)}>{template.format}</span>
         </div>
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 'var(--leading-normal)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as React.CSSProperties}>
-          {template.description || 'No description.'}
+          {template.description || t('outputs.noDescription')}
         </p>
       </div>
     </Card>
@@ -186,6 +190,7 @@ function TemplateCard({ template, onClick, onEdit, onDelete }: TemplateCardProps
 // ---------------------------------------------------------------------------
 
 export default function OutputsView() {
+  const { t } = useLanguage();
   const [templates, setTemplates] = useState<OutputTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -215,20 +220,20 @@ export default function OutputsView() {
   const handleDelete = useCallback(async (template: OutputTemplate, e: React.MouseEvent) => {
     e.stopPropagation();
     const ok = await confirm({
-      title: `Delete "${template.name}"?`,
-      message: 'The template and its files are deleted. Tasks that used it keep their deliverables. This cannot be undone.',
-      confirmLabel: 'Delete template',
+      title: t('outputs.delete', { name: template.name }),
+      message: t('outputs.theTemplateAndItsFiles'),
+      confirmLabel: t('outputs.deleteTemplate'),
       tone: 'danger',
     });
     if (!ok) return;
     try {
       await apiDelete(`/api/outputs/templates/${template.id}`);
       setTemplates((prev) => prev.filter((t) => t.id !== template.id));
-      notify.success(`Deleted "${template.name}".`);
+      notify.success(t('outputs.deleted', { name: template.name }));
     } catch (err: unknown) {
-      notify.error(err, 'Could not delete the template. Try again.');
+      notify.error(err, t('outputs.couldNotDeleteTheTemplate'));
     }
-  }, [confirm, notify]);
+  }, [confirm, notify, t]);
 
   const handleSaved = useCallback((saved: OutputTemplate) => {
     setTemplates((prev) => {
@@ -240,27 +245,27 @@ export default function OutputsView() {
     setSelectedTemplate(null);
   }, []);
 
-  if (loading) return <LoadingSpinner text="Loading output templates…" />;
+  if (loading) return <LoadingSpinner text={t('outputs.loadingOutputTemplates')} />;
 
   return (
     <Page width="default">
       <PageHeader
-        description="The formats your deliverables come in. Agents follow a template's style guide when they write."
+        description={t('outputs.theFormatsYourDeliverablesCome')}
         actions={
           <>
-            <SearchInput value={search} onChange={setSearch} placeholder="Search templates" />
-            <Button variant="primary" icon={icons.plus} onClick={openCreate}>New template</Button>
+            <SearchInput value={search} onChange={setSearch} placeholder={t('outputs.searchTemplates')} />
+            <Button variant="primary" icon={icons.plus} onClick={openCreate}>{t('outputs.newTemplate')}</Button>
           </>
         }
       />
 
-      {error && <Notice tone="critical" title="Could not load the templates.">{error}</Notice>}
+      {error && <Notice tone="critical" title={t('outputs.couldNotLoadTheTemplates')}>{error}</Notice>}
 
       {filtered.length === 0 && !error && (
         <EmptyState
-          title={search ? 'No templates match your search' : 'No templates yet'}
-          description={search ? 'Try another word, or clear the search.' : 'A template sets the format and structure of a deliverable, such as a board deck or a one-page memo.'}
-          action={search ? { label: 'Clear search', onClick: () => setSearch('') } : { label: 'New template', onClick: openCreate }}
+          title={search ? t('outputs.noTemplatesMatchYourSearch') : t('outputs.noTemplatesYet')}
+          description={search ? t('context.tryAnotherWordOrClear') : t('outputs.aTemplateSetsTheFormat')}
+          action={search ? { label: t('meetingsList.clearSearch'), onClick: () => setSearch('') } : { label: t('outputs.newTemplate'), onClick: openCreate }}
         />
       )}
 

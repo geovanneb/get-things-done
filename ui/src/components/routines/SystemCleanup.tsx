@@ -1,3 +1,7 @@
+import { scheduleText } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { currentLocale, tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Card from '@/components/common/Card';
 import { useConfirm } from '@/components/common/ConfirmDialog';
@@ -15,30 +19,30 @@ import type {
 } from '@/types';
 
 /** What each content type is, in the user's words, and what it may do. Mirrors RULE_ACTIONS on the server. */
-export const RULES: { type: CleanupRuleType; label: string; hint: string; actions: CleanupAction[]; clock: string }[] = [
-  { type: 'completed_tasks', label: 'Finished tasks', hint: 'Done tasks still on the board.', actions: ['archive', 'trash', 'delete'], clock: 'since finished' },
-  { type: 'archived_tasks', label: 'Archived tasks', hint: 'Insights stop counting removed tasks.', actions: ['trash', 'delete'], clock: 'since archived' },
-  { type: 'context_updates', label: 'Finished context updates', hint: 'Records of done updates. Updates whose materials you kept, with a confirmed meeting record, or still holding kept meetings, are skipped.', actions: ['trash', 'delete'], clock: 'since finished' },
-  { type: 'meetings', label: 'Meetings', hint: 'Transcripts, notes and kept recordings, after review, counted from the day the meeting took place or was imported. Meetings still waiting for a digest or a review, and meetings marked Keep this meeting, are skipped. Moved to the trash, a meeting is deleted for good 30 days later. Confirmed records stay with their update.', actions: ['trash', 'delete'], clock: 'since the meeting' },
-  { type: 'kaizen', label: 'Finished Kaizen notes', hint: 'Notes already opened as a context update, and older ones applied or rejected. A note still waiting is never touched.', actions: ['trash', 'delete'], clock: 'since closed' },
-  { type: 'trash', label: 'Empty the trash', hint: 'Removed and replaced files the app keeps in .situation-board/trash/.', actions: ['delete'], clock: 'in the trash' },
-];
+export const RULES = (): { type: CleanupRuleType; label: string; hint: string; actions: CleanupAction[]; clock: string }[] => ([
+  { type: 'completed_tasks', label: tr('systemCleanup.finishedTasks'), hint: tr('systemCleanup.doneTasksStillOnThe'), actions: ['archive', 'trash', 'delete'], clock: tr('systemCleanup.sinceFinished') },
+  { type: 'archived_tasks', label: tr('systemCleanup.archivedTasks'), hint: tr('systemCleanup.insightsStopCountingRemovedTasks'), actions: ['trash', 'delete'], clock: tr('systemCleanup.sinceArchived') },
+  { type: 'context_updates', label: tr('systemCleanup.finishedContextUpdates'), hint: tr('systemCleanup.recordsOfDoneUpdatesUpdates'), actions: ['trash', 'delete'], clock: tr('systemCleanup.sinceFinished') },
+  { type: 'meetings', label: tr('meetings'), hint: tr('systemCleanup.transcriptsNotesAndKeptRecordings'), actions: ['trash', 'delete'], clock: tr('systemCleanup.sinceTheMeeting') },
+  { type: 'kaizen', label: tr('systemCleanup.finishedKaizenNotes'), hint: tr('systemCleanup.notesAlreadyOpenedAsA'), actions: ['trash', 'delete'], clock: tr('systemCleanup.sinceClosed') },
+  { type: 'trash', label: tr('systemCleanup.emptyTheTrash'), hint: tr('systemCleanup.removedAndReplacedFilesThe'), actions: ['delete'], clock: tr('systemCleanup.inTheTrash') },
+]);
 
-const ACTION_LABEL: Record<CleanupAction, string> = { archive: 'Archive', trash: 'Move to trash', delete: 'Delete permanently' };
-const NOUN: Record<CleanupRuleType, [string, string]> = {
-  completed_tasks: ['finished task', 'finished tasks'],
-  archived_tasks: ['archived task', 'archived tasks'],
-  context_updates: ['context update record', 'context update records'],
+const ACTION_LABEL = (): Record<CleanupAction, string> => ({ archive: tr('systemCleanup.archive'), trash: tr('systemCleanup.moveToTrash'), delete: tr('systemCleanup.deletePermanently') });
+const NOUN = (): Record<CleanupRuleType, [string, string]> => ({
+  completed_tasks: [tr('systemCleanup.finishedTask'), tr('systemCleanup.finishedTasks2')],
+  archived_tasks: [tr('systemCleanup.archivedTask'), tr('systemCleanup.archivedTasks2')],
+  context_updates: [tr('systemCleanup.contextUpdateRecord'), tr('systemCleanup.contextUpdateRecords')],
   meetings: ['meeting', 'meetings'],
-  kaizen: ['Kaizen note', 'Kaizen notes'],
-  trash: ['trash item', 'trash items'],
-};
-const ACTION_PAST: Record<CleanupAction, string> = { archive: 'archived', trash: 'moved to the trash', delete: 'deleted' };
+  kaizen: [tr('systemCleanup.kaizenNote'), tr('systemCleanup.kaizenNotes')],
+  trash: [tr('systemCleanup.trashItem'), tr('systemCleanup.trashItems')],
+});
+const ACTION_PAST = (): Record<CleanupAction, string> => ({ archive: 'archived', trash: tr('meetingsList.movedToTheTrash2'), delete: 'deleted' });
 
-const WEEKDAYS: { id: RoutineWeekday; label: string }[] = [
-  { id: 'mon', label: 'Monday' }, { id: 'tue', label: 'Tuesday' }, { id: 'wed', label: 'Wednesday' }, { id: 'thu', label: 'Thursday' },
-  { id: 'fri', label: 'Friday' }, { id: 'sat', label: 'Saturday' }, { id: 'sun', label: 'Sunday' },
-];
+const WEEKDAYS = (): { id: RoutineWeekday; label: string }[] => ([
+  { id: 'mon', label: tr('calendarModel.monday') }, { id: 'tue', label: tr('calendarModel.tuesday') }, { id: 'wed', label: tr('calendarModel.wednesday') }, { id: 'thu', label: tr('calendarModel.thursday') },
+  { id: 'fri', label: tr('calendarModel.friday') }, { id: 'sat', label: tr('calendarModel.saturday') }, { id: 'sun', label: tr('calendarModel.sunday') },
+]);
 
 type Cadence = 'weekly' | 'biweekly' | 'monthly';
 
@@ -59,17 +63,18 @@ function scheduleFor(cadence: Cadence, day: RoutineWeekday, time: string, base: 
 
 /** One line on what the job does with files, e.g. "Finished tasks after 30 days: archive". */
 export function cleanupSummary(settings: CleanupSettings): string {
-  const on = RULES.filter((r) => settings.rules[r.type].enabled);
-  if (on.length === 0) return 'Never archives, trashes or deletes a file.';
-  const text = on.map((r) => `${NOUN[r.type][1]} ${ACTION_PAST[settings.rules[r.type].action]} after ${settings.rules[r.type].older_than_days} days`).join(', ');
+  const on = RULES().filter((r) => settings.rules[r.type].enabled);
+  if (on.length === 0) return tr('systemCleanup.neverArchivesTrashesOrDeletes');
+  const text = on.map((r) => tr('systemCleanup.afterDays', { value: NOUN()[r.type][1], value2: ACTION_PAST()[settings.rules[r.type].action], older_than_days: settings.rules[r.type].older_than_days })).join(', ');
   return text.charAt(0).toUpperCase() + text.slice(1) + '.';
 }
 
 function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString(currentLocale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 export function SystemCleanupCard({ job, onEdit, onChanged }: { job: SystemCleanup; onEdit: () => void; onChanged: () => void }) {
+  const { t } = useLanguage();
   const [busy, setBusy] = React.useState<'toggle' | 'run' | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
   const { settings, state } = job;
@@ -90,28 +95,27 @@ export function SystemCleanupCard({ job, onEdit, onChanged }: { job: SystemClean
   };
 
   return (
-    <Card as="article" padding="compact" id="system-cleanup" aria-label="System cleanup">
+    <Card as="article" padding="compact" id="system-cleanup" aria-label={t('systemCleanup')}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>System cleanup</h3>
-            <Badge size="sm" variant="info">Built-in</Badge>
-            {!settings.enabled && <Badge size="sm">Paused</Badge>}
-            {failed && <Badge variant="critical" size="sm">Last run failed</Badge>}
+            <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>{t('systemCleanup')}</h3>
+            <Badge size="sm" variant="info">{t('meetingDigest.builtIn')}</Badge>
+            {!settings.enabled && <Badge size="sm">{t('meetingDigest.paused')}</Badge>}
+            {failed && <Badge variant="critical" size="sm">{t('meetingDigest.lastRunFailed')}</Badge>}
           </div>
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 4 }}>
-            {job.summary}.{' '}
-            {settings.memory_review.enabled ? 'Reviews your memory and suggests fixes for you to approve.' : 'Memory review is off.'}{' '}
+            {scheduleText(job.summary)}.{' '}
+            {settings.memory_review.enabled ? t('systemCleanup.reviewsYourMemoryAndSuggests') : t('systemCleanup.memoryReviewIsOff')}{' '}
             {cleanupSummary(settings)}
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span>Next: {settings.enabled ? (job.next_run_at ? formatWhen(job.next_run_at) : 'no more runs') : 'paused'}</span>
-            {state.last_run_at && <span title={state.last_message}>Last: {formatRelativeTime(state.last_run_at)}</span>}
+            <span>{rich(t, 'meetingDigest.next', { value: settings.enabled ? (job.next_run_at ? formatWhen(job.next_run_at) : t('meetingDigest.noMoreRuns')) : 'paused' })}</span>
+            {state.last_run_at && <span title={state.last_message}>{rich(t, 'meetingDigest.last', { last_run_at: formatRelativeTime(state.last_run_at) })}</span>}
           </div>
           {job.open_review && (
             <div style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>
-              Memory review <Link to={`/context/updates/${job.open_review}`} style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{job.open_review}</Link> is waiting for you.
-              No new review starts until it is done.
+              {rich(t, 'systemCleanup.memoryReviewIsWaitingFor', { link: <Link to={`/context/updates/${job.open_review}`} style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{job.open_review}</Link> })}
             </div>
           )}
           {failed && state.last_message && (
@@ -119,7 +123,7 @@ export function SystemCleanupCard({ job, onEdit, onChanged }: { job: SystemClean
           )}
         </div>
         <Toggle
-          label={settings.enabled ? 'Pause System cleanup' : 'Resume System cleanup'}
+          label={settings.enabled ? t('systemCleanup.pauseSystemCleanup') : t('systemCleanup.resumeSystemCleanup')}
           checked={settings.enabled}
           disabled={busy !== null}
           onChange={(on) => act('toggle', async () => { await apiPut('/api/routines/system-cleanup', { enabled: on }); })}
@@ -127,11 +131,11 @@ export function SystemCleanupCard({ job, onEdit, onChanged }: { job: SystemClean
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <Button size="sm" variant="secondary" loading={busy === 'run'} disabled={busy !== null}
-          title="Run it now with the saved settings, without waiting for the schedule"
+          title={t('systemCleanup.runItNowWithThe')}
           onClick={() => act('run', async () => (await apiPost<RoutineRun>('/api/routines/system-cleanup/run')).message)}>
-          Run now
+          {t('systemCleanup.runNow')}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>Settings</Button>
+        <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>{t('settings')}</Button>
         {notice && (
           <span role={notice.error ? 'alert' : 'status'} style={{ fontSize: 'var(--text-xs)', color: notice.error ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
             {notice.text}
@@ -150,6 +154,7 @@ function daysValue(v: string): number | string {
 }
 
 export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen: boolean; job: SystemCleanup | null; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const [draft, setDraft] = React.useState<CleanupSettings | null>(null);
   const [days, setDays] = React.useState<Record<string, string>>({});
@@ -167,7 +172,7 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
     seeded.current = true;
     setDraft(structuredClone(job.settings));
     setDays(Object.fromEntries([
-      ...RULES.map((r) => [r.type, String(job.settings.rules[r.type].older_than_days)]),
+      ...RULES().map((r) => [r.type, String(job.settings.rules[r.type].older_than_days)]),
       ['stale', String(job.settings.memory_review.stale_after_days)],
       ['max', String(job.settings.max_items_per_run)],
     ]));
@@ -182,7 +187,7 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
     ...draft,
     memory_review: { ...draft.memory_review, stale_after_days: daysValue(days['stale'] ?? '') },
     max_items_per_run: daysValue(days['max'] ?? ''),
-    rules: Object.fromEntries(RULES.map((r) => [r.type, { ...draft.rules[r.type], older_than_days: daysValue(days[r.type] ?? '') }])),
+    rules: Object.fromEntries(RULES().map((r) => [r.type, { ...draft.rules[r.type], older_than_days: daysValue(days[r.type] ?? '') }])),
   });
 
   const setRule = (type: CleanupRuleType, patch: Partial<CleanupSettings['rules'][CleanupRuleType]>) => {
@@ -207,16 +212,16 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
 
   const save = async () => {
     // Permanent deletion that was not on before gets one specific confirmation, with the count from a preview.
-    const newlyPermanent = RULES.filter((r) => draft.rules[r.type].enabled && draft.rules[r.type].action === 'delete'
+    const newlyPermanent = RULES().filter((r) => draft.rules[r.type].enabled && draft.rules[r.type].action === 'delete'
       && !(job.settings.rules[r.type].enabled && job.settings.rules[r.type].action === 'delete'));
     if (newlyPermanent.length) {
       const p = preview ?? await runPreview();
       if (!p) return;
-      const lines = newlyPermanent.map((r) => `- ${r.label}: ${p.plan.counts[r.type]} now, older than ${days[r.type]} days`).join('\n');
+      const lines = newlyPermanent.map((r) => t('systemCleanup.nowOlderThanDays', { label: r.label, value: p.plan.counts[r.type], value2: days[r.type] })).join('\n');
       const ok = await confirm({
-        title: 'Delete permanently, without the trash?',
-        message: `${lines}\n\nDeleted files cannot be restored. Choose "Move to trash" to keep a way back.`,
-        confirmLabel: 'Delete permanently',
+        title: t('systemCleanup.deletePermanentlyWithoutTheTrash'),
+        message: t('systemCleanup.deletedFilesCannotBeRestored', { lines }),
+        confirmLabel: t('systemCleanup.deletePermanently'),
         tone: 'danger',
       });
       if (!ok) return;
@@ -239,73 +244,69 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
   const setSchedule = (c: Cadence, d: RoutineWeekday, time: string) => setDraft({ ...draft, schedule: scheduleFor(c, d, time, draft.schedule) });
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="System cleanup" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={t('systemCleanup')} size="lg">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          A built-in routine that keeps your workspace tidy. It reviews your memory and opens a context update for you to approve.
-          It removes meeting text you chose to keep once it is old (the Meetings rule), and other files only for the rules you turn on below.
+          {t('systemCleanup.aBuiltInRoutineThat')}
         </p>
 
         <section aria-labelledby="sc-schedule">
-          <h3 id="sc-schedule" style={{ ...sectionLabelStyle, margin: '0 0 8px' }}>When</h3>
+          <h3 id="sc-schedule" style={{ ...sectionLabelStyle, margin: '0 0 8px' }}>{t('meetingDigest.when')}</h3>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <label style={{ flex: '1 1 160px' }}>
-              <span style={fieldLabelStyle}>How often</span>
+              <span style={fieldLabelStyle}>{t('systemCleanup.howOften')}</span>
               <select style={selectStyle} value={cadence} onChange={(e) => setSchedule(e.target.value as Cadence, day, draft.schedule.time)}>
-                <option value="weekly">Every week</option>
-                <option value="biweekly">Every 2 weeks</option>
-                <option value="monthly">Every month, the first</option>
+                <option value="weekly">{t('systemCleanup.everyWeek')}</option>
+                <option value="biweekly">{t('systemCleanup.every2Weeks')}</option>
+                <option value="monthly">{t('systemCleanup.everyMonthTheFirst')}</option>
               </select>
             </label>
             <label style={{ flex: '1 1 140px' }}>
-              <span style={fieldLabelStyle}>Day</span>
+              <span style={fieldLabelStyle}>{t('routineEditor.day')}</span>
               <select style={selectStyle} value={day} onChange={(e) => setSchedule(cadence, e.target.value as RoutineWeekday, draft.schedule.time)}>
-                {WEEKDAYS.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
+                {WEEKDAYS().map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
               </select>
             </label>
             <label style={{ flex: '0 0 120px' }}>
-              <span style={fieldLabelStyle}>Time</span>
+              <span style={fieldLabelStyle}>{t('meetingDigest.time')}</span>
               <input type="time" style={dateInputStyle} value={draft.schedule.time} onChange={(e) => setSchedule(cadence, day, e.target.value || '09:00')} />
             </label>
           </div>
-          <p style={hintStyle}>Pick a time your computer is usually on. A missed run happens the next time the dashboard starts, once.</p>
+          <p style={hintStyle}>{t('systemCleanup.pickATimeYourComputer')}</p>
         </section>
 
         <section aria-labelledby="sc-memory">
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <h3 id="sc-memory" style={{ ...sectionLabelStyle, margin: 0 }}>Memory review</h3>
+              <h3 id="sc-memory" style={{ ...sectionLabelStyle, margin: 0 }}>{t('systemCleanup.memoryReview')}</h3>
               <p style={{ ...hintStyle, fontSize: 'var(--text-sm)' }}>
-                Scans context notes and stakeholders for duplicates, empty and old notes, and opens a context update marked
-                <strong> System cleanup</strong>. Run the analyze command on it, and an agent proposes merges, moves and removals.
-                Nothing changes until you approve. One review at a time.
+                {rich(t, 'systemCleanup.scansContextNotesAndStakeholders', { strong: <strong> {t('systemCleanup')}</strong> })}
               </p>
             </div>
-            <Toggle label="Memory review" checked={draft.memory_review.enabled}
+            <Toggle label={t('systemCleanup.memoryReview')} checked={draft.memory_review.enabled}
               onChange={(on) => setDraft({ ...draft, memory_review: { ...draft.memory_review, enabled: on } })} />
           </div>
           {draft.memory_review.enabled && (
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 'var(--text-sm)' }}>
-              Flag notes not updated in
-              <input aria-label="Days before a note counts as old" inputMode="numeric" style={numberStyle} value={days['stale'] ?? ''}
+              {t('systemCleanup.flagNotesNotUpdatedIn')}
+              <input aria-label={t('systemCleanup.daysBeforeANoteCounts')} inputMode="numeric" style={numberStyle} value={days['stale'] ?? ''}
                 onChange={(e) => setDays({ ...days, stale: e.target.value })} />
-              days or more
+              {t('systemCleanup.daysOrMore')}
             </label>
           )}
         </section>
 
         <section aria-labelledby="sc-files">
-          <h3 id="sc-files" style={{ ...sectionLabelStyle, margin: 0 }}>File cleanup</h3>
+          <h3 id="sc-files" style={{ ...sectionLabelStyle, margin: 0 }}>{t('systemCleanup.fileCleanup')}</h3>
           <p style={{ ...hintStyle, fontSize: 'var(--text-sm)', marginBottom: 8 }}>
-            Off unless you turn a rule on, except Meetings, which is on from the start. Only finished items are touched, each counted from its own date. "Move to trash"
-            keeps a way back; "Delete permanently" does not. Tasks tagged <code style={{ fontFamily: 'var(--font-mono)' }}>{draft.keep_tag || 'keep'}</code> are never touched.
+            {rich(t, 'systemCleanup.offUnlessYouTurnA', { code: <code style={{ fontFamily: 'var(--font-mono)' }}>{draft.keep_tag || 'keep'}</code> })}
           </p>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {RULES.map((r) => {
+            {RULES().map((r) => {
               const rule = draft.rules[r.type];
               return (
                 <div key={r.type} style={{ display: 'grid', gridTemplateColumns: '44px 1fr', columnGap: 8, rowGap: 6, padding: '10px 0', borderTop: '1px solid var(--color-border)' }}>
-                  <Toggle label={`Clean up ${r.label.toLowerCase()}`} checked={rule.enabled} onChange={(on) => setRule(r.type, { enabled: on })} />
+                  <Toggle label={t('systemCleanup.cleanUp', { toLowerCase: r.label.toLowerCase() })} checked={rule.enabled} onChange={(on) => setRule(r.type, { enabled: on })} />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{r.label}</div>
                     <div style={hintStyle}>{r.hint}</div>
@@ -313,23 +314,23 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
                   {rule.enabled && (
                     <div style={{ gridColumn: 2, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 'var(--text-sm)' }}>
                       {r.actions.length > 1 ? (
-                        <select aria-label={`${r.label}: action`} style={{ ...selectStyle, width: 'auto' }} value={rule.action}
+                        <select aria-label={t('systemCleanup.action', { label: r.label })} style={{ ...selectStyle, width: 'auto' }} value={rule.action}
                           onChange={(e) => setRule(r.type, { action: e.target.value as CleanupAction })}>
-                          {r.actions.map((a) => <option key={a} value={a}>{ACTION_LABEL[a]}</option>)}
+                          {r.actions.map((a) => <option key={a} value={a}>{ACTION_LABEL()[a]}</option>)}
                         </select>
-                      ) : <span style={{ fontWeight: 600 }}>{ACTION_LABEL.delete}</span>}
-                      after
-                      <input aria-label={`${r.label}: days`} inputMode="numeric" style={numberStyle} value={days[r.type] ?? ''}
+                      ) : <span style={{ fontWeight: 600 }}>{ACTION_LABEL().delete}</span>}
+                      {t('systemCleanup.after')}
+                      <input aria-label={t('systemCleanup.days', { label: r.label })} inputMode="numeric" style={numberStyle} value={days[r.type] ?? ''}
                         onChange={(e) => { setDays({ ...days, [r.type]: e.target.value }); setPreview(null); }} />
-                      days {r.clock}
+                      {t('systemCleanup.days2')} {r.clock}
                     </div>
                   )}
                   {r.type === 'meetings' && (
                     <div style={{ gridColumn: 2 }}>
                       <Checkbox checked={draft.meetings.keep_text === true}
                         onChange={(on) => { setDraft({ ...draft, meetings: { keep_text: on } }); setPreview(null); }}
-                        label="Keep meeting transcripts and notes after review"
-                        description="Only the meeting text, not other materials. Recordings are kept with Keep recordings in Settings > Transcription. Off: they are deleted when the review is done, as before." />
+                        label={t('systemCleanup.keepMeetingTranscriptsAndNotes')}
+                        description={t('systemCleanup.onlyTheMeetingTextNot')} />
                     </div>
                   )}
                 </div>
@@ -339,34 +340,34 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
         </section>
 
         <details>
-          <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Advanced</summary>
+          <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>{t('systemCleanup.advanced')}</summary>
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
             <label style={{ flex: '1 1 200px' }}>
-              <span style={fieldLabelStyle}>Protect tasks with the tag</span>
+              <span style={fieldLabelStyle}>{t('systemCleanup.protectTasksWithTheTag')}</span>
               <input style={dateInputStyle} value={draft.keep_tag} placeholder="none"
                 onChange={(e) => setDraft({ ...draft, keep_tag: e.target.value.trim() })} />
             </label>
             <label style={{ flex: '1 1 200px' }}>
-              <span style={fieldLabelStyle}>At most this many items per run</span>
+              <span style={fieldLabelStyle}>{t('systemCleanup.atMostThisManyItems')}</span>
               <input inputMode="numeric" style={numberStyle} value={days['max'] ?? ''} onChange={(e) => setDays({ ...days, max: e.target.value })} />
-              <p style={hintStyle}>A safety limit. The rest wait for the next run.</p>
+              <p style={hintStyle}>{t('systemCleanup.aSafetyLimitTheRest')}</p>
             </label>
           </div>
         </details>
 
         <section aria-labelledby="sc-preview" style={{ background: 'var(--color-surface-raised, var(--color-surface))', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <h3 id="sc-preview" style={{ ...sectionLabelStyle, margin: 0, flex: 1 }}>What a run would do now</h3>
-            <Button size="sm" variant="secondary" loading={previewing} onClick={() => void runPreview()}>{preview ? 'Refresh' : 'Preview'}</Button>
+            <h3 id="sc-preview" style={{ ...sectionLabelStyle, margin: 0, flex: 1 }}>{t('systemCleanup.whatARunWouldDo')}</h3>
+            <Button size="sm" variant="secondary" loading={previewing} onClick={() => void runPreview()}>{preview ? t('systemCleanup.refresh') : t('preview')}</Button>
           </div>
-          {!preview && <p style={hintStyle}>Check these settings against your workspace before saving. A preview changes nothing.</p>}
+          {!preview && <p style={hintStyle}>{t('systemCleanup.checkTheseSettingsAgainstYour')}</p>}
           {preview && <PreviewResult preview={preview} settings={draft} />}
         </section>
 
         {error && <div role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</div>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={saving} onClick={() => void save()}>Save</Button>
+          <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+          <Button variant="primary" loading={saving} onClick={() => void save()}>{t('updateDetail.save')}</Button>
         </div>
       </div>
     </Modal>
@@ -374,42 +375,42 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
 }
 
 function PreviewResult({ preview, settings }: { preview: CleanupPreview; settings: CleanupSettings }) {
+  const { t } = useLanguage();
   const m = preview.memory;
   const items = preview.plan.items;
   return (
     <div style={{ fontSize: 'var(--text-sm)', marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {m && (
         <div>
-          <strong>Memory review:</strong>{' '}
+          <strong>{t('systemCleanup.memoryReview2')}</strong>{' '}
           {preview.open_review
-            ? <>{preview.open_review} is still open, so no new review would start.</>
+            ? <>{rich(t, 'systemCleanup.isStillOpenSoNo', { open_review: preview.open_review })}</>
             : m.notes + m.stakeholders === 0
-            ? 'no notes or stakeholders yet, so nothing to review.'
-            : <>would open a review of {m.notes} notes and {m.stakeholders} stakeholders. The scan found {m.duplicates.length} possible
-              duplicate{m.duplicates.length === 1 ? '' : 's'}, {m.stale.length} old and {m.thin.length} empty note{m.thin.length === 1 ? '' : 's'}.</>}
+            ? t('systemCleanup.noNotesOrStakeholdersYet')
+            : t('systemCleanup.previewReview', { notes: m.notes, stakeholders: m.stakeholders, duplicates: m.duplicates.length, stale: m.stale.length, thin: m.thin.length })}
         </div>
       )}
       <div>
-        <strong>Files:</strong>{' '}
-        {RULES.every((r) => !settings.rules[r.type].enabled)
-          ? 'no rule is on, so no file would change.'
+        <strong>{t('systemCleanup.files')}</strong>{' '}
+        {RULES().every((r) => !settings.rules[r.type].enabled)
+          ? t('systemCleanup.noRuleIsOnSo')
           : items.length === 0
-          ? 'nothing is old enough yet.'
-          : RULES.filter((r) => settings.rules[r.type].enabled).map((r) => {
+          ? t('systemCleanup.nothingIsOldEnoughYet')
+          : RULES().filter((r) => settings.rules[r.type].enabled).map((r) => {
             const n = preview.plan.counts[r.type];
-            return `${n} ${n === 1 ? NOUN[r.type][0] : NOUN[r.type][1]} ${ACTION_PAST[settings.rules[r.type].action]}`;
+            return `${n} ${n === 1 ? NOUN()[r.type][0] : NOUN()[r.type][1]} ${ACTION_PAST()[settings.rules[r.type].action]}`;
           }).join(', ') + '.'}
-        {preview.plan.deferred > 0 && ` ${preview.plan.deferred} more would wait for the next run.`}
+        {preview.plan.deferred > 0 && t('systemCleanup.moreWouldWaitForThe', { deferred: preview.plan.deferred })}
       </div>
       {items.length > 0 && (
         <ul style={{ margin: 0, paddingLeft: 18, maxHeight: 180, overflow: 'auto', fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
           {items.slice(0, 50).map((i) => (
             <li key={`${i.type}-${i.id}`}>
-              <span style={{ fontWeight: 600, color: i.action === 'delete' ? 'var(--color-critical)' : 'var(--color-text)' }}>{ACTION_LABEL[i.action]}</span>{' '}
-              {i.title || i.id} <span style={{ color: 'var(--color-text-muted)' }}>({i.id}, {i.age_days} days)</span>
+              <span style={{ fontWeight: 600, color: i.action === 'delete' ? 'var(--color-critical)' : 'var(--color-text)' }}>{ACTION_LABEL()[i.action]}</span>{' '}
+              {i.title || i.id} <span style={{ color: 'var(--color-text-muted)' }}>{rich(t, 'systemCleanup.days3', { id: i.id, age_days: i.age_days })}</span>
             </li>
           ))}
-          {items.length > 50 && <li>and {items.length - 50} more</li>}
+          {items.length > 50 && <li>{rich(t, 'dayTooltip.andMore', { value: items.length - 50 })}</li>}
         </ul>
       )}
     </div>

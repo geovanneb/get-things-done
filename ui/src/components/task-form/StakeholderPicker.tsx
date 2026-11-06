@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
 import React from 'react';
 import { apiGet } from '@/utils/api';
 import type { Stakeholder } from '@/types';
@@ -13,7 +15,8 @@ interface StakeholderPickerProps {
   onAddName?: (name: string) => void;
 }
 
-export default function StakeholderPicker({ selected, onAdd, onRemove, label = 'Stakeholders', placeholder = 'Search stakeholders...', onAddName }: StakeholderPickerProps) {
+export default function StakeholderPicker({ selected, onAdd, onRemove, label = tr('stakeholders'), placeholder = tr('stakeholderPicker.searchStakeholders'), onAddName }: StakeholderPickerProps) {
+  const { t } = useLanguage();
   const [query, setQuery] = React.useState('');
   const [allStakeholders, setAllStakeholders] = React.useState<Stakeholder[]>([]);
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
@@ -74,14 +77,14 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
       {selected.length > 0 && (
         <div
           style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px', marginBottom: '8px' }}
-          aria-label="Selected stakeholders"
+          aria-label={t('stakeholderPicker.selectedStakeholders')}
         >
           {selected.map((s) => (
             <span key={s.id} style={chipStyle}>
               {s.name ?? s.id}
               <button
                 type="button"
-                aria-label={`Remove stakeholder ${s.name ?? s.id}`}
+                aria-label={t('stakeholderPicker.removeStakeholder', { name: s.name ?? s.id })}
                 style={chipRemoveStyle}
                 onClick={() => onRemove(s.id)}
               >
@@ -113,7 +116,7 @@ export default function StakeholderPicker({ selected, onAdd, onRemove, label = '
           className="gtd-control"
         />
         {dropdownOpen && (
-          <ul id={`${labelId}-listbox`} role="listbox" aria-label="Stakeholder suggestions" style={dropdownStyle}>
+          <ul id={`${labelId}-listbox`} role="listbox" aria-label={t('stakeholderPicker.stakeholderSuggestions')} style={dropdownStyle}>
             {filtered.map((s) => (
               <li
                 key={s.id}

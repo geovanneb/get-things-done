@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Modal, { FormActions } from '../common/Modal';
 import Button from '../common/Button';
@@ -23,13 +26,12 @@ interface BoardColumnsEditorProps {
   onSaved: (columns: BoardColumn[]) => void;
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** A name for a new column that no other column has yet. */
 function freeName(columns: BoardColumn[]): string {
   const taken = new Set(columns.map((c) => c.label.trim().toLowerCase()));
   for (let n = 1; ; n++) {
-    const name = n === 1 ? 'New column' : `New column ${n}`;
+    const name = n === 1 ? tr('boardColumnsEditor.newColumn') : tr('boardColumnsEditor.newColumn2', { n });
     if (!taken.has(name.toLowerCase())) return name;
   }
 }
@@ -40,6 +42,7 @@ function freeName(columns: BoardColumn[]): string {
  * and each change is announced to screen readers.
  */
 export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, onSaved }: BoardColumnsEditorProps) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const [draft, setDraft] = React.useState<BoardColumn[]>(columns);
   const [saving, setSaving] = React.useState(false);
@@ -85,7 +88,7 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
     if (next === draft) return;
     setDraft(next);
     const position = next.findIndex((c) => c.id === column.id);
-    setAnnouncement(`${column.label || 'Column'} moved to position ${position + 1} of ${next.length}.`);
+    setAnnouncement(t('boardColumnsEditor.movedToPositionOf', { label: column.label || t('boardColumnsEditor.column'), value: position + 1, length: next.length }));
     // The row moves in the list: keep the focus on its button, or on the other arrow once it reaches the end.
     if (keepFocus) {
       const other = keepFocus === 'up' ? 'down' : 'up';
@@ -97,7 +100,7 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
     if (draft.length >= MAX_COLUMNS) return;
     const column: BoardColumn = { id: newColumnId(draft), label: freeName(draft), status: 'in_progress' };
     setDraft((prev) => [...prev, column]);
-    setAnnouncement(`${column.label} added at the end.`);
+    setAnnouncement(t('boardColumnsEditor.addedAtTheEnd', { label: column.label }));
     requestAnimationFrame(() => {
       const input = rowRefs.current.get(column.id)?.querySelector<HTMLInputElement>('input');
       input?.focus();
@@ -115,18 +118,18 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
       const destinations = [...after.byColumn].filter(([, list]) => list.length > 0).map(([id]) => next.find((c) => c.id === id)!.label);
       const message = (
         <>
-          {destinations.length > 0 && <>Its {plural(held.length - after.unplaced.length, 'task')} will show in {destinations.join(', ')}. </>}
-          {after.unplaced.length > 0 && <>{plural(after.unplaced.length, 'task')} will only show in the List view, because no other column takes their status. </>}
-          Tasks keep their status, and nothing is saved until you choose Save columns.
+          {destinations.length > 0 && <>{rich(t, 'boardColumnsEditor.itsWillShowIn', { plural: t('common.taskCount', { count: held.length - after.unplaced.length }), join: destinations.join(', ') })} </>}
+          {after.unplaced.length > 0 && <>{rich(t, 'boardColumnsEditor.willOnlyShowInThe', { plural: t('common.taskCount', { count: after.unplaced.length }) })} </>}
+          {t('boardColumnsEditor.tasksKeepTheirStatusAnd')}
         </>
       );
       const ok = await confirm({
-        title: `Remove the "${column.label || 'unnamed'}" column?`, message, confirmLabel: 'Remove column', tone: 'danger',
+        title: t('boardColumnsEditor.removeTheColumn', { label: column.label || 'unnamed' }), message, confirmLabel: t('boardColumnsEditor.removeColumn'), tone: 'danger',
       });
       if (!ok) return;
     }
     setDraft(next);
-    setAnnouncement(`${column.label || 'Column'} removed.`);
+    setAnnouncement(t('boardColumnsEditor.removed', { label: column.label || t('boardColumnsEditor.column') }));
     const neighbour = next[Math.min(index, next.length - 1)];
     if (neighbour) focusLater(neighbour.id, 'input', addButton);
     else requestAnimationFrame(() => addButton()?.focus());
@@ -134,7 +137,7 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
 
   const reset = () => {
     setDraft(DEFAULT_BOARD.columns);
-    setAnnouncement('The columns are back to the default four. Choose Save columns to keep them.');
+    setAnnouncement(t('boardColumnsEditor.theColumnsAreBackTo'));
   };
 
   const save = async () => {
@@ -152,7 +155,7 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
         onSaved(saved?.columns ?? cleaned);
       }
     } catch (err) {
-      setSaveError(err instanceof Error && err.message ? err.message : 'Try again.');
+      setSaveError(err instanceof Error && err.message ? err.message : t('boardColumnsEditor.tryAgain'));
     } finally {
       setSaving(false);
     }
@@ -164,37 +167,37 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
       onClose={saving ? () => {} : onClose}
       size="lg"
       keepWhileTyping
-      title="Edit columns"
-      description="Rename, add, remove and reorder the board's columns. The first column is the leftmost one. Tasks keep their status: a column only says which status a task gets when you drop it there."
+      title={t('boardColumnsEditor.editColumns')}
+      description={t('boardColumnsEditor.renameAddRemoveAndReorder')}
       footer={(
         <FormActions start={(
           <Button variant="ghost" onClick={reset} disabled={saving || isDefaultBoard(draft)}
-            title={isDefaultBoard(draft) ? 'The columns are already the default ones' : undefined}>
-            Reset to default
+            title={isDefaultBoard(draft) ? t('boardColumnsEditor.theColumnsAreAlreadyThe') : undefined}>
+            {t('resetToDefault')}
           </Button>
         )}>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
           <Button variant="primary" onClick={save} loading={saving} disabled={!valid || !changed}
-            title={!valid ? 'Fix the names marked in red first' : !changed ? 'Nothing has changed yet' : undefined}>
-            Save columns
+            title={!valid ? t('boardColumnsEditor.fixTheNamesMarkedIn') : !changed ? t('boardColumnsEditor.nothingHasChangedYet') : undefined}>
+            {t('boardColumnsEditor.saveColumns')}
           </Button>
         </FormActions>
       )}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-        {saveError && <Notice tone="critical" title="Could not save the columns.">{saveError}</Notice>}
+        {saveError && <Notice tone="critical" title={t('boardColumnsEditor.couldNotSaveTheColumns')}>{saveError}</Notice>}
 
         <Card padding="none">
-        <ul className="gtd-list" aria-label="Board columns, left to right">
+        <ul className="gtd-list" aria-label={t('boardColumnsEditor.boardColumnsLeftToRight')}>
           {draft.map((column, index) => {
             const count = placed.byColumn.get(column.id)?.length ?? 0;
-            const name = column.label.trim() || 'unnamed column';
+            const name = column.label.trim() || t('boardColumnsEditor.unnamedColumn');
             return (
               <li
                 key={column.id}
                 ref={(el) => { if (el) rowRefs.current.set(column.id, el); else rowRefs.current.delete(column.id); }}
                 className="gtd-list__row"
-                aria-label={`Column ${index + 1} of ${draft.length}: ${name}`}
+                aria-label={t('boardColumnsEditor.columnOf', { value: index + 1, length: draft.length, name })}
                 onDragOver={(e) => {
                   if (dragging === null) return;
                   e.preventDefault();
@@ -212,7 +215,7 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
               >
                 <span
                   draggable
-                  title="Drag to reorder"
+                  title={t('boardColumnsEditor.dragToReorder')}
                   aria-hidden="true"
                   onDragStart={(e) => {
                     e.dataTransfer.effectAllowed = 'move';
@@ -228,28 +231,28 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
                 </span>
                 <div className="gtd-form-grid" style={{ flex: 1, minWidth: 0, gap: 'var(--space-3)' }}>
                   <Input
-                    label="Name"
+                    label={t('boardColumnsEditor.name')}
                     required
                     size="sm"
                     value={column.label}
                     maxLength={MAX_LABEL}
                     onChange={(label) => update(index, { label })}
                     error={errors[index]}
-                    hint={plural(count, 'task') + ' here now'}
+                    hint={t('common.taskCount', { count: count }) + t('boardColumnsEditor.hereNow')}
                   />
                   <Select
-                    label="Dropped tasks become"
+                    label={t('boardColumnsEditor.droppedTasksBecome')}
                     size="sm"
                     value={column.status}
                     onChange={(status) => update(index, { status: status as BoardColumn['status'] })}
-                    options={COLUMN_STATUSES.map((s) => ({ value: s.value, label: s.label }))}
+                    options={COLUMN_STATUSES().map((s) => ({ value: s.value, label: s.label }))}
                   />
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', marginTop: 22, flexShrink: 0 }}>
-                  <IconButton data-move="up" label={`Move ${name} up`} icon={arrowUp} disabled={index === 0} onClick={() => move(index, index - 1, 'up')} />
-                  <IconButton data-move="down" label={`Move ${name} down`} icon={arrowDown} disabled={index === draft.length - 1} onClick={() => move(index, index + 1, 'down')} />
+                  <IconButton data-move="up" label={t('boardColumnsEditor.moveUp', { name })} icon={arrowUp} disabled={index === 0} onClick={() => move(index, index - 1, 'up')} />
+                  <IconButton data-move="down" label={t('boardColumnsEditor.moveDown', { name })} icon={arrowDown} disabled={index === draft.length - 1} onClick={() => move(index, index + 1, 'down')} />
                   <IconButton
-                    label={draft.length === 1 ? 'The board needs at least one column' : `Remove ${name}`}
+                    label={draft.length === 1 ? t('boardColumnsEditor.theBoardNeedsAtLeast') : t('removeNamedFile', { name })}
                     icon={icons.trash}
                     tone="danger"
                     disabled={draft.length === 1}
@@ -264,15 +267,14 @@ export default function BoardColumnsEditor({ isOpen, columns, tasks, onClose, on
 
         <div ref={addRef}>
           <Button icon={icons.plus} size="sm" onClick={add} disabled={draft.length >= MAX_COLUMNS}
-            title={draft.length >= MAX_COLUMNS ? `The board has the most columns it can hold (${MAX_COLUMNS})` : undefined}>
-            Add column
+            title={draft.length >= MAX_COLUMNS ? t('boardColumnsEditor.theBoardHasTheMost', { MAX_COLUMNS }) : undefined}>
+            {t('boardColumnsEditor.addColumn')}
           </Button>
         </div>
 
         {missing.length > 0 && (
-          <Notice tone="warning" title={`No column shows ${missing.map(statusLabel).join(', ')} tasks.`}>
-            {placed.unplaced.length > 0 ? `${plural(placed.unplaced.length, 'task')} will` : 'Those tasks will'} only show in the List view.
-            {missing.includes('in_review') && ' Agents move tasks to Needs Review when they finish, so keep a column for it if you review work from the board.'}
+          <Notice tone="warning" title={t('boardColumnsEditor.noColumnShowsTasks', { join: missing.map(statusLabel).join(', ') })}>
+            {rich(t, 'boardColumnsEditor.onlyShowInTheList', { value: placed.unplaced.length > 0 ? t('boardColumnsEditor.will', { plural: t('common.taskCount', { count: placed.unplaced.length }) }) : t('boardColumnsEditor.thoseTasksWill'), value2: missing.includes('in_review') && t('boardColumnsEditor.agentsMoveTasksToNeeds') })}
           </Notice>
         )}
       </div>

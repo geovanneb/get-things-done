@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import { RecordingProvider } from '@/components/recording/RecordingProvider';
 import { RecordingBanner } from '@/components/recording/RecordingBanner';
 import { RecordLauncherProvider } from '@/components/recording/RecordLauncher';
@@ -59,7 +60,7 @@ function AppInitializer() {
   return null;
 }
 
-const loading = <LoadingSpinner text="Loading…" />;
+const loading = () => (<LoadingSpinner text={tr('loading')} />);
 
 function AppRoutes() {
   // Without an open workspace the dashboard has nothing to show: first-run setup takes its place at any address.
@@ -71,10 +72,10 @@ function AppRoutes() {
       .catch(() => setSetup('ready'));
   }, []);
 
-  if (setup === null) return loading;
+  if (setup === null) return loading();
   if (setup !== 'ready') {
     return (
-      <Suspense fallback={loading}>
+      <Suspense fallback={loading()}>
         <SetupView status={setup} />
       </Suspense>
     );
@@ -83,7 +84,7 @@ function AppRoutes() {
   return (
     <RecordLauncherProvider>
       <AppInitializer />
-      <Suspense fallback={loading}>
+      <Suspense fallback={loading()}>
       <Routes>
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/situation" replace />} />

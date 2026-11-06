@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import Button from '@/components/common/Button';
 import EmptyState from '@/components/common/EmptyState';
 import { formatRelativeDate } from '@/utils/format';
@@ -5,49 +8,50 @@ import { filterUpdates, HISTORY_PAGE, READY_FOR_YOU, TO_ANALYZE, typeCounts, UPD
 import type { ContextUpdate, ContextUpdateStatus } from '@/types';
 import { HelpBox, StatusPill, TypeBadge, sectionLabel } from './shared';
 
-const GROUPS: { id: string; title: string; hint: string; statuses: ContextUpdateStatus[]; paged?: boolean }[] = [
+const GROUPS = (): { id: string; title: string; hint: string; statuses: ContextUpdateStatus[]; paged?: boolean }[] => ([
   // Your turn first, then the agent's: the counts by the title take the user to these two.
-  { id: 'updates-ready-for-you', title: 'Ready for you', hint: 'Analyzed and waiting for your review, or approved and waiting to be applied.', statuses: READY_FOR_YOU },
-  { id: 'updates-to-analyze', title: 'To analyze', hint: 'Material waiting for an analysis. Nothing to review yet.', statuses: TO_ANALYZE },
-  { id: 'updates-agent-working', title: 'Agent working', hint: 'These update by themselves.', statuses: ['analyzing', 'applying'] },
-  { id: 'updates-history', title: 'History', hint: 'What each update changed. Materials were deleted when it finished, unless you kept them.', statuses: ['done'], paged: true },
-];
+  { id: 'updates-ready-for-you', title: tr('updatesList.readyForYou'), hint: tr('updatesList.analyzedAndWaitingForYour'), statuses: READY_FOR_YOU },
+  { id: 'updates-to-analyze', title: tr('updatesList.toAnalyze'), hint: tr('updatesList.materialWaitingForAnAnalysis'), statuses: TO_ANALYZE },
+  { id: 'updates-agent-working', title: tr('updatesList.agentWorking'), hint: tr('updatesList.theseUpdateByThemselves'), statuses: ['analyzing', 'applying'] },
+  { id: 'updates-history', title: tr('updatesList.history'), hint: tr('updatesList.whatEachUpdateChangedMaterials'), statuses: ['done'], paged: true },
+]);
 
 function summaryLine(u: ContextUpdate): string {
-  if (u.kind === 'memory-review' && (u.status === 'ready' || u.status === 'analyzing')) return 'review of your existing memory';
-  const files = `${u.materials.length} file${u.materials.length === 1 ? '' : 's'}`;
+  if (u.kind === 'memory-review' && (u.status === 'ready' || u.status === 'analyzing')) return tr('updatesList.reviewOfYourExistingMemory');
+  const files = tr('updatesList.files', { count: u.materials.length });
   if (u.status === 'ready' || u.status === 'analyzing') return files;
   const accepted = u.proposals.filter((p) => p.decision === 'accepted').length;
-  if (u.status === 'done') return `${files}${u.keep_materials ? ' (kept)' : ''} · ${accepted} of ${u.proposals.length} change${u.proposals.length === 1 ? '' : 's'} applied`;
-  return `${files} · ${u.proposals.length} proposal${u.proposals.length === 1 ? '' : 's'}`;
+  if (u.status === 'done') return tr('updatesList.ofChangesApplied', { count: u.proposals.length, files, value: u.keep_materials ? ' (kept)' : '', accepted });
+  return tr('updatesList.proposals', { count: u.proposals.length, files });
 }
 
-const STEPS = (
+const STEPS = () => ((
   <ol style={{ margin: '8px 0 0', paddingLeft: 20 }}>
-    <li><strong>Collect:</strong> upload files or paste a transcript.</li>
-    <li><strong>Analyze:</strong> copy the command and run it in Claude Code.</li>
-    <li><strong>Review:</strong> tick the proposals you accept.</li>
-    <li><strong>Apply:</strong> run the second command. Done.</li>
+    <li>{rich(tr, 'updatesList.uploadFilesOrPasteA', { strong: <strong>{tr('updatesList.collect')}</strong> })}</li>
+    <li>{rich(tr, 'updatesList.copyTheCommandAndRun', { strong: <strong>{tr('updatesList.analyze')}</strong> })}</li>
+    <li>{rich(tr, 'updatesList.tickTheProposalsYouAccept', { strong: <strong>{tr('updatesList.review')}</strong> })}</li>
+    <li>{rich(tr, 'updatesList.runTheSecondCommandDone', { strong: <strong>{tr('updatesList.apply')}</strong> })}</li>
   </ol>
-);
+));
 
-const INTRO = 'Meetings, decks and photos change what is true about your organization, stakeholders and plans. Import them here. An agent compares them with your current context and proposes only the changes that matter. You review each change as a before and after, accept what is right, and the agent applies only that.';
+const INTRO = () => tr('updatesList.meetingsDecksAndPhotosChange');
 
 /**
  * Same look as the Board's priority filter: small chips, the active one filled. The counts follow the search,
  * so a chip never promises updates the list will not show.
  */
 function TypeChips({ updates, query, value, onChange }: { updates: ContextUpdate[]; query: string; value: TypeFilter; onChange: (value: TypeFilter) => void }) {
+  const { t } = useLanguage();
   const matching = filterUpdates(updates, 'all', query);
   const counts = typeCounts(matching);
   const present = typeCounts(updates);
   const options = [
-    { id: 'all' as const, label: 'All', count: matching.length, hint: 'Every update' },
+    { id: 'all' as const, label: t('all'), count: matching.length, hint: t('updatesList.everyUpdate') },
     // Chips stay put while typing: a type is listed when the workspace has it, not when the search finds it.
-    ...UPDATE_TYPES.filter((t) => present[t.id] || t.id === value).map((t) => ({ id: t.id, label: t.label, count: counts[t.id] ?? 0, hint: t.hint })),
+    ...UPDATE_TYPES().filter((t) => present[t.id] || t.id === value).map((t) => ({ id: t.id, label: t.label, count: counts[t.id] ?? 0, hint: t.hint })),
   ];
   return (
-    <div role="group" aria-label="Filter by type" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+    <div role="group" aria-label={t('filterByType')} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {options.map((o) => {
         const active = o.id === value;
         return (
@@ -69,6 +73,7 @@ function TypeChips({ updates, query, value, onChange }: { updates: ContextUpdate
 }
 
 function UpdateRow({ u, onOpen }: { u: ContextUpdate; onOpen: (id: string) => void }) {
+  const { t } = useLanguage();
   return (
     <button type="button" onClick={() => onOpen(u.id)}
       style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', cursor: 'pointer', textAlign: 'left', color: 'var(--color-text)', fontFamily: 'inherit' }}
@@ -80,7 +85,7 @@ function UpdateRow({ u, onOpen }: { u: ContextUpdate; onOpen: (id: string) => vo
           <TypeBadge origin={u.origin} kind={u.kind} />
         </span>
         <span style={{ display: 'block', marginTop: 2, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span>{u.kaizen ? (u.kaizen.task_ref ? ` · from ${u.kaizen.task_ref}` : '') : u.kind === 'memory-review' ? '' : ` · material from ${u.source_date || 'unknown date'}`} · {summaryLine(u)} · updated {formatRelativeDate(u.updated_at || u.created_at)}
+          {rich(t, 'updatesList.updated', { part: <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span>, value: u.kaizen ? (u.kaizen.task_ref ? t('updatesList.from', { task_ref: u.kaizen.task_ref }) : '') : u.kind === 'memory-review' ? '' : t('updatesList.materialFrom', { source_date: u.source_date || t('updateDetail.unknownDate') }), summaryLine: summaryLine(u), updated_at: formatRelativeDate(u.updated_at || u.created_at) })}
         </span>
       </span>
       <StatusPill status={u.status} />
@@ -100,13 +105,14 @@ export default function UpdatesList({ updates, type, query, historyShown, onType
   onOpen: (id: string) => void;
   onImport: () => void;
 }) {
+  const { t } = useLanguage();
   if (updates.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 900 }}>
-        <HelpBox title="Keep your context true, without the busywork">{INTRO}{STEPS}</HelpBox>
-        <EmptyState title="No context updates yet"
-          description="Import a transcript, a deck or any other material that may change your context."
-          action={{ label: 'Import update', onClick: onImport }} />
+        <HelpBox title={t('updatesList.keepYourContextTrueWithout')}>{INTRO()}{STEPS()}</HelpBox>
+        <EmptyState title={t('updatesList.noContextUpdatesYet')}
+          description={t('updatesList.importATranscriptADeck')}
+          action={{ label: t('updatesList.importUpdate'), onClick: onImport }} />
       </div>
     );
   }
@@ -120,24 +126,24 @@ export default function UpdatesList({ updates, type, query, historyShown, onType
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 900 }}>
       {/* Once there are updates, the explanation is reference: closed, so the work comes first. */}
       <details style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', lineHeight: 1.5 }}>
-        <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>How context updates work</summary>
-        <div style={{ marginTop: 8 }}><HelpBox>{INTRO}{STEPS}</HelpBox></div>
+        <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>{t('updatesList.howContextUpdatesWork')}</summary>
+        <div style={{ marginTop: 8 }}><HelpBox>{INTRO()}{STEPS()}</HelpBox></div>
       </details>
 
       {(showChips || (filtering && shown.length > 0)) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {showChips && <TypeChips updates={updates} query={query} value={type} onChange={onType} />}
-          {filtering && shown.length > 0 && <Button variant="ghost" size="sm" onClick={onClearFilters}>Clear filters</Button>}
+          {filtering && shown.length > 0 && <Button variant="ghost" size="sm" onClick={onClearFilters}>{t('updatesList.clearFilters')}</Button>}
         </div>
       )}
 
       {shown.length === 0 && (
-        <EmptyState title="No updates match"
-          description={query.trim() ? `Nothing with "${query.trim()}" in the title or ID for this filter.` : 'There are no updates of this type.'}
-          action={{ label: 'Clear filters', onClick: onClearFilters }} />
+        <EmptyState title={t('updatesList.noUpdatesMatch')}
+          description={query.trim() ? t('updatesList.nothingWithInTheTitle', { trim: query.trim() }) : t('updatesList.thereAreNoUpdatesOf')}
+          action={{ label: t('updatesList.clearFilters'), onClick: onClearFilters }} />
       )}
 
-      {GROUPS.map((group) => {
+      {GROUPS().map((group) => {
         const items = shown.filter((u) => group.statuses.includes(u.status))
           .sort((a, b) => group.statuses.indexOf(a.status) - group.statuses.indexOf(b.status) || b.id.localeCompare(a.id));
         if (items.length === 0) return null;
@@ -152,8 +158,8 @@ export default function UpdatesList({ updates, type, query, historyShown, onType
             </div>
             {rest > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-                <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Showing {visible.length} of {items.length}</span>
-                <Button variant="secondary" size="sm" onClick={onShowMore}>Show {Math.min(rest, HISTORY_PAGE)} more</Button>
+                <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{rich(t, 'updatesList.showingOf', { length: visible.length, length2: items.length })}</span>
+                <Button variant="secondary" size="sm" onClick={onShowMore}>{rich(t, 'updatesList.showMore', { min: Math.min(rest, HISTORY_PAGE) })}</Button>
               </div>
             )}
           </section>

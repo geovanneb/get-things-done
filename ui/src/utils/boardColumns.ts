@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import type { Task } from '../types';
 
 /**
@@ -24,6 +25,13 @@ export interface BoardColumns {
 export const MAX_COLUMNS = 12;
 export const MAX_LABEL = 40;
 
+/** A default column's saved name follows the interface language; a name someone chose stays as they wrote it. */
+export function columnLabel(column: BoardColumn): string {
+  const fallback = DEFAULT_BOARD.columns.find((c) => c.id === column.id);
+  if (!fallback || fallback.label !== column.label) return column.label;
+  return { backlog: tr('routineEditor.backlog'), in_progress: tr('board.columnInProgress'), needs_review: tr('simulation.needsReview'), done: tr('done') }[column.id] ?? column.label;
+}
+
 /** The board as it has always been. */
 export const DEFAULT_BOARD: BoardColumns = {
   columns: [
@@ -35,13 +43,13 @@ export const DEFAULT_BOARD: BoardColumns = {
 };
 
 /** The statuses a column can give, in workflow order, with the names the rest of the app uses. */
-export const COLUMN_STATUSES: ReadonlyArray<{ value: BoardColumnStatus; label: string }> = [
-  { value: 'backlog', label: 'Backlog' },
-  { value: 'in_progress', label: 'In Progress' },
-  { value: 'blocked', label: 'Blocked' },
-  { value: 'in_review', label: 'Needs Review' },
-  { value: 'done', label: 'Done' },
-];
+export const COLUMN_STATUSES = (): ReadonlyArray<{ value: BoardColumnStatus; label: string }> => ([
+  { value: 'backlog', label: tr('routineEditor.backlog') },
+  { value: 'in_progress', label: tr('board.columnInProgress') },
+  { value: 'blocked', label: tr('renderer.blocked') },
+  { value: 'in_review', label: tr('simulation.needsReview') },
+  { value: 'done', label: tr('done') },
+]);
 
 /**
  * The task statuses a column shows. The legacy spellings stay where they always were: `ready` with Backlog, `review`
@@ -56,7 +64,7 @@ const SHOWS: Record<BoardColumnStatus, ReadonlyArray<Task['status']>> = {
 };
 
 export function statusLabel(status: BoardColumnStatus): string {
-  return COLUMN_STATUSES.find((s) => s.value === status)?.label ?? status;
+  return COLUMN_STATUSES().find((s) => s.value === status)?.label ?? status;
 }
 
 const DEFAULT_IDS = new Set(DEFAULT_BOARD.columns.map((c) => c.id));
@@ -96,7 +104,7 @@ export function placeTasks<T extends Pick<Task, 'status'> & { board_column?: unk
 
 /** The workflow statuses no column shows, so the editor can say where those tasks would go. */
 export function statusesWithoutColumn(columns: BoardColumn[]): BoardColumnStatus[] {
-  return COLUMN_STATUSES.map((s) => s.value).filter((status) => columnFor({ status }, columns) === null);
+  return COLUMN_STATUSES().map((s) => s.value).filter((status) => columnFor({ status }, columns) === null);
 }
 
 /**
@@ -127,9 +135,9 @@ export function moveColumn(columns: BoardColumn[], from: number, to: number): Bo
 /** What is wrong with a column's name, in the words the form shows, or null when it is fine. */
 export function labelError(columns: BoardColumn[], index: number): string | null {
   const name = columns[index].label.trim();
-  if (!name) return 'Enter a name.';
-  if (name.length > MAX_LABEL) return `Use at most ${MAX_LABEL} characters.`;
-  if (columns.some((c, i) => i !== index && c.label.trim().toLowerCase() === name.toLowerCase())) return 'Another column has this name.';
+  if (!name) return tr('boardColumns.enterAName');
+  if (name.length > MAX_LABEL) return tr('boardColumns.useAtMostCharacters', { MAX_LABEL });
+  if (columns.some((c, i) => i !== index && c.label.trim().toLowerCase() === name.toLowerCase())) return tr('boardColumns.anotherColumnHasThisName');
   return null;
 }
 

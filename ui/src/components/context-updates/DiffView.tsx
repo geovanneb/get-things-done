@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { useMemo, useState } from 'react';
 import { diffLines, foldUnchanged, type DiffLine } from '@/utils/lineDiff';
 
@@ -26,11 +28,12 @@ function Row({ line }: { line: DiffLine }) {
 
 /** Unified line diff, current file on the left numbers, proposed on the right; long unchanged runs fold away. */
 export default function DiffView({ before, after }: { before: string | null; after: string | null }) {
+  const { t } = useLanguage();
   const blocks = useMemo(() => foldUnchanged(diffLines(before, after)), [before, after]);
   const [opened, setOpened] = useState<Set<number>>(() => new Set());
 
   if (blocks.every((b) => b.kind === 'lines' && b.lines.every((l) => l.kind === 'same'))) {
-    return <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No difference from the current file.</p>;
+    return <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('diff.noDifferenceFromTheCurrent')}</p>;
   }
 
   return (
@@ -42,7 +45,7 @@ export default function DiffView({ before, after }: { before: string | null; aft
         return (
           <button key={i} type="button" onClick={() => setOpened((prev) => new Set(prev).add(i))}
             style={{ display: 'block', width: '100%', padding: '3px 12px', border: 'none', borderTop: '1px solid var(--color-border)', borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-accent)', fontFamily: 'var(--font-sans)', fontSize: 'var(--text-xs)', textAlign: 'left', cursor: 'pointer' }}>
-            Show {block.count} unchanged lines
+            {rich(t, 'diff.showUnchangedLines', { amount: block.count })}
           </button>
         );
       })}
