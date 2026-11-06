@@ -8,6 +8,15 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The dashboard warns before a run when Claude Code does not trust the workspace folder itself.**
+  Claude Code applies a workspace's permission rules only when it trusts that folder (inside a git
+  repository, the repository's root), not another folder further up. The dashboard also counted a
+  trusted folder further up, so **Run analysis**, **Apply with Claude Code** and the meeting
+  digest's analysis started and stopped within a second. It now shows the trust problem before the
+  run, with the steps to fix it.
+
 ## [0.11.0] - 2026-11-05
 
 Get Things Done now **updates itself from the app**, lets you **shape the Kanban board** the way

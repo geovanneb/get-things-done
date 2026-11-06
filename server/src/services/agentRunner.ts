@@ -30,8 +30,9 @@ import { atomicWrite } from '../utils/atomicWrite';
  * - It uses the plan, not an API account: API-key and provider variables are removed from its environment, a
  *   workspace that sets them is refused, Claude Code must report a claude.ai sign-in, and a run that still
  *   reports an API key at startup is stopped at once.
- * - Claude Code ignores a workspace's allow rules until the folder is trusted. The runner checks that before
- *   starting and stops a run that reports it anyway; it never changes trust itself.
+ * - Claude Code ignores a workspace's allow rules until it trusts the folder it files the workspace under: the
+ *   folder itself, or its repository's root, never a folder above that. The runner checks that before starting and
+ *   stops a run that reports it anyway; it never changes trust itself.
  *
  * One run at a time, pinned to the workspace it started in, with its own process group so Stop ends everything
  * it started. A small record per update in `.situation-board/runs/` says how the last run ended.
@@ -155,9 +156,65 @@ function claudeConfigFile(env: NodeJS.ProcessEnv): string {
   return dir ? path.join(dir, '.claude.json') : path.join(env['HOME'] ?? os.homedir(), '.claude.json');
 }
 
+/** A folder as Claude Code writes it in its project list: with forward slashes on Windows. */
+export function claudeProjectKey(folder: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' ? folder.replaceAll('\\', '/') : folder;
+}
+
+/** What a `.git` entry is, following a link: only a file or a folder marks a repository, as for Claude Code. */
+async function gitEntry(file: string): Promise<'file' | 'folder' | null> {
+  const stat = await fsp.stat(file).catch(() => null);
+  return stat?.isFile() ? 'file' : stat?.isDirectory() ? 'folder' : null;
+}
+
+/** A worktree's bookkeeping file, read only when it is a regular file and not a link: Claude Code ignores others. */
+async function bookkeeping(file: string): Promise<string | null> {
+  const stat = await fsp.lstat(file).catch(() => null);
+  return stat?.isFile() ? (await fsp.readFile(file, 'utf-8')).trim() : null;
+}
+
 /**
- * Whether Claude Code has trusted this folder (or a folder above it): true, false, or null when its settings
- * cannot be read. Claude Code keeps this in its own settings file; the runner only reads it.
+ * The main checkout of a linked worktree (`git worktree add`), whose root Claude Code files the worktree's trust
+ * under. Any other `.git` file, or one that does not point back from the checkout's `worktrees/`, leaves the folder.
+ */
+async function mainCheckout(root: string): Promise<string> {
+  try {
+    const pointer = (await fsp.readFile(path.join(root, '.git'), 'utf-8')).trim();
+    if (!pointer.startsWith('gitdir:')) return root;
+    const admin = path.resolve(root, pointer.slice('gitdir:'.length).trim());
+    const commondir = await bookkeeping(path.join(admin, 'commondir'));
+    if (commondir === null) return root;
+    const common = path.resolve(admin, commondir);
+    if (path.dirname(admin) !== path.join(common, 'worktrees')) return root;
+    const gitdir = await bookkeeping(path.join(admin, 'gitdir'));
+    if (gitdir === null || await fsp.realpath(path.resolve(admin, gitdir)) !== path.join(await fsp.realpath(root), '.git')) return root;
+    if (path.basename(common) !== '.git') return (await gitEntry(path.join(common, '.git'))) ? root : common;
+    return path.dirname(common);
+  } catch {
+    // A pointer that cannot be followed: the folder is the key.
+    return root;
+  }
+}
+
+/**
+ * The folder Claude Code files a workspace's trust under: the root of the git repository the workspace is in (for a
+ * linked worktree, its main checkout's), or the workspace folder itself outside a repository. Never a folder above.
+ */
+async function trustFolder(folder: string): Promise<string> {
+  for (let dir = folder; ; dir = path.dirname(dir)) {
+    const entry = await gitEntry(path.join(dir, '.git'));
+    if (entry === 'folder') return dir;
+    if (entry === 'file') return mainCheckout(dir);
+    if (path.dirname(dir) === dir) return folder;
+  }
+}
+
+/**
+ * Whether Claude Code trusts this workspace enough to apply its permission rules: true, false, or null when its
+ * settings cannot be read. Claude Code keeps trust in its own settings file; the runner only reads it. Outside a
+ * repository (or up to its root), a trusted folder further up lets Claude Code start a session, but it applies the
+ * workspace's allow rules only with the trust filed under the folder trustFolder finds; without them a run cannot
+ * write anything.
  */
 export async function workspaceTrusted(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean | null> {
   let projects: Record<string, { hasTrustDialogAccepted?: unknown }>;
@@ -166,14 +223,11 @@ export async function workspaceTrusted(workspace: string, env: NodeJS.ProcessEnv
   } catch {
     return null;
   }
-  const real = await fsp.realpath(workspace).catch(() => workspace);
-  for (const start of new Set([path.resolve(workspace), real])) {
-    for (let dir = start; ; dir = path.dirname(dir)) {
-      if (projects[dir]?.hasTrustDialogAccepted === true) return true;
-      if (path.dirname(dir) === dir) break;
-    }
-  }
-  return false;
+  // Claude Code keys trust on the real folder it runs in, in NFC form: links, letter case and aliases such as /tmp
+  // resolved, accented names composed (macOS keeps them decomposed on disk). The path as given never counts.
+  const start = (await fsp.realpath(workspace).catch(() => path.resolve(workspace))).normalize('NFC');
+  const key = claudeProjectKey((await trustFolder(start)).normalize('NFC'));
+  return projects[key]?.hasTrustDialogAccepted === true;
 }
 
 /** What the workspace's own `.claude/settings.json` does about billing: the names it sets, if any. */
