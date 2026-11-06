@@ -816,6 +816,12 @@ try {
       && meetingPkg.files?.some((f) => f.type === 'meeting_sources') && meetingPkg.files?.filter((f) => f.type === 'meeting').length === 1
       && fs.existsSync(path.join(ws, 'tasks', 'active', fromMeeting.id, 'sources', 'meetings.md')),
       `pick=${meetingPick.filter((c) => c.type === 'meeting').length} pinned=${pinnedMeeting?.id} files=${(meetingPkg.files ?? []).map((f) => f.type).join(',')}`);
+    // From the meeting's side: the task that used it, and how it stands.
+    const related = await (await fetch(`${base}/api/meetings/${queued.id}/related-work`)).json();
+    const relatedRow = related.tasks?.find((r) => r.id === fromMeeting.id);
+    check('a meeting lists the task that used it, as unchanged',
+      relatedRow?.via?.latest === true && relatedRow.state === 'no_change' && Array.isArray(related.skipped),
+      JSON.stringify(relatedRow ?? related).slice(0, 300));
     await fetch(`${base}/api/tasks/${fromMeeting.id}`, { method: 'DELETE' });
     const budget = await json('PUT', '/api/routines/meeting-digest', { max_characters: 200000 });
     const budgetBody = await budget.json();

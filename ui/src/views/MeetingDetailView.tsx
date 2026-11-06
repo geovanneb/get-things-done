@@ -15,6 +15,7 @@ import { Tabs } from '@/components/common/Tabs';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { MeetingRecordCard } from '@/components/context-updates/UpdateDetail';
 import { MeetingText } from '@/components/meetings/MeetingText';
+import MeetingRelatedWork from '@/components/meetings/MeetingRelatedWork';
 import { SpeakerNaming } from '@/components/meetings/SpeakerNaming';
 import { TranscribeAgainDialog, TranscriptionNotice, VersionsSection } from '@/components/meetings/MeetingVersions';
 import { QueuedMeetingActions, recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
@@ -224,7 +225,10 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   ) : tab === 'record' ? (
     <EmptyState size="compact" title={t('meetingDetail.noRecordYet')} description={t('meetingDetail.whenItsDigestIsAnalyzed')} />
   ) : tab === 'tasks' ? (
-    <EmptyState size="compact" title={t('meetingDetail.noTasksFromThisMeeting')} description={t('meetingDetail.tasksComeFromTheAction')} />
+    <div style={{ overflowY: 'auto' }}>
+      <EmptyState size="compact" title={t('meetingDetail.noTasksFromThisMeeting')} description={t('meetingDetail.tasksComeFromTheAction')} />
+      <MeetingRelatedWork meetingId={m.id} />
+    </div>
   ) : (
     <QueuedMeetingActions meeting={m} job={job} onChanged={onChanged} onRemoved={() => { onChanged(); onClose(); }}
       onRead={(file) => { setPicked(file); setTab('transcript'); }} />
@@ -478,6 +482,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
       ) : (
         <EmptyState size="compact" title={t('meetingDetail.noTasksFromThisMeeting2')} description={record ? t('meetingDetail.itsRecordHasNoAction') : t('meetingDetail.tasksComeFromTheAction2')} />
       ))}
+      {tab === 'tasks' && <MeetingRelatedWork meetingId={h.id} />}
       {tab === 'files' && (
         <ul aria-label={t('queuedMeetingActions.filesOfThisMeeting')} className="gtd-list" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
           {sources.map((s) => (
