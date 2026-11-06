@@ -19,6 +19,7 @@ import { Task, Stakeholder, OfficeCheck } from '../types';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import Notice from '../components/common/Notice';
 import MarkdownView from '../components/common/MarkdownView';
 import OfficeCheckBadge from '../components/common/OfficeCheckBadge';
 import MarkdownEditor from '../components/common/MarkdownEditor';
@@ -213,7 +214,7 @@ function FilesTab({ taskId }: { taskId: string }) {
   const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
-  const { data: files, loading, refetch } = useApi<Array<{ name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }>>(`/api/tasks/${taskId}/files`);
+  const { data: files, loading, error, refetch } = useApi<Array<{ name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }>>(`/api/tasks/${taskId}/files`);
   const [uploading, setUploading] = useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -256,8 +257,17 @@ function FilesTab({ taskId }: { taskId: string }) {
           {t('attachFile')}
         </Button>
       </div>
+      {/* A failed load is not an empty folder: say so, and keep a list already shown rather than blank it. */}
+      {error && (
+        <div style={{ marginBottom: 'var(--space-3)' }}>
+          <Notice tone="critical" title={t('attachedFilesLoadError')}
+            action={<Button size="sm" variant="secondary" onClick={refetch}>{t('retry')}</Button>}>
+            {t('checkConnectionRetry')}
+          </Notice>
+        </div>
+      )}
       {(!files || files.length === 0) ? (
-        <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', padding: 4 }}>{t('noFilesAttached')}</div>
+        !error && <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', padding: 4 }}>{t('noFilesAttached')}</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {files.map((f) => (
