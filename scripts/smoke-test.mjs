@@ -200,6 +200,11 @@ try {
 
   const search = await (await fetch(`${base}/api/search?q=carrier`)).json();
   check('search finds seeded content', (search.results ?? []).length > 0);
+  // "Consolidates" is only in the text of a seeded context note, not in its title or tags.
+  const noteText = await (await fetch(`${base}/api/search?q=consolidates&types=context`)).json();
+  check('search finds words in a context note\'s text',
+    (noteText.results ?? []).some((r) => r.id === 'CTX-moved-support-tooling-to-one-platform'),
+    JSON.stringify(noteText.results?.map((r) => r.id)));
 
   const insights = await (await fetch(`${base}/api/insights`)).json();
   check('insights count work waiting on review', insights.summary?.awaiting_review === 1);

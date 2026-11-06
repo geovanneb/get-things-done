@@ -148,7 +148,8 @@ export class SearchService {
     try {
       const notes = await contextService.listContextNotes();
       for (const n of notes) {
-        rows.push({ id: n.id, type: 'context', title: n.title, body: [n.content, n.tags.join(' ')].filter(Boolean).join(' '), status: null, path: n.path || null });
+        // A note's text is its Markdown `body`; `content` is only the older name a caller may still send.
+        rows.push({ id: n.id, type: 'context', title: n.title, body: [n.body ?? n.content, n.tags.join(' ')].filter(Boolean).join(' '), status: null, path: n.path || null });
       }
     } catch { /* no context yet */ }
 
@@ -283,7 +284,7 @@ export class SearchService {
   async indexEntity(entity: Record<string, unknown>, type: string): Promise<void> {
     const id = String(entity['id'] || '');
     const title = String(entity['title'] || entity['name'] || '');
-    const body = [entity['description'], entity['content'], entity['objective'], (entity['tags'] as string[] || []).join(' ')].filter(Boolean).join(' ');
+    const body = [entity['description'], entity['body'] ?? entity['content'], entity['objective'], (entity['tags'] as string[] || []).join(' ')].filter(Boolean).join(' ');
     const status = entity['status'] ? String(entity['status']) : null;
     const filePath = entity['path'] ? String(entity['path']) : null;
 
