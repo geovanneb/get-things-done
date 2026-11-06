@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -203,7 +204,7 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
             footer={<DictateButton fieldName={t('stakeholders.whatMatters')} onText={(text) => setForm((f) => ({ ...f, what_matters: withDictation(f.what_matters, text) }))} />} />
           <Textarea label={t('orgChartsPanel.notes')} hint={t('context.markdownIsSupported')} value={form.notes} onChange={(v) => setField('notes', v)}
             placeholder={t('stakeholders.contextHistoryHowTheRelationship')} rows={4} style={{ gridColumn: '1 / -1' }}
-            footer={<DictateButton fieldName="notes" onText={(text) => setForm((f) => ({ ...f, notes: withDictation(f.notes, text) }))} />} />
+            footer={<DictateButton fieldName={tr('dictation.fieldNotes')} onText={(text) => setForm((f) => ({ ...f, notes: withDictation(f.notes, text) }))} />} />
         </div>
       </form>
     </Modal>

@@ -2456,5 +2456,17 @@ export const en = {
   "orgChartsPanel.movesToParent": "{items}: they move to \"{parent}\".",
   "orgChartsPanel.subUnitsToTop": "{items}: they move to the top level.",
   "orgChartsPanel.peopleWithoutUnit": "{items}: they are left without a unit.",
-  "systemCleanup.previewReview": "would open a review of {notes} notes and {stakeholders} stakeholders. The scan found: possible duplicates {duplicates}, old notes {stale}, empty notes {thin}."
+  "systemCleanup.previewReview": "would open a review of {notes} notes and {stakeholders} stakeholders. The scan found: possible duplicates {duplicates}, old notes {stale}, empty notes {thin}.",
+  "situation.eventCreated": "created",
+  "situation.eventModified": "modified",
+  "situation.eventDeleted": "deleted",
+  "context.relevanceRequired": "Required",
+  "context.relevanceRecommended": "Recommended",
+  "context.relevanceOptional": "Optional",
+  "routineEditor.dateTokensHint": "You can use {date} for the scheduled run date and {due} for the due date (YYYY-MM-DD).",
+  "routineEditor.titleExample": "Prepare steering sync ({due})",
+  "routineEditor.nameExample": "Steering sync prep",
+  "dictation.fieldContent": "content",
+  "dictation.fieldNotes": "notes",
+  "dictation.fieldObjective": "objective",
 } as const;

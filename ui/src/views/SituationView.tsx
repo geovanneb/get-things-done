@@ -618,7 +618,7 @@ export default function SituationView() {
                         {a.title ?? a.filename}
                       </div>
                       <div className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
-                        <span style={{ fontFamily: 'var(--font-mono)' }}>{shortPath(a.path)}</span> · {a.event}
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>{shortPath(a.path)}</span> · {a.event === 'modified' ? t('situation.eventModified') : a.event === 'created' ? t('situation.eventCreated') : a.event === 'deleted' ? t('situation.eventDeleted') : a.event}
                       </div>
                     </div>
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>

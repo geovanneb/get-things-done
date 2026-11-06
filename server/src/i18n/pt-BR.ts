@@ -2457,5 +2457,17 @@ export default {
   "orgChartsPanel.movesToParent": "{items}: vão para \"{parent}\".",
   "orgChartsPanel.subUnitsToTop": "{items}: vão para o nível superior.",
   "orgChartsPanel.peopleWithoutUnit": "{items}: ficam sem unidade.",
-  "systemCleanup.previewReview": "abriria uma revisão de {notes} notas e {stakeholders} partes interessadas. A verificação encontrou: possíveis duplicados {duplicates}, notas antigas {stale}, notas vazias {thin}."
+  "systemCleanup.previewReview": "abriria uma revisão de {notes} notas e {stakeholders} partes interessadas. A verificação encontrou: possíveis duplicados {duplicates}, notas antigas {stale}, notas vazias {thin}.",
+  "situation.eventCreated": "criado",
+  "situation.eventModified": "modificado",
+  "situation.eventDeleted": "excluído",
+  "context.relevanceRequired": "Obrigatória",
+  "context.relevanceRecommended": "Recomendada",
+  "context.relevanceOptional": "Opcional",
+  "routineEditor.dateTokensHint": "Você pode usar {date} para a data agendada da execução e {due} para a data de entrega (AAAA-MM-DD).",
+  "routineEditor.titleExample": "Preparar reunião do comitê ({due})",
+  "routineEditor.nameExample": "Preparação do comitê",
+  "dictation.fieldContent": "conteúdo",
+  "dictation.fieldNotes": "notas",
+  "dictation.fieldObjective": "objetivo",
 } satisfies Catalog;

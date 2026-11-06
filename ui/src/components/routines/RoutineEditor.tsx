@@ -256,8 +256,8 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
         {/* Task the routine creates */}
         <div style={{ flex: '1 1 380px', minWidth: 0 }}>
           <h3 style={{ ...sectionLabelStyle, marginBottom: 12 }}>{t('routineEditor.taskItCreates')}</h3>
-          <Field label={t('newTaskModal.taskTitle')} htmlFor={ids.task} hint="You can use {{date}} for the scheduled run date and {{due_date}} for the due date (YYYY-MM-DD).">
-            <input id={ids.task} style={fieldStyle} value={draft.taskTitle} placeholder="Prepare steering sync ({{due_date}})"
+          <Field label={t('newTaskModal.taskTitle')} htmlFor={ids.task} hint={t('routineEditor.dateTokensHint', { date: '{{date}}', due: '{{due_date}}' })}>
+            <input id={ids.task} style={fieldStyle} value={draft.taskTitle} placeholder={t('routineEditor.titleExample', { due: '{{due_date}}' })}
               onChange={(e) => set('taskTitle', e.target.value)} />
           </Field>
           <Field label={t('newTaskModal.objective')} hint={t('routineEditor.copiedIntoEveryTaskAs')}>
@@ -420,7 +420,7 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
           </Field>
 
           <Field label={t('routineEditor.routineName')} htmlFor={ids.name} hint={t('routineEditor.optionalDefaultsToTheTask')}>
-            <input id={ids.name} style={fieldStyle} value={draft.title} placeholder="Steering sync prep" onChange={(e) => set('title', e.target.value)} />
+            <input id={ids.name} style={fieldStyle} value={draft.title} placeholder={t('routineEditor.nameExample')} onChange={(e) => set('title', e.target.value)} />
           </Field>
 
           <div aria-live="polite" style={{ padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>

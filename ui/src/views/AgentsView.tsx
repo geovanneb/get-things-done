@@ -50,7 +50,7 @@ function ValidationDot({ state }: { state: 'valid' | 'warning' | 'error' }) {
           textTransform: 'capitalize',
         }}
       >
-        {state}
+        {state === 'valid' ? tr('agents.valid') : state === 'warning' ? tr('agents.warning') : tr('agents.error')}
       </span>
     </span>
   );

@@ -260,7 +260,7 @@ export default function NewTaskModal({
                   onChange={(v) => setField('objective', v)}
                   placeholder={t('newTaskModal.describeTheGoalOrContext')}
                 />
-                <DictateButton fieldName="objective" onText={addDictation} />
+                <DictateButton fieldName={tr('dictation.fieldObjective')} onText={addDictation} />
               </Field>
 
               <div style={{ marginBottom: 'var(--space-6)' }}>

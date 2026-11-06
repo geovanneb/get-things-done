@@ -44,6 +44,7 @@ type Category = (typeof CATEGORIES)[number] | 'All';
 
 const RELEVANCE_OPTIONS = ['required', 'recommended', 'optional'] as const;
 type Relevance = (typeof RELEVANCE_OPTIONS)[number];
+const relevanceLabel = (relevance: string): string => ({ required: tr('context.relevanceRequired'), recommended: tr('context.relevanceRecommended'), optional: tr('context.relevanceOptional') } as Record<string, string>)[relevance] ?? relevance;
 
 const RELEVANCE_BADGE: Record<Relevance, { bg: string; color: string }> = {
   required:    { bg: 'var(--color-critical-subtle)', color: 'var(--color-critical)' },
@@ -143,12 +144,12 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
             options={CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))} />
           <Select label={t('context.relevance')} value={form.relevance} onChange={(v) => set('relevance', v)}
             hint={t('context.requiredNotesAreReadBefore')}
-            options={RELEVANCE_OPTIONS.map((r) => ({ value: r, label: r.charAt(0).toUpperCase() + r.slice(1) }))} />
+            options={RELEVANCE_OPTIONS.map((r) => ({ value: r, label: relevanceLabel(r) }))} />
         </div>
         <Field label={t('context.content')} hint={t('context.markdownIsSupported')} htmlFor="context-note-body">
           <MarkdownEditor id="context-note-body" value={form.body} onChange={(v) => set('body', v)} rows={8}
             placeholder={t('context.whatAnAgentShouldKnow')} />
-          <DictateButton fieldName="content" onText={(text) => setForm((f) => ({ ...f, body: withDictation(f.body, text) }))} />
+          <DictateButton fieldName={tr('dictation.fieldContent')} onText={(text) => setForm((f) => ({ ...f, body: withDictation(f.body, text) }))} />
         </Field>
         {effectiveNote?.id && (
           <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label={t('context.attachedFiles')} />
@@ -195,7 +196,7 @@ function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
           </span>
           {note.relevance && (
             <span style={{ ...chip, background: relevanceStyle.bg, color: relevanceStyle.color }}>
-              {note.relevance.charAt(0).toUpperCase() + note.relevance.slice(1)}
+              {relevanceLabel(note.relevance)}
             </span>
           )}
           <span>{rich(t, 'context.updated', { updated_at: formatRelativeDate(note.updated_at) })}</span>

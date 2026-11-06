@@ -2455,5 +2455,17 @@ export default {
   "orgChartsPanel.movesToParent": "{items}は「{parent}」に移動します。",
   "orgChartsPanel.subUnitsToTop": "{items}は最上位に移動します。",
   "orgChartsPanel.peopleWithoutUnit": "{items}は部門なしになります。",
-  "systemCleanup.previewReview": "ノート {notes} 件と関係者 {stakeholders} 件の見直しを開きます。スキャン結果: 重複の可能性 {duplicates} 件、古いノート {stale} 件、空のノート {thin} 件。"
+  "systemCleanup.previewReview": "ノート {notes} 件と関係者 {stakeholders} 件の見直しを開きます。スキャン結果: 重複の可能性 {duplicates} 件、古いノート {stale} 件、空のノート {thin} 件。",
+  "situation.eventCreated": "作成",
+  "situation.eventModified": "変更",
+  "situation.eventDeleted": "削除",
+  "context.relevanceRequired": "必須",
+  "context.relevanceRecommended": "推奨",
+  "context.relevanceOptional": "任意",
+  "routineEditor.dateTokensHint": "予定された実行日には {date}、期日には {due} を使用できます (YYYY-MM-DD)。",
+  "routineEditor.titleExample": "運営委員会の準備 ({due})",
+  "routineEditor.nameExample": "運営委員会の準備",
+  "dictation.fieldContent": "内容",
+  "dictation.fieldNotes": "メモ",
+  "dictation.fieldObjective": "目的",
 } satisfies Catalog;
