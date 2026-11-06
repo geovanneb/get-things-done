@@ -24,10 +24,10 @@ test('the switcher lists the current workspace first, then the others newest fir
   const gone = fakeWorkspace('Old Project');
   t.after(() => { for (const d of [home, north, south, gone]) fs.rmSync(d, { recursive: true, force: true }); });
 
-  service.setWorkspacePath(gone);
-  service.setWorkspacePath(north);
-  service.setWorkspacePath(south);
-  service.setWorkspacePath(north);
+  await service.setWorkspacePath(gone);
+  await service.setWorkspacePath(north);
+  await service.setWorkspacePath(south);
+  await service.setWorkspacePath(north);
   fs.rmSync(gone, { recursive: true, force: true });
 
   const list = service.listRecentWorkspaces();
@@ -36,7 +36,7 @@ test('the switcher lists the current workspace first, then the others newest fir
   assert.deepEqual(list.map((w) => w.available), [true, true, false]);
   assert.equal(list.filter((w) => w.path === north).length, 1, 'switching back does not duplicate an entry');
 
-  service.forgetWorkspace(gone);
+  await service.forgetWorkspace(gone);
   assert.deepEqual(service.listRecentWorkspaces().map((w) => w.path), [north, south]);
   assert.equal(service.getWorkspacePath(), north, 'forgetting another entry keeps the current workspace');
 });
@@ -46,7 +46,7 @@ test('a workspace opened outside the dashboard is remembered when the server sta
   const service = new WorkspaceService();
   const west = fakeWorkspace('Westwind Studio');
   try {
-    service.rememberWorkspace(west);
+    await service.rememberWorkspace(west);
     assert.ok(service.listRecentWorkspaces().some((w) => w.path === west && w.name === 'Westwind Studio'));
   } finally {
     fs.rmSync(west, { recursive: true, force: true });

@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('gtdDesktop', {
   version: 1,
+  preferredLanguages: (): Promise<string[]> => ipcRenderer.invoke('gtd:preferred-languages'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('gtd:pick-folder'),
   openWorkspaceFolder: (): Promise<{ opened: boolean; error?: string }> => ipcRenderer.invoke('gtd:open-workspace-folder'),
   microphoneAccess: (): Promise<string> => ipcRenderer.invoke('gtd:microphone-access'),

@@ -19,7 +19,7 @@ export function migrateLegacyConfig(): void {
 
   try {
     fs.mkdirSync(ESB_DIR, { recursive: true });
-    fs.copyFileSync(legacyConfig, ESB_CONFIG_FILE);
+    fs.copyFileSync(legacyConfig, ESB_CONFIG_FILE, fs.constants.COPYFILE_EXCL);
   } catch {
     // Not fatal — the user can re-point with `gtd use <path>`.
   }

@@ -1,3 +1,4 @@
+import { useLanguage } from '../../i18n/LanguageProvider';
 import React from 'react';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -175,6 +176,7 @@ const NAV_WIDTH_COLLAPSED = '60px';
 const NAV_WIDTH_EDITING = '288px';
 
 export default function NavRail() {
+  const { t } = useLanguage();
   const { validationCount, agenticVisualMode, sidebar, sidebarEditing } = useAppState();
   const dispatch = useAppDispatch();
   const location = useLocation();
@@ -233,13 +235,13 @@ export default function NavRail() {
 
   const toItem = (entry: { path: string; label: string; id: NavItemId }): NavItem => ({
     path: entry.path,
-    label: entry.label,
+    label: t(entry.id),
     icon: NAV_ICONS[entry.id],
     pending: pending.find((p) => p.navPath === entry.path),
   });
   const arranged = arrangeSidebar(navGroups({ agentFloor: agenticVisualMode }), sidebar);
   const groups = arranged
-    .map((group) => ({ ...group, items: group.items.filter((entry) => !entry.hidden).map(toItem) }))
+    .map((group) => ({ ...group, heading: group.id === 'memory' || group.id === 'automation' ? t(group.id) : group.heading, items: group.items.filter((entry) => !entry.hidden).map(toItem) }))
     .filter((group) => group.items.length > 0);
   const hiddenItems = arranged.flatMap((group) => group.items.filter((entry) => entry.hidden).map(toItem));
   const mainGroups = groups.filter((g) => g.id !== 'account');
@@ -247,7 +249,7 @@ export default function NavRail() {
 
   return (
     <nav
-      aria-label="Main navigation"
+      aria-label={t('mainNavigation')}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -276,8 +278,8 @@ export default function NavRail() {
           <button
             hidden={narrow}
             onClick={toggleCollapsed}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? t('expandSidebar') : t('collapseSidebar')}
+            title={collapsed ? t('expandSidebar') : t('collapseSidebar')}
             style={{
               display: narrow ? 'none' : 'flex',
               alignItems: 'center',

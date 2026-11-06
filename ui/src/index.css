@@ -23,6 +23,10 @@
   --font-scale: 1;
 }
 
+:root:lang(ja) {
+  --font-sans: 'IBM Plex Sans', 'Hiragino Sans', 'Yu Gothic', 'Noto Sans JP', sans-serif;
+}
+
 :root[data-accent="blue"]   { --accent-h: 255; --accent-c: 0.11; }
 :root[data-accent="violet"] { --accent-h: 295; --accent-c: 0.12; }
 :root[data-accent="teal"]   { --accent-h: 195; --accent-c: 0.10; }

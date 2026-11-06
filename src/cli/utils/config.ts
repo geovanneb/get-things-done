@@ -1,5 +1,6 @@
 import * as fs from 'fs';
-import { ESB_DIR, ESB_CONFIG_FILE } from './paths';
+import * as path from 'path';
+import { ESB_CONFIG_FILE, getBundledScaffoldPath } from './paths';
 
 interface EsbConfig {
   workspace_path?: string;
@@ -15,12 +16,13 @@ export function readConfig(): EsbConfig {
   }
 }
 
-export function writeConfig(config: EsbConfig): void {
-  if (!fs.existsSync(ESB_DIR)) {
-    fs.mkdirSync(ESB_DIR, { recursive: true });
-  }
-  const existing = readConfig();
-  fs.writeFileSync(ESB_CONFIG_FILE, JSON.stringify({ ...existing, ...config }, null, 2), 'utf-8');
+/** Use the server's config boundary, like the shared scaffolder, including its cross-process lock. */
+export async function writeConfig(config: EsbConfig): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { updateUserConfig } = require(path.join(path.dirname(getBundledScaffoldPath()), 'userConfig.js')) as {
+    updateUserConfig(change: (current: Record<string, unknown>) => Record<string, unknown>): Promise<unknown>;
+  };
+  await updateUserConfig(current => ({ ...current, ...config }));
 }
 
 export function getWorkspacePath(): string | undefined {

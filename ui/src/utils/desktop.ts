@@ -6,6 +6,8 @@ import { apiPost } from './api';
 
 export interface DesktopBridge {
   version: number;
+  /** OS preference order, independent of Chromium UI locale. */
+  preferredLanguages?(): Promise<string[]>;
   /** The system folder dialog, attached to the app window. Null on cancel. */
   pickFolder(): Promise<string | null>;
   /** Opens the current workspace in Finder or Explorer. */

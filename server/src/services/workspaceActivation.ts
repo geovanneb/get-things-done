@@ -33,7 +33,7 @@ export async function activateWorkspace(
   if (initialized) {
     await workspaceService.initWorkspace(workspacePath, init);
   } else {
-    workspaceService.setWorkspacePath(workspacePath);
+    await workspaceService.setWorkspacePath(workspacePath);
     await refreshWorkspaceFiles(workspacePath);
   }
   searchService.reset();

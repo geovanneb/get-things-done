@@ -5,6 +5,7 @@ import * as os from 'os';
 import { WorkspaceConfig } from '../types';
 import { ScaffoldOptions, WorkspaceProfile, scaffoldWorkspace } from './scaffold';
 import { quoteYaml, unquoteYaml } from '../utils/yamlScalar';
+import { readUserConfig as readConfigFile, updateUserConfig } from './userConfig';
 import { workspaceIconVersion } from './workspaceIcon';
 
 const ESB_CONFIG_DIR = path.join(os.homedir(), '.gtd');
@@ -44,20 +45,6 @@ export interface RecentWorkspace {
   icon_version: string | null;
 }
 
-function readConfigFile(): EsbConfig {
-  if (!fs.existsSync(ESB_CONFIG_FILE)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(ESB_CONFIG_FILE, 'utf-8'));
-  } catch {
-    return {};
-  }
-}
-
-function writeConfigFile(config: EsbConfig): void {
-  fs.mkdirSync(ESB_CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(ESB_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
-}
-
 function samePath(a: string, b: string): boolean {
   return path.resolve(a) === path.resolve(b);
 }
@@ -93,9 +80,8 @@ export class WorkspaceService {
     throw new Error('Workspace path not configured. Run `gtd init`, or set the ESB_WORKSPACE_PATH env var.');
   }
 
-  setWorkspacePath(workspacePath: string): void {
-    const existing = readConfigFile();
-    writeConfigFile({ ...existing, workspace_path: workspacePath, recent_workspaces: withRecent(existing.recent_workspaces, workspacePath) });
+  async setWorkspacePath(workspacePath: string): Promise<void> {
+    await updateUserConfig(existing => ({ ...existing, workspace_path: workspacePath, recent_workspaces: withRecent(existing.recent_workspaces, workspacePath) }));
 
     const scoped = operationWorkspace.getStore();
     if (scoped) scoped.path = workspacePath;
@@ -107,9 +93,8 @@ export class WorkspaceService {
   }
 
   /** Puts a workspace at the top of the recent list, e.g. the one `gtd start` opened. */
-  rememberWorkspace(workspacePath: string): void {
-    const existing = readConfigFile();
-    writeConfigFile({ ...existing, recent_workspaces: withRecent(existing.recent_workspaces, workspacePath) });
+  async rememberWorkspace(workspacePath: string): Promise<void> {
+    await updateUserConfig(existing => ({ ...existing, recent_workspaces: withRecent(existing.recent_workspaces, workspacePath) }));
   }
 
   /** The current workspace first, then the others most recently opened first. */
@@ -135,10 +120,8 @@ export class WorkspaceService {
   }
 
   /** Drops a workspace from the recent list. The folder itself is not touched. */
-  forgetWorkspace(workspacePath: string): void {
-    const existing = readConfigFile();
-    const recent = (existing.recent_workspaces ?? []).filter((e) => !samePath(e.path, workspacePath));
-    writeConfigFile({ ...existing, recent_workspaces: recent });
+  async forgetWorkspace(workspacePath: string): Promise<void> {
+    await updateUserConfig(existing => ({ ...existing, recent_workspaces: (existing.recent_workspaces ?? []).filter(e => !samePath(e.path, workspacePath)) }));
   }
 
   /** Expands a leading `~` and returns an absolute path. */
@@ -163,7 +146,7 @@ export class WorkspaceService {
       aiTools: opts.aiTools ?? ['claude-code'],
     });
 
-    this.setWorkspacePath(workspacePath);
+    await this.setWorkspacePath(workspacePath);
   }
 
   getWorkspaceConfig(): WorkspaceConfig {

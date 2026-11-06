@@ -211,3 +211,13 @@ as a CI artifact for review and only the behaviour checks decide.
 
 **Still manual**: colour contrast of new token values, screen-reader wording, zoom to 200%, and
 judging whether a new screen reads well. The pull-request checklist asks for these.
+
+## Interface languages
+
+Language selection uses the shared `Select` in Settings > Appearance. Options use their
+native names and no flags; Automatic includes the detected language. The setting belongs
+to the person, separate from workspace content and the recording's spoken language.
+Catalogs, translator notes and the incremental migration are described in
+[localization.md](localization.md). Japanese uses system CJK fallbacks through `:lang(ja)`.
+Check translated controls at all three standard widths in both themes and with a keyboard;
+allow natural language-specific punctuation instead of mechanically applying English rules.

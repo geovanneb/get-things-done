@@ -1,6 +1,6 @@
 // Main-process side of the preload bridge. Only the main window, showing the app's own pages, may call it,
 // and no call takes a path from the page: the workspace path comes from the server.
-import { BrowserWindow, IpcMainInvokeEvent, dialog, ipcMain, shell, systemPreferences } from 'electron';
+import { app, BrowserWindow, IpcMainInvokeEvent, dialog, ipcMain, shell, systemPreferences } from 'electron';
 import { classifyLink } from './links';
 import type { RecordingCommand } from './recording-commands';
 import { systemAudioSupport } from './systemAudio';
@@ -43,6 +43,11 @@ export function registerBridge(
     }
     return window;
   };
+
+  ipcMain.handle('gtd:preferred-languages', async (event) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    return app.getPreferredSystemLanguages();
+  });
 
   // The app's own update (#284): read, checked now, or installed with a restart (which waits while something runs).
   ipcMain.handle('gtd:update-state', async (event) => {

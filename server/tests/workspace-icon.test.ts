@@ -46,8 +46,8 @@ test('a picture is stored per workspace in the home config, never in the workspa
   t.after(() => { for (const d of [north, south]) fs.rmSync(d, { recursive: true, force: true }); });
   const { base, put } = await iconServer(t);
 
-  service.setWorkspacePath(south);
-  service.setWorkspacePath(north);
+  await service.setWorkspacePath(south);
+  await service.setWorkspacePath(north);
   assert.equal(service.getWorkspaceConfig().icon_version, null);
   assert.equal((await fetch(`${base}/icon`)).status, 404);
 
@@ -79,7 +79,7 @@ test('only a reasonably sized PNG is accepted, and a refused upload changes noth
   const service = new WorkspaceService();
   const west = fakeWorkspace('Westwind Studio');
   t.after(() => fs.rmSync(west, { recursive: true, force: true }));
-  service.setWorkspacePath(west);
+  await service.setWorkspacePath(west);
   const { put } = await iconServer(t);
 
   const svg = `data:image/png;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').toString('base64')}`;
@@ -106,7 +106,7 @@ test('the picture route does not reveal pictures of folders outside the recent l
   const current = fakeWorkspace('Eastwind Co');
   const stranger = fakeWorkspace('Not Opened Here');
   t.after(() => { for (const d of [current, stranger]) fs.rmSync(d, { recursive: true, force: true }); });
-  service.setWorkspacePath(current);
+  await service.setWorkspacePath(current);
   await saveWorkspaceIcon(stranger, Buffer.from(PNG.split(',')[1], 'base64'));
   const { base } = await iconServer(t);
 

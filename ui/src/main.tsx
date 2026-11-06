@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { LanguageProvider } from './i18n/LanguageProvider';
 import { applyStoredAppearance } from './utils/theme';
 import './index.css';
 import './styles/primitives.css';
@@ -10,6 +11,6 @@ applyStoredAppearance();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <LanguageProvider><App /></LanguageProvider>
   </React.StrictMode>
 );

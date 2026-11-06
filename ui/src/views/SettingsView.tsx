@@ -1,3 +1,5 @@
+import { useLanguage } from '../i18n/LanguageProvider';
+import LanguageSettings from '../components/settings/LanguageSettings';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Button from '@/components/common/Button';
 import Input, { FieldRow } from '@/components/common/Input';
@@ -438,6 +440,7 @@ function GitStatusPanel({ status }: { status: GitStatus }) {
 // ---------------------------------------------------------------------------
 
 export default function SettingsView() {
+  const { t } = useLanguage();
   const { agenticVisualMode, showTaskIds, theme, accent, textSize, workspace } = useAppState();
   const dispatch = useAppDispatch();
 
@@ -822,45 +825,46 @@ export default function SettingsView() {
         <TranscriptionSettings />
       </Card>
 
-      <Card title="Appearance">
-        <FieldRow label="Theme">
+      <Card title={t('appearance')}>
+        <LanguageSettings />
+        <FieldRow label={t('theme')}>
           <SegmentedControl
-            label="Theme"
+            label={t('theme')}
             value={theme}
-            options={THEME_OPTIONS}
+            options={THEME_OPTIONS.map(option => ({ ...option, label: t(option.value) }))}
             onChange={next => dispatch({ type: 'SET_THEME', payload: next })}
           />
           {theme === 'system' && (
             <span style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-sans)', color: 'var(--color-text-muted)' }}>
-              Following your OS setting ({resolveTheme('system')}).
+              {t('systemTheme', { theme: t(resolveTheme('system')) })}
             </span>
           )}
         </FieldRow>
 
-        <FieldRow label="Accent color">
+        <FieldRow label={t('accent')}>
           <AccentPicker
             value={accent}
             onChange={next => dispatch({ type: 'SET_ACCENT', payload: next })}
           />
         </FieldRow>
 
-        <FieldRow label="Text size">
+        <FieldRow label={t('textSize')}>
           <SegmentedControl
-            label="Text size"
+            label={t('textSize')}
             value={textSize}
-            options={TEXT_SIZE_OPTIONS}
+            options={TEXT_SIZE_OPTIONS.map(option => ({ ...option, label: t(option.value) }))}
             onChange={next => dispatch({ type: 'SET_TEXT_SIZE', payload: next })}
           />
         </FieldRow>
 
-        <FieldRow label="Sidebar">
+        <FieldRow label={t('sidebar')}>
           <SidebarSettings />
         </FieldRow>
 
-        <FieldRow label="Task IDs on the board">
+        <FieldRow label={t('taskIds')}>
           <Toggle
             id="show-task-ids"
-            label="Show task IDs on board cards and in the list view"
+            label={t('showTaskIds')}
             checked={showTaskIds}
             onChange={(next) => dispatch({ type: 'SET_SHOW_TASK_IDS', payload: next })}
           />
@@ -875,8 +879,7 @@ export default function SettingsView() {
             lineHeight: 1.5,
           }}
         >
-          Theme, accent color, text size and task IDs are stored in this browser. The sidebar
-          order is saved in the workspace, so it follows you to the desktop app and other computers.
+          {t('appearanceHint')}
         </p>
       </Card>
 

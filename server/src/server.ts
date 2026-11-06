@@ -170,7 +170,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
         // Notes left while the dashboard was closed: the watcher only reports what changes from now on.
         void scheduleKaizenIntake();
         // A workspace chosen with `gtd init` or `gtd use` shows up in the dashboard's switcher too.
-        try { workspaceService.rememberWorkspace(workspacePath); } catch { /* the config folder is not writable: not fatal */ }
+        void workspaceService.rememberWorkspace(workspacePath).catch(() => undefined);
       } catch {
         console.log('Workspace not configured yet. File watcher not started.');
         console.log('Use POST /api/workspace/init to configure your workspace.');

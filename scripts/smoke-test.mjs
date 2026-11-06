@@ -11,6 +11,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gtd-smoke-'));
@@ -107,6 +108,23 @@ try {
     htmlPreview.ok && htmlPreview.headers.get('content-security-policy')?.includes('sandbox;') &&
     !htmlPreview.headers.get('content-security-policy')?.includes('allow-scripts') &&
     !htmlPreview.headers.get('content-security-policy')?.includes('allow-same-origin'));
+
+  // The compiled catalog is the same artifact shipped by npm and staged into the desktop app.
+  const require = createRequire(import.meta.url);
+  const { loadCatalog, translator } = require(path.join(root, 'dist/server/i18n/messages.js'));
+  const japanese = translator(await loadCatalog('ja'), 'ja');
+  check('packaged catalog formats a Japanese plural', japanese('validationErrors', { count: 2 }) === 'エラー2件');
+
+  // Interface language belongs to the person, never the workspace.
+  const languageUrl = `${base}/api/app/language`;
+  const saveLanguage = (language) => fetch(languageUrl, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }) });
+  check('interface language defaults to Automatic', (await (await fetch(languageUrl)).json()).language === 'auto');
+  for (const language of ['ja', 'pt-BR', 'es-419', 'en', 'auto']) {
+    check(`interface language saves ${language}`, (await saveLanguage(language)).ok && (await (await fetch(languageUrl)).json()).language === language);
+  }
+  for (const language of ['fr', 'constructor', null, {}, 'ja-JP']) {
+    check('invalid interface language has no side effect', (await saveLanguage(language)).status === 400 && (await (await fetch(languageUrl)).json()).language === 'auto');
+  }
 
   // Sidebar order: saved in the workspace next to the scaffolded UI preferences, which it keeps.
   const sidebarPrefs = { order: { work: ['board', 'situation', 'meetings', 'insights'] }, hidden: ['routines'] };
