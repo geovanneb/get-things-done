@@ -444,17 +444,34 @@ export async function checkTaskMeetings(taskPath: string, mentionedIds: string[]
 }
 
 /**
+ * Every selection a task holds, for reading from the meeting's side. Read-only: no lock is taken and nothing is
+ * created. A damaged file or a link throws, as it does for the task itself.
+ */
+export async function readTaskSelections(taskPath: string): Promise<MeetingSelection[]> {
+  return (await readSelections(await sourcesDir(taskPath))).selections;
+}
+
+/**
+ * One selection checked for one meeting only, with the meeting as the caller resolved it once for many tasks.
+ * `now` null: the meeting cannot be read here now.
+ */
+export async function checkSelectionForMeeting(selection: MeetingSelection, meetingId: string, now: PinnedMeeting | null): Promise<SelectionCheck> {
+  const only: MeetingSelection = { ...selection, meetings: selection.meetings.filter((m) => m.id === meetingId), problems: selection.problems.filter((p) => p.id === meetingId) };
+  return checkSelection(only, [], async () => now);
+}
+
+/**
  * A pinned file still counts only while its meeting holds a file with the pinned bytes: the same path, or the path it
  * moved to (from the queue into its digest). A file the meeting no longer holds (deleted, in the trash) is missing,
  * even when the same bytes are written back.
  */
-async function checkSelection(selection: MeetingSelection | null, mentionedIds: string[]): Promise<SelectionCheck> {
+async function checkSelection(selection: MeetingSelection | null, mentionedIds: string[], resolve: (id: string) => Promise<PinnedMeeting | null> = (id) => resolveMeeting(id).catch(() => null)): Promise<SelectionCheck> {
   const pinned = new Set([...(selection?.meetings ?? []).map((m) => m.id), ...(selection?.problems ?? []).map((p) => p.id)]);
   const sources: SelectionCheck['sources'] = [];
   const recordChanged: string[] = [];
   const reviewChanges: SelectionCheck['review_changes'] = [];
   for (const m of selection?.meetings ?? []) {
-    const now = await resolveMeeting(m.id).catch(() => null);
+    const now = await resolve(m.id);
     for (const s of m.sources) {
       const held = now?.sources.find((c) => c.sha256 === s.sha256);
       if (held) { sources.push({ meeting: m.id, path: s.path, state: 'ok', ...(held.path !== s.path ? { current_path: held.path } : {}) }); continue; }
@@ -498,17 +515,35 @@ async function inOlderVersion(id: string, s: PinnedSource): Promise<string | nul
   return null;
 }
 
-/** How a meeting's record or review moved on since it was pinned, in words; null when it did not. */
-function reviewChange(was: PinnedMeeting, now: PinnedMeeting | null): string | null {
-  if (!now) return 'The meeting can no longer be read here.';
-  if (!was.record && now.record) return 'It has a record now.';
-  if (was.record && !now.record) return 'Its record is no longer linked to it.';
+/** How a meeting's record or review moved on since it was pinned, as a code a screen can word in its language. */
+export type ReviewChange =
+  | { code: 'unreadable' } | { code: 'record_added' } | { code: 'record_unlinked' } | { code: 'record_changed' }
+  | { code: 'confirmation'; value: 'confirmed' | 'rejected' | null } | { code: 'review'; value: PinnedMeeting['review'] };
+
+export function reviewChangeOf(was: PinnedMeeting, now: PinnedMeeting | null): ReviewChange | null {
+  if (!now) return { code: 'unreadable' };
+  if (!was.record && now.record) return { code: 'record_added' };
+  if (was.record && !now.record) return { code: 'record_unlinked' };
   if (was.record && now.record) {
-    if (was.record.update_id !== now.record.update_id || was.record.id !== now.record.id || was.record.revision !== now.record.revision) return 'Its record changed.';
-    if (was.record.confirmation !== now.record.confirmation) return `Its record was ${now.record.confirmation ?? 'set back to not confirmed'} since.`;
+    if (was.record.update_id !== now.record.update_id || was.record.id !== now.record.id || was.record.revision !== now.record.revision) return { code: 'record_changed' };
+    if (was.record.confirmation !== now.record.confirmation) return { code: 'confirmation', value: now.record.confirmation ?? null };
   }
-  if (was.review !== now.review) return `Its review is ${now.review} now.`;
+  if (was.review !== now.review) return { code: 'review', value: now.review };
   return null;
+}
+
+/** The same, in words, for the sheet and the task page. */
+function reviewChange(was: PinnedMeeting, now: PinnedMeeting | null): string | null {
+  const change = reviewChangeOf(was, now);
+  switch (change?.code) {
+    case undefined: return null;
+    case 'unreadable': return 'The meeting can no longer be read here.';
+    case 'record_added': return 'It has a record now.';
+    case 'record_unlinked': return 'Its record is no longer linked to it.';
+    case 'record_changed': return 'Its record changed.';
+    case 'confirmation': return `Its record was ${change.value ?? 'set back to not confirmed'} since.`;
+    case 'review': return `Its review is ${change.value} now.`;
+  }
 }
 
 /* ---- The sheet ------------------------------------------------------------ */

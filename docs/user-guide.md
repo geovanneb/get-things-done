@@ -793,6 +793,8 @@ model is downloaded; the Meetings page shows each one's progress.
 
 The Meetings page includes queued and reviewed meetings. Search titles, people or words in transcripts and notes, then open a meeting to read its transcript, record, action items or files. A record still under review is shown as provisional; confirmed records remain available even when retention has removed their transcripts.
 
+After you correct a meeting, its **Tasks** tab can **Check related work**: every task, active or archived, that pinned the meeting, mentions it or was made from its action items, and how each stands now (changes to review, an earlier version that is still valid, not pinned yet, and so on). It changes nothing; open a task to look, and refresh its sources there if you want the newer text.
+
 ### Recordings and versions
 
 Enable **Keep recordings after transcription** if you want playback later. For newly reviewed meetings, retained audio is stored under `meetings/<id>/audio/` and text under version folders. Older retained meetings remain readable in their original layout. A transcript timestamp can jump into a retained recording.

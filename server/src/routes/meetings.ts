@@ -6,6 +6,7 @@ import { sendFile } from '../utils/files';
 import { startCorrection } from '../services/meetingCorrectionService';
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
 import { nameVersionSpeakers } from '../services/meetingVersions';
+import { relatedWork } from '../services/meetingRelatedWork';
 import { VoiceprintService } from '../services/voiceprints/service';
 import { WorkspaceService } from '../services/workspace';
 
@@ -29,6 +30,11 @@ router.get('/history', async (_req: Request, res: Response) => {
 // GET /api/meetings/search?q=words  meetings whose transcripts and notes hold every word, with where
 router.get('/search', async (req: Request, res: Response) => {
   res.json(await service.search(req.query['q']));
+});
+
+// GET /api/meetings/:id/related-work  the tasks that used this meeting and how each stands now (read-only, on demand)
+router.get('/:id/related-work', async (req: Request, res: Response) => {
+  res.json(await relatedWork(meetingId(req)));
 });
 
 // GET /api/meetings/:id  one meeting held by an update: its record, its files and where it stands
