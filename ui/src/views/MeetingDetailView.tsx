@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React, { useCallback, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
@@ -45,7 +48,7 @@ const fileUrl = (meeting: string, file: string) => `/api/meetings/${encodeURICom
 const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 const longDate = (date: string) => {
   const [y, m, d] = date.split('-').map(Number);
-  return y && m && d ? new Date(y, m - 1, d).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : date || 'No date';
+  return y && m && d ? new Date(y, m - 1, d).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : date || tr('meetingHistory.noDate');
 };
 
 function StatusBadge({ status }: { status: RowStatus }) {
@@ -69,7 +72,7 @@ function Steps({ title, steps }: { title: string; steps: { label: string; detail
             }}>{mark[s.state]}</span>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: s.state === 'later' ? 'var(--color-text-muted)' : 'var(--color-text)' }}>
-                {s.label}<span className="sr-only">{s.state === 'done' ? ' (done)' : s.state === 'now' ? ' (now)' : ' (to come)'}</span>
+                {s.label}<span className="sr-only">{s.state === 'done' ? tr('meetingDetail.stepDone') : s.state === 'now' ? tr('meetingDetail.stepNow') : tr('meetingDetail.stepNext')}</span>
               </div>
               {s.detail && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{s.detail}</div>}
             </div>
@@ -81,9 +84,10 @@ function Steps({ title, steps }: { title: string; steps: { label: string; detail
 }
 
 function Details({ rows }: { rows: [string, React.ReactNode][] }) {
+  const { t } = useLanguage();
   return (
-    <section aria-label="Details">
-      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Details</h3>
+    <section aria-label={t('meetingDetail.details')}>
+      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>{t('meetingDetail.details')}</h3>
       <dl style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, auto) 1fr', gap: 'var(--space-1) var(--space-3)', margin: 0, fontSize: 'var(--text-sm)' }}>
         {rows.map(([k, v]) => <React.Fragment key={k}><dt style={{ color: 'var(--color-text-muted)' }}>{k}</dt><dd style={{ margin: 0, minWidth: 0 }}>{v}</dd></React.Fragment>)}
       </dl>
@@ -93,12 +97,14 @@ function Details({ rows }: { rows: [string, React.ReactNode][] }) {
 
 /** The text sources of a meeting to choose from in the Transcript tab, when there are several. */
 function SourcePicker({ sources, value, onChange }: { sources: { key: string; label: string }[]; value: string; onChange: (key: string) => void }) {
+  const { t } = useLanguage();
   if (sources.length < 2) return null;
-  return <Select label="File" size="sm" value={value} onChange={onChange} options={sources.map((s) => ({ value: s.key, label: s.label }))} />;
+  return <Select label={t('queuedMeetingActions.file')} size="sm" value={value} onChange={onChange} options={sources.map((s) => ({ value: s.key, label: s.label }))} />;
 }
 
 /** A meeting, opened from the Meetings list: like a task, with tabs and a side panel. Read-only, apart from keep and delete. */
 export default function MeetingDetailView() {
+  const { t } = useLanguage();
   const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const outlet = useOutletContext<MeetingsOutlet>();
@@ -114,7 +120,7 @@ export default function MeetingDetailView() {
     document.body,
   );
 
-  if (!outlet.job) return frame(<LoadingSpinner text="Loading the meeting…" />, 'Meeting');
+  if (!outlet.job) return frame(<LoadingSpinner text={t('meetingDetail.loadingTheMeeting')} />, t('importUpdateModal.meeting'));
   if (queued) return frame(<QueuedMeetingBody meeting={queued} job={outlet.job} onClose={close} onChanged={outlet.onChanged} />, queued.title);
   return <HeldMeetingBody id={id} outlet={outlet} onClose={close} frame={frame} />;
 }
@@ -138,19 +144,20 @@ function Header({ id, title, statuses, line, actions }: { id: string; title: str
 }
 
 function Body({ tab, setTab, counts, main, aside }: { tab: MeetingTab; setTab: (t: MeetingTab) => void; counts: Partial<Record<MeetingTab, number>>; main: React.ReactNode; aside: React.ReactNode }) {
+  const { t } = useLanguage();
   const items: { id: MeetingTab; label: string; count?: number }[] = [
-    { id: 'transcript', label: 'Transcript' },
-    { id: 'record', label: 'Record' },
-    { id: 'tasks', label: 'Tasks', ...(counts.tasks ? { count: counts.tasks } : {}) },
-    { id: 'files', label: 'Files', ...(counts.files ? { count: counts.files } : {}) },
+    { id: 'transcript', label: t('transcriptReader.transcript') },
+    { id: 'record', label: t('record') },
+    { id: 'tasks', label: t('tasks'), ...(counts.tasks ? { count: counts.tasks } : {}) },
+    { id: 'files', label: t('newTaskModal.files'), ...(counts.files ? { count: counts.files } : {}) },
   ];
   return (
     <>
-      <Tabs label="Meeting sections" value={tab} onChange={setTab} idPrefix="meeting" items={items} style={{ padding: '0 var(--space-5)', flexShrink: 0 }} />
+      <Tabs label={t('meetingDetail.meetingSections')} value={tab} onChange={setTab} idPrefix="meeting" items={items} style={{ padding: '0 var(--space-5)', flexShrink: 0 }} />
       <div id="meeting-panel" role="tabpanel" aria-labelledby={`meeting-tab-${tab}`} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)' }}>
         <div className="gtd-detail">
           <div className="gtd-detail__main">{main}</div>
-          <aside className="gtd-detail__aside" aria-label="Where this meeting stands">{aside}</aside>
+          <aside className="gtd-detail__aside" aria-label={t('meetingDetail.whereThisMeetingStands')}>{aside}</aside>
         </div>
       </div>
     </>
@@ -160,6 +167,7 @@ function Body({ tab, setTab, counts, main, aside }: { tab: MeetingTab; setTab: (
 // ---- a meeting still in the queue ------------------------------------------------------------------------------
 
 function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: QueuedMeeting; job: MeetingDigest; onClose: () => void; onChanged: () => void }) {
+  const { t } = useLanguage();
   const recorder = useRecorder();
   const [tab, setTab] = useState<MeetingTab>('transcript');
   const processing = queueProcessing(m, {
@@ -171,12 +179,12 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   const sources = m.files.flatMap((f): { key: string; label: string; url: string; text: string; names: Record<string, string>; audio?: { url: string; label: string } }[] => {
     const r = f.recording;
     // The recording is in the queue until its digest takes it, so it can always be played with its transcript.
-    const audio = { url: audioUrl(m.id, f.name), label: `Recording ${f.name}` };
+    const audio = { url: audioUrl(m.id, f.name), label: t('meetingDetail.recording', { name: f.name }) };
     if (r?.transcript && r.transcript_sha256) {
       const names = r.speaker_names && r.speaker_names.transcript_sha256 === r.transcript_sha256 ? r.speaker_names.names : [];
-      return [{ key: f.name, label: `${f.name}, transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.transcript)}`, text: r.transcript, names: Object.fromEntries(names.map((n) => [n.label, n.name])), audio }];
+      return [{ key: f.name, label: t('meetingDetail.transcript', { name: f.name }), url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.transcript)}`, text: r.transcript, names: Object.fromEntries(names.map((n) => [n.label, n.name])), audio }];
     }
-    if (r?.draft) return [{ key: f.name, label: `${f.name}, live transcript`, url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.draft.transcript)}`, text: r.draft.transcript, names: {}, audio }];
+    if (r?.draft) return [{ key: f.name, label: t('meetingDetail.liveTranscript', { name: f.name }), url: `/api/meeting-queue/${m.id}/transcripts/${encodeURIComponent(r.draft.transcript)}`, text: r.draft.transcript, names: {}, audio }];
     if (!r && TEXT.test(f.name) && !m.files.some((o) => o.recording?.transcript === f.name || o.recording?.draft?.transcript === f.name)) {
       return [{ key: f.name, label: f.name, url: `/api/meetings/${m.id}/text/${encodeURIComponent(f.name)}`, text: f.name, names: {} }];
     }
@@ -202,7 +210,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
         <div>
           <SpeakerNaming source={{ kind: 'queue', meeting: m.id, file: readable.file, transcript_sha256: readable.sha256 }}
             transcriptUrl={shown?.url} {...(shown?.audio ? { audioUrl: shown.audio.url } : {})}
-            hint={m.in_digest ? undefined : 'Name who spoke, or leave them for the analysis to propose.'}
+            hint={m.in_digest ? undefined : t('transcriptReader.nameWhoSpokeOrLeave')}
             labels={speakerLabels} names={readable.names} suggestions={readable.suggestions ?? []} rememberable={readable.rememberable ?? []}
             modelSha={readable.modelSha ?? null} participants={m.participants ?? []} editable={!m.in_digest}
             onName={async (label, person) => { await apiPut(`/api/meeting-queue/${m.id}/recordings/${encodeURIComponent(readable.file)}/speakers`, { transcript_sha256: readable.sha256, names: { [label]: person } }); }}
@@ -210,13 +218,13 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
         </div>
       )}
       {shown ? <MeetingText key={shown.url} url={shown.url} names={shown.names} initialFind={found} {...(shown.audio ? { audio: shown.audio } : {})} />
-        : transcriptOnItsWay(m) ? <LoadingSpinner text="The transcript appears here when transcription finishes." />
-          : <EmptyState size="compact" title="Nothing to read yet" description="This meeting has no transcript or notes that can be shown here. Its files are in the Files tab." action={{ label: 'Show the files', onClick: () => setTab('files') }} />}
+        : transcriptOnItsWay(m) ? <LoadingSpinner text={t('meetingDetail.theTranscriptAppearsHereWhen')} />
+          : <EmptyState size="compact" title={t('meetingDetail.nothingToReadYet')} description={t('meetingDetail.thisMeetingHasNoTranscript')} action={{ label: t('meetingDetail.showTheFiles'), onClick: () => setTab('files') }} />}
     </div>
   ) : tab === 'record' ? (
-    <EmptyState size="compact" title="No record yet" description="When its digest is analyzed, your AI tool drafts a record of this meeting: decisions, open questions and action items. You confirm it in Context > Updates." />
+    <EmptyState size="compact" title={t('meetingDetail.noRecordYet')} description={t('meetingDetail.whenItsDigestIsAnalyzed')} />
   ) : tab === 'tasks' ? (
-    <EmptyState size="compact" title="No tasks from this meeting yet" description="Tasks come from the action items of its confirmed record, after the digest is reviewed." />
+    <EmptyState size="compact" title={t('meetingDetail.noTasksFromThisMeeting')} description={t('meetingDetail.tasksComeFromTheAction')} />
   ) : (
     <QueuedMeetingActions meeting={m} job={job} onChanged={onChanged} onRemoved={() => { onChanged(); onClose(); }}
       onRead={(file) => { setPicked(file); setTab('transcript'); }} />
@@ -224,20 +232,20 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
 
   const aside = (
     <>
-      <Steps title="Processing" steps={[
-        { label: recorded ? 'Recorded' : 'Added', detail: `${longDate(m.meeting_date)}${period ? `, ${period}` : ''}`, state: m.live ? 'now' : 'done' },
-        ...(recorded ? [{ label: 'Transcribed', detail: transcribed ? undefined : processing.label, state: transcribed ? 'done' as const : 'now' as const }] : []),
-        { label: m.in_digest ? 'Going into a digest' : 'Waits for the digest', detail: processing.detail, state: !transcribed || m.live ? 'later' as const : 'now' as const },
+      <Steps title={t('meetingsList.processing')} steps={[
+        { label: recorded ? t('meetingHistory.recorded') : t('meetingDetail.added'), detail: `${longDate(m.meeting_date)}${period ? `, ${period}` : ''}`, state: m.live ? 'now' : 'done' },
+        ...(recorded ? [{ label: t('meetingDetail.transcribed'), detail: transcribed ? undefined : processing.label, state: transcribed ? 'done' as const : 'now' as const }] : []),
+        { label: m.in_digest ? t('meetingHistory.goingIntoADigest') : t('meetingDetail.waitsForTheDigest'), detail: processing.detail, state: !transcribed || m.live ? 'later' as const : 'now' as const },
       ]} />
-      <Steps title="Review" steps={[
-        { label: 'Analyzed', state: 'later' },
-        { label: 'Record confirmed', state: 'later' },
-        { label: 'Context updated', state: 'later' },
+      <Steps title={t('shared.review')} steps={[
+        { label: t('analysisRun.analyzed'), state: 'later' },
+        { label: t('meetingHistory.recordConfirmed'), state: 'later' },
+        { label: t('meetingHistory.contextUpdated'), state: 'later' },
       ]} />
       <Details rows={[
-        ['Date', longDate(m.meeting_date)],
-        ['Source', recorded ? 'Recorded' : 'Uploaded files'],
-        ...(m.participants?.length ? [['Expected', joinNames(m.participants)] as [string, React.ReactNode]] : []),
+        [t('updateDetail.date'), longDate(m.meeting_date)],
+        [t('meetingDetail.source'), recorded ? t('meetingHistory.recorded') : t('meetingHistory.uploadedFiles')],
+        ...(m.participants?.length ? [[t('meetingDetail.expected'), joinNames(m.participants)] as [string, React.ReactNode]] : []),
       ]} />
     </>
   );
@@ -245,7 +253,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   return (
     <>
       <Header id={m.id} title={m.title} statuses={[processing]} line={`${longDate(m.meeting_date)}${period ? ` · ${period}` : ''}${m.participants?.length ? ` · ${joinNames(m.participants)}` : ''}`}
-        actions={<IconButton label="Close meeting" icon={icons.close} onClick={onClose} />} />
+        actions={<IconButton label={t('meetingDetail.closeMeeting')} icon={icons.close} onClick={onClose} />} />
       <Body tab={tab} setTab={setTab} counts={{ files: m.files.length }} main={main} aside={aside} />
     </>
   );
@@ -254,6 +262,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
 // ---- a meeting held by a context update ------------------------------------------------------------------------
 
 function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: MeetingsOutlet; onClose: () => void; frame: (body: React.ReactNode, label: string) => React.ReactNode }) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
   const dispatch = useAppDispatch();
@@ -279,10 +288,10 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
     const message = (() => { try { return (JSON.parse(error) as { message?: string }).message ?? error; } catch { return error; } })();
     return <>{frame(
       <div style={{ padding: 'var(--space-6)' }}>
-        <EmptyState title="Meeting not found" description={`${message} It may have been removed with its update. Go back to the list to see the others.`} action={{ label: 'Back to the meetings', onClick: onClose }} />
-      </div>, 'Meeting not found')}</>;
+        <EmptyState title={t('meetingDetail.meetingNotFound')} description={t('meetingDetail.itMayHaveBeenRemoved', { message })} action={{ label: t('meetingDetail.backToTheMeetings'), onClick: onClose }} />
+      </div>, t('meetingDetail.meetingNotFound'))}</>;
   }
-  if (!data) return <>{frame(<LoadingSpinner text="Loading the meeting…" />, 'Meeting')}</>;
+  if (!data) return <>{frame(<LoadingSpinner text={t('meetingDetail.loadingTheMeeting')} />, t('importUpdateModal.meeting'))}</>;
 
   const { meeting: h, record, update_records: unlinked, sources } = data;
   const changed = () => { refetch(); outlet.onChanged(); };
@@ -307,17 +316,17 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
     setBusy(true);
     try {
       const created = await apiPost<{ id: string }>(`/api/context-updates/${recordOwner}/follow-up`);
-      notify.success(`${created.id} opened. Analyze it to find notes that still use the old values.`);
+      notify.success(t('meetingDetail.openedAnalyzeItToFind', { id: created.id }));
       navigate(`/context/updates/${created.id}`);
-    } catch (err) { notify.error(err, 'Could not start a follow-up. Try again.'); } finally { setBusy(false); }
+    } catch (err) { notify.error(err, t('meetingDetail.couldNotStartAFollow')); } finally { setBusy(false); }
   };
   const suggest = async () => {
     setBusy(true);
     try {
       const started = await apiPost<{ id: string }>(`/api/meetings/${encodeURIComponent(h.id)}/corrections`);
-      notify.success(`${started.id} opened. Analyze it to get the suggested corrections.`);
+      notify.success(t('meetingDetail.openedAnalyzeItToGet', { id: started.id }));
       navigate(`/context/updates/${started.id}`);
-    } catch (err) { notify.error(err, 'Could not start a correction. Try again.'); changed(); } finally { setBusy(false); }
+    } catch (err) { notify.error(err, t('meetingDetail.couldNotStartACorrection')); changed(); } finally { setBusy(false); }
   };
   const recordOwner = h.record_owner?.update_id ?? h.update_id;
   const createTask = async (r: MeetingRecord, item: number) => {
@@ -336,25 +345,25 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
 
   const remove = async () => {
     const ok = await confirm({
-      title: `Move "${h.title}" to the trash?`,
-      message: `Its transcript and notes go to the trash. You can restore them from the Meetings list until they are deleted for good. Its confirmed record stays in ${h.update_id}, because your context was built from it.`,
-      confirmLabel: 'Move to trash', tone: 'danger',
+      title: t('meetingDetail.moveToTheTrash', { title: h.title }),
+      message: t('meetingDetail.itsTranscriptAndNotesGo', { update_id: h.update_id }),
+      confirmLabel: t('systemCleanup.moveToTrash'), tone: 'danger',
     });
-    if (ok) void run(() => apiDelete(`/api/meetings/${h.id}`), `${h.title} is in the trash.`, 'Could not delete the meeting. Try again.');
+    if (ok) void run(() => apiDelete(`/api/meetings/${h.id}`), t('meetingDetail.isInTheTrash', { title: h.title }), t('meetingDetail.couldNotDeleteTheMeeting'));
   };
 
   const trashNotice = h.deleted && (
-    <Notice tone="warning" title={h.deleted.in_trash ? 'This meeting is in the trash.' : 'This meeting\'s text was deleted for good.'}
+    <Notice tone="warning" title={h.deleted.in_trash ? t('meetingDetail.thisMeetingIsInThe') : t('meetingDetail.thisMeetingSTextWas')}
       action={h.deleted.in_trash ? (
         <span style={{ display: 'inline-flex', gap: 'var(--space-2)' }}>
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => apiPost(`/api/meetings/${h.id}/restore`), `${h.title} is back.`, 'Could not restore the meeting. Try again.')}>Restore</Button>
+          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(() => apiPost(`/api/meetings/${h.id}/restore`), `${h.title} is back.`, 'Could not restore the meeting. Try again.')}>{t('meetingsList.restore')}</Button>
           <Button size="sm" variant="danger" disabled={busy} onClick={async () => {
             if (!(await confirm({ title: `Delete "${h.title}" for good?`, message: 'Its transcript and notes are deleted from this computer. This cannot be undone.', confirmLabel: 'Delete for good', tone: 'danger' }))) return;
             void run(() => apiDelete(`/api/meetings/${h.id}/trash`), `${h.title} is deleted for good.`, 'Could not delete the meeting. Try again.');
-          }}>Delete for good</Button>
+          }}>{t('meetingsList.deleteForGood')}</Button>
         </span>
       ) : undefined}>
-      {h.deleted.by === 'system-cleanup' ? 'System cleanup' : 'You'} deleted it on {day(h.deleted.at)}. Its record stays in {h.update_id}.
+      {rich(t, 'meetingDetail.deletedItOnItsRecord', { value: h.deleted.by === 'system-cleanup' ? t('systemCleanup') : t('updateDetail.you2'), day: day(h.deleted.at), update_id: h.update_id })}
     </Notice>
   );
 
@@ -369,7 +378,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
         onStop={() => void run(() => apiDelete(`/api/meetings/${encodeURIComponent(h.id)}/transcriptions`), data.transcription?.status === 'failed' ? 'Dismissed.' : 'Stopped. Nothing of it was kept.', 'Could not stop it. Try again.')} />
       {tab === 'transcript' && (shown ? (
         <>
-          <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.kind === 'recording' ? `${s.name}, transcript` : s.name }))} value={shown.file} onChange={setPicked} />
+          <SourcePicker sources={readable.map((s) => ({ key: s.file, label: s.kind === 'recording' ? t('meetingDetail.transcript', { name: s.name }) : s.name }))} value={shown.file} onChange={setPicked} />
           {versionSpeakers && (
             <VersionSpeakersPanel meetingId={h.id} version={current!.id} speakers={versionSpeakers} editable={!h.deleted} onChanged={changed}
               transcriptUrl={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`}
@@ -377,116 +386,116 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
           )}
           <MeetingText key={`${shown.file}:${current?.id ?? ''}`} url={`/api/meetings/${encodeURIComponent(h.id)}/text/${encodeURIComponent(shown.file)}`} initialFind={found}
             names={Object.fromEntries((versionSpeakers?.names ?? []).map((n) => [n.label, n.name]))}
-            {...(shown.playable ? { audio: { url: audioUrl(h.id, shown.file), label: `Recording ${shown.name}` } } : {})} />
+            {...(shown.playable ? { audio: { url: audioUrl(h.id, shown.file), label: t('meetingDetail.recording', { name: shown.name }) } } : {})} />
           {shown.kind === 'recording' && !shown.playable && (
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              Only the transcript of this recording is kept, so it cannot be played. Recordings are kept when Keep recordings is on in Settings &gt; Transcription.
+              {t('meetingDetail.onlyTheTranscriptOfThis')}
             </p>
           )}
         </>
       ) : (
         <>
           {!h.deleted && firstMissing?.missing && (
-            <Notice tone="warning" title="The transcript of this meeting is no longer here.">
-              {firstMissing.missing}{record ? ' Its record is still here, in the Record tab.' : ''}
+            <Notice tone="warning" title={t('meetingDetail.theTranscriptOfThisMeeting')}>
+              {firstMissing.missing}{record ? t('meetingDetail.itsRecordIsStillHere') : ''}
             </Notice>
           )}
-          <EmptyState size="compact" title="No transcript"
-            description={h.deleted ? 'Restore the meeting to read it again.' : 'If you still have the transcript, add it again in Context > Updates. It goes through review like any other import.'}
-            {...(record ? { action: { label: 'Read the record', onClick: () => setTab('record') } } : {})} />
+          <EmptyState size="compact" title={t('meetingDetail.noTranscript')}
+            description={h.deleted ? t('meetingDetail.restoreTheMeetingToRead') : t('meetingDetail.ifYouStillHaveThe')}
+            {...(record ? { action: { label: t('meetingDetail.readTheRecord'), onClick: () => setTab('record') } } : {})} />
         </>
       ))}
       {tab === 'record' && (
         record ? (
           <>
             {h.review_state === 'provisional' && (
-              <Notice tone="info" title="Provisional: this record is still under review."
-                action={h.update.status === 'in_review' ? <Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Review it</Link> : undefined}>
-                {h.update.status === 'in_review' ? `Confirm or reject it with the rest of ${h.update_id}.` : `It becomes final when ${h.update_id} is done.`} Until then it can still change.
+              <Notice tone="info" title={t('meetingDetail.provisionalThisRecordIsStill')}
+                action={h.update.status === 'in_review' ? <Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">{t('meetingDetail.reviewIt')}</Link> : undefined}>
+                {rich(t, 'meetingDetail.untilThenItCanStill', { value: h.update.status === 'in_review' ? t('meetingDetail.confirmOrRejectItWith', { update_id: h.update_id }) : t('meetingDetail.itBecomesFinalWhenIs', { update_id: h.update_id }) })}
               </Notice>
             )}
             {versions && (versions.state === 'conflict' || versions.state === 'broken') ? (
-              <Notice tone="warning" title={versions.state === 'conflict' ? 'Two corrections of this record disagree.' : 'A version of this record is missing.'}
-                action={<Link to={`/context/updates/${versions.original.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open the original</Link>}>
+              <Notice tone="warning" title={versions.state === 'conflict' ? t('meetingDetail.twoCorrectionsOfThisRecord') : t('meetingDetail.aVersionOfThisRecord')}
+                action={<Link to={`/context/updates/${versions.original.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">{t('meetingDetail.openTheOriginal')}</Link>}>
                 {versions.state === 'conflict'
-                  ? 'Two corrections were made from the same version, so neither is shown as current. This is the last version both build on; no new correction or task source can start from it until one is removed.'
-                  : 'A correction builds on a version that is gone or no longer confirmed. This is the last version that holds; no new correction or task source can start from it.'}
+                  ? t('meetingDetail.twoCorrectionsWereMadeFrom')
+                  : t('meetingDetail.aCorrectionBuildsOnA')}
               </Notice>
             ) : versions?.open.length ? (
-              <Notice tone="info" title="A correction of this record is waiting."
-                action={<Link to={`/context/updates/${versions.open[0]}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open {versions.open[0]}</Link>}>
-                The record below stays the current one until you approve the correction in Context &gt; Updates.
+              <Notice tone="info" title={t('meetingDetail.aCorrectionOfThisRecord')}
+                action={<Link to={`/context/updates/${versions.open[0]}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">{rich(t, 'meetingDetail.open', { value: versions.open[0] })}</Link>}>
+                {t('meetingDetail.theRecordBelowStaysThe')}
               </Notice>
             ) : null}
             {versions?.state === 'corrected' && (
               <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                Corrected{versions.head_at ? ` on ${day(versions.head_at)}` : ''} in <Link to={`/context/updates/${recordOwner}`} className="gtd-link">{recordOwner}</Link>.
-                {' '}<Link to={`/context/updates/${versions.original.update_id}`} className="gtd-link">See the original record</Link>.
-                {versions.head_changed && <>{' '}<Button size="sm" variant="secondary" disabled={busy} onClick={() => void followUp()}>Check the context</Button></>}
+                {t('meetingDetail.corrected')}{versions.head_at ? t('meetingDetail.on', { day: day(versions.head_at) }) : ''} {t('meetingDetail.in')} <Link to={`/context/updates/${recordOwner}`} className="gtd-link">{recordOwner}</Link>.
+                {' '}<Link to={`/context/updates/${versions.original.update_id}`} className="gtd-link">{t('meetingDetail.seeTheOriginalRecord')}</Link>.
+                {versions.head_changed && <>{' '}<Button size="sm" variant="secondary" disabled={busy} onClick={() => void followUp()}>{t('updateDetail.checkTheContext')}</Button></>}
               </p>
             )}
             <MeetingRecordCard record={record} reviewing={false} confirmation={record.confirmation}
               onChoose={() => {}} onSpeaker={() => {}} {...(canCreate ? { onCreateTask: (item: number) => void createTask(record, item) } : {})} />
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              From <Link to={`/context/updates/${recordOwner}`} className="gtd-link">{recordOwner}</Link>. Tasks come only from a confirmed record, through the same step as in Context &gt; Updates.
+              {rich(t, 'meetingDetail.fromTasksComeOnlyFrom', { link: <Link to={`/context/updates/${recordOwner}`} className="gtd-link">{recordOwner}</Link> })}
             </p>
             {canCorrect && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void suggest()}>Suggest corrections</Button>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => void suggest()}>{t('meetingDetail.suggestCorrections')}</Button>
                 <span style={{ flex: '1 1 240px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  A misheard name, a wrong term, title or date? Your AI tool checks the record against the transcript, your stakeholders and glossary, and you review what it suggests.
+                  {t('meetingDetail.aMisheardNameAWrong')}
                 </span>
               </div>
             )}
           </>
         ) : versions?.state === 'broken' ? (
-          <Notice tone="warning" title="The original record of this meeting is gone."
-            action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open {h.update_id}</Link>}>
-            Corrections of it are still here, in Context &gt; Updates, but none can count without the record they correct.
+          <Notice tone="warning" title={t('meetingDetail.theOriginalRecordOfThis')}
+            action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">{rich(t, 'meetingDetail.open2', { update_id: h.update_id })}</Link>}>
+            {t('meetingDetail.correctionsOfItAreStill')}
           </Notice>
         ) : h.record_state === 'ambiguous' ? (
-          <Notice tone="info" title="It is not clear which record is this meeting's."
-            action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">Open {h.update_id}</Link>}>
-            None of this digest's records names this meeting or only its files, so none is shown here as its own. Its records: {unlinked.map((r) => r.title || r.id).join('; ')}.
+          <Notice tone="info" title={t('meetingDetail.itIsNotClearWhich')}
+            action={<Link to={`/context/updates/${h.update_id}`} className="gtd-btn gtd-btn--secondary gtd-btn--sm">{rich(t, 'meetingDetail.open2', { update_id: h.update_id })}</Link>}>
+            {t('meetingDetail.noneOfThisDigestS')} {unlinked.map((r) => r.title || r.id).join('; ')}.
           </Notice>
         ) : (
-          <EmptyState size="compact" title="No record yet"
-            description={done ? 'This meeting was reviewed without a record.' : 'When its update is analyzed, your AI tool drafts a record of this meeting. You confirm it in Context > Updates.'} />
+          <EmptyState size="compact" title={t('meetingDetail.noRecordYet')}
+            description={done ? t('meetingDetail.thisMeetingWasReviewedWithout') : t('meetingDetail.whenItsUpdateIsAnalyzed')} />
         )
       )}
       {tab === 'tasks' && (items.length ? (
-        <ul aria-label="Action items" className="gtd-list" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+        <ul aria-label={t('updateDetail.actionItems')} className="gtd-list" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
           {items.map((a, i) => (
             <li key={i} className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
-              <span style={{ flex: '1 1 240px', minWidth: 0 }}>{a.description}{a.owner ? <span style={{ color: 'var(--color-text-muted)' }}> · {a.owner.name}</span> : null}{a.due_date ? <span style={{ color: 'var(--color-text-muted)' }}> · by {a.due_date}</span> : null}</span>
-              {a.task_ref ? (a.task_found === false ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{a.task_ref} (no longer exists)</span>
+              <span style={{ flex: '1 1 240px', minWidth: 0 }}>{a.description}{a.owner ? <span style={{ color: 'var(--color-text-muted)' }}> · {a.owner.name}</span> : null}{a.due_date ? <span style={{ color: 'var(--color-text-muted)' }}> {rich(t, 'updateDetail.by', { due_date: a.due_date })}</span> : null}</span>
+              {a.task_ref ? (a.task_found === false ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{rich(t, 'meetingDetail.noLongerExists', { task_ref: a.task_ref })}</span>
                 : <Link to={`/board/task/${a.task_ref}`} className="gtd-link mono" style={{ fontSize: 'var(--text-xs)' }}>{a.task_ref}</Link>)
-                : canCreate ? <Button size="sm" variant="secondary" onClick={() => void createTask(record!, i)}>Create task</Button>
-                  : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{!holds ? 'Once its versions agree' : record?.confirmation === 'confirmed' ? 'After the review is done' : 'Once the record is confirmed'}</span>}
+                : canCreate ? <Button size="sm" variant="secondary" onClick={() => void createTask(record!, i)}>{t('newTaskModal.createTask')}</Button>
+                  : <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{!holds ? t('meetingDetail.onceItsVersionsAgree') : record?.confirmation === 'confirmed' ? t('meetingDetail.afterTheReviewIsDone') : t('meetingDetail.onceTheRecordIsConfirmed')}</span>}
             </li>
           ))}
         </ul>
       ) : (
-        <EmptyState size="compact" title="No tasks from this meeting" description={record ? 'Its record has no action items.' : 'Tasks come from the action items of its confirmed record.'} />
+        <EmptyState size="compact" title={t('meetingDetail.noTasksFromThisMeeting2')} description={record ? t('meetingDetail.itsRecordHasNoAction') : t('meetingDetail.tasksComeFromTheAction2')} />
       ))}
       {tab === 'files' && (
-        <ul aria-label="Files of this meeting" className="gtd-list" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
+        <ul aria-label={t('queuedMeetingActions.filesOfThisMeeting')} className="gtd-list" style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)' }}>
           {sources.map((s) => (
             <li key={s.file} className="gtd-list__row" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)' }}>
               <span className="mono truncate" style={{ flex: '1 1 200px', minWidth: 0 }}>{s.name}</span>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{{ transcript: 'Transcript', recording: 'Recording', notes: 'Notes', file: 'File' }[s.kind]}</span>
-              {s.playable && <Button size="sm" variant="secondary" onClick={() => { setPicked(s.file); setTab('transcript'); }}>Play</Button>}
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{{ transcript: t('transcriptReader.transcript'), recording: t('queuedMeetingActions.recording'), notes: t('orgChartsPanel.notes'), file: t('queuedMeetingActions.file') }[s.kind]}</span>
+              {s.playable && <Button size="sm" variant="secondary" onClick={() => { setPicked(s.file); setTab('transcript'); }}>{t('meetingDetail.play')}</Button>}
               {s.playable && data.versions.length > 0 && !h.deleted && (
-                <Button size="sm" variant="ghost" disabled={busy || Boolean(transcribing)} onClick={() => setAgain(s.file)}>Transcribe again…</Button>
+                <Button size="sm" variant="ghost" disabled={busy || Boolean(transcribing)} onClick={() => setAgain(s.file)}>{t('meetingDetail.transcribeAgain')}</Button>
               )}
               {s.present && (s.kind !== 'recording' || s.playable)
-                ? <a href={fileUrl(h.id, s.file)} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open</a>
+                ? <a href={fileUrl(h.id, s.file)} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">{t('meetingDetail.open3')}</a>
                 : s.present
-                  ? <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Its audio is not kept. Its transcript is in the Transcript tab.</em>
+                  ? <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('meetingDetail.itsAudioIsNotKept')}</em>
                   : <em style={{ flexBasis: '100%', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{s.missing}</em>}
             </li>
           ))}
-          {sources.length === 0 && <li className="gtd-list__row" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No files are recorded for this meeting.</li>}
+          {sources.length === 0 && <li className="gtd-list__row" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('meetingDetail.noFilesAreRecordedFor')}</li>}
         </ul>
       )}
     </div>
@@ -495,33 +504,33 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   const reviewed = h.record?.confirmation;
   const aside = (
     <>
-      <Steps title="Processing" steps={h.origin === 'digest' ? [
-        { label: h.recorded ? 'Recorded' : 'Added', detail: longDate(h.meeting_date), state: 'done' },
-        ...(h.recorded ? [{ label: 'Transcribed', state: 'done' as const }] : []),
-        { label: 'In a digest', detail: <><Link to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>{h.update.created_at ? `, ${day(h.update.created_at)}` : ''}</>, state: 'done' },
+      <Steps title={t('meetingsList.processing')} steps={h.origin === 'digest' ? [
+        { label: h.recorded ? t('meetingHistory.recorded') : t('meetingDetail.added'), detail: longDate(h.meeting_date), state: 'done' },
+        ...(h.recorded ? [{ label: t('meetingDetail.transcribed'), state: 'done' as const }] : []),
+        { label: t('meetingHistory.inADigest'), detail: <><Link to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>{h.update.created_at ? `, ${day(h.update.created_at)}` : ''}</>, state: 'done' },
       ] : [
-        { label: 'Imported as an update', detail: <><Link to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>{h.update.created_at ? `, ${day(h.update.created_at)}` : ''}</>, state: 'done' },
+        { label: t('meetingHistory.importedAsAnUpdate'), detail: <><Link to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>{h.update.created_at ? `, ${day(h.update.created_at)}` : ''}</>, state: 'done' },
       ]} />
-      <Steps title="Review" steps={[
-        { label: 'Analyzed', detail: day(h.update.analyzed_at) || undefined, state: h.update.analyzed_at || h.update.status !== 'ready' && h.update.status !== 'analyzing' ? 'done' : 'now' },
-        { label: reviewed === 'rejected' ? 'Record rejected' : 'Record confirmed', detail: h.record?.confirmed_at ? day(h.record.confirmed_at) : !h.record && done ? 'No record of this meeting' : undefined,
+      <Steps title={t('shared.review')} steps={[
+        { label: t('analysisRun.analyzed'), detail: day(h.update.analyzed_at) || undefined, state: h.update.analyzed_at || h.update.status !== 'ready' && h.update.status !== 'analyzing' ? 'done' : 'now' },
+        { label: reviewed === 'rejected' ? t('meetingHistory.recordRejected') : t('meetingHistory.recordConfirmed'), detail: h.record?.confirmed_at ? day(h.record.confirmed_at) : !h.record && done ? t('meetingDetail.noRecordOfThisMeeting') : undefined,
           state: reviewed ? 'done' : h.update.status === 'in_review' ? 'now' : done ? 'done' : 'later' },
-        { label: done ? (h.update.context_changed ? 'Context updated' : 'No context changes') : 'Context updated', detail: day(h.update.applied_at) || undefined, state: done ? 'done' : 'later' },
+        { label: done ? (h.update.context_changed ? t('meetingHistory.contextUpdated') : t('meetingHistory.noContextChanges')) : t('meetingHistory.contextUpdated'), detail: day(h.update.applied_at) || undefined, state: done ? 'done' : 'later' },
       ]} />
       <VersionsSection detail={data} names={modelNames} busy={busy}
         onChoose={(version) => void run(() => apiPut(`/api/meetings/${encodeURIComponent(h.id)}/version`, { version }).then(() => undefined), version === 'v1' ? 'The reviewed transcript is in use again.' : `Version ${version.slice(1)} is in use.`, 'Could not change the version. Try again.')} />
       {done && h.has_text && !h.deleted && (
-        <section aria-label="Keep" style={{ marginBottom: 'var(--space-5)' }}>
-          <Checkbox checked={h.kept} disabled={busy} label="Keep this meeting"
-            description="System cleanup never moves it to the trash. You can still delete it yourself."
+        <section aria-label={t('meetingDetail.keep')} style={{ marginBottom: 'var(--space-5)' }}>
+          <Checkbox checked={h.kept} disabled={busy} label={t('meetingDetail.keepThisMeeting')}
+            description={t('meetingDetail.systemCleanupNeverMovesIt')}
             onChange={(keep) => void run(() => apiPut(`/api/meetings/${h.id}/keep`, { keep }).then(() => undefined), keep ? 'System cleanup will keep this meeting.' : 'System cleanup may remove this meeting again.', 'Could not change this. Try again.')} />
         </section>
       )}
       <Details rows={[
-        ['Date', longDate(h.meeting_date)],
-        ['Source', h.origin === 'update' ? 'Imported as an update' : h.recorded ? 'Recorded' : 'Uploaded files'],
-        ['Update', <Link key="u" to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>],
-        ...(keptUntil ? [['Kept until', keptUntil] as [string, React.ReactNode]] : []),
+        [t('updateDetail.date'), longDate(h.meeting_date)],
+        [t('meetingDetail.source'), h.origin === 'update' ? t('meetingHistory.importedAsAnUpdate') : h.recorded ? t('meetingHistory.recorded') : t('meetingHistory.uploadedFiles')],
+        [t('updateDetail.update'), <Link key="u" to={`/context/updates/${h.update_id}`} className="gtd-link">{h.update_id}</Link>],
+        ...(keptUntil ? [[t('meetingDetail.keptUntil'), keptUntil] as [string, React.ReactNode]] : []),
       ]} />
     </>
   );
@@ -531,8 +540,8 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
       <Header id={h.id} title={h.title} statuses={[historyProcessing(h), historyReview(h)]}
         line={`${longDate(h.meeting_date)}${h.people.length ? ` · ${h.people.join(', ')}` : ''}`}
         actions={<>
-          {canDelete && <IconButton label="Delete meeting" icon={icons.trash} tone="danger" outline disabled={busy} onClick={() => void remove()} />}
-          <IconButton label="Close meeting" icon={icons.close} onClick={onClose} />
+          {canDelete && <IconButton label={t('meetingDetail.deleteMeeting')} icon={icons.trash} tone="danger" outline disabled={busy} onClick={() => void remove()} />}
+          <IconButton label={t('meetingDetail.closeMeeting')} icon={icons.close} onClick={onClose} />
         </>} />
       <Body tab={tab} setTab={setTab} counts={{ tasks: items.filter((a) => a.task_ref).length, files: sources.length }} main={main} aside={aside} />
       <TranscribeAgainDialog key={again ?? ''} file={again} job={outlet.job} onClose={() => setAgain(null)}
@@ -555,6 +564,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
 function VersionSpeakersPanel({ meetingId, version, speakers, editable, onChanged, transcriptUrl, audioUrl: clipUrl }: {
   meetingId: string; version: string; speakers: VersionSpeakers; editable: boolean; onChanged: () => void; transcriptUrl: string; audioUrl?: string;
 }) {
+  const { t } = useLanguage();
   if (!speakers.labels.length) return null;
   const name = async (label: string, person: Omit<SpeakerName, 'label'> | null) => {
     await apiPut(`/api/meetings/${encodeURIComponent(meetingId)}/versions/${version}/speakers`, { transcript_sha256: speakers.transcript_sha256, names: { [label]: person } });
@@ -563,7 +573,7 @@ function VersionSpeakersPanel({ meetingId, version, speakers, editable, onChange
     <div>
       <SpeakerNaming source={{ kind: 'folder', meeting: meetingId, version, transcript_sha256: speakers.transcript_sha256 }}
         transcriptUrl={transcriptUrl} {...(clipUrl ? { audioUrl: clipUrl } : {})}
-        hint={`Speakers of ${version}, numbered anew by its transcription. Names given here are for this version; the record keeps its own.`}
+        hint={t('meetingDetail.speakersOfNumberedAnewBy', { version })}
         labels={speakers.labels.map((l) => l.label)} names={speakers.names} suggestions={speakers.suggestions}
         rememberable={speakers.audio_kept ? speakers.labels.filter((l) => l.can_remember).map((l) => l.label) : []}
         modelSha={speakers.model_sha256} editable={editable} onName={name} onChanged={onChanged} />

@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import Card from '@/components/common/Card';
 import IconButton, { icons } from '@/components/common/IconButton';
@@ -16,13 +17,14 @@ export function TranscriptReader({ meetingId, title, transcript, onClose, canNam
   canName: boolean;
   onNamed: () => void;
 }) {
+  const { t } = useLanguage();
   const url = `/api/meeting-queue/${meetingId}/transcripts/${encodeURIComponent(transcript.name)}`;
   const [loaded, setLoaded] = React.useState<{ text: string; parts: TranscriptPart[] | null; matches: boolean } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   React.useEffect(() => {
     const abort = new AbortController();
     fetch(url, { signal: abort.signal })
-      .then((res) => { if (!res.ok) throw new Error(`The transcript could not be read (${res.status}).`); return res.text(); })
+      .then((res) => { if (!res.ok) throw new Error(t('transcriptReader.theTranscriptCouldNotBe', { status: res.status })); return res.text(); })
       .then(async (text) => {
         // Names are saved for the transcript with this hash: only the text that has it may be named.
         const bytes = new TextEncoder().encode(text);
@@ -45,25 +47,25 @@ export function TranscriptReader({ meetingId, title, transcript, onClose, canNam
   return (
     <Card
       title={title}
-      description={<span role="status">{transcript.file}: {transcript.final ? 'transcript' : 'live transcript, shown until the more accurate one is ready'}</span>}
+      description={<span role="status">{transcript.file}: {transcript.final ? 'transcript' : t('transcriptReader.liveTranscriptShownUntilThe')}</span>}
       actions={<>
-        <a href={url} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open as a file</a>
-        <IconButton label="Close the transcript" icon={icons.close} onClick={onClose} />
+        <a href={url} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">{t('meetingText.openAsAFile')}</a>
+        <IconButton label={t('transcriptReader.closeTheTranscript')} icon={icons.close} onClick={onClose} />
       </>}
     >
       <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
         {labels.length > 0 && transcript.final && (
           <div>
             <SpeakerNaming source={{ kind: 'queue', meeting: meetingId, file: transcript.file, transcript_sha256: transcript.sha256 }} transcriptUrl={url}
-              hint={canName ? 'Name who spoke, or leave them for the analysis to propose.' : undefined}
+              hint={canName ? t('transcriptReader.nameWhoSpokeOrLeave') : undefined}
               labels={labels} names={transcript.names} suggestions={transcript.suggestions ?? []} rememberable={transcript.rememberable ?? []}
               modelSha={transcript.modelSha ?? null} participants={participants} editable={naming} onName={name} onChanged={onNamed} />
           </div>
         )}
         {error && <Notice tone="critical">{error}</Notice>}
-        <div aria-label="Transcript" tabIndex={0} className="gtd-reading-box">
-          {!loaded && !error && <span style={{ color: 'var(--color-text-muted)' }}>Reading the transcript…</span>}
-          {loaded?.parts?.length === 0 && <span style={{ color: 'var(--color-text-muted)' }}>No speech was found.</span>}
+        <div aria-label={t('transcriptReader.transcript')} tabIndex={0} className="gtd-reading-box">
+          {!loaded && !error && <span style={{ color: 'var(--color-text-muted)' }}>{t('meetingText.readingTheTranscript')}</span>}
+          {loaded?.parts?.length === 0 && <span style={{ color: 'var(--color-text-muted)' }}>{t('meetingText.noSpeechWasFound')}</span>}
           {loaded && !loaded.parts && <pre style={{ margin: 0, whiteSpace: 'pre-wrap', font: 'inherit' }}>{loaded.text}</pre>}
           {loaded?.parts?.map((p, i) => (
             <p key={i}>

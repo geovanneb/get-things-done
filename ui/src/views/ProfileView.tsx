@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
 import { useEffect, useState, useCallback } from 'react';
 import Button from '@/components/common/Button';
 import Avatar from '@/components/common/Avatar';
@@ -31,26 +33,27 @@ interface SectionConfig {
   rows: number;
 }
 
-const SECTIONS: SectionConfig[] = [
-  { key: 'responsibilities',       label: 'Responsibilities',       rows: 6 },
-  { key: 'communication_style',    label: 'Communication style',    rows: 4 },
-  { key: 'decision_making',        label: 'Decision making',        rows: 4 },
-  { key: 'language_preferences',   label: 'Language preferences',   rows: 2 },
-  { key: 'recurring_expectations', label: 'Recurring expectations', rows: 4 },
-  { key: 'principles',             label: 'Principles',             rows: 4 },
-];
+const SECTIONS = (): SectionConfig[] => ([
+  { key: 'responsibilities',       label: tr('profile.responsibilities'),       rows: 6 },
+  { key: 'communication_style',    label: tr('profile.communicationStyle'),    rows: 4 },
+  { key: 'decision_making',        label: tr('profile.decisionMaking'),        rows: 4 },
+  { key: 'language_preferences',   label: tr('profile.languagePreferences'),   rows: 2 },
+  { key: 'recurring_expectations', label: tr('profile.recurringExpectations'), rows: 4 },
+  { key: 'principles',             label: tr('profile.principles'),             rows: 4 },
+]);
 
-const IDENTITY_FIELDS: Array<{ key: ProfileIdentityKey; label: string; placeholder: string }> = [
-  { key: 'name',         label: 'Name',        placeholder: 'Your name' },
-  { key: 'role',         label: 'Role', placeholder: 'e.g. VP Operations' },
-  { key: 'organization', label: 'Organization',         placeholder: 'e.g. Acme Corporation' },
-];
+const IDENTITY_FIELDS = (): Array<{ key: ProfileIdentityKey; label: string; placeholder: string }> => ([
+  { key: 'name',         label: tr('boardColumnsEditor.name'),        placeholder: tr('profile.yourName') },
+  { key: 'role',         label: tr('orgChartDialogs.role'), placeholder: tr('profile.eGVpOperations') },
+  { key: 'organization', label: tr('orgChartDialogs.organization'),         placeholder: tr('profile.eGAcmeCorporation') },
+]);
 
 // ---------------------------------------------------------------------------
 // Main view
 // ---------------------------------------------------------------------------
 
 export default function ProfileView() {
+  const { t } = useLanguage();
   const [profile,   setProfile]   = useState<Profile | null>(null);
   const [formData,  setFormData]  = useState<Profile | null>(null);
   const [editMode,  setEditMode]  = useState(false);
@@ -67,11 +70,11 @@ export default function ProfileView() {
       setProfile(data);
       setFormData(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The server did not answer.');
+      setError(err instanceof Error ? err.message : t('profile.theServerDidNotAnswer'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { fetchProfile(); }, [fetchProfile]);
 
@@ -96,7 +99,7 @@ export default function ProfileView() {
       setProfile(updated ?? formData);
       setEditMode(false);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not save your profile. Try again.');
+      setSaveError(err instanceof Error ? err.message : t('profile.couldNotSaveYourProfile'));
     } finally {
       setSaving(false);
     }
@@ -106,12 +109,12 @@ export default function ProfileView() {
     setFormData(prev => (prev ? { ...prev, [key]: value } : prev));
   };
 
-  if (loading) return <LoadingSpinner text="Loading your profile…" />;
+  if (loading) return <LoadingSpinner text={t('profile.loadingYourProfile')} />;
 
   if (error) {
     return (
       <Page width="narrow">
-        <Notice tone="critical" title="Could not load your profile." action={<Button size="sm" onClick={fetchProfile}>Try again</Button>}>{error}</Notice>
+        <Notice tone="critical" title={t('profile.couldNotLoadYourProfile')} action={<Button size="sm" onClick={fetchProfile}>{t('retry')}</Button>}>{error}</Notice>
       </Page>
     );
   }
@@ -120,25 +123,25 @@ export default function ProfileView() {
 
   const actions = editMode ? (
     <FormActions>
-      <Button variant="ghost" onClick={handleCancel} disabled={saving}>Cancel</Button>
-      <Button variant="primary" onClick={handleSave} loading={saving}>Save changes</Button>
+      <Button variant="ghost" onClick={handleCancel} disabled={saving}>{t('cancel')}</Button>
+      <Button variant="primary" onClick={handleSave} loading={saving}>{t('orgChartDialogs.saveChanges')}</Button>
     </FormActions>
   ) : (
-    <Button variant="secondary" onClick={handleEdit}>Edit profile</Button>
+    <Button variant="secondary" onClick={handleEdit}>{t('profile.editProfile')}</Button>
   );
 
   return (
     <Page width="narrow">
-      <PageHeader description="Who you are and how you work. Agents read this before they write anything for you." actions={actions} />
+      <PageHeader description={t('profile.whoYouAreAndHow')} actions={actions} />
 
-      {saveError && <Notice tone="critical" title="Your changes are not saved.">{saveError}</Notice>}
+      {saveError && <Notice tone="critical" title={t('profile.yourChangesAreNotSaved')}>{saveError}</Notice>}
 
       <Card>
         {editMode ? (
           <div style={{ display: 'flex', gap: 'var(--space-5)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <Avatar name={formData.name || profile.name || '?'} size="xl" />
             <div className="gtd-stack" style={{ flex: '1 1 260px', gap: 'var(--space-3)' }}>
-              {IDENTITY_FIELDS.map(({ key, label, placeholder }) => (
+              {IDENTITY_FIELDS().map(({ key, label, placeholder }) => (
                 <Input key={key} label={label} value={formData[key] || ''} placeholder={placeholder} disabled={saving}
                   required={key === 'name'} onChange={(v) => handleChange(key, v)} />
               ))}
@@ -156,12 +159,12 @@ export default function ProfileView() {
         )}
       </Card>
 
-      {SECTIONS.map(({ key, label, rows }) => (
+      {SECTIONS().map(({ key, label, rows }) => (
         <Card key={key} title={label}>
           {editMode ? (
             <Textarea aria-label={label} rows={rows} value={formData[key] || ''} onChange={(v) => handleChange(key, v)} disabled={saving} />
           ) : (
-            <MarkdownView content={profile[key]} emptyText="Not set" compact />
+            <MarkdownView content={profile[key]} emptyText={t('profile.notSet')} compact />
           )}
         </Card>
       ))}

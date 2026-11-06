@@ -1,3 +1,5 @@
+import { useLanguage } from '../../i18n/LanguageProvider';
+import type { PlainMessageKey, Translate } from '../../../../server/src/i18n/messages';
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../../store';
@@ -6,38 +8,39 @@ import GitIndicator from '../common/GitIndicator';
 import { apiPost } from '../../utils/api';
 import { RecordButton } from '@/components/recording/RecordButton';
 
-const VIEW_LABELS: Record<string, string> = {
-  '/situation': 'Situation',
-  '/board': 'Board',
-  '/stakeholders': 'Stakeholders',
-  '/outputs': 'Output templates',
-  '/context': 'Context',
-  '/agents': 'Agents & Skills',
-  '/insights': 'Insights',
-  '/meetings': 'Meetings',
-  '/routines': 'Routines',
-  '/agent-floor': 'Agent Floor',
-  '/profile': 'Profile',
-  '/settings': 'Settings',
-  '/design-system': 'Design system',
+const VIEW_LABELS: Record<string, PlainMessageKey> = {
+  '/situation': 'situation',
+  '/board': 'board',
+  '/stakeholders': 'stakeholders',
+  '/outputs': 'outputs',
+  '/context': 'context',
+  '/agents': 'agents',
+  '/insights': 'insights',
+  '/meetings': 'meetings',
+  '/routines': 'routines',
+  '/agent-floor': 'agent-floor',
+  '/profile': 'profile',
+  '/settings': 'settings',
+  '/design-system': 'design-system',
 };
 
-function getBreadcrumb(pathname: string): { label: string; sub?: string } {
+function getBreadcrumb(pathname: string, t: Translate): { label: string; sub?: string } {
   if (pathname.startsWith('/board/task/')) {
-    return { label: 'Board', sub: 'Task' };
+    return { label: t('board'), sub: t('task') };
   }
   if (pathname.startsWith('/stakeholders/') && pathname !== '/stakeholders') {
-    return { label: 'Stakeholders', sub: 'Detail' };
+    return { label: t('stakeholders'), sub: t('detail') };
   }
-  const label = Object.entries(VIEW_LABELS).find(([path]) => pathname.startsWith(path))?.[1] ?? 'App';
-  return { label };
+  const label = Object.entries(VIEW_LABELS).find(([path]) => pathname.startsWith(path))?.[1] ?? 'app';
+  return { label: t(label) };
 }
 
 export default function Header() {
   const location = useLocation();
   const { isSearchOpen, workspace, validationCount } = useAppState();
   const dispatch = useAppDispatch();
-  const crumb = getBreadcrumb(location.pathname);
+  const { t } = useLanguage();
+  const crumb = getBreadcrumb(location.pathname, t);
   const isMac = navigator.platform.toLowerCase().includes('mac');
 
   const [openingClaude, setOpeningClaude] = useState(false);
@@ -48,7 +51,7 @@ export default function Header() {
       await apiPost<{ opened: boolean; command: string }>('/api/workspace/open-claude');
       dispatch({
         type: 'ADD_NOTIFICATION',
-        payload: { type: 'success', message: 'Claude Code opened in a new terminal window.' },
+        payload: { type: 'success', message: t('claudeOpened') },
       });
     } catch (err) {
       // Terminal launch failed — fall back to handing the user the command.
@@ -65,8 +68,8 @@ export default function Header() {
         payload: {
           type: 'warning',
           message: copied
-            ? `Could not open a terminal automatically. Command copied to clipboard: ${command}`
-            : `Could not open a terminal automatically. Run: ${command}`,
+            ? t('terminalCopied', { command })
+            : t('terminalRun', { command }),
         },
       });
       void err;
@@ -126,11 +129,11 @@ export default function Header() {
       {/* Search button */}
       <button
         onClick={() => dispatch({ type: 'TOGGLE_SEARCH' })}
-        aria-label="Open search"
+        aria-label={t('openSearch')}
         aria-expanded={isSearchOpen}
         aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}
         className="app-header__search"
-        title={`Search (${isMac ? '⌘K' : 'Ctrl+K'})`}
+        title={`${t('openSearch')} (${isMac ? '⌘K' : 'Ctrl+K'})`}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -150,7 +153,7 @@ export default function Header() {
           <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />
           <path d="M9.5 9.5L12.5 12.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
         </svg>
-        <span className="app-header__search-text" style={{ flex: 1, textAlign: 'left' }}>Search...</span>
+        <span className="app-header__search-text" style={{ flex: 1, textAlign: 'left' }}>{t('search')}</span>
         <kbd
           className="app-header__search-text"
           style={{
@@ -173,7 +176,7 @@ export default function Header() {
         {/* Validation indicator */}
         {(validationCount.errors > 0 || validationCount.warnings > 0) && (
           <button
-            aria-label={`${validationCount.errors} errors, ${validationCount.warnings} warnings`}
+            aria-label={t('validationSummary', { errors: t('validationErrors', { count: validationCount.errors }), warnings: t('validationWarnings', { count: validationCount.warnings }) })}
             onClick={() => (window.location.href = '/settings')}
             style={{
               display: 'flex',
@@ -204,13 +207,13 @@ export default function Header() {
         )}
 
         <Button variant="secondary" size="sm" onClick={handleOpenClaude} loading={openingClaude}
-          aria-label="Open Claude Code" title="Open Claude Code">
+          aria-label={t('openClaude')} title={t('openClaude')}>
           <span className="app-header__compact-icon" aria-hidden="true">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
               <path d="M2 3.5l3 3-3 3M6.5 10h4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <span className="app-header__label app-header__label--claude">Open Claude Code</span>
+          <span className="app-header__label app-header__label--claude">{t('openClaude')}</span>
         </Button>
 
         <RecordButton />
@@ -221,9 +224,9 @@ export default function Header() {
               <path d="M6.5 2v9M2 6.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           }
-          aria-label="New task"
+          aria-label={t('newTask')}
         >
-          <span className="app-header__label app-header__label--new">New task</span>
+          <span className="app-header__label app-header__label--new">{t('newTask')}</span>
         </Button>
       </div>
     </header>

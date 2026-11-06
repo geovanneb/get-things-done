@@ -1,3 +1,6 @@
+import { languageName } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useId, useState } from 'react';
 import Modal, { FormActions } from '@/components/common/Modal';
@@ -18,6 +21,7 @@ function today(): string {
 
 /** Starts a recording: what it is called, which microphone, and a reminder to tell the others, each time. */
 export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boolean; onClose: () => void; prefill: RecordPrefill | null }) {
+  const { t } = useLanguage();
   const { start } = useRecorder();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
@@ -92,39 +96,39 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Record a meeting"
-      description="The recording is transcribed on this computer. Nothing is sent anywhere."
+      title={t('recordMeeting')}
+      description={t('recordMeetingModal.theRecordingIsTranscribedOn')}
       size="lg"
       keepWhileTyping
       footer={
-        <FormActions start={!told ? <span className="gtd-field__hint">Confirm that everyone knows, to start.</span> : undefined}>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" disabled={!told || !date || !languageReady} onClick={startRecording}>Start recording</Button>
+        <FormActions start={!told ? <span className="gtd-field__hint">{t('recordMeetingModal.confirmThatEveryoneKnowsTo')}</span> : undefined}>
+          <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+          <Button variant="primary" disabled={!told || !date || !languageReady} onClick={startRecording}>{t('recordMeetingModal.startRecording')}</Button>
         </FormActions>
       }
     >
       <div className="gtd-stack" style={{ gap: 'var(--space-5)' }}>
-        <FormSection title="Meeting">
+        <FormSection title={t('importUpdateModal.meeting')}>
           <div className="gtd-form-grid">
-            <Input id={titleId} label="Title" value={title} maxLength={200} onChange={setTitle} placeholder={defaultTitle} autoFocus
-              hint={prefill?.title ? undefined : 'Named after when you clicked Record. Keep it to start quickly, or change it.'} />
-            <Input label="Date" type="date" required value={date} onChange={setDate} error={!date ? 'Choose the date of the meeting.' : undefined} />
+            <Input id={titleId} label={t('importUpdateModal.title')} value={title} maxLength={200} onChange={setTitle} placeholder={defaultTitle} autoFocus
+              hint={prefill?.title ? undefined : t('recordMeetingModal.namedAfterWhenYouClicked')} />
+            <Input label={t('updateDetail.date')} type="date" required value={date} onChange={setDate} error={!date ? t('recordMeetingModal.chooseTheDateOfThe') : undefined} />
           </div>
           <ParticipantsField value={participants} onChange={(next) => { setParticipants(next); setTold(false); }} />
           {languages.length > 0 && (
-            <Field label="Spoken language" htmlFor="record-language"
-              hint="For this meeting only; the default is in Settings > Transcription. It can be changed during the recording too.">
+            <Field label={t('recordMeetingModal.spokenLanguage')} htmlFor="record-language"
+              hint={t('recordMeetingModal.forThisMeetingOnlyThe')}>
               <select id="record-language" className="gtd-control" value={language} onChange={(e) => setLanguage(e.target.value)}
                 aria-describedby="record-language-hint">
-                <option value="auto">Auto (each part in its own language)</option>
+                <option value="auto">{t('recordMeetingModal.autoEachPartInIts')}</option>
                 {/* A language in Settings that the model lacks: shown as it is, so what is sent is what is seen. */}
                 {language !== 'auto' && !languages.some((l) => l.id === language) && (
-                  <option value={language}>{allLanguages.find((l) => l.id === language)?.label ?? language} (not in {modelName || 'the chosen model'}: read as Auto)</option>
+                  <option value={language}>{rich(t, 'recordMeetingModal.notInReadAsAuto', { label: allLanguages.find((l) => l.id === language)?.label ?? language, modelName: modelName || t('recordMeetingModal.theChosenModel') })}</option>
                 )}
-                {languages.filter((l) => l.common || l.id === language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                {languages.filter((l) => l.common || l.id === language).map((l) => <option key={l.id} value={l.id}>{languageName(l.id, l.label)}</option>)}
                 {languages.some((l) => !l.common && l.id !== language) && (
-                  <optgroup label="Other languages">
-                    {languages.filter((l) => !l.common && l.id !== language).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                  <optgroup label={t('recordMeetingModal.otherLanguages')}>
+                    {languages.filter((l) => !l.common && l.id !== language).map((l) => <option key={l.id} value={l.id}>{languageName(l.id, l.label)}</option>)}
                   </optgroup>
                 )}
               </select>
@@ -132,17 +136,17 @@ export function RecordMeetingModal({ isOpen, onClose, prefill }: { isOpen: boole
           )}
         </FormSection>
 
-        <FormSection title="Audio"
-          description="The audio is saved in your workspace as it arrives, and stays on this computer unless the workspace folder is synced. It is removed once its transcript is in a digest, unless Keep recordings is on in Settings.">
-          <Select label="Microphone" value={deviceId} onChange={setDeviceId}
-            options={[{ value: '', label: "The system's default" }, ...microphones.map((d, i) => ({ value: d.deviceId, label: d.label || `Microphone ${i + 1}` }))]} />
-          <Checkbox checked={voiceCleanup} onChange={setVoiceCleanup} label="Clean up the voice"
-            description="Good for a laptop microphone. Turn it off for a conference microphone, which usually does this itself." />
+        <FormSection title={t('recordMeetingModal.audio')}
+          description={t('recordMeetingModal.theAudioIsSavedIn')}>
+          <Select label={t('recordMeetingModal.microphone')} value={deviceId} onChange={setDeviceId}
+            options={[{ value: '', label: t('recordMeetingModal.theSystemSDefault') }, ...microphones.map((d, i) => ({ value: d.deviceId, label: d.label || t('recordMeetingModal.microphone2', { value: i + 1 }) }))]} />
+          <Checkbox checked={voiceCleanup} onChange={setVoiceCleanup} label={t('recordMeetingModal.cleanUpTheVoice')}
+            description={t('recordMeetingModal.goodForALaptopMicrophone')} />
           {systemSupport === 'yes' ? (
-            <Checkbox checked={systemAudio} onChange={setSystemAudio} label="Also record the computer's sound"
-              description="The other people in a video call, also when you wear headphones. The first time, the system asks to allow it." />
+            <Checkbox checked={systemAudio} onChange={setSystemAudio} label={t('recordMeetingModal.alsoRecordTheComputerS')}
+              description={t('recordMeetingModal.theOtherPeopleInA')} />
           ) : (
-            <p className="gtd-field__hint">{systemSupport ?? 'Only the microphone is recorded, so people heard through headphones are not.'}</p>
+            <p className="gtd-field__hint">{systemSupport ?? t('recordMeetingModal.onlyTheMicrophoneIsRecorded')}</p>
           )}
         </FormSection>
 

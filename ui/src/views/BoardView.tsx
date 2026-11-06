@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { useState, useCallback, useEffect, useMemo, createContext, useContext } from 'react';
 import Page from '@/components/common/Page';
 import { SearchInput } from '@/components/common/Input';
@@ -16,7 +18,7 @@ import EmptyState from '../components/common/EmptyState';
 import { useAppDispatch, useAppState, useDataVersion } from '../store';
 import { apiPut } from '../utils/api';
 import { formatDate, formatDueStatus, formatStatusLabel, formatPriorityLabel } from '../utils/format';
-import { DEFAULT_BOARD, dropUpdate, placeTasks, type BoardColumn, type BoardColumns } from '../utils/boardColumns';
+import { columnLabel, DEFAULT_BOARD, dropUpdate, placeTasks, type BoardColumn, type BoardColumns } from '../utils/boardColumns';
 
 type ViewTab = 'kanban' | 'list' | 'archive';
 type PriorityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -114,13 +116,14 @@ function formatAgentName(agent: string): string {
 const WORKING_STATUSES: Task['status'][] = ['in_progress', 'review'];
 
 function AgentWorkingIndicator({ task }: { task: Task }) {
+  const { t } = useLanguage();
   if (!WORKING_STATUSES.includes(task.status)) return null;
   // The agent name only exists once a task is routed to a specialist. Until
   // then still show progress, so the card never looks idle while work is running.
-  const label = task.preferred_agent ? formatAgentName(task.preferred_agent) : 'Working';
+  const label = task.preferred_agent ? formatAgentName(task.preferred_agent) : t('runSteps.working');
   return (
     <div
-      title={task.preferred_agent ? `${label} is working on this task` : 'An agent is working on this task'}
+      title={task.preferred_agent ? t('board.isWorkingOnThisTask', { label }) : t('board.anAgentIsWorkingOn')}
       style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
     >
       <svg
@@ -152,11 +155,12 @@ function AgentWorkingIndicator({ task }: { task: Task }) {
 /* ---- Task card (Kanban) ------------------------------------------- */
 
 function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
+  const { t } = useLanguage();
   const { showTaskIds } = useAppState();
   return (
     <button
       onClick={onClick}
-      aria-label={`Open task ${task.id}: ${task.title}`}
+      aria-label={t('board.openTask', { id: task.id, title: task.title })}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -187,7 +191,7 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
         </Badge>
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{task.task_type}</span>
         {task.routine_ref && (
-          <span title={`Created by routine ${task.routine_ref}`} aria-label={`Created by routine ${task.routine_ref}`} style={{ display: 'inline-flex', color: 'var(--color-text-muted)' }}>
+          <span title={t('board.createdByRoutine', { routine_ref: task.routine_ref })} aria-label={t('board.createdByRoutine', { routine_ref: task.routine_ref })} style={{ display: 'inline-flex', color: 'var(--color-text-muted)' }}>
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M2.5 7V6a2.5 2.5 0 0 1 2.5-2.5h7.5M10.5 1.5l2 2-2 2M13.5 9v1a2.5 2.5 0 0 1-2.5 2.5H3.5M5.5 14.5l-2-2 2-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -231,7 +235,7 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
           color: 'var(--color-critical)',
           fontWeight: 500,
         }}>
-          Blocked
+          {t('renderer.blocked')}
         </div>
       )}
 
@@ -267,6 +271,7 @@ function KanbanCol({
   onDrop: (taskId: string, column: BoardColumn) => void;
   onAddTask: (column: BoardColumn) => void;
 }) {
+  const { t } = useLanguage();
   const [dragOver, setDragOver] = useState(false);
 
   return (
@@ -300,17 +305,17 @@ function KanbanCol({
         borderBottom: '1px solid var(--color-border)',
         flexShrink: 0,
       }}>
-        <h2 title={column.label} style={{ fontWeight: 600, fontSize: 'var(--text-sm)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{column.label}</h2>
-        <CountBadge count={tasks.length} label={`${tasks.length} tasks`} />
+        <h2 title={columnLabel(column)} style={{ fontWeight: 600, fontSize: 'var(--text-sm)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{columnLabel(column)}</h2>
+        <CountBadge count={tasks.length} label={t('board.tasks', { length: tasks.length })} />
         <div style={{ flex: 1 }} />
-        <IconButton label={`Add a task to ${column.label}`} icon={icons.plus} onClick={() => onAddTask(column)} />
+        <IconButton label={t('board.addATaskTo', { label: columnLabel(column) })} icon={icons.plus} onClick={() => onAddTask(column)} />
       </div>
 
       {/* Cards */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 10px 4px' }}>
         {tasks.length === 0 && (
           <div style={{ textAlign: 'center', padding: '20px 0', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-            Drop tasks here
+            {t('board.dropTasksHere')}
           </div>
         )}
         {tasks.map((task) => (
@@ -335,6 +340,7 @@ function ListView({
   tasks: Task[];
   onRowClick: (id: string) => void;
 }) {
+  const { t } = useLanguage();
   const { showTaskIds } = useAppState();
   const [sortKey, setSortKey] = useState<keyof Task>('created_at');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -352,12 +358,12 @@ function ListView({
 
   type ColDef = { key: keyof Task; label: string; width?: string };
   const cols: ColDef[] = [
-    { key: 'priority', label: 'Priority', width: '90px' },
-    { key: 'title', label: 'Title' },
-    { key: 'status', label: 'Status', width: '110px' },
-    { key: 'due_date', label: 'Due', width: '90px' },
-    { key: 'task_type', label: 'Type', width: '110px' },
-    { key: 'created_at', label: 'Created', width: '90px' },
+    { key: 'priority', label: t('newTaskModal.priority'), width: '90px' },
+    { key: 'title', label: t('importUpdateModal.title') },
+    { key: 'status', label: t('newTaskModal.status'), width: '110px' },
+    { key: 'due_date', label: t('dayPanel.due'), width: '90px' },
+    { key: 'task_type', label: t('board.type'), width: '110px' },
+    { key: 'created_at', label: t('flowChart.created'), width: '90px' },
   ];
 
   return (
@@ -415,6 +421,7 @@ function ListView({
 
 /* ---- Main view ----------------------------------------------------- */
 export default function BoardView() {
+  const { t } = useLanguage();
   const [tab, setTab] = useState<ViewTab>('kanban');
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
   const [search, setSearch] = useState('');
@@ -473,39 +480,39 @@ export default function BoardView() {
       dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     } catch (err) {
       // The card goes back to its column on the next refresh; say why it did not move.
-      notify.error(err, 'Could not move the task. Try again.');
+      notify.error(err, t('board.couldNotMoveTheTask'));
       dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     }
-  }, [dispatch, notify, columns]);
+  }, [dispatch, notify, columns, t]);
 
   const priorities: PriorityFilter[] = ['all', 'critical', 'high', 'medium', 'low'];
 
   return (
     <StakeholderLookup.Provider value={stakeholderLookup}>
     <Page width="full" flush style={{ overflow: 'hidden' }}>
-      <Tabs label="Board views" value={tab} onChange={setTab} idPrefix="board"
+      <Tabs label={t('board.boardViews')} value={tab} onChange={setTab} idPrefix="board"
         style={{ padding: '0 var(--page-gutter)', background: 'var(--color-surface)', flexShrink: 0 }}
-        items={[{ id: 'kanban', label: 'Kanban' }, { id: 'list', label: 'List' }, { id: 'archive', label: 'Archive' }]} />
+        items={[{ id: 'kanban', label: t('board.kanban') }, { id: 'list', label: t('board.list') }, { id: 'archive', label: t('systemCleanup.archive') }]} />
 
       {/* Filter bar */}
       {tab !== 'archive' && (
         <div className="gtd-toolbar">
-          <SegmentedControl label="Priority" value={priorityFilter} onChange={setPriorityFilter}
-            options={priorities.map((p) => ({ value: p, label: p === 'all' ? 'All' : formatPriorityLabel(p) }))} />
-          <SearchInput value={search} onChange={setSearch} placeholder="Search tasks by title or ID" width={240} size="sm" />
+          <SegmentedControl label={t('newTaskModal.priority')} value={priorityFilter} onChange={setPriorityFilter}
+            options={priorities.map((p) => ({ value: p, label: p === 'all' ? t('all') : formatPriorityLabel(p) }))} />
+          <SearchInput value={search} onChange={setSearch} placeholder={t('board.searchTasksByTitleOr')} width={240} size="sm" />
           <span role="status" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
-            {filtered.length} task{filtered.length !== 1 ? 's' : ''}
+            {rich(t, 'board.tasks2', { count: filtered.length })}
           </span>
           {tab === 'kanban' && placed.unplaced.length > 0 && (
             // The user removed the only column for these statuses. The tasks are not lost: the List view has them.
             <Button variant="ghost" size="sm" onClick={() => setTab('list')}
-              title="No column shows the status of these tasks. Open the List view to see them, or edit the columns.">
-              {placed.unplaced.length} not in a column
+              title={t('board.noColumnShowsTheStatus')}>
+              {rich(t, 'board.notInAColumn', { length: placed.unplaced.length })}
             </Button>
           )}
           {tab === 'kanban' && (
             <Button variant="ghost" size="sm" icon={icons.edit} onClick={() => setEditingColumns(true)}>
-              Edit columns…
+              {t('board.editColumns')}
             </Button>
           )}
         </div>
@@ -513,7 +520,7 @@ export default function BoardView() {
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {(loading || (tab === 'kanban' && boardLoading)) && <LoadingSpinner text="Loading tasks…" />}
+        {(loading || (tab === 'kanban' && boardLoading)) && <LoadingSpinner text={t('board.loadingTasks')} />}
 
         {!loading && !boardLoading && tab === 'kanban' && (
           <div id="board-panel" role="tabpanel" aria-labelledby="board-tab-kanban" style={{ flex: 1, display: 'flex', gap: 'var(--space-4)', padding: 'var(--space-4) var(--page-gutter)', overflowX: 'auto', overflowY: 'hidden', minHeight: 0 }}>
@@ -535,11 +542,11 @@ export default function BoardView() {
             <div className="gtd-card">
               {filtered.length === 0 ? (
                 search || priorityFilter !== 'all' ? (
-                  <EmptyState size="compact" title="No tasks match these filters" description="Try another word or priority."
-                    action={{ label: 'Clear filters', onClick: () => { setSearch(''); setPriorityFilter('all'); } }} />
+                  <EmptyState size="compact" title={t('board.noTasksMatchTheseFilters')} description={t('board.tryAnotherWordOrPriority')}
+                    action={{ label: t('updatesList.clearFilters'), onClick: () => { setSearch(''); setPriorityFilter('all'); } }} />
                 ) : (
-                  <EmptyState size="compact" title="No tasks yet" description="A task is one piece of work, with the deliverables an agent will make for it."
-                    action={{ label: 'New task', onClick: () => openNewTask('backlog') }} />
+                  <EmptyState size="compact" title={t('board.noTasksYet')} description={t('board.aTaskIsOnePiece')}
+                    action={{ label: t('newTask'), onClick: () => openNewTask('backlog') }} />
                 )
               ) : (
                 <ListView tasks={filtered} onRowClick={(id) => navigate(`/board/task/${id}`)} />
@@ -552,7 +559,7 @@ export default function BoardView() {
           <div id="board-panel" role="tabpanel" aria-labelledby="board-tab-archive" style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-4) var(--page-gutter)' }}>
             <div className="gtd-card">
               {tasks.length === 0 ? (
-                <EmptyState size="compact" title="The archive is empty" description="Archived tasks appear here. Move a task to Archived from its status field." />
+                <EmptyState size="compact" title={t('board.theArchiveIsEmpty')} description={t('board.archivedTasksAppearHereMove')} />
               ) : (
                 <ListView tasks={tasks} onRowClick={(id) => navigate(`/board/task/${id}`)} />
               )}

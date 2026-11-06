@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import * as A from '../pixel/sprites-agent';
 import * as R from '../pixel/sprites-room';
 import * as I from '../pixel/sprites-icons';
@@ -246,18 +247,18 @@ export interface RenderOptions {
 
 /** Short caption shown in an agent's bubble. */
 function bubbleText(agent: FloorAgent): string {
-  if (agent.blocked) return 'Blocked';
+  if (agent.blocked) return tr('renderer.blocked');
   switch (agent.activity) {
-    case 'pickup': return 'Taking a task';
-    case 'reading': return 'Reading brief';
-    case 'browsing': return 'Loading context';
-    case 'searching': return 'Researching';
-    case 'thinking': return 'Planning';
-    case 'writing': return `Writing ${(agent.outputFormat ?? 'output').toUpperCase()}`;
-    case 'delivering': return agent.destination === 'done' ? 'Filing to Done' : 'Sending to Review';
-    case 'celebrating': return 'Handed in';
+    case 'pickup': return tr('renderer.takingATask');
+    case 'reading': return tr('renderer.readingBrief');
+    case 'browsing': return tr('renderer.loadingContext');
+    case 'searching': return tr('renderer.researching');
+    case 'thinking': return tr('renderer.planning');
+    case 'writing': return tr('renderer.writing', { toUpperCase: (agent.outputFormat ?? 'output').toUpperCase() });
+    case 'delivering': return agent.destination === 'done' ? tr('renderer.filingToDone') : tr('renderer.sendingToReview');
+    case 'celebrating': return tr('renderer.handedIn');
     case 'walk': return agent.taskId;
-    default: return 'Idle';
+    default: return tr('renderer.idle');
   }
 }
 
@@ -302,7 +303,7 @@ export function render(
   blit(ctx, bake('rug', R.RUG), DECOR.rug.x, DECOR.rug.y);
 
   // --- Back-row furniture ---------------------------------------------------
-  blit(ctx, bake('shelf', R.BOOKSHELF), SHELF.sprite.x, SHELF.sprite.y);
+  blit(ctx, bake('shelf', R.BOOKSHELF), SHELF().sprite.x, SHELF().sprite.y);
 
   const agentAt = new Map<string, FloorAgent>();
   for (const agent of world.agents) {
@@ -352,15 +353,15 @@ export function render(
   blit(ctx, bake('plantSmall', X.PLANT_SMALL), DECOR.plantSmall.x, DECOR.plantSmall.y);
 
   const desk = bake('desk', R.DESK);
-  blit(ctx, desk, DESKS.backlog.sprite.x, DESKS.backlog.sprite.y);
-  blit(ctx, desk, DESKS.review.sprite.x, DESKS.review.sprite.y);
-  blit(ctx, desk, DESKS.done.sprite.x, DESKS.done.sprite.y);
+  blit(ctx, desk, DESKS().backlog.sprite.x, DESKS().backlog.sprite.y);
+  blit(ctx, desk, DESKS().review.sprite.x, DESKS().review.sprite.y);
+  blit(ctx, desk, DESKS().done.sprite.x, DESKS().done.sprite.y);
   blit(ctx, bake('mug', R.MUG), DECOR.mug.x, DECOR.mug.y);
   blit(ctx, bake('tray', X.PAPER_TRAY), DECOR.paperTray.x, DECOR.paperTray.y);
 
-  drawStack(ctx, DESKS.backlog.sprite.x, DESKS.backlog.sprite.y, world.piles.backlog.shown);
-  drawStack(ctx, DESKS.review.sprite.x, DESKS.review.sprite.y, world.piles.review.shown);
-  drawStack(ctx, DESKS.done.sprite.x, DESKS.done.sprite.y, world.piles.done.shown);
+  drawStack(ctx, DESKS().backlog.sprite.x, DESKS().backlog.sprite.y, world.piles.backlog.shown);
+  drawStack(ctx, DESKS().review.sprite.x, DESKS().review.sprite.y, world.piles.review.shown);
+  drawStack(ctx, DESKS().done.sprite.x, DESKS().done.sprite.y, world.piles.done.shown);
   blit(ctx, bake('clipboard', X.CLIPBOARD), DECOR.clipboard.x, DECOR.clipboard.y);
 
   // --- Agents, painted back to front so nearer ones overlap -----------------
@@ -374,12 +375,12 @@ export function render(
   // above uses the eased value, so a growing pile animates while the label
   // stays truthful.
   const p = world.piles;
-  drawDeskLabel(ctx, DESKS.backlog.sprite.x, DESKS.backlog.sprite.y, 'BACKLOG', p.backlog.target, '#8b88ab');
-  drawDeskLabel(ctx, DESKS.review.sprite.x, DESKS.review.sprite.y, 'REVIEW', p.review.target, '#f2c14e');
-  drawDeskLabel(ctx, DESKS.done.sprite.x, DESKS.done.sprite.y, 'DONE', p.done.target, '#5fbb62');
+  drawDeskLabel(ctx, DESKS().backlog.sprite.x, DESKS().backlog.sprite.y, 'BACKLOG', p.backlog.target, '#8b88ab');
+  drawDeskLabel(ctx, DESKS().review.sprite.x, DESKS().review.sprite.y, 'REVIEW', p.review.target, '#f2c14e');
+  drawDeskLabel(ctx, DESKS().done.sprite.x, DESKS().done.sprite.y, 'DONE', p.done.target, '#5fbb62');
 
   if (world.caretaker && world.agents.length === 0) {
-    drawTextOutlined(ctx, 'NO TASKS IN PROGRESS', 176, 258, '#8b88ab');
+    drawTextOutlined(ctx, tr('renderer.noTasksInProgress'), 176, 258, '#8b88ab');
   }
 
   // --- Effects --------------------------------------------------------------
@@ -465,17 +466,17 @@ function drawAgent(
 }
 
 /** Labels pointing at each station, toggled from the HUD. */
-const LEGEND: Array<{ x: number; y: number; text: string }> = [
-  { x: 88, y: 34, text: 'CONTEXT SHELF' },
-  { x: 170, y: 44, text: 'TERMINALS' },
-  { x: 340, y: 46, text: 'TOOLS' },
-  { x: 36, y: 208, text: 'WAITING WORK' },
-  { x: 216, y: 208, text: 'NEEDS REVIEW' },
-  { x: 396, y: 208, text: 'FINISHED' },
-];
+const LEGEND = (): Array<{ x: number; y: number; text: string }> => ([
+  { x: 88, y: 34, text: tr('renderer.contextShelf') },
+  { x: 170, y: 44, text: tr('renderer.terminals') },
+  { x: 340, y: 46, text: tr('renderer.tools') },
+  { x: 36, y: 208, text: tr('renderer.waitingWork') },
+  { x: 216, y: 208, text: tr('renderer.needsReview') },
+  { x: 396, y: 208, text: tr('renderer.finished') },
+]);
 
 function drawLegend(ctx: CanvasRenderingContext2D): void {
-  for (const item of LEGEND) {
+  for (const item of LEGEND()) {
     const w = textWidth(item.text) + 6;
     ctx.fillStyle = 'rgba(18,16,28,0.78)';
     ctx.fillRect(item.x, item.y, w, 11);

@@ -86,6 +86,7 @@ async function scenario(mode) {
       if (name.endsWith('/desktop')) return { microphoneAccess: async () => 'granted' };
       if (name.endsWith('/RecordingParts')) return { MicIcon: 'MicIcon', RecordingPill: 'RecordingPill' };
       if (name.endsWith('/dictation')) return utils;
+      if (name.endsWith('/LanguageProvider')) return { useLanguage: () => ({ t: (key) => key }) };
       throw Error(name);
     },
     {

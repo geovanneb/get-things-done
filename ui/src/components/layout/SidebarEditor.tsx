@@ -1,3 +1,5 @@
+import type { PlainMessageKey } from '../../../../server/src/i18n/messages';
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import { useAppDispatch, useAppState } from '../../store';
 import { useSaveSidebar } from '../../hooks/useSidebar';
@@ -7,8 +9,8 @@ import {
 } from './navGroups';
 
 // The groups without a heading in the normal sidebar still get one here, so it is clear where items can move.
-const EDIT_HEADINGS: Record<ArrangedGroup['id'], string> = {
-  work: 'Work', memory: 'Memory', automation: 'Automation', account: 'Account',
+const EDIT_HEADINGS: Record<ArrangedGroup['id'], PlainMessageKey> = {
+  work: 'groupWork', memory: 'memory', automation: 'automation', account: 'groupAccount',
 };
 
 /**
@@ -16,6 +18,7 @@ const EDIT_HEADINGS: Record<ArrangedGroup['id'], string> = {
  * row also has Move up and Move down buttons, and each change is announced to screen readers.
  */
 export default function SidebarEditor({ icons }: { icons: Record<NavItemId, React.ReactNode> }) {
+  const { t } = useLanguage();
   const { sidebar, agenticVisualMode } = useAppState();
   const dispatch = useAppDispatch();
   const save = useSaveSidebar();
@@ -32,7 +35,7 @@ export default function SidebarEditor({ icons }: { icons: Record<NavItemId, Reac
 
   const move = (group: ArrangedGroup, item: ArrangedEntry, to: number, keepFocus?: 'up' | 'down') => {
     save(moveItem(defaults, sidebar, item.id, to));
-    setAnnouncement(`${item.label} moved to position ${to + 1} of ${group.items.length} in ${EDIT_HEADINGS[group.id]}.`);
+    setAnnouncement(t('itemMoved', { item: item.label, position: to + 1, total: group.items.length, group: t(EDIT_HEADINGS[group.id]) }));
     if (!keepFocus) return;
     // The row moves in the page: keep the focus on its button, or on the other arrow once it reaches the end.
     requestAnimationFrame(() => {
@@ -44,13 +47,13 @@ export default function SidebarEditor({ icons }: { icons: Record<NavItemId, Reac
 
   const toggle = (item: ArrangedEntry) => {
     save(setHidden(sidebar, item.id, !item.hidden));
-    setAnnouncement(item.hidden ? `${item.label} is shown again.` : `${item.label} is hidden. It is under More.`);
+    setAnnouncement(item.hidden ? t('itemShown', { item: item.label }) : t('itemHidden', { item: item.label }));
   };
 
   const reset = () => {
     save(DEFAULT_SIDEBAR);
     setConfirmReset(false);
-    setAnnouncement('The sidebar is back to the default order.');
+    setAnnouncement(t('sidebarReset'));
   };
 
   return (
@@ -70,16 +73,16 @@ export default function SidebarEditor({ icons }: { icons: Record<NavItemId, Reac
           // design-exception: outline none on a heading that only receives focus from code (tabIndex -1), never from Tab
           style={{ margin: 0, fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--nav-text-active)', outline: 'none' }}
         >
-          Customize sidebar
+          {t('customizeSidebar')}
         </h2>
         <p style={{ margin: '4px 0 0', fontSize: 'var(--text-xs)', lineHeight: 1.45, color: 'var(--nav-text)' }}>
-          Drag items or use the arrows to change their order inside a group. Hidden items move to More.
+          {t('sidebarEditorHint')}
         </p>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 8px' }}>
         {groups.map((group) => (
-          <div key={group.id} role="group" aria-label={EDIT_HEADINGS[group.id]}>
+          <div key={group.id} role="group" aria-label={t(EDIT_HEADINGS[group.id])}>
             <div
               aria-hidden="true"
               style={{
@@ -87,7 +90,7 @@ export default function SidebarEditor({ icons }: { icons: Record<NavItemId, Reac
                 textTransform: 'uppercase', color: 'var(--nav-text)', opacity: 0.7,
               }}
             >
-              {EDIT_HEADINGS[group.id]}
+              {t(EDIT_HEADINGS[group.id])}
             </div>
             <ul role="list" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {group.items.map((item, index) => (
@@ -121,18 +124,18 @@ export default function SidebarEditor({ icons }: { icons: Record<NavItemId, Reac
         {confirmReset ? (
           <>
             <span style={{ flexBasis: '100%', padding: '0 4px 4px', fontSize: 'var(--text-xs)', color: 'var(--nav-text-active)' }}>
-              Reset the sidebar to the default order and show every item?
+              {t('sidebarResetConfirm')}
             </span>
-            <EditorButton onClick={() => setConfirmReset(false)}>Cancel</EditorButton>
-            <EditorButton onClick={reset} strong>Reset</EditorButton>
+            <EditorButton onClick={() => setConfirmReset(false)}>{t('cancel')}</EditorButton>
+            <EditorButton onClick={reset} strong>{t('reset')}</EditorButton>
           </>
         ) : (
           <>
             <EditorButton onClick={() => setConfirmReset(true)} disabled={isDefaultSidebar(defaults, sidebar)}>
-              Reset to default
+              {t('resetToDefault')}
             </EditorButton>
             <span style={{ flex: 1 }} />
-            <EditorButton onClick={done} strong>Done</EditorButton>
+            <EditorButton onClick={done} strong>{t('done')}</EditorButton>
           </>
         )}
       </div>
@@ -158,8 +161,9 @@ interface EditRowProps {
 }
 
 function EditRow({ item, icon, first, last, dragging, acceptsDrop, onUp, onDown, onToggle, onDragStart, onDragEnd, onDrop }: EditRowProps) {
+  const { t } = useLanguage();
   const hideable = canHide(item.id);
-  const hideLabel = !hideable ? `${item.label} is always shown` : item.hidden ? `Show ${item.label}` : `Hide ${item.label}`;
+  const hideLabel = !hideable ? t('itemAlwaysShown', { item: item.label }) : item.hidden ? t('showItem', { item: item.label }) : t('hideItem', { item: item.label });
   return (
     <li
       draggable
@@ -196,12 +200,12 @@ function EditRow({ item, icon, first, last, dragging, acceptsDrop, onUp, onDown,
       <span style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, opacity: item.hidden ? 0.45 : 1 }}>
         <span style={{ display: 'flex', flexShrink: 0 }}>{icon}</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
-        {item.hidden && <span className="sr-only">, hidden</span>}
+        {item.hidden && <span className="sr-only">{t('hiddenSuffix')}</span>}
       </span>
-      <RowButton id={`sidebar-up-${item.id}`} label={`Move ${item.label} up`} disabled={first} onClick={onUp}>
+      <RowButton id={`sidebar-up-${item.id}`} label={t('moveItemUp', { item: item.label })} disabled={first} onClick={onUp}>
         <path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" />
       </RowButton>
-      <RowButton id={`sidebar-down-${item.id}`} label={`Move ${item.label} down`} disabled={last} onClick={onDown}>
+      <RowButton id={`sidebar-down-${item.id}`} label={t('moveItemDown', { item: item.label })} disabled={last} onClick={onDown}>
         <path d="M8 3.5v9M4.5 9 8 12.5 11.5 9" />
       </RowButton>
       <RowButton label={hideLabel} disabled={!hideable} onClick={onToggle}>

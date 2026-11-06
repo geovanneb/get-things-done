@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * Native helpers when the dashboard runs in the desktop app, with the server routes as the browser fallback.
  * The desktop app's preload script sets `window.gtdDesktop`; a browser tab never has it.
@@ -6,6 +7,8 @@ import { apiPost } from './api';
 
 export interface DesktopBridge {
   version: number;
+  /** OS preference order, independent of Chromium UI locale. */
+  preferredLanguages?(): Promise<string[]>;
   /** The system folder dialog, attached to the app window. Null on cancel. */
   pickFolder(): Promise<string | null>;
   /** Opens the current workspace in Finder or Explorer. */
@@ -86,7 +89,7 @@ export function followDesktopUpdate(listener: (state: DesktopUpdate) => void): (
 /** Restart to update: null when the app restarts, else why not now. */
 export async function restartToUpdate(): Promise<string | null> {
   const b = desktopBridge();
-  if (!b?.restartToUpdate) return 'Only the desktop app restarts itself';
+  if (!b?.restartToUpdate) return tr('desktop.onlyTheDesktopAppRestarts');
   return b.restartToUpdate();
 }
 
@@ -122,7 +125,7 @@ export async function microphoneAccess(): Promise<string> {
 /** In a browser only the microphone is recorded; the desktop app says whether this computer can do more. */
 export async function systemAudioSupport(): Promise<string> {
   const bridge = desktopBridge();
-  if (!bridge?.systemAudioSupport) return 'Only the microphone is recorded here, so people heard through headphones are not. The desktop app can also record the computer\'s sound.';
+  if (!bridge?.systemAudioSupport) return tr('desktop.onlyTheMicrophoneIsRecorded');
   return bridge.systemAudioSupport();
 }
 
@@ -162,7 +165,7 @@ export async function openWorkspaceFolder(): Promise<void> {
   const bridge = desktopBridge();
   if (bridge) {
     const result = await bridge.openWorkspaceFolder();
-    if (!result.opened) throw new Error(result.error || 'Could not open the workspace folder.');
+    if (!result.opened) throw new Error(result.error || tr('desktop.couldNotOpenTheWorkspace'));
     return;
   }
   await apiPost('/api/workspace/open', {});

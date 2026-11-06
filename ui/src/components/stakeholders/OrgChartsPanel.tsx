@@ -1,3 +1,7 @@
+import { listText } from '@/i18n/current';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useNavigate } from 'react-router-dom';
@@ -32,7 +36,7 @@ import OrgUnitsView from './OrgUnitsView';
 import type { UnitAction } from './OrgUnitsView';
 
 type View = 'chart' | 'outline' | 'units';
-const VIEW_LABELS: Record<View, string> = { chart: 'Chart', outline: 'Outline', units: 'Units' };
+const VIEW_LABELS = (): Record<View, string> => ({ chart: tr('orgChartsPanel.chart'), outline: tr('orgChartsPanel.outline'), units: tr('orgChartDialogs.units') });
 const VIEW_KEY = 'gtd:org-chart-view';
 /** Charts with more people than this open at two levels until the user chooses otherwise. */
 const LARGE_CHART = 15;
@@ -64,6 +68,7 @@ interface PanelProps {
 }
 
 export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeholderCreated }: PanelProps) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const dispatch = useAppDispatch();
   const { workspace } = useAppState();
@@ -116,7 +121,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
         setCharts(list);
         setActiveId((id) => id ?? (list.some((c) => c.id === initialChartId) ? initialChartId! : list[0]?.id ?? null));
       })
-      .catch((err) => notifyError(err instanceof Error ? err.message : 'Could not load org charts.'))
+      .catch((err) => notifyError(err instanceof Error ? err.message : t('orgChartsPanel.couldNotLoadOrgCharts')))
       .finally(() => setLoading(false));
   }, [notifyError, initialChartId]);
 
@@ -285,7 +290,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
       return true;
     } catch (err) {
       if (seq === saveSeq.current) setCharts((list) => list.map((c) => (c.id === chart.id ? { ...c, ...previous } : c)));
-      notifyError(err instanceof Error ? err.message : 'Could not save the change.');
+      notifyError(err instanceof Error ? err.message : t('orgChartsPanel.couldNotSaveTheChange'));
       return false;
     }
   }
@@ -309,7 +314,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
     onStakeholderCreated?.(person);
     const ok = await saveChart(replaceRef(members, units, ref, person.id, false));
     if (!ok) {
-      notifyError(`${person.name} was created as a stakeholder, but the chart was not updated. Use "Link to existing stakeholder…" on the placeholder to finish.`);
+      notifyError(t('orgChartsPanel.wasCreatedAsAStakeholder', { name: person.name }));
     }
   }
   const saveMembers = (next: OrgChartMember[]) => saveChart({ members: next });
@@ -325,7 +330,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
     if (!unitForm) return;
     const id = unitForm.editing?.id ?? nextUnitId(units);
     if (values.parent && !canNestUnit(units, id, values.parent)) {
-      notifyError('A unit cannot sit inside one of its own sub-units.');
+      notifyError(t('orgChartsPanel.aUnitCannotSitInside'));
       return;
     }
     saveChart({ units: saveUnit(units, { id, name: values.name, parent: values.parent ?? undefined, head: values.head ?? undefined }) });
@@ -338,21 +343,21 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
     else {
       const people = members.filter((m) => m.unit === unit.id).length;
       const subUnits = units.filter((u) => u.parent === unit.id).length;
-      const parentName = unit.parent ? units.find((u) => u.id === unit.parent)?.name ?? 'the unit above' : null;
-      const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+      const parentName = unit.parent ? units.find((u) => u.id === unit.parent)?.name ?? t('orgChartsPanel.theUnitAbove') : null;
+      const peopleText = t('common.personCount', { count: people });
+      const subUnitsText = t('common.subUnitCount', { count: subUnits });
       const moves = parentName
-        ? [people && count(people, 'person', 'people'), subUnits && count(subUnits, 'sub-unit', 'sub-units')].filter(Boolean).join(' and ')
-            .replace(/^(.+)$/, `Its $1 move to "${parentName}".`)
-        : [subUnits && `Its ${count(subUnits, 'sub-unit moves', 'sub-units move')} to the top level.`,
-           people && `Its ${count(people, 'person is', 'people are')} left without a unit.`].filter(Boolean).join(' ');
-      void confirm({ title: `Delete the unit "${unit.name}"?`, message: `${moves ? `${moves} ` : ''}Nobody is removed from the chart.`, confirmLabel: 'Delete unit', tone: 'danger' })
+        ? (people || subUnits) ? t('orgChartsPanel.movesToParent', { items: listText([...(people ? [peopleText] : []), ...(subUnits ? [subUnitsText] : [])]), parent: parentName }) : ''
+        : [subUnits && t('orgChartsPanel.subUnitsToTop', { items: subUnitsText }),
+           people && t('orgChartsPanel.peopleWithoutUnit', { items: peopleText })].filter(Boolean).join(' ');
+      void confirm({ title: t('orgChartsPanel.deleteTheUnit', { name: unit.name }), message: t('orgChartsPanel.nobodyIsRemovedFromThe', { value: moves ? `${moves} ` : '' }), confirmLabel: t('orgChartsPanel.deleteUnit'), tone: 'danger' })
         .then((ok) => { if (ok) saveChart(deleteUnit(units, members, unit.id)); });
     }
   }
 
   function place(ref: string, manager: string | null) {
     if (!canReportTo(members, ref, manager)) {
-      notifyError(`${people.get(ref)?.name ?? ref} cannot report to someone in their own team.`);
+      notifyError(t('orgChartsPanel.cannotReportToSomeoneIn', { name: people.get(ref)?.name ?? ref }));
       return;
     }
     saveMembers(placeMember(members, ref, manager));
@@ -405,14 +410,14 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
 
   async function deleteChart() {
     if (!chart) return;
-    if (!(await confirm({ title: `Delete the org chart "${chart.name}"?`, message: 'The chart and its units are deleted. The stakeholders themselves are kept.', confirmLabel: 'Delete org chart', tone: 'danger' }))) return;
+    if (!(await confirm({ title: t('orgChartsPanel.deleteTheOrgChart', { name: chart.name }), message: t('orgChartsPanel.theChartAndItsUnits'), confirmLabel: t('orgChartsPanel.deleteOrgChart'), tone: 'danger' }))) return;
     try {
       await apiDelete(`/api/org-charts/${chart.id}`);
       const rest = charts.filter((c) => c.id !== chart.id);
       setCharts(rest);
       setActiveId(rest[0]?.id ?? null);
     } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Could not delete the chart.');
+      notifyError(err instanceof Error ? err.message : t('orgChartsPanel.couldNotDeleteTheChart'));
     }
   }
 
@@ -454,32 +459,32 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
     <div className={`org-layout${listCollapsed ? ' org-layout--list-collapsed' : ''}`}>
       {/* Chart list (collapsible to a thin rail) */}
       {listCollapsed ? (
-        <aside className="org-layout__list org-layout__list--rail" aria-label="Org charts">
-          <button type="button" className="org-rail-btn" onClick={toggleList} aria-label="Show the chart list" title="Show the chart list">
+        <aside className="org-layout__list org-layout__list--rail" aria-label={t('orgChartsPanel.orgCharts')}>
+          <button type="button" className="org-rail-btn" onClick={toggleList} aria-label={t('orgChartsPanel.showTheChartList')} title={t('orgChartsPanel.showTheChartList')}>
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
-          <span className="org-rail-label">Charts · {charts.length}</span>
+          <span className="org-rail-label">{rich(t, 'orgChartsPanel.charts', { length: charts.length })}</span>
         </aside>
       ) : (
-      <aside className="org-layout__list" aria-label="Org charts">
+      <aside className="org-layout__list" aria-label={t('orgChartsPanel.orgCharts')}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, padding: '12px 8px 8px 12px' }}>
-          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Charts</span>
+          <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('orgChartsPanel.charts2')}</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Button size="sm" variant="ghost" icon={icons.plus} onClick={() => { setEditingChart(null); setFormOpen(true); }}>New chart</Button>
-            <button type="button" className="org-rail-btn" onClick={toggleList} aria-label="Hide the chart list" title="Hide the chart list">
+            <Button size="sm" variant="ghost" icon={icons.plus} onClick={() => { setEditingChart(null); setFormOpen(true); }}>{t('orgChartsPanel.newChart')}</Button>
+            <button type="button" className="org-rail-btn" onClick={toggleList} aria-label={t('orgChartsPanel.hideTheChartList')} title={t('orgChartsPanel.hideTheChartList')}>
               <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M9 3L5 7l4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </button>
           </span>
         </div>
         {charts.length === 0 && (
-          <p style={{ padding: '0 12px 12px', margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No charts yet.</p>
+          <p style={{ padding: '0 12px 12px', margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('orgChartsPanel.noChartsYet')}</p>
         )}
         {charts.map((c) => (
           <button key={c.id} type="button" onClick={() => setActiveId(c.id)}
             className={`org-layout__chart${c.id === activeId ? ' org-layout__chart--active' : ''}`}>
             <span style={{ display: 'block', fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}>{c.name}</span>
             <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              {[c.organization, `${c.members.length} ${c.members.length === 1 ? 'person' : 'people'}`].filter(Boolean).join(' · ')}
+              {[c.organization, t('common.personCount', { count: c.members.length })].filter(Boolean).join(' · ')}
             </span>
           </button>
         ))}
@@ -488,12 +493,12 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
 
       {/* Editor */}
       <section className={`org-layout__editor${fullscreen ? ' org-layout__editor--fullscreen' : ''}`}
-        aria-label={fullscreen && chart ? `${chart.name} (full screen)` : undefined}>
+        aria-label={fullscreen && chart ? t('orgChartsPanel.fullScreen', { name: chart.name }) : undefined}>
         {!chart ? (
           <EmptyState
-            title="Map who reports to whom"
-            description="Create an org chart for a company or organization, then arrange your stakeholders into reporting lines. Agents use it to pitch deliverables at the right level and to find the right escalation path."
-            action={{ label: 'New org chart', onClick: () => { setEditingChart(null); setFormOpen(true); } }}
+            title={t('orgChartsPanel.mapWhoReportsToWhom')}
+            description={t('orgChartsPanel.createAnOrgChartFor')}
+            action={{ label: t('orgChartDialogs.newOrgChart'), onClick: () => { setEditingChart(null); setFormOpen(true); } }}
           />
         ) : (
           <>
@@ -501,23 +506,23 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
               <div style={{ flex: 1, minWidth: 200 }}>
                 <h2 style={{ margin: 0, fontSize: 'var(--text-lg)', fontWeight: 600, color: 'var(--color-text)' }}>{chart.name}</h2>
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                  {[chart.organization, chart.description].filter(Boolean).join(' · ') || 'No organization set'}
+                  {[chart.organization, chart.description].filter(Boolean).join(' · ') || t('orgChartsPanel.noOrganizationSet')}
                 </div>
               </div>
-              <Tabs label="Chart view" value={view} onChange={setView}
-                items={(['chart', 'outline', 'units'] as View[]).map((id) => ({ id, label: VIEW_LABELS[id] }))} />
+              <Tabs label={t('orgChartsPanel.chartView')} value={view} onChange={setView}
+                items={(['chart', 'outline', 'units'] as View[]).map((id) => ({ id, label: VIEW_LABELS()[id] }))} />
               {fullscreen ? (
-                <button ref={exitBtn} type="button" className="org-tool-btn org-tool-btn--primary" onClick={exitFullscreen} title="Exit full screen (Esc)">
-                  Exit full screen
+                <button ref={exitBtn} type="button" className="org-tool-btn org-tool-btn--primary" onClick={exitFullscreen} title={t('orgChartsPanel.exitFullScreenEsc')}>
+                  {t('orgChartsPanel.exitFullScreen')}
                 </button>
               ) : (
                 <>
                   <Button size="sm" variant={panelOpen ? 'primary' : 'secondary'} aria-pressed={panelOpen} aria-controls="org-people-panel"
                     onClick={() => setPanelOpen(!panelOpen)}>
-                    {panelOpen ? 'Close Add people' : 'Add people'}
+                    {panelOpen ? t('orgChartsPanel.closeAddPeople') : t('orgChartsPanel.addPeople')}
                   </Button>
-                  <Button size="sm" variant="secondary" onClick={() => { setEditingChart(chart); setFormOpen(true); }}>Edit details</Button>
-                  <Button size="sm" variant="danger" onClick={deleteChart}>Delete chart</Button>
+                  <Button size="sm" variant="secondary" onClick={() => { setEditingChart(chart); setFormOpen(true); }}>{t('orgChartsPanel.editDetails')}</Button>
+                  <Button size="sm" variant="danger" onClick={deleteChart}>{t('orgChartsPanel.deleteChart')}</Button>
                 </>
               )}
             </header>
@@ -530,27 +535,26 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
                     onDrop={(e) => { e.preventDefault(); const ref = e.dataTransfer.getData(DRAG_MIME); if (ref) place(ref, null); }}
                     style={{ border: '1px dashed var(--color-border-strong)', borderRadius: 'var(--radius-lg)', padding: '40px 20px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}
                   >
-                    This chart is empty. Drag people here from the <strong>Add people</strong> panel, or click <strong>Add</strong> next to a name.
-                    <br />Start with the most senior person, then add their direct reports.
+                    {rich(t, 'orgChartsPanel.thisChartIsEmptyDrag', { strong: <strong>{t('orgChartsPanel.addPeople')}</strong>, strong2: <strong>{t('orgChartsPanel.add')}</strong>, part: <br /> })}
                   </div>
                 ) : (
                   <>
                   <div className="org-toolbar">
                   {view !== 'units' && depth > 1 && (
-                      <div role="group" aria-label="Levels shown" className="org-view-toggle">
-                        <span className="org-toolbar__label">Levels</span>
+                      <div role="group" aria-label={t('orgChartsPanel.levelsShown')} className="org-view-toggle">
+                        <span className="org-toolbar__label">{t('orgChartsPanel.levels')}</span>
                         {Array.from({ length: depth }, (_, i) => i + 1).map((level) => (
                           <button key={level} type="button" aria-pressed={activeLevel === level}
                             className={activeLevel === level ? 'org-view-toggle__btn org-view-toggle__btn--active' : 'org-view-toggle__btn'}
-                            title={level === 1 ? 'Collapse all' : level === depth ? 'Expand all' : `Show ${level} levels`}
+                            title={level === 1 ? t('orgChartsPanel.collapseAll') : level === depth ? t('orgChartsPanel.expandAll') : t('orgChartsPanel.showLevels', { level })}
                             onClick={() => applyCollapsed(level === depth ? new Set() : collapsedForLevel(roots, level))}>
-                            {level === depth ? 'All' : level}
+                            {level === depth ? t('all') : level}
                           </button>
                         ))}
                       </div>
                   )}
                     {view === 'units' && (
-                      <Button size="sm" icon={icons.plus} onClick={() => setUnitForm({ editing: null, parent: null })}>New unit</Button>
+                      <Button size="sm" icon={icons.plus} onClick={() => setUnitForm({ editing: null, parent: null })}>{t('orgChartDialogs.newUnit')}</Button>
                     )}
                     {view !== 'units' && (
                     <div className="org-search" role="search">
@@ -563,39 +567,39 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
                           else if (e.key === 'ArrowUp') { e.preventDefault(); stepMatch(-1); }
                           else if (e.key === 'Escape' && search) { e.preventDefault(); e.stopPropagation(); setSearch(''); }
                         }}
-                        placeholder="Find in chart"
-                        aria-label="Find a person in this chart"
+                        placeholder={t('orgChartsPanel.findInChart')}
+                        aria-label={t('orgChartsPanel.findAPersonInThis')}
                         className="org-search__input"
                       />
                       {search.trim() && (
                         <>
                           <span className="org-search__count" aria-live="polite">
-                            {matchList.length ? `${Math.min(matchIndex, matchList.length - 1) + 1}/${matchList.length}` : 'No match'}
+                            {matchList.length ? `${Math.min(matchIndex, matchList.length - 1) + 1}/${matchList.length}` : t('orgChartsPanel.noMatch')}
                           </span>
-                          <button type="button" className="org-view-toggle__btn" onClick={() => stepMatch(-1)} disabled={!matchList.length} aria-label="Previous match">↑</button>
-                          <button type="button" className="org-view-toggle__btn" onClick={() => stepMatch(1)} disabled={!matchList.length} aria-label="Next match">↓</button>
+                          <button type="button" className="org-view-toggle__btn" onClick={() => stepMatch(-1)} disabled={!matchList.length} aria-label={t('orgChartsPanel.previousMatch')}>↑</button>
+                          <button type="button" className="org-view-toggle__btn" onClick={() => stepMatch(1)} disabled={!matchList.length} aria-label={t('orgChartsPanel.nextMatch')}>↓</button>
                         </>
                       )}
                     </div>
                     )}
                     <span style={{ flex: 1 }} />
                     {view !== 'outline' && (
-                      <div role="group" aria-label="Zoom" className="org-view-toggle">
-                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s / 1.25))} aria-label="Zoom out" title="Zoom out (Ctrl/⌘ + scroll)">−</button>
-                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale(1)} title="Reset to 100%" style={{ minWidth: 48 }}>{Math.round(scale * 100)}%</button>
-                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s * 1.25))} aria-label="Zoom in" title="Zoom in (Ctrl/⌘ + scroll)">+</button>
-                        <button type="button" className="org-view-toggle__btn" onClick={() => viewportRef.current?.fit()} title="Fit the visible chart">Fit</button>
+                      <div role="group" aria-label={t('zoom')} className="org-view-toggle">
+                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s / 1.25))} aria-label={t('orgChartsPanel.zoomOut')} title={t('orgChartsPanel.zoomOutCtrlScroll')}>−</button>
+                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale(1)} title={t('orgChartsPanel.resetTo100')} style={{ minWidth: 48 }}>{Math.round(scale * 100)}%</button>
+                        <button type="button" className="org-view-toggle__btn" onClick={() => setScale((s) => clampScale(s * 1.25))} aria-label={t('orgChartsPanel.zoomIn')} title={t('orgChartsPanel.zoomInCtrlScroll')}>+</button>
+                        <button type="button" className="org-view-toggle__btn" onClick={() => viewportRef.current?.fit()} title={t('orgChartsPanel.fitTheVisibleChart')}>{t('orgChartsPanel.fit')}</button>
                         {fullscreen && view === 'chart' && (
-                          <button type="button" className="org-view-toggle__btn" onClick={expandAllAndFit} title="Expand everyone and fit; your collapsed cards come back when you leave full screen">
-                            Expand all &amp; fit
+                          <button type="button" className="org-view-toggle__btn" onClick={expandAllAndFit} title={t('orgChartsPanel.expandEveryoneAndFitYour')}>
+                            {t('orgChartsPanel.expandAllFit')}
                           </button>
                         )}
                       </div>
                     )}
                     {!fullscreen && (
-                      <button ref={fullscreenBtn} type="button" className="org-tool-btn" onClick={enterFullscreen} title="Full screen">
+                      <button ref={fullscreenBtn} type="button" className="org-tool-btn" onClick={enterFullscreen} title={t('orgChartsPanel.fullScreen2')}>
                         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 4.5v-3h3M7.5 1.5h3v3M10.5 7.5v3h-3M4.5 10.5h-3v-3" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                        Full screen
+                        {t('orgChartsPanel.fullScreen2')}
                       </button>
                     )}
                   </div>
@@ -628,10 +632,9 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
                         <>
                           {units.length === 0 && (
                             <div className="org-unit-intro">
-                              <strong>Group people into departments or teams.</strong> Units are optional and only group people:
-                              who reports to whom stays as it is in the chart. Create a unit, then drag people into it.
+                              <strong>{t('orgChartsPanel.groupPeopleIntoDepartmentsOr')}</strong> {t('orgChartsPanel.unitsAreOptionalAndOnly')}
                               <div style={{ marginTop: 10 }}>
-                                <Button size="sm" variant="primary" onClick={() => setUnitForm({ editing: null, parent: null })}>New unit</Button>
+                                <Button size="sm" variant="primary" onClick={() => setUnitForm({ editing: null, parent: null })}>{t('orgChartDialogs.newUnit')}</Button>
                               </div>
                             </div>
                           )}
@@ -662,14 +665,14 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
                 {!fullscreen && (
                 <p style={{ margin: '20px 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                   {view === 'units'
-                    ? <>Drag a person onto a unit to move them, or click a person to pick their unit. Units only group people; reporting lines do not change.</>
-                    : <>Drag a card onto someone to make them their manager. Select a card and click <strong>+</strong> to add a direct report, or open <strong>Add people</strong> to add under it.</>}
-                  {view !== 'outline' && ' Drag the background to move around; Ctrl/⌘ + scroll to zoom.'}
+                    ? <>{t('orgChartsPanel.dragAPersonOntoA')}</>
+                    : <>{rich(t, 'orgChartsPanel.dragACardOntoSomeone', { strong: <strong>+</strong>, strong2: <strong>{t('orgChartsPanel.addPeople')}</strong> })}</>}
+                  {view !== 'outline' && t('orgChartsPanel.dragTheBackgroundToMove')}
                 </p>
                 )}
                 {chart.notes && !fullscreen && (
                   <div style={{ marginTop: 16, padding: '12px 14px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)' }}>
-                    <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Notes</div>
+                    <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{t('orgChartsPanel.notes')}</div>
                     <MarkdownView content={chart.notes} compact />
                   </div>
                 )}
@@ -677,36 +680,36 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
 
               {/* People panel (hidden until opened; Esc or ✕ closes it; never in full screen) */}
               {panelOpen && !fullscreen && (
-              <aside className="org-layout__people" id="org-people-panel" aria-label="People to add">
+              <aside className="org-layout__people" id="org-people-panel" aria-label={t('orgChartsPanel.peopleToAdd')}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Add people
+                    {t('orgChartsPanel.addPeople')}
                   </span>
-                  <button type="button" className="org-rail-btn" onClick={() => setPanelOpen(false)} aria-label="Close Add people" title="Close (Esc)">
+                  <button type="button" className="org-rail-btn" onClick={() => setPanelOpen(false)} aria-label={t('orgChartsPanel.closeAddPeople')} title={t('orgChartsPanel.closeEsc')}>
                     <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
                   </button>
                 </div>
                 <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', marginBottom: 8, minHeight: 18 }}>
                   {selectedName ? (
-                    <>Adding under <strong>{selectedName}</strong> · <button type="button" className="org-link-btn" onClick={() => setSelected(null)}>top level instead</button></>
-                  ) : 'Adding at the top level. Select a card to add under it.'}
+                    <>{t('orgChartsPanel.addingUnder')} <strong>{selectedName}</strong> · <button type="button" className="org-link-btn" onClick={() => setSelected(null)}>{t('orgChartsPanel.topLevelInstead')}</button></>
+                  ) : t('orgChartsPanel.addingAtTheTopLevel')}
                 </div>
-                <Input value={peopleQuery} onChange={setPeopleQuery} placeholder="Search stakeholders" aria-label="Search stakeholders to add" />
+                <Input value={peopleQuery} onChange={setPeopleQuery} placeholder={t('orgChartsPanel.searchStakeholders')} aria-label={t('orgChartsPanel.searchStakeholdersToAdd')} />
                 <Button size="sm" variant="ghost" style={{ marginTop: 6, width: '100%' }} onClick={() => setPhForm({ manager: selected })}
-                  title="Someone who is not a stakeholder yet, or a vacant role">
-                  + Add a placeholder
+                  title={t('orgChartsPanel.someoneWhoIsNotA')}>
+                  {t('orgChartsPanel.addAPlaceholder')}
                 </Button>
                 {sameOrgCount > 1 && !peopleQuery && (
                   <Button size="sm" variant="secondary" style={{ marginTop: 8, width: '100%' }}
                     onClick={() => saveMembers(available.filter((a) => a.sameOrg).reduce((acc, a) => placeMember(acc, a.s.id, selected), members))}>
-                    Add all {sameOrgCount} from {chart.organization}
+                    {rich(t, 'orgChartsPanel.addAllFrom', { sameOrgCount: sameOrgCount, organization: chart.organization })}
                   </Button>
                 )}
                 <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {available.map(({ s, sameOrg }, i) => (
                     <React.Fragment key={s.id}>
-                      {i === 0 && sameOrg && <div className="org-people__group">From {chart.organization}</div>}
-                      {!sameOrg && (i === 0 || available[i - 1].sameOrg) && sameOrgCount > 0 && <div className="org-people__group">Everyone else</div>}
+                      {i === 0 && sameOrg && <div className="org-people__group">{rich(t, 'orgChartsPanel.from', { organization: chart.organization })}</div>}
+                      {!sameOrg && (i === 0 || available[i - 1].sameOrg) && sameOrgCount > 0 && <div className="org-people__group">{t('orgChartsPanel.everyoneElse')}</div>}
                       <div
                         className="org-people__row"
                         draggable
@@ -717,16 +720,16 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
                         <span style={{ minWidth: 0, flex: 1 }}>
                           <span style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
                           <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {s.id.startsWith('GRP-') ? 'Group' : [s.role, s.organization].filter(Boolean).join(' · ')}
+                            {s.id.startsWith('GRP-') ? t('orgChartsPanel.group') : [s.role, s.organization].filter(Boolean).join(' · ')}
                           </span>
                         </span>
-                        <button type="button" className="org-link-btn" onClick={() => place(s.id, selected)} aria-label={`Add ${s.name}`}>Add</button>
+                        <button type="button" className="org-link-btn" onClick={() => place(s.id, selected)} aria-label={t('orgChartsPanel.add2', { name: s.name })}>{t('orgChartsPanel.add')}</button>
                       </div>
                     </React.Fragment>
                   ))}
                   {available.length === 0 && (
                     <p style={{ margin: '8px 0 0', fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                      {peopleQuery ? 'Nobody matches that search.' : 'Every stakeholder is already in this chart.'}
+                      {peopleQuery ? t('orgChartDialogs.nobodyMatchesThatSearch') : t('orgChartsPanel.everyStakeholderIsAlreadyIn')}
                     </p>
                   )}
                 </div>
@@ -781,13 +784,13 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
 
       <PersonPickerModal
         isOpen={picker !== null}
-        title={picker?.mode === 'add-report' ? `Add a direct report to ${pickerName}`
-          : picker?.mode === 'link' ? `Who is "${pickerName}"?` : `Who does ${pickerName} report to?`}
-        description={picker?.mode === 'change-manager' ? 'People in their own team are not listed, so the chart cannot loop.'
-          : picker?.mode === 'link' ? 'They take the placeholder\'s place in this chart, with the same manager, reports, unit and title. Other charts are not changed.' : undefined}
+        title={picker?.mode === 'add-report' ? t('orgChartsPanel.addADirectReportTo', { pickerName })
+          : picker?.mode === 'link' ? t('orgChartsPanel.whoIs', { pickerName }) : t('orgChartsPanel.whoDoesReportTo', { pickerName })}
+        description={picker?.mode === 'change-manager' ? t('orgChartsPanel.peopleInTheirOwnTeam')
+          : picker?.mode === 'link' ? t('orgChartsPanel.theyTakeThePlaceholderS') : undefined}
         people={pickerPeople}
-        noneLabel={picker?.mode === 'change-manager' && managerOf(members, picker.ref) ? 'Nobody (top of the chart)' : undefined}
-        emptyText={picker?.mode === 'change-manager' ? 'Nobody else in this chart can be their manager.' : 'Every stakeholder is already in this chart.'}
+        noneLabel={picker?.mode === 'change-manager' && managerOf(members, picker.ref) ? t('orgChartsPanel.nobodyTopOfTheChart') : undefined}
+        emptyText={picker?.mode === 'change-manager' ? t('orgChartsPanel.nobodyElseInThisChart') : t('orgChartsPanel.everyStakeholderIsAlreadyIn')}
         onClose={() => setPicker(null)}
         onPick={(id) => {
           if (!picker) return;
@@ -798,7 +801,7 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
         }}
         footer={picker?.mode === 'add-report' ? (
           <Button size="sm" variant="ghost" onClick={() => { const manager = picker.ref; setPicker(null); setPhForm({ manager }); }}>
-            Not a stakeholder yet? Add a placeholder instead
+            {t('orgChartsPanel.notAStakeholderYetAdd')}
           </Button>
         ) : undefined}
       />
@@ -811,12 +814,12 @@ export default function OrgChartsPanel({ stakeholders, initialChartId, onStakeho
         onSave={savePlaceholder}
       />
 
-      <Modal isOpen={profileFor !== null} onClose={closeProfile} title="Profile" size="lg">
+      <Modal isOpen={profileFor !== null} onClose={closeProfile} title={t('profile')} size="lg">
         {profileFor && (
           <>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
               <button type="button" className="org-link-btn" onClick={() => navigate(`/stakeholders/${encodeURIComponent(profileFor)}`)}>
-                Open full page
+                {t('orgChartsPanel.openFullPage')}
               </button>
             </div>
             <StakeholderDetailView stakeholderId={profileFor} embedded onNavigate={() => setProfileFor(null)} />

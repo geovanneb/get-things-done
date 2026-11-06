@@ -1,3 +1,7 @@
+import { scheduleText } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { currentLocale, tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Card from '@/components/common/Card';
 import { Link } from 'react-router-dom';
@@ -10,10 +14,10 @@ import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
 import type { MeetingDigest, MeetingDigestSettings, RoutineRun, RoutineWeekday, RunnerStatus } from '@/types';
 
-const WEEKDAYS: { id: RoutineWeekday; short: string }[] = [
-  { id: 'mon', short: 'Mon' }, { id: 'tue', short: 'Tue' }, { id: 'wed', short: 'Wed' }, { id: 'thu', short: 'Thu' },
-  { id: 'fri', short: 'Fri' }, { id: 'sat', short: 'Sat' }, { id: 'sun', short: 'Sun' },
-];
+const WEEKDAYS = (): { id: RoutineWeekday; short: string }[] => ([
+  { id: 'mon', short: tr('yearGrid.mon') }, { id: 'tue', short: tr('calendarModel.tue') }, { id: 'wed', short: tr('yearGrid.wed') }, { id: 'thu', short: tr('calendarModel.thu') },
+  { id: 'fri', short: tr('yearGrid.fri') }, { id: 'sat', short: tr('calendarModel.sat') }, { id: 'sun', short: tr('calendarModel.sun') },
+]);
 
 /** Text per digest, in characters of readable text: a meeting averages about 30,000 an hour with its pauses. */
 const CHARACTERS_PER_HOUR = 30_000;
@@ -22,10 +26,11 @@ const TEXT_SIZES = [100_000, 200_000, 400_000, 800_000, 1_600_000];
 const hintStyle: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '2px 0 0' };
 
 function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleString(currentLocale(), { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDigest; onEdit: () => void; onChanged: () => void }) {
+  const { t } = useLanguage();
   const [busy, setBusy] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
   const { settings, state } = job;
@@ -52,29 +57,26 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
   };
 
   return (
-    <Card as="article" padding="compact" id="meeting-digest" aria-label="Meeting digest">
+    <Card as="article" padding="compact" id="meeting-digest" aria-label={t('meetingDigest.meetingDigest')}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>Meeting digest</h3>
-            <Badge size="sm" variant="info">Built-in</Badge>
-            {!settings.enabled && <Badge size="sm">Paused</Badge>}
-            {failed && <Badge variant="critical" size="sm">Last run failed</Badge>}
+            <h3 style={{ margin: 0, fontSize: 'var(--text-base)', fontWeight: 600 }}>{t('meetingDigest.meetingDigest')}</h3>
+            <Badge size="sm" variant="info">{t('meetingDigest.builtIn')}</Badge>
+            {!settings.enabled && <Badge size="sm">{t('meetingDigest.paused')}</Badge>}
+            {failed && <Badge variant="critical" size="sm">{t('meetingDigest.lastRunFailed')}</Badge>}
           </div>
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', marginTop: 4 }}>
-            {job.summary}. Collects the meetings you queued into one context update, at most {settings.max_meetings} at a time
-            and about {hours} hour{hours > 1 ? 's' : ''} of meetings.
-            A day without queued meetings makes nothing.{settings.after_each_meeting ? ' Also right after each meeting.' : ''}{settings.auto_analyze ? ' Each new digest is analyzed automatically.' : ''}
+            {rich(t, 'meetingDigest.collectsTheMeetingsYouQueued', { summary: scheduleText(job.summary), max_meetings: settings.max_meetings, hours: t('meetingDigest.hoursCount', { count: hours }), value2: settings.after_each_meeting ? t('meetingDigest.alsoRightAfterEachMeeting') : '', value3: settings.auto_analyze ? t('meetingDigest.eachNewDigestIsAnalyzed') : '' })}
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span>Next: {settings.enabled ? (job.next_run_at ? formatWhen(job.next_run_at) : 'no more runs') : 'paused'}</span>
-            {state.last_run_at && <span title={state.last_message}>Last: {formatRelativeTime(state.last_run_at)}</span>}
-            <span>{queued.length === 0 ? 'Queue empty' : `${queued.length} meeting${queued.length === 1 ? '' : 's'} queued`}{held > 0 ? `, ${held} on hold` : ''}{drafts > 0 ? `, ${drafts} not queued` : ''}</span>
+            <span>{rich(t, 'meetingDigest.next', { value: settings.enabled ? (job.next_run_at ? formatWhen(job.next_run_at) : t('meetingDigest.noMoreRuns')) : 'paused' })}</span>
+            {state.last_run_at && <span title={state.last_message}>{rich(t, 'meetingDigest.last', { last_run_at: formatRelativeTime(state.last_run_at) })}</span>}
+            <span>{queued.length === 0 ? t('meetingDigest.queueEmpty') : t('meetingDigest.meetingsQueued', { count: queued.length })}{held > 0 ? t('meetingDigest.onHold', { held }) : ''}{drafts > 0 ? t('meetingDigest.notQueued', { drafts }) : ''}</span>
           </div>
           {job.open_digest && (
             <div style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>
-              Digest <Link to={`/context/updates/${job.open_digest}`} style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{job.open_digest}</Link> is waiting for you.
-              No new digest starts until it is done; queued meetings wait.
+              {rich(t, 'meetingDigest.digestIsWaitingForYou', { link: <Link to={`/context/updates/${job.open_digest}`} style={{ color: 'var(--color-accent)', fontWeight: 600 }}>{job.open_digest}</Link> })}
             </div>
           )}
           {settings.auto_analyze && state.analysis && state.analysis.update_id === job.open_digest && (
@@ -86,11 +88,11 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-critical)', marginTop: 6 }}>{state.last_message}</div>
           )}
           <div style={{ fontSize: 'var(--text-sm)', marginTop: 8 }}>
-            <Link to="/meetings" style={{ color: 'var(--color-accent)' }}>Open Meetings</Link> to record, and to see the queue and its transcripts.
+            {rich(t, 'meetingDigest.toRecordAndToSee', { link: <Link to="/meetings" style={{ color: 'var(--color-accent)' }}>{t('meetingDigest.openMeetings')}</Link> })}
           </div>
         </div>
         <Toggle
-          label={settings.enabled ? 'Pause Meeting digest' : 'Resume Meeting digest'}
+          label={settings.enabled ? t('meetingDigest.pauseMeetingDigest') : t('meetingDigest.resumeMeetingDigest')}
           checked={settings.enabled}
           disabled={busy !== null}
           onChange={(on) => act('toggle', async () => { await apiPut('/api/routines/meeting-digest', { enabled: on }); })}
@@ -99,11 +101,11 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
 
       <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <Button size="sm" variant="secondary" loading={busy === 'run'} disabled={busy !== null || queued.length === 0}
-          title={queued.length === 0 ? 'The queue is empty' : 'Make a digest from the queue now, without waiting for the schedule'}
+          title={queued.length === 0 ? t('meetingDigest.theQueueIsEmpty') : t('meetingDigest.makeADigestFromThe')}
           onClick={() => act('run', async () => (await apiPost<RoutineRun>('/api/routines/meeting-digest/run')).message)}>
-          Make digest now
+          {t('meetingDigest.makeDigestNow')}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>Settings</Button>
+        <Button size="sm" variant="ghost" onClick={onEdit} disabled={busy !== null}>{t('settings')}</Button>
         {notice && (
           <span role={notice.error ? 'alert' : 'status'} style={{ fontSize: 'var(--text-xs)', color: notice.error ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
             {notice.text}
@@ -115,6 +117,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
 }
 
 export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen: boolean; job: MeetingDigest | null; onClose: () => void; onSaved: () => void }) {
+  const { t } = useLanguage();
   const [draft, setDraft] = React.useState<MeetingDigestSettings | null>(null);
   const [max, setMax] = React.useState('');
   const [saving, setSaving] = React.useState(false);
@@ -146,11 +149,11 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
   const days = draft.schedule.weekdays;
   const toggleDay = (day: RoutineWeekday) => {
     const next = days.includes(day) ? days.filter((d) => d !== day) : [...days, day];
-    setDraft({ ...draft, schedule: { ...draft.schedule, frequency: 'weekly', interval: 1, weekdays: WEEKDAYS.map((w) => w.id).filter((d) => next.includes(d)), month_week: null, month_weekday: null, month_day: null } });
+    setDraft({ ...draft, schedule: { ...draft.schedule, frequency: 'weekly', interval: 1, weekdays: WEEKDAYS().map((w) => w.id).filter((d) => next.includes(d)), month_week: null, month_weekday: null, month_day: null } });
   };
 
   const save = async () => {
-    if (days.length === 0) { setError('Pick at least one day.'); return; }
+    if (days.length === 0) { setError(t('meetingDigest.pickAtLeastOneDay')); return; }
     setSaving(true);
     setError(null);
     try {
@@ -165,19 +168,16 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Meeting digest" size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={t('meetingDigest.meetingDigest')} size="md">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          A built-in routine for meetings. Record a meeting on the <strong>Meetings</strong> page, or add one from <strong>Import</strong>
-          in Context updates; on the days
-          below, the queued meetings become one context update. The analysis drafts a record per meeting and proposes context
-          changes for you to approve: you run it, or the dashboard starts it for you (below).
+          {rich(t, 'meetingDigest.aBuiltInRoutineFor', { strong: <strong>{t('meetings')}</strong>, strong2: <strong>{t('meetingDigest.import')}</strong> })}
         </p>
 
         <section aria-labelledby="md-schedule">
-          <h3 id="md-schedule" style={{ ...sectionLabelStyle, margin: '0 0 8px' }}>When</h3>
-          <div role="group" aria-label="Days" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {WEEKDAYS.map((w) => (
+          <h3 id="md-schedule" style={{ ...sectionLabelStyle, margin: '0 0 8px' }}>{t('meetingDigest.when')}</h3>
+          <div role="group" aria-label={t('meetingDigest.days')} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {WEEKDAYS().map((w) => (
               <label key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 'var(--text-sm)', padding: '4px 8px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
                 <input type="checkbox" checked={days.includes(w.id)} onChange={() => toggleDay(w.id)} />
                 {w.short}
@@ -185,59 +185,52 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
             ))}
           </div>
           <label style={{ display: 'block', marginTop: 10, width: 120 }}>
-            <span style={fieldLabelStyle}>Time</span>
+            <span style={fieldLabelStyle}>{t('meetingDigest.time')}</span>
             <input type="time" style={dateInputStyle} value={draft.schedule.time}
               onChange={(e) => setDraft({ ...draft, schedule: { ...draft.schedule, time: e.target.value || '18:00' } })} />
           </label>
           <p style={hintStyle}>
-            After your last meeting of the day is a good time. If the computer was off, one digest is made the next time the
-            dashboard starts; nothing in the queue is lost. While a digest waits for your review, new meetings wait in the queue.
+            {t('meetingDigest.afterYourLastMeetingOf')}
           </p>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 10, fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
             <input type="checkbox" checked={draft.after_each_meeting} onChange={(e) => setDraft({ ...draft, after_each_meeting: e.target.checked })} style={{ marginTop: 3 }} />
-            <span>Also make a digest right after each meeting</span>
+            <span>{t('meetingDigest.alsoMakeADigestRight')}</span>
           </label>
           <p style={hintStyle}>
-            Within a minute of a meeting being queued, any day and time, when no digest waits for your review. Meetings queued
-            while one waits go into the next digest as soon as it is done. Useful with automatic analysis below.
+            {t('meetingDigest.withinAMinuteOfA')}
           </p>
         </section>
 
         <section aria-labelledby="md-size">
-          <h3 id="md-size" style={{ ...sectionLabelStyle, margin: 0 }}>Size</h3>
+          <h3 id="md-size" style={{ ...sectionLabelStyle, margin: 0 }}>{t('meetingDigest.size')}</h3>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: 'var(--text-sm)' }}>
-            At most
-            <input aria-label="Meetings per digest" inputMode="numeric" style={{ ...dateInputStyle, width: 80 }} value={max} onChange={(e) => setMax(e.target.value)} />
-            meetings per digest (up to {job.max_meetings_limit})
+            {t('meetingDigest.atMost')}
+            <input aria-label={t('meetingDigest.meetingsPerDigest')} inputMode="numeric" style={{ ...dateInputStyle, width: 80 }} value={max} onChange={(e) => setMax(e.target.value)} />
+            {t('meetingDigest.meetingsPerDigestUpTo')} {job.max_meetings_limit})
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 'var(--text-sm)' }}>
-            Text per digest
-            <select aria-label="Text per digest" style={{ ...dateInputStyle, width: 'auto' }} value={draft.max_characters}
+            {t('meetingDigest.textPerDigest')}
+            <select aria-label={t('meetingDigest.textPerDigest')} style={{ ...dateInputStyle, width: 'auto' }} value={draft.max_characters}
               onChange={(e) => setDraft({ ...draft, max_characters: Number(e.target.value) })}>
               {TEXT_SIZES.includes(draft.max_characters) ? null : (
-                <option value={draft.max_characters}>{draft.max_characters.toLocaleString()} characters</option>
+                <option value={draft.max_characters}>{rich(t, 'meetingDigest.characters', { toLocaleString: draft.max_characters.toLocaleString(currentLocale()) })}</option>
               )}
-              {TEXT_SIZES.map((n) => <option key={n} value={n}>About {Math.round(n / CHARACTERS_PER_HOUR)} hours of meetings ({n.toLocaleString()} characters)</option>)}
+              {TEXT_SIZES.map((n) => <option key={n} value={n}>{rich(t, 'meetingDigest.aboutHoursOfMeetingsCharacters', { round: Math.round(n / CHARACTERS_PER_HOUR), toLocaleString: n.toLocaleString(currentLocale()) })}</option>)}
             </select>
           </label>
           <p style={hintStyle}>
-            The oldest meetings go first; the rest wait for the next digest. One analysis reads the whole digest, so long
-            days are spread over several digests; a full-day meeting is about 250,000 characters. A meeting longer than this
-            on its own gets a digest of its own.
+            {t('meetingDigest.theOldestMeetingsGoFirst')}
           </p>
         </section>
 
         <section aria-labelledby="md-analysis">
-          <h3 id="md-analysis" style={{ ...sectionLabelStyle, margin: 0 }}>Analysis</h3>
+          <h3 id="md-analysis" style={{ ...sectionLabelStyle, margin: 0 }}>{t('analysisRun.analysis')}</h3>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 8, fontSize: 'var(--text-sm)', cursor: 'pointer' }}>
             <input type="checkbox" checked={draft.auto_analyze} onChange={(e) => setDraft({ ...draft, auto_analyze: e.target.checked })} style={{ marginTop: 3 }} />
-            <span>Analyze each new digest automatically</span>
+            <span>{t('meetingDigest.analyzeEachNewDigestAutomatically')}</span>
           </label>
           <p style={hintStyle}>
-            As soon as a digest is made, the dashboard runs the analysis with {runner?.label ?? 'Claude Code'} on your own plan, as
-            <strong> Run analysis</strong> on the digest&apos;s page does, so the proposals are ready when you look. Nothing changes in
-            your context until you approve each proposal. If another run is going, it starts after it; if it cannot start, the
-            card says why and you start it yourself.
+            {rich(t, 'meetingDigest.asSoonAsADigest', { label: runner?.label ?? 'Claude Code', strong: <strong> {t('analysisRun.runAnalysis')}</strong> })}
           </p>
           {draft.auto_analyze && runner && runner.problems.length > 0 && (
             <p role="alert" style={{ ...hintStyle, color: 'var(--color-critical)' }}>{runner.problems[0]!.message}</p>
@@ -246,8 +239,8 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
 
         {error && <div role="alert" style={{ color: 'var(--color-critical)', fontSize: 'var(--text-sm)' }}>{error}</div>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={saving} onClick={() => void save()}>Save</Button>
+          <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+          <Button variant="primary" loading={saving} onClick={() => void save()}>{t('updateDetail.save')}</Button>
         </div>
       </div>
     </Modal>

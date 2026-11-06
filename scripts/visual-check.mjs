@@ -97,8 +97,11 @@ for (const stream of [server.stdout, server.stderr]) stream.on('data', (chunk) =
 let browser;
 try {
   let healthy = false;
-  for (let i = 0; i < 50 && !healthy; i++) {
-    try { healthy = (await fetch(`${base}/health`)).ok; } catch { await new Promise((r) => setTimeout(r, 200)); }
+  // A busy CI runner can take well over ten seconds to load the server for the first time.
+  const startDeadline = Date.now() + 60_000;
+  while (!healthy && Date.now() < startDeadline) {
+    try { healthy = (await fetch(`${base}/health`)).ok; } catch { /* not listening yet */ }
+    if (!healthy) await new Promise((r) => setTimeout(r, 200));
   }
   if (!healthy) throw new Error(`the server did not start: ${serverLog}`);
   execFileSync(process.execPath, [path.join(root, 'scripts/seed-demo.mjs'), base], { env, stdio: 'pipe' });
@@ -148,6 +151,7 @@ try {
   };
 
   // ---- Behaviour on every page and width ----------------------------------
+  if (!process.argv.includes('--language-only')) {
   for (const theme of ['light', 'dark']) {
     for (const width of WIDTHS) {
       const { context, page, errors } = await open(width, theme);
@@ -388,6 +392,68 @@ try {
       }
       await context.close();
     }
+  }
+  }
+  // Personal interface language: real browser detection, native bridge precedence, keyboard override,
+  // persistence and failed saves. Each case uses the fictional workspace above.
+  const setLanguage = async (language) => {
+    const response = await fetch(`${base}/api/app/language`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }) });
+    if (!response.ok) throw new Error('Could not set test language');
+  };
+  await setLanguage('auto');
+  for (const theme of ['light', 'dark']) {
+    for (const width of [390, 768, 1280]) {
+      const context = await browser.newContext({ locale: 'ja-JP', viewport: { width, height: 900 } });
+      await context.addInitScript(t => localStorage.setItem('gtd:theme', t), theme);
+      const page = await context.newPage();
+      await page.goto(`${base}/settings`);
+      await page.waitForFunction(() => document.documentElement.lang === 'ja');
+      const language = page.getByLabel('言語', { exact: true });
+      await language.waitFor({ state: 'visible' });
+      check(`language: Japanese automatic ${width} ${theme}`, await language.inputValue() === 'auto' && await page.locator('h1').textContent() === '設定');
+      check(`language: Settings and the shell are translated ${width} ${theme}`, await page.getByRole('heading', { name: '通知', exact: true }).isVisible() && await page.getByRole('button', { name: 'ワークスペースを検証', exact: true }).isVisible());
+      check(`language: no overflow ${width} ${theme}`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await language.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.join(outDir, `language-ja-${width}-${theme}.png`) });
+      await language.selectOption('en');
+      await page.waitForFunction(() => document.documentElement.lang === 'en');
+      const english = page.getByLabel('Language', { exact: true });
+      await english.focus();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
+      check(`language: keyboard focus ${width} ${theme}`, await english.evaluate(element => element === document.activeElement));
+      // Headless Chromium on macOS does not drive native select popups with arrow keys.
+      // Exercise the native selection event separately; real OS popup selection remains manual QA.
+      await english.selectOption('ja');
+      await page.waitForFunction(() => document.documentElement.lang === 'ja');
+      check(`language: immediate override ${width} ${theme}`, await language.inputValue() === 'ja');
+      await page.reload();
+      await page.waitForFunction(() => document.documentElement.lang === 'ja');
+      check('language: preference survives reload', await page.getByLabel('言語', { exact: true }).inputValue() === 'ja');
+      await setLanguage('auto');
+      await context.close();
+    }
+  }
+  {
+    const context = await browser.newContext({ locale: 'ja-JP' });
+    await context.addInitScript(() => { window.gtdDesktop = { version: 1, preferredLanguages: async () => ['pt-PT'] }; });
+    const page = await context.newPage();
+    await page.goto(`${base}/settings`);
+    await page.waitForFunction(() => document.documentElement.lang === 'pt-BR');
+    check('language: desktop system preferences override browser language', await page.locator('h1').textContent() === 'Configurações');
+    await page.route('**/api/app/language', async route => {
+      if (route.request().method() === 'PUT') await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+      else await route.continue();
+    });
+    await page.getByLabel('Idioma', { exact: true }).selectOption('es-419');
+    await page.getByText('Não foi possível salvar o idioma. Tente novamente.').waitFor();
+    check('language: failed save retains previous language and choice', await page.getByLabel('Idioma', { exact: true }).inputValue() === 'auto' && await page.locator('html').getAttribute('lang') === 'pt-BR');
+    await page.unroute('**/api/app/language');
+    await page.getByLabel('Idioma', { exact: true }).selectOption('es-419');
+    await page.waitForFunction(() => document.documentElement.lang === 'es-419');
+    check('language: Spanish applies without restart', await page.locator('h1').textContent() === 'Configuración');
+    await context.close();
+    await setLanguage('auto');
   }
   if (update) console.log(`Baselines written to ${path.relative(root, baselineDir)}/`);
 } catch (err) {

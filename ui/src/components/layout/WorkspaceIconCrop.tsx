@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
@@ -18,6 +19,7 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
   onClose: () => void;
   onSaved: (iconVersion: string | null) => void;
 }) {
+  const { t } = useLanguage();
   const [image, setImage] = React.useState<HTMLImageElement | null>(null);
   const [crop, setCrop] = React.useState<CropState | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -40,7 +42,7 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
       setCrop(initialCrop(img.naturalWidth, img.naturalHeight, VIEW));
     };
     img.onerror = () => {
-      if (!cancelled) setError('This picture could not be opened. Try a PNG, JPG or WebP file.');
+      if (!cancelled) setError(t('pictureUnreadable'));
     };
     img.src = url;
     return () => { cancelled = true; URL.revokeObjectURL(url); };
@@ -83,14 +85,14 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
       canvas.width = OUTPUT;
       canvas.height = OUTPUT;
       const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Your browser could not prepare the picture.');
+      if (!ctx) throw new Error(t('picturePrepareFailed'));
       ctx.imageSmoothingQuality = 'high';
       const { sx, sy, size } = sourceRect(crop, VIEW);
       ctx.drawImage(image, sx, sy, size, size, 0, 0, OUTPUT, OUTPUT);
       const result = await apiPut<{ icon_version: string | null }>('/api/workspace/icon', { image: canvas.toDataURL('image/png') });
       onSaved(result.icon_version);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the picture.');
+      setError(err instanceof Error ? err.message : t('pictureSaveFailed'));
     } finally {
       setSaving(false);
     }
@@ -104,9 +106,9 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
   } : undefined;
 
   return (
-    <Modal isOpen={file !== null} onClose={() => { if (!saving) onClose(); }} title="Workspace picture" size="sm">
+    <Modal isOpen={file !== null} onClose={() => { if (!saving) onClose(); }} title={t('workspacePicture')} size="sm">
       <p style={{ margin: '0 0 16px 0', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-        Drag to move the picture, and zoom to choose what shows. It stays on this computer.
+        {t('pictureCropHint')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
@@ -114,7 +116,7 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
           ref={viewportRef}
           tabIndex={0}
           role="img"
-          aria-label="Crop area. Use the arrow keys to move the picture, and plus or minus to zoom."
+          aria-label={t('pictureCropArea')}
           onKeyDown={onKeyDown}
           onPointerDown={(e) => {
             if (!crop) return;
@@ -136,12 +138,12 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
         >
           {image && crop
             ? <img src={image.src} alt="" draggable={false} style={placed(VIEW)} />
-            : !error && <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Loading...</span>}
+            : !error && <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('loading')}</span>}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: VIEW }}>
           <label htmlFor="workspace-icon-zoom" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', fontWeight: 500 }}>
-            Zoom
+            {t('zoom')}
           </label>
           <input
             id="workspace-icon-zoom"
@@ -157,7 +159,7 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
           {/* What it looks like at the size the sidebar shows. */}
           <span
             aria-hidden="true"
-            title="How it looks in the sidebar"
+            title={t('pictureSidebarPreview')}
             style={{ position: 'relative', width: PREVIEW, height: PREVIEW, flexShrink: 0, overflow: 'hidden', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
           >
             {image && crop && <img src={image.src} alt="" draggable={false} style={placed(PREVIEW)} />}
@@ -178,9 +180,9 @@ export default function WorkspaceIconCrop({ file, onClose, onSaved }: {
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
-        <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="ghost" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
         <Button variant="primary" onClick={() => void save()} disabled={!crop || saving}>
-          {saving ? 'Saving...' : 'Save Picture'}
+          {saving ? t('saving') : t('savePicture')}
         </Button>
       </div>
     </Modal>

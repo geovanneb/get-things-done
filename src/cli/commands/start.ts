@@ -140,7 +140,7 @@ export const startCommand = new Command('start')
       workspace: workspacePath,
       startedAt: new Date().toISOString(),
     });
-    writeConfig({ port });
+    await writeConfig({ port });
 
     spinner.succeed(`Server running at ${chalk.cyan(`http://localhost:${port}`)}`);
     console.log(`  Workspace: ${chalk.dim(workspacePath)}`);

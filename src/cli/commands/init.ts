@@ -53,7 +53,7 @@ export const initCommand = new Command('init')
         console.log(chalk.yellow('Aborted.'));
         process.exit(0);
       }
-      writeConfig({ workspace_path: targetDir });
+      await writeConfig({ workspace_path: targetDir });
       console.log('');
       console.log(chalk.green('✓') + ` Workspace configured: ${chalk.cyan(targetDir)}`);
       console.log('');
@@ -122,7 +122,7 @@ export const initCommand = new Command('init')
         console.log(`${chalk.green('\u2713')} ${toolLabel(tool)} configured`);
       }
 
-      writeConfig({ workspace_path: targetDir });
+      await writeConfig({ workspace_path: targetDir });
 
       console.log('');
       console.log(chalk.green.bold('Your workspace is ready.'));

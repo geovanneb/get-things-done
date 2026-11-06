@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * What a measured speed means for the person using it. The test is clean continuous speech; a real meeting has pauses
  * but harder speech, and the two roughly cancel out: measured on a real 10-minute meeting, Whisper ran at 4.6× against
@@ -10,9 +11,9 @@ const LIVE_X = 10;
 const AFTER_X = 4;
 
 function minutes(m: number): string {
-  if (m < 1) return 'under a minute';
-  if (m < 90) return `about ${Math.round(m)} min`;
-  return `about ${Math.round(m / 6) / 10} hours`;
+  if (m < 1) return tr('transcriptionSpeed.underAMinute');
+  if (m < 90) return tr('transcriptionSpeed.aboutMin', { m: Math.round(m) });
+  return tr('transcriptionSpeed.aboutHours', { value: Math.round(m / 6) / 10 });
 }
 
 /** One line for a model's card. */
@@ -20,10 +21,10 @@ export function describeSpeed(realtime: number): { line: string; live: 'yes' | '
   const hour = minutes(60 / realtime);
   const live = realtime >= LIVE_X ? 'yes' : realtime >= AFTER_X ? 'maybe' : 'no';
   // Rules of thumb for the room a video call needs next to it, not measurements of one.
-  const liveText = live === 'yes' ? 'likely enough room to transcribe while recording'
-    : live === 'maybe' ? 'transcribing while recording may slow a video call'
-      : 'likely too slow to transcribe while recording next to a call';
-  return { line: `On this computer: about ${realtime}× real time, so an hour of meeting takes ${hour}; by rule of thumb, ${liveText}. An estimate from a short sample: other work on the computer slows it.`, live };
+  const liveText = live === 'yes' ? tr('transcriptionSpeed.likelyEnoughRoomToTranscribe')
+    : live === 'maybe' ? tr('transcriptionSpeed.transcribingWhileRecordingMaySlow')
+      : tr('transcriptionSpeed.likelyTooSlowToTranscribe');
+  return { line: tr('transcriptionSpeed.onThisComputerAboutReal', { realtime, hour, liveText }), live };
 }
 
 /**
@@ -36,9 +37,9 @@ export function recommendModel(models: { id: string; name: string; speed: { real
   const measured = models.filter((m) => m.speed);
   if (measured.length === 0) return null;
   const quick = measured.find((m) => m.speed!.realtime_x >= AFTER_X);
-  if (quick) return { id: quick.id, name: quick.name, reason: measured.length < models.length ? 'the most accurate of the tested ones that is quick enough here' : 'the most accurate one that is quick enough on this computer' };
+  if (quick) return { id: quick.id, name: quick.name, reason: measured.length < models.length ? tr('transcriptionSpeed.theMostAccurateOfThe') : tr('transcriptionSpeed.theMostAccurateOneThat') };
   const fastest = measured.reduce((a, b) => (b.speed!.realtime_x > a.speed!.realtime_x ? b : a));
-  return { id: fastest.id, name: fastest.name, reason: 'the fastest one tested; none of them is quick on this computer' };
+  return { id: fastest.id, name: fastest.name, reason: tr('transcriptionSpeed.theFastestOneTestedNone') };
 }
 
 /**

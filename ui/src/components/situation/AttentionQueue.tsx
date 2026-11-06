@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
@@ -10,33 +13,33 @@ interface AttentionQueueProps {
 
 type Reason = SituationData['attention_queue'][number]['reason'];
 
-const REASON_CONFIG: Record<
+const REASON_CONFIG = (): Record<
   Reason,
   { label: string; stripColor: string; badgeVariant: string }
-> = {
+> => ({
   overdue: {
-    label: 'Overdue',
+    label: tr('attentionList.overdue'),
     stripColor: 'var(--color-critical)',
     badgeVariant: 'critical',
   },
   blocked: {
-    label: 'Blocked',
+    label: tr('renderer.blocked'),
     stripColor: 'var(--color-warning)',
     badgeVariant: 'warning',
   },
   due_soon: {
-    label: 'Due Soon',
+    label: tr('attentionQueue.dueSoon'),
     stripColor: 'var(--color-info)',
     badgeVariant: 'info',
   },
-};
+});
 
-const PRIORITY_LABELS: Record<string, string> = {
-  critical: 'Critical',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
-};
+const PRIORITY_LABELS = (): Record<string, string> => ({
+  critical: tr('attentionQueue.critical'),
+  high: tr('attentionQueue.high'),
+  medium: tr('attentionQueue.medium'),
+  low: tr('attentionQueue.low'),
+});
 
 const styles = {
   container: {
@@ -133,18 +136,19 @@ const styles = {
 };
 
 export default function AttentionQueue({ items }: AttentionQueueProps) {
+  const { t } = useLanguage();
   if (!items || items.length === 0) {
     return (
       <p style={styles.emptyState} aria-live="polite">
-        No items need attention right now.
+        {t('attentionQueue.noItemsNeedAttentionRight')}
       </p>
     );
   }
 
   return (
-    <ol style={styles.container} aria-label="Attention queue">
+    <ol style={styles.container} aria-label={t('attentionQueue.attentionQueue')}>
       {items.map((item) => {
-        const config = REASON_CONFIG[item.reason] ?? REASON_CONFIG.due_soon;
+        const config = REASON_CONFIG()[item.reason] ?? REASON_CONFIG().due_soon;
         const visibleStakeholders = item.stakeholders.slice(0, 2);
         const extraCount = item.stakeholders.length - visibleStakeholders.length;
 
@@ -165,14 +169,14 @@ export default function AttentionQueue({ items }: AttentionQueueProps) {
                   {item.title}
                 </Link>
                 <Badge variant={config.badgeVariant as any} label={config.label} />
-                <Badge variant="priority" label={PRIORITY_LABELS[item.priority] ?? item.priority} />
+                <Badge variant="priority" label={PRIORITY_LABELS()[item.priority] ?? item.priority} />
               </div>
 
               <div style={styles.metaRow}>
                 {item.due_date && (
                   <>
-                    <span style={styles.dueDate} aria-label={`Due ${formatDate(item.due_date)}`}>
-                      Due {formatDate(item.due_date)}
+                    <span style={styles.dueDate} aria-label={t('attentionQueue.due', { due_date: formatDate(item.due_date) })}>
+                      {rich(t, 'attentionQueue.due', { due_date: formatDate(item.due_date) })}
                     </span>
                     {visibleStakeholders.length > 0 && (
                       <span style={styles.separator} aria-hidden="true">
@@ -183,14 +187,14 @@ export default function AttentionQueue({ items }: AttentionQueueProps) {
                 )}
 
                 {visibleStakeholders.map((ref) => (
-                  <span key={ref} style={styles.stakeholderChip} aria-label={`Stakeholder: ${ref}`}>
+                  <span key={ref} style={styles.stakeholderChip} aria-label={t('attentionQueue.stakeholder', { ref })}>
                     {ref}
                   </span>
                 ))}
 
                 {extraCount > 0 && (
-                  <span style={styles.moreChip} aria-label={`${extraCount} more stakeholders`}>
-                    +{extraCount} more
+                  <span style={styles.moreChip} aria-label={t('attentionQueue.moreStakeholders', { extraCount })}>
+                    {rich(t, 'attentionQueue.more', { extraCount: extraCount })}
                   </span>
                 )}
               </div>

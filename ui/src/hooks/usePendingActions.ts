@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useAppState, useDataVersion } from '../store';
 import { useApi } from './useApi';
 import type { ContextUpdate, MeetingDigest, Routine, SystemCleanup, Task } from '../types';
@@ -27,6 +28,7 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * its dot goes up when a run finishes; material waiting for an analysis shows on Import & review instead.
  */
 export function usePendingActions(): PendingAction[] {
+  const { t } = useLanguage();
   const { validationCount } = useAppState();
   const { data: tasks } = useApi<Task[]>('/api/tasks', [useDataVersion('tasks')]);
   const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [useDataVersion('context-updates')]);
@@ -42,10 +44,10 @@ export function usePendingActions(): PendingAction[] {
     + (digestError || digest?.state.last_status === 'error' ? 1 : 0);
 
   const all: PendingAction[] = [
-    { navPath: '/board', to: '/board', count: toReview, tone: 'attention', label: `${plural(toReview, 'task', 'tasks')} waiting for your review` },
+    { navPath: '/board', to: '/board', count: toReview, tone: 'attention', label: t('usePendingActions.waitingForYourReview', { plural: t('common.taskCount', { count: toReview }) }) },
     { navPath: '/context', to: '/context/updates', count: waiting.ready, tone: 'attention', label: waitingLabel(waiting) },
-    { navPath: '/routines', to: '/routines', count: routineProblems, tone: 'problem', label: `${plural(routineProblems, 'routine needs', 'routines need')} attention` },
-    { navPath: '/settings', to: '/settings', count: validationCount.errors, tone: 'problem', label: `${plural(validationCount.errors, 'workspace validation error', 'workspace validation errors')} to fix` },
+    { navPath: '/routines', to: '/routines', count: routineProblems, tone: 'problem', label: t('usePendingActions.attention', { plural: plural(routineProblems, t('usePendingActions.routineNeeds'), t('usePendingActions.routinesNeed')) }) },
+    { navPath: '/settings', to: '/settings', count: validationCount.errors, tone: 'problem', label: t('usePendingActions.toFix', { plural: plural(validationCount.errors, t('usePendingActions.workspaceValidationError'), t('usePendingActions.workspaceValidationErrors')) }) },
   ];
   return all.filter((a) => a.count > 0);
 }

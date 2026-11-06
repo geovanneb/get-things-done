@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React, {
   forwardRef,
   useCallback,
@@ -92,6 +93,7 @@ const AgentFloorStage = forwardRef<StageHandle, Props>(function AgentFloorStage(
   { snapshot, options, speed, paused, onHud, onPickAgent, footer },
   ref,
 ) {
+  const { t } = useLanguage();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const worldRef = useRef<WorldState>(createWorld());
@@ -234,7 +236,7 @@ const AgentFloorStage = forwardRef<StageHandle, Props>(function AgentFloorStage(
           width={STAGE_W}
           height={STAGE_H}
           onClick={handleClick}
-          aria-label="Pixel-art view of agents working through the task backlog"
+          aria-label={t('agentFloorStage.pixelArtViewOfAgents')}
           style={{
             width: '100%',
             height: '100%',

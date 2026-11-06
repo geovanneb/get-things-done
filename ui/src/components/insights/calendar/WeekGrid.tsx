@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { OverdueDot, type GridProps } from './MonthGrid';
 import { WEEKDAYS_SHORT, countLabel, keysBetween, longDay, metricValue, weekday } from './calendarModel';
 import { stepFill, stepInk } from './parts';
@@ -39,13 +40,14 @@ export default function WeekGrid({
   onPickDay: (date: string) => void;
   onHourHover: (hit: { date: string; hour: number; value: number; el: HTMLElement } | null) => void;
 }) {
+  const { t } = useLanguage();
   const days = keysBetween(from, to);
   const hours = visibleHours(days.map((d) => byDate.get(d)?.by_hour));
   const columns = '44px repeat(7, minmax(0, 1fr))';
 
   return (
     <div>
-      <div role="grid" aria-label="Days of the week" style={{ display: 'grid', gridTemplateColumns: columns, gap: 2 }}>
+      <div role="grid" aria-label={t('weekGrid.daysOfTheWeek')} style={{ display: 'grid', gridTemplateColumns: columns, gap: 2 }}>
         <span />
         {days.map((date) => {
           const value = metricValue(byDate.get(date), metric);
@@ -57,8 +59,8 @@ export default function WeekGrid({
               type="button"
               role="gridcell"
               aria-selected={pinned === date}
-              aria-label={`${longDay(date)}: ${countLabel(value, metric)}${overdue ? `, ${overdue} overdue` : ''}${
-                date === today ? ', today' : ''
+              aria-label={`${longDay(date)}: ${countLabel(value, metric)}${overdue ? t('monthGrid.overdue2', { overdue }) : ''}${
+                date === today ? t('monthGrid.today') : ''
               }`}
               {...cellProps(date)}
               style={{
@@ -76,8 +78,8 @@ export default function WeekGrid({
               }}
             >
               <span style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: date === today ? 700 : 400 }}>
-                {WEEKDAYS_SHORT[weekday(date)]} {Number(date.slice(8))}
-                {date === today ? ' · today' : ''}
+                {WEEKDAYS_SHORT()[weekday(date)]} {Number(date.slice(8))}
+                {date === today ? t('weekGrid.today') : ''}
               </span>
               <span style={{ display: 'block', fontSize: 'var(--text-sm)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                 {value}
@@ -89,7 +91,7 @@ export default function WeekGrid({
       </div>
 
       <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '12px 0 6px' }}>
-        Activity by hour (created, completed and agent runs)
+        {t('weekGrid.activityByHourCreatedCompleted')}
       </p>
       <div
         aria-hidden

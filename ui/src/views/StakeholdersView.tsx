@@ -1,3 +1,5 @@
+import { tr } from '@/i18n/current';
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
@@ -121,6 +123,7 @@ interface StakeholderModalProps {
 }
 
 function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: StakeholderModalProps) {
+  const { t } = useLanguage();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -149,7 +152,7 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim()) {
-      setFormError('Enter a name.');
+      setFormError(t('boardColumns.enterAName'));
       return;
     }
     setSaving(true);
@@ -171,37 +174,37 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
       onSaved();
       onClose();
     } catch (err: unknown) {
-      setFormError(err instanceof Error ? err.message : 'Could not save. Try again.');
+      setFormError(err instanceof Error ? err.message : t('stakeholders.couldNotSaveTryAgain'));
     } finally {
       setSaving(false);
     }
   }
 
-  const noun = type === 'groups' ? 'group' : 'individual';
+  const addLabel = type === 'groups' ? t('stakeholders.addGroup') : t('stakeholders.addIndividual');
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editing ? `Edit ${editing.name}` : `Add ${noun}`} size="lg" keepWhileTyping
+    <Modal isOpen={isOpen} onClose={onClose} title={editing ? t('orgChartDialogs.edit', { name: editing.name }) : addLabel} size="lg" keepWhileTyping
       footer={
         <FormActions>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
           <Button variant="primary" type="submit" form="stakeholder-form" loading={saving}>
-            {editing ? 'Save changes' : `Add ${noun}`}
+            {editing ? t('orgChartDialogs.saveChanges') : addLabel}
           </Button>
         </FormActions>
       }>
       <form id="stakeholder-form" onSubmit={handleSubmit} noValidate className="gtd-stack">
         {formError && form.name.trim() && <Notice tone="critical">{formError}</Notice>}
         <div className="gtd-form-grid">
-          <Input label="Name" required value={form.name} onChange={(v) => setField('name', v)} placeholder="Jane Smith" autoFocus
-            error={formError && !form.name.trim() ? 'Enter a name.' : undefined} style={{ gridColumn: '1 / -1' }} />
-          <Input label="Role" value={form.role} onChange={(v) => setField('role', v)} placeholder="VP of Engineering" />
-          <Input label="Organization" value={form.organization} onChange={(v) => setField('organization', v)} placeholder="Acme Corp" />
-          <Input label="Email" type="email" autoComplete="off" value={form.email} onChange={(v) => setField('email', v)} placeholder="jane@acme.com" style={{ gridColumn: '1 / -1' }} />
-          <Textarea label="What matters" value={form.what_matters} onChange={(v) => setField('what_matters', v)}
-            placeholder="What this person cares about most" rows={3} style={{ gridColumn: '1 / -1' }}
-            footer={<DictateButton fieldName="what matters" onText={(text) => setForm((f) => ({ ...f, what_matters: withDictation(f.what_matters, text) }))} />} />
-          <Textarea label="Notes" hint="Markdown is supported." value={form.notes} onChange={(v) => setField('notes', v)}
-            placeholder="Context, history, how the relationship works" rows={4} style={{ gridColumn: '1 / -1' }}
-            footer={<DictateButton fieldName="notes" onText={(text) => setForm((f) => ({ ...f, notes: withDictation(f.notes, text) }))} />} />
+          <Input label={t('boardColumnsEditor.name')} required value={form.name} onChange={(v) => setField('name', v)} placeholder="Jane Smith" autoFocus
+            error={formError && !form.name.trim() ? t('boardColumns.enterAName') : undefined} style={{ gridColumn: '1 / -1' }} />
+          <Input label={t('orgChartDialogs.role')} value={form.role} onChange={(v) => setField('role', v)} placeholder={t('stakeholders.vpOfEngineering')} />
+          <Input label={t('orgChartDialogs.organization')} value={form.organization} onChange={(v) => setField('organization', v)} placeholder="Acme Corp" />
+          <Input label={t('stakeholders.email')} type="email" autoComplete="off" value={form.email} onChange={(v) => setField('email', v)} placeholder="jane@acme.com" style={{ gridColumn: '1 / -1' }} />
+          <Textarea label={t('stakeholderDetail.whatMatters')} value={form.what_matters} onChange={(v) => setField('what_matters', v)}
+            placeholder={t('stakeholders.whatThisPersonCaresAbout')} rows={3} style={{ gridColumn: '1 / -1' }}
+            footer={<DictateButton fieldName={t('stakeholders.whatMatters')} onText={(text) => setForm((f) => ({ ...f, what_matters: withDictation(f.what_matters, text) }))} />} />
+          <Textarea label={t('orgChartsPanel.notes')} hint={t('context.markdownIsSupported')} value={form.notes} onChange={(v) => setField('notes', v)}
+            placeholder={t('stakeholders.contextHistoryHowTheRelationship')} rows={4} style={{ gridColumn: '1 / -1' }}
+            footer={<DictateButton fieldName={tr('dictation.fieldNotes')} onText={(text) => setForm((f) => ({ ...f, notes: withDictation(f.notes, text) }))} />} />
         </div>
       </form>
     </Modal>
@@ -221,7 +224,8 @@ interface RowProps {
 }
 
 function StakeholderRow({ stakeholder: s, voice, onEdit, onDelete }: RowProps) {
-  const missing = <span style={{ color: 'var(--color-text-muted)' }} aria-label="Not set">—</span>;
+  const { t } = useLanguage();
+  const missing = <span style={{ color: 'var(--color-text-muted)' }} aria-label={t('profile.notSet')}>—</span>;
   return (
     <tr>
       <td>
@@ -240,8 +244,8 @@ function StakeholderRow({ stakeholder: s, voice, onEdit, onDelete }: RowProps) {
       </td>
       <td style={{ textAlign: 'right' }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-          <IconButton label={`Edit ${s.name}`} icon={icons.edit} onClick={onEdit} />
-          <IconButton label={`Delete ${s.name}`} icon={icons.trash} tone="danger" onClick={onDelete} />
+          <IconButton label={t('orgChartDialogs.edit', { name: s.name })} icon={icons.edit} onClick={onEdit} />
+          <IconButton label={t('agents.delete', { name: s.name })} icon={icons.trash} tone="danger" onClick={onDelete} />
         </div>
       </td>
     </tr>
@@ -260,6 +264,7 @@ type TabType = ListTab | 'charts';
 // ---------------------------------------------------------------------------
 
 export default function StakeholdersView() {
+  const { t } = useLanguage();
   const [params, setParams] = useSearchParams();
   const tab: TabType = params.get('tab') === 'charts' ? 'charts' : params.get('tab') === 'groups' ? 'groups' : 'people';
   const [people, setPeople] = useState<Stakeholder[]>([]);
@@ -277,13 +282,13 @@ export default function StakeholdersView() {
     try {
       setFetchError(null);
       const [peopleData, groupsData] = await Promise.all([
-        fetch('/api/stakeholders?type=people').then((r) => { if (!r.ok) throw new Error('Failed to load'); return r.json(); }),
-        fetch('/api/stakeholders?type=groups').then((r) => { if (!r.ok) throw new Error('Failed to load'); return r.json(); }),
+        fetch('/api/stakeholders?type=people').then((r) => { if (!r.ok) throw new Error(t('stakeholders.failedToLoad')); return r.json(); }),
+        fetch('/api/stakeholders?type=groups').then((r) => { if (!r.ok) throw new Error(t('stakeholders.failedToLoad')); return r.json(); }),
       ]);
       setPeople(peopleData);
       setGroups(groupsData);
     } catch (err: unknown) {
-      setFetchError(err instanceof Error ? err.message : 'Failed to load stakeholders.');
+      setFetchError(err instanceof Error ? err.message : t('stakeholders.failedToLoadStakeholders'));
     } finally {
       setLoading(false);
     }
@@ -300,11 +305,11 @@ export default function StakeholdersView() {
   const notify = useNotify();
 
   async function handleDelete(s: Stakeholder) {
-    const label = tab === 'groups' ? 'group' : 'individual';
+    const group = tab === 'groups';
     const confirmed = await confirm({
-      title: `Delete ${s.name}?`,
-      message: `The ${label} is removed from your stakeholders. Tasks that mention them keep the reference. This cannot be undone.`,
-      confirmLabel: `Delete ${label}`,
+      title: t('transcriptionSettings.delete', { name: s.name }),
+      message: t(group ? 'stakeholders.groupRemoved' : 'stakeholders.individualRemoved'),
+      confirmLabel: t(group ? 'stakeholders.deleteGroup' : 'stakeholders.deleteIndividual'),
       tone: 'danger',
     });
     if (!confirmed) return;
@@ -313,7 +318,7 @@ export default function StakeholdersView() {
       if (tab === 'groups') setGroups((prev) => prev.filter((x) => x.id !== s.id));
       else setPeople((prev) => prev.filter((x) => x.id !== s.id));
     } catch (err: unknown) {
-      notify.error(err, `Could not delete the ${label}. Try again.`);
+      notify.error(err, t(group ? 'stakeholders.deleteGroupFailed' : 'stakeholders.deleteIndividualFailed'));
     }
   }
 
@@ -330,16 +335,17 @@ export default function StakeholdersView() {
     setParams((previous) => { const next = new URLSearchParams(previous); next.set('tab', t); return next; });
     setSearch('');
   };
-  const noun = tab === 'groups' ? 'group' : 'individual';
+  const isGroups = tab === 'groups';
+  const addLabel = isGroups ? t('stakeholders.addGroup') : t('stakeholders.addIndividual');
 
   return (
     <Page width={tab === 'charts' ? 'full' : 'default'}>
       <div>
-        <Tabs label="Stakeholder views" value={tab} onChange={setTab} idPrefix="stakeholders"
+        <Tabs label={t('stakeholders.stakeholderViews')} value={tab} onChange={setTab} idPrefix="stakeholders"
           items={[
-            { id: 'people', label: 'Individuals', count: loading ? undefined : people.length },
-            { id: 'groups', label: 'Groups', count: loading ? undefined : groups.length },
-            { id: 'charts', label: 'Org charts' },
+            { id: 'people', label: t('stakeholders.individuals'), count: loading ? undefined : people.length },
+            { id: 'groups', label: t('stakeholders.groups'), count: loading ? undefined : groups.length },
+            { id: 'charts', label: t('orgChartsPanel.orgCharts') },
           ]} />
       </div>
 
@@ -347,18 +353,18 @@ export default function StakeholdersView() {
         {tab !== 'charts' && (
           <PageHeader
             description={tab === 'groups'
-              ? 'Teams, boards and committees you work with, so agents can address them as a group.'
-              : 'The people your work is for. Agents read what matters to each one before they write.'}
+              ? t('stakeholders.teamsBoardsAndCommitteesYou')
+              : t('stakeholders.thePeopleYourWorkIs')}
             actions={<>
-              <SearchInput value={search} onChange={setSearch} placeholder={`Search ${tab === 'groups' ? 'groups' : 'individuals'}`} />
-              <Button variant="primary" icon={icons.plus} onClick={() => { setEditing(null); setModalOpen(true); }}>Add {noun}</Button>
+              <SearchInput value={search} onChange={setSearch} placeholder={t(isGroups ? 'stakeholders.searchGroups' : 'stakeholders.searchIndividuals')} />
+              <Button variant="primary" icon={icons.plus} onClick={() => { setEditing(null); setModalOpen(true); }}>{addLabel}</Button>
             </>}
           />
         )}
 
-        {fetchError && <Notice tone="critical" title="Could not load stakeholders." action={<Button size="sm" onClick={fetchStakeholders}>Try again</Button>}>{fetchError}</Notice>}
+        {fetchError && <Notice tone="critical" title={t('stakeholders.couldNotLoadStakeholders')} action={<Button size="sm" onClick={fetchStakeholders}>{t('retry')}</Button>}>{fetchError}</Notice>}
 
-        {loading && <LoadingSpinner text="Loading stakeholders…" />}
+        {loading && <LoadingSpinner text={t('stakeholders.loadingStakeholders')} />}
 
         {!loading && tab === 'charts' && <OrgChartsPanel stakeholders={[...people, ...groups]} initialChartId={params.get('chart')}
           onStakeholderCreated={(s) => setPeople((prev) => [...prev, s])} />}
@@ -367,20 +373,20 @@ export default function StakeholdersView() {
           <div className="gtd-card">
             {sorted.length === 0 ? (
               <EmptyState
-                title={search ? `No ${noun}s match "${search}"` : `No ${noun}s yet`}
-                description={search ? 'Try another name, role or organization.' : `Add the ${noun}s your work is for. Agents use what matters to them.`}
-                action={search ? { label: 'Clear search', onClick: () => setSearch('') } : { label: `Add ${noun}`, onClick: () => { setEditing(null); setModalOpen(true); } }}
+                title={search ? t(isGroups ? 'stakeholders.noGroupsMatch' : 'stakeholders.noIndividualsMatch', { search }) : t(isGroups ? 'stakeholders.noGroupsYet' : 'stakeholders.noIndividualsYet')}
+                description={search ? t('stakeholders.tryAnotherNameRoleOr') : t(isGroups ? 'stakeholders.addGroupsHint' : 'stakeholders.addIndividualsHint')}
+                action={search ? { label: t('meetingsList.clearSearch'), onClick: () => setSearch('') } : { label: addLabel, onClick: () => { setEditing(null); setModalOpen(true); } }}
               />
             ) : (
               <div className="gtd-table-wrap">
                 <table className="gtd-table">
                   <thead>
                     <tr>
-                      <SortHeader label="Name" sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                      <SortHeader label="Role" sortKey="role" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                      <SortHeader label="Organization" sortKey="organization" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
-                      <th scope="col">What matters</th>
-                      <th scope="col" style={{ textAlign: 'right' }}><span className="sr-only">Actions</span></th>
+                      <SortHeader label={t('boardColumnsEditor.name')} sortKey="name" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                      <SortHeader label={t('orgChartDialogs.role')} sortKey="role" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                      <SortHeader label={t('orgChartDialogs.organization')} sortKey="organization" currentKey={sortKey} currentDir={sortDir} onSort={handleSort} />
+                      <th scope="col">{t('stakeholderDetail.whatMatters')}</th>
+                      <th scope="col" style={{ textAlign: 'right' }}><span className="sr-only">{t('actions')}</span></th>
                     </tr>
                   </thead>
                   <tbody>

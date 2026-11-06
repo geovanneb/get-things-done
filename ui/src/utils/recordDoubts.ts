@@ -1,15 +1,16 @@
+import { tr } from '@/i18n/current';
 import type { RecordDoubt } from '@/types';
 
 /** How each field is named where the record card shows it. */
-export const DOUBT_FIELD_LABELS: Record<RecordDoubt['field'], string> = {
-  title: 'Title',
-  meeting_date: 'Date',
-  attendees: 'Attendees',
-  speakers: 'Speakers',
-  decisions: 'Decisions',
-  open_questions: 'Open questions',
-  action_items: 'Action items',
-};
+export const DOUBT_FIELD_LABELS = (): Record<RecordDoubt['field'], string> => ({
+  title: tr('importUpdateModal.title'),
+  meeting_date: tr('updateDetail.date'),
+  attendees: tr('updateDetail.attendees2'),
+  speakers: tr('updateDetail.speakers2'),
+  decisions: tr('updateDetail.decisions'),
+  open_questions: tr('updateDetail.openQuestions'),
+  action_items: tr('updateDetail.actionItems'),
+});
 
 /** Scripts written without spaces between words: there a doubt matches wherever its text appears. */
 const NO_SPACES = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u;
@@ -32,5 +33,5 @@ export function doubtsAbout(doubts: RecordDoubt[] | undefined, field: RecordDoub
 
 /** One line for a doubt, as the record card lists it: the text, why, and what it may be instead. */
 export function doubtLine(d: RecordDoubt): string {
-  return `${DOUBT_FIELD_LABELS[d.field]}: "${d.value}". ${d.reason}${d.suggestion ? ` Maybe: ${d.suggestion}.` : ''}`;
+  return `${DOUBT_FIELD_LABELS()[d.field]}: "${d.value}". ${d.reason}${d.suggestion ? tr('recordDoubts.maybe', { suggestion: d.suggestion }) : ''}`;
 }

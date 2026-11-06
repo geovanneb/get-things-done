@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import { useApi } from '@/hooks/useApi';
 import type { OutputTemplate } from '@/types';
 import { sectionLabelStyle } from './styles';
@@ -22,8 +23,8 @@ export default function DeliverableList({
   onChange,
   onRemove,
   onAdd,
-  label = 'Deliverables',
-  emptyText = 'No deliverables defined.',
+  label = tr('deliverableList.deliverables'),
+  emptyText = tr('deliverableList.noDeliverablesDefined'),
 }: DeliverableListProps) {
   const { data: templates } = useApi<OutputTemplate[]>('/api/outputs/templates');
 

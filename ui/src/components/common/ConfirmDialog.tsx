@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import Modal, { FormActions } from './Modal';
 import Button from './Button';
@@ -51,6 +52,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
 }
 
 function ConfirmDialog({ options, onSettle }: { options: ConfirmOptions; onSettle: (ok: boolean) => void }) {
+  const { t } = useLanguage();
   const danger = options.tone === 'danger';
   return (
     <Modal
@@ -62,10 +64,10 @@ function ConfirmDialog({ options, onSettle }: { options: ConfirmOptions; onSettl
       footer={
         <FormActions>
           <Button variant="ghost" onClick={() => onSettle(false)} autoFocus={danger}>
-            {options.cancelLabel ?? 'Cancel'}
+            {options.cancelLabel ?? t('cancel')}
           </Button>
           <Button variant={danger ? 'danger' : 'primary'} onClick={() => onSettle(true)} autoFocus={!danger}>
-            {options.confirmLabel ?? 'Confirm'}
+            {options.confirmLabel ?? t('confirm')}
           </Button>
         </FormActions>
       }

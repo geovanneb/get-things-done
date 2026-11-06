@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import React from 'react';
 import ReactDOM from 'react-dom';
@@ -29,9 +31,9 @@ async function uploadTaskFile(taskId: string, file: File): Promise<string | null
     const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/files`, { method: 'POST', body: form });
     if (res.ok) return null;
     const body = await res.json().catch(() => null) as { message?: string; error?: string } | null;
-    return `${file.name}: ${body?.message ?? body?.error ?? `upload failed (${res.status})`}`;
+    return `${file.name}: ${body?.message ?? body?.error ?? tr('newTaskModal.uploadFailed', { status: res.status })}`;
   } catch {
-    return `${file.name}: upload failed`;
+    return tr('newTaskModal.uploadFailed2', { name: file.name });
   }
 }
 
@@ -78,6 +80,7 @@ export default function NewTaskModal({
   draft,
   onCreated,
 }: NewTaskModalProps) {
+  const { t } = useLanguage();
   const [form, setForm] = React.useState<FormState>(() => defaultForm(defaultStatus, draft));
   const [titleError, setTitleError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
@@ -132,12 +135,12 @@ export default function NewTaskModal({
 
   const validate = (): boolean => {
     if (!form.title.trim()) {
-      setTitleError('Title is required.');
+      setTitleError(t('newTaskModal.titleIsRequired'));
       return false;
     }
     setTitleError('');
     if (tooBig.length) {
-      setSaveError(`Remove files over 50 MB: ${tooBig.map((f) => f.name).join(', ')}`);
+      setSaveError(t('newTaskModal.removeFilesOver50Mb', { join: tooBig.map((f) => f.name).join(', ') }));
       return false;
     }
     return true;
@@ -188,14 +191,14 @@ export default function NewTaskModal({
       }
       const uploadErrors: string[] = [];
       for (let i = 0; i < (existing ? 0 : files.length); i++) {
-        setProgress(`Uploading ${i + 1} of ${files.length}...`);
+        setProgress(t('newTaskModal.uploadingOf', { value: i + 1, length: files.length }));
         const failed = await uploadTaskFile(created.id, files[i]!);
         if (failed) uploadErrors.push(failed);
       }
       onCreated?.(created, uploadErrors, existing);
       onClose();
     } catch (err: any) {
-      setSaveError(err?.message ?? 'Could not create the task. Try again.');
+      setSaveError(err?.message ?? t('newTaskModal.couldNotCreateTheTask'));
     } finally {
       setSaving(false);
       setProgress('');
@@ -206,7 +209,7 @@ export default function NewTaskModal({
 
   const statuses = ['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'] as Task['status'][];
   const agentOptions = [
-    { value: '', label: 'No preference' },
+    { value: '', label: t('newTaskModal.noPreference') },
     ...(form.preferred_agent && !(agents ?? []).some((a) => a.name === form.preferred_agent) ? [{ value: form.preferred_agent, label: form.preferred_agent }] : []),
     ...(agents ?? []).map((a) => ({ value: a.name, label: a.name })),
   ];
@@ -219,15 +222,15 @@ export default function NewTaskModal({
         {/* Header */}
         <div className="gtd-modal__header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <h2 id="new-task-heading" className="gtd-modal__title" style={{ flex: 1 }}>New task</h2>
+            <h2 id="new-task-heading" className="gtd-modal__title" style={{ flex: 1 }}>{t('newTask')}</h2>
             {progress && <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{progress}</span>}
-            <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>Cancel</Button>
-            <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>Create task</Button>
-            <IconButton label="Close dialog" icon={icons.close} onClick={onClose} disabled={saving} />
+            <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
+            <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>{t('newTaskModal.createTask')}</Button>
+            <IconButton label={t('closeDialog')} icon={icons.close} onClick={onClose} disabled={saving} />
           </div>
           <input
             type="text"
-            aria-label="Task title"
+            aria-label={t('newTaskModal.taskTitle')}
             aria-required="true"
             aria-invalid={titleError ? true : undefined}
             aria-describedby={titleError ? 'new-task-title-error' : undefined}
@@ -237,7 +240,7 @@ export default function NewTaskModal({
               setField('title', e.target.value);
               if (titleError) setTitleError('');
             }}
-            placeholder="What needs to get done?"
+            placeholder={t('newTaskModal.whatNeedsToGetDone')}
             style={titleError ? { borderColor: 'var(--color-critical)' } : undefined}
           />
           {titleError && <span id="new-task-title-error" className="gtd-field__error">{titleError}</span>}
@@ -245,19 +248,19 @@ export default function NewTaskModal({
 
         {/* Body: main + sidebar */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)', gap: 'var(--space-4)', minHeight: 0 }}>
-          {saveError && <Notice tone="critical" title="The task was not created.">{saveError}</Notice>}
+          {saveError && <Notice tone="critical" title={t('newTaskModal.theTaskWasNotCreated')}>{saveError}</Notice>}
           <div className="gtd-detail">
             <div className="gtd-detail__main">
-              <Field label="Objective" htmlFor="new-task-objective" hint="Type @ to mention a stakeholder, template, context note, task or meeting." style={{ marginBottom: 'var(--space-6)' }}>
+              <Field label={t('newTaskModal.objective')} htmlFor="new-task-objective" hint={t('newTaskModal.typeToMentionAStakeholder')} style={{ marginBottom: 'var(--space-6)' }}>
                 <MentionTextarea
                   id="new-task-objective"
                   className="gtd-control"
                   rows={6}
                   value={form.objective}
                   onChange={(v) => setField('objective', v)}
-                  placeholder="Describe the goal or context for this task"
+                  placeholder={t('newTaskModal.describeTheGoalOrContext')}
                 />
-                <DictateButton fieldName="objective" onText={addDictation} />
+                <DictateButton fieldName={tr('dictation.fieldObjective')} onText={addDictation} />
               </Field>
 
               <div style={{ marginBottom: 'var(--space-6)' }}>
@@ -266,14 +269,14 @@ export default function NewTaskModal({
                   onChange={updateDeliverable}
                   onRemove={removeDeliverable}
                   onAdd={addDeliverable}
-                  label="Output type"
-                  emptyText="No outputs defined yet."
+                  label={t('newTaskModal.outputType')}
+                  emptyText={t('newTaskModal.noOutputsDefinedYet')}
                 />
               </div>
 
               {/* Files: attached right after the task is created */}
               <div style={{ marginBottom: 'var(--space-6)' }}>
-                <h3 style={{ ...sectionLabelStyle, marginBottom: 'var(--space-2)' }}>Files</h3>
+                <h3 style={{ ...sectionLabelStyle, marginBottom: 'var(--space-2)' }}>{t('newTaskModal.files')}</h3>
                 <DropZone onFiles={addFiles} compact />
                 {files.length > 0 && (
                   <ul style={{ listStyle: 'none', margin: 'var(--space-2) 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
@@ -281,7 +284,7 @@ export default function NewTaskModal({
                       <li key={`${f.name}-${f.size}`} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)', padding: '2px 4px 2px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
                         <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{f.name}</span>
                         <span style={{ fontSize: 'var(--text-xs)', color: f.size > MAX_FILE ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
-                        <IconButton label={`Remove ${f.name}`} icon={icons.close} tone="danger" disabled={saving} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))} />
+                        <IconButton label={t('removeNamedFile', { name: f.name })} icon={icons.close} tone="danger" disabled={saving} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))} />
                       </li>
                     ))}
                   </ul>
@@ -289,13 +292,13 @@ export default function NewTaskModal({
               </div>
             </div>
 
-            <aside className="gtd-detail__aside" aria-label="Task fields">
-              <Select label="Status" size="sm" value={form.status} onChange={(v) => setField('status', v as Task['status'])}
+            <aside className="gtd-detail__aside" aria-label={t('newTaskModal.taskFields')}>
+              <Select label={t('newTaskModal.status')} size="sm" value={form.status} onChange={(v) => setField('status', v as Task['status'])}
                 options={statuses.map((s) => ({ value: s, label: formatStatusLabel(s) }))} />
-              <Select label="Priority" size="sm" value={form.priority} onChange={(v) => setField('priority', v as Task['priority'])}
+              <Select label={t('newTaskModal.priority')} size="sm" value={form.priority} onChange={(v) => setField('priority', v as Task['priority'])}
                 options={(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => ({ value: p, label: formatPriorityLabel(p) }))} />
-              <Input label="Due date" type="date" size="sm" value={form.due_date} onChange={(v) => setField('due_date', v)} />
-              <Select label="Preferred agent" size="sm" value={form.preferred_agent} onChange={(v) => setField('preferred_agent', v)} options={agentOptions} />
+              <Input label={t('newTaskModal.dueDate')} type="date" size="sm" value={form.due_date} onChange={(v) => setField('due_date', v)} />
+              <Select label={t('newTaskModal.preferredAgent')} size="sm" value={form.preferred_agent} onChange={(v) => setField('preferred_agent', v)} options={agentOptions} />
               <StakeholderPicker
                 selected={selectedStakeholders}
                 onAdd={(s) => setSelectedStakeholders((prev) => [...prev, s])}

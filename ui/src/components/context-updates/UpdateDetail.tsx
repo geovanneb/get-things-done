@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link, useNavigate } from 'react-router-dom';
@@ -25,32 +28,33 @@ const card: React.CSSProperties = {
   background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 16,
 };
 
-const CONFIDENCE: Record<string, { label: string; color: string; hint: string }> = {
-  high: { label: 'High confidence', color: 'var(--color-success)', hint: 'Stated clearly by someone who owns the topic.' },
-  medium: { label: 'Medium confidence', color: 'var(--color-warning)', hint: 'Likely right, but check the evidence.' },
-  low: { label: 'Low confidence', color: 'var(--color-critical)', hint: 'Unconfirmed or contradicted. Check before accepting.' },
-};
+const CONFIDENCE = (): Record<string, { label: string; color: string; hint: string }> => ({
+  high: { label: tr('updateDetail.highConfidence'), color: 'var(--color-success)', hint: tr('updateDetail.statedClearlyBySomeoneWho') },
+  medium: { label: tr('updateDetail.mediumConfidence'), color: 'var(--color-warning)', hint: tr('updateDetail.likelyRightButCheckThe') },
+  low: { label: tr('updateDetail.lowConfidence'), color: 'var(--color-critical)', hint: tr('updateDetail.unconfirmedOrContradictedCheckBefore') },
+});
 
-const OUTCOME: Record<string, string> = {
-  applied: 'Applied as reviewed',
-  merged: 'Applied, merged with newer edits',
-  failed: 'Could not be applied',
-  skipped: 'Not applied',
-};
+const OUTCOME = (): Record<string, string> => ({
+  applied: tr('updateDetail.appliedAsReviewed'),
+  merged: tr('updateDetail.appliedMergedWithNewerEdits'),
+  failed: tr('updateDetail.couldNotBeApplied'),
+  skipped: tr('updateDetail.notApplied'),
+});
 
 type Decisions = Record<string, { decision: ContextUpdateProposal['decision']; reviewer_note: string }>;
 type Confirmations = Record<string, MeetingRecord['confirmation']>;
 
 /** The name as the material writes it; the stakeholder id only says the agent linked it. */
 function personLabel(p: MeetingPerson): string {
-  if (p.ref === 'me') return p.name && p.name !== 'me' ? `${p.name} (you)` : 'You';
+  if (p.ref === 'me') return p.name && p.name !== 'me' ? tr('updateDetail.you', { name: p.name }) : tr('updateDetail.you2');
   return p.name || p.ref || '';
 }
 
 /** Marks a piece of a record the analysis is not sure of; the reason is in the record's "Not sure" list and the tooltip. */
 function NotSure({ doubts }: { doubts: RecordDoubt[] }) {
+  const { t } = useLanguage();
   if (doubts.length === 0) return null;
-  return <> <span title={doubts.map(doubtLine).join(' ')}><Badge size="sm" variant="warning">Not sure</Badge></span></>;
+  return <> <span title={doubts.map(doubtLine).join(' ')}><Badge size="sm" variant="warning">{t('updateDetail.notSure')}</Badge></span></>;
 }
 
 function RecordList({ label, items }: { label: string; items: React.ReactNode[] }) {
@@ -67,12 +71,13 @@ function RecordList({ label, items }: { label: string; items: React.ReactNode[] 
 
 /** How a person shows: the name, and whether the agent's link to a stakeholder holds. */
 function PersonName({ person }: { person: MeetingPerson }) {
+  const { t } = useLanguage();
   const unknownLink = person.ref && person.ref !== 'me' && person.ref_found === false;
   return (
     <>
-      <span title={person.ref && person.ref !== 'me' ? `The agent linked this to ${person.ref}` : person.ref ? undefined : 'Not linked to a stakeholder'}>{personLabel(person)}</span>
-      {!person.ref && <span style={{ color: 'var(--color-text-muted)' }}> (not linked)</span>}
-      {unknownLink && <span style={{ color: 'var(--color-warning)' }}> (no stakeholder {person.ref})</span>}
+      <span title={person.ref && person.ref !== 'me' ? t('updateDetail.theAgentLinkedThisTo', { ref: person.ref }) : person.ref ? undefined : t('updateDetail.notLinkedToAStakeholder')}>{personLabel(person)}</span>
+      {!person.ref && <span style={{ color: 'var(--color-text-muted)' }}> {t('updateDetail.notLinked')}</span>}
+      {unknownLink && <span style={{ color: 'var(--color-warning)' }}> {rich(t, 'updateDetail.noStakeholder', { ref: person.ref })}</span>}
     </>
   );
 }
@@ -87,6 +92,7 @@ function SpeakerRow({ speaker, reviewing, people, onSet }: {
   people: Stakeholder[];
   onSet: (person: { ref?: string; name: string } | null) => void;
 }) {
+  const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const change = useRef<HTMLButtonElement>(null);
@@ -97,22 +103,22 @@ function SpeakerRow({ speaker, reviewing, people, onSet }: {
     if (name.trim()) onSet(known ? { ref: known.id, name: known.name } : { name: name.trim() });
     close();
   };
-  const who = `${speaker.label} of ${speaker.source}`;
+  const who = t('updateDetail.of', { label: speaker.label, source: speaker.source });
   const link = { padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-xs)', marginLeft: 8 } as const;
   return (
     <li>
-      {speaker.label}: {speaker.person ? <PersonName person={speaker.person} /> : <span style={{ color: 'var(--color-text-muted)' }}>unknown</span>}
+      {speaker.label}: {speaker.person ? <PersonName person={speaker.person} /> : <span style={{ color: 'var(--color-text-muted)' }}>{t('updateDetail.unknown')}</span>}
       {speaker.reason && <span style={{ color: 'var(--color-text-muted)' }}> · {speaker.reason}</span>}
       <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}> · {speaker.source}</span>
-      {reviewing && !editing && <button ref={change} type="button" style={link} onClick={() => { setName(''); setEditing(true); }} aria-label={`Change ${who}`}>Change</button>}
-      {reviewing && !editing && speaker.person && <button type="button" style={link} onClick={() => onSet(null)} aria-label={`Leave ${who} unknown`}>Leave unknown</button>}
+      {reviewing && !editing && <button ref={change} type="button" style={link} onClick={() => { setName(''); setEditing(true); }} aria-label={t('updateDetail.change', { who })}>{t('change')}</button>}
+      {reviewing && !editing && speaker.person && <button type="button" style={link} onClick={() => onSet(null)} aria-label={t('updateDetail.leaveUnknown', { who })}>{t('updateDetail.leaveUnknown2')}</button>}
       {editing && (
         <span style={{ marginLeft: 8 }}>
-          <input aria-label={`Who is ${who}`} list="speaker-people" value={name} autoFocus onChange={(e) => setName(e.target.value)}
+          <input aria-label={t('updateDetail.whoIs', { who })} list="speaker-people" value={name} autoFocus onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); }}
             style={{ padding: '2px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--color-border)', background: 'var(--color-surface)', color: 'var(--color-text)' }} />
-          <button type="button" style={link} onClick={save}>Save</button>
-          <button type="button" style={link} onClick={close}>Cancel</button>
+          <button type="button" style={link} onClick={save}>{t('updateDetail.save')}</button>
+          <button type="button" style={link} onClick={close}>{t('cancel')}</button>
         </span>
       )}
     </li>
@@ -149,73 +155,74 @@ export function MeetingRecordCard({ record, reviewing, confirmation, onChoose, o
   onCreateTask?: (item: number) => void;
   onSpeaker: (speaker: MeetingSpeaker, person: { ref?: string; name: string } | null) => void;
 }) {
+  const { t } = useLanguage();
   const confirmed = confirmation === 'confirmed';
   const rejected = confirmation === 'rejected';
   // A record without a unique id cannot be chosen at all; a flawed one can still be rejected.
   const unusableId = record.problems.some((p) => p.includes('valid id') || p.includes('same id'));
   const canConfirm = record.problems.length === 0;
   return (
-    <article aria-label={`Meeting record ${record.id || 'without id'}`} style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8, borderLeft: `3px solid ${confirmed ? 'var(--color-success)' : rejected ? 'var(--color-border)' : 'var(--color-border-strong)'}`, opacity: rejected && !reviewing ? 0.7 : 1 }}>
+    <article aria-label={t('updateDetail.meetingRecord', { id: record.id || t('updateDetail.withoutId') })} style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8, borderLeft: `3px solid ${confirmed ? 'var(--color-success)' : rejected ? 'var(--color-border)' : 'var(--color-border-strong)'}`, opacity: rejected && !reviewing ? 0.7 : 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{record.title || 'Meeting'}</span>
-        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{record.meeting_date || 'date unknown'}</span>
+        <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>{record.title || t('importUpdateModal.meeting')}</span>
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{record.meeting_date || t('updateDetail.dateUnknown')}</span>
         {!reviewing && confirmation && (
           <span style={{ marginLeft: 'auto', fontSize: 'var(--text-xs)', fontWeight: 600, color: confirmed ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-            {confirmed ? 'Confirmed' : 'Rejected'}
+            {confirmed ? t('updateDetail.confirmed') : t('updateDetail.rejected')}
           </span>
         )}
       </div>
       {record.attendees.length > 0 && (
         <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          <span style={{ fontWeight: 600 }}>Attendees: </span>
+          <span style={{ fontWeight: 600 }}>{t('updateDetail.attendees')} </span>
           {record.attendees.map((p, i) => <span key={i}>{i > 0 && ', '}<PersonName person={p} /><NotSure doubts={doubtsAbout(record.unsure, 'attendees', p.name)} /></span>)}
         </div>
       )}
       {record.speakers.length > 0 && (
-        <SpeakerList speakers={record.speakers} title={`Speakers${confirmed ? '' : ' (proposed, until you confirm this record)'}`} reviewing={reviewing} onSet={onSpeaker} />
+        <SpeakerList speakers={record.speakers} title={t('updateDetail.speakers', { value: confirmed ? '' : ' (proposed, until you confirm this record)' })} reviewing={reviewing} onSet={onSpeaker} />
       )}
-      <RecordList label="Decisions" items={record.decisions.map((d) => <>{d}<NotSure doubts={doubtsAbout(record.unsure, 'decisions', d)} /></>)} />
-      <RecordList label="Open questions" items={record.open_questions.map((q) => <>{q}<NotSure doubts={doubtsAbout(record.unsure, 'open_questions', q)} /></>)} />
-      <RecordList label="Action items" items={record.action_items.map((a, i) => (
+      <RecordList label={t('updateDetail.decisions')} items={record.decisions.map((d) => <>{d}<NotSure doubts={doubtsAbout(record.unsure, 'decisions', d)} /></>)} />
+      <RecordList label={t('updateDetail.openQuestions')} items={record.open_questions.map((q) => <>{q}<NotSure doubts={doubtsAbout(record.unsure, 'open_questions', q)} /></>)} />
+      <RecordList label={t('updateDetail.actionItems')} items={record.action_items.map((a, i) => (
         <>
-          {a.description}{a.owner && <span style={{ color: 'var(--color-text-secondary)' }}> · <PersonName person={a.owner} /></span>}{a.due_date && <span style={{ color: 'var(--color-text-secondary)' }}> · by {a.due_date}</span>}
+          {a.description}{a.owner && <span style={{ color: 'var(--color-text-secondary)' }}> · <PersonName person={a.owner} /></span>}{a.due_date && <span style={{ color: 'var(--color-text-secondary)' }}> {rich(t, 'updateDetail.by', { due_date: a.due_date })}</span>}
           <NotSure doubts={doubtsAbout(record.unsure, 'action_items', [a.description, a.owner?.name ?? '', a.due_date].join(' '))} />
           {a.task_ref && (a.task_found === false
-            ? <span style={{ color: 'var(--color-text-muted)' }}> · task {a.task_ref} (no longer exists)</span>
+            ? <span style={{ color: 'var(--color-text-muted)' }}> {rich(t, 'updateDetail.taskNoLongerExists', { task_ref: a.task_ref })}</span>
             : <> · <Link to={`/board/task/${a.task_ref}`} style={{ color: 'var(--color-accent)' }}>{a.task_ref}</Link></>)}
           {!a.task_ref && onCreateTask && (
-            <button type="button" onClick={() => onCreateTask(i)} aria-label={`Create a task from: ${a.description}`}
+            <button type="button" onClick={() => onCreateTask(i)} aria-label={t('updateDetail.createATaskFrom', { description: a.description })}
               style={{ marginLeft: 8, padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600 }}>
-              Create task
+              {t('newTaskModal.createTask')}
             </button>
           )}
         </>
       ))} />
       {(record.unsure?.length ?? 0) > 0 && (
-        <HelpBox tone="warning" title="Not sure: check these before you confirm">
+        <HelpBox tone="warning" title={t('updateDetail.notSureCheckTheseBefore')}>
           <ul style={{ margin: 0, paddingLeft: 18 }}>{record.unsure!.map((d, i) => <li key={i}>{doubtLine(d)}</li>)}</ul>
-          The record says what the material says; a suggestion changes nothing until you correct it.
+          {t('updateDetail.theRecordSaysWhatThe')}
         </HelpBox>
       )}
-      {record.source && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Source: {record.source}</div>}
+      {record.source && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{rich(t, 'updateDetail.source', { source: record.source })}</div>}
       {record.changed_since_confirmed && (
-        <HelpBox tone="warning" title="Changed after you confirmed it">
-          The record is no longer the one you confirmed. Read it again and confirm or reject it before you approve or close.
+        <HelpBox tone="warning" title={t('updateDetail.changedAfterYouConfirmedIt')}>
+          {t('updateDetail.theRecordIsNoLonger')}
         </HelpBox>
       )}
       {record.problems.length > 0 && (
-        <HelpBox tone="critical" title="Cannot be confirmed as it is">
+        <HelpBox tone="critical" title={t('updateDetail.cannotBeConfirmedAsIt')}>
           <ul style={{ margin: 0, paddingLeft: 18 }}>{record.problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
-          Ask the agent to fix the record (or analyze again).{!unusableId && ' You can still reject it.'}
+          {t('updateDetail.askTheAgentToFix')}{!unusableId && t('updateDetail.youCanStillRejectIt')}
         </HelpBox>
       )}
       {reviewing && !unusableId && (
-        <div role="group" aria-label={`Review ${record.id}`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div role="group" aria-label={t('updateDetail.review', { id: record.id })} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <Button variant={confirmed ? 'primary' : 'secondary'} size="sm" aria-pressed={confirmed} disabled={!canConfirm && !confirmed} onClick={() => onChoose(confirmed ? null : 'confirmed')}>
-            {confirmed ? 'Confirmed' : 'Confirm'}
+            {confirmed ? t('updateDetail.confirmed') : t('confirm')}
           </Button>
           <Button variant="ghost" size="sm" aria-pressed={rejected} onClick={() => onChoose(rejected ? null : 'rejected')}>
-            {rejected ? 'Rejected' : 'Reject'}
+            {rejected ? t('updateDetail.rejected') : t('updateDetail.reject')}
           </Button>
         </div>
       )}
@@ -223,17 +230,18 @@ export function MeetingRecordCard({ record, reviewing, confirmation, onChoose, o
   );
 }
 
-const FIELD_LABELS: Record<RecordDoubt['field'], string> = {
-  title: 'Title', meeting_date: 'Date', attendees: 'Attendees', speakers: 'Speakers', decisions: 'Decisions', open_questions: 'Open questions', action_items: 'Action items',
-};
+const FIELD_LABELS = (): Record<RecordDoubt['field'], string> => ({
+  title: tr('importUpdateModal.title'), meeting_date: tr('updateDetail.date'), attendees: tr('updateDetail.attendees2'), speakers: tr('updateDetail.speakers2'), decisions: tr('updateDetail.decisions'), open_questions: tr('updateDetail.openQuestions'), action_items: tr('updateDetail.actionItems'),
+});
 
 /** One side of a changed field: its lines, the ones not on the other side marked, in words as well as colour. */
 function ChangeSide({ label, lines, other, tone }: { label: string; lines: string[]; other: string[]; tone: 'before' | 'after' }) {
+  const { t } = useLanguage();
   const color = tone === 'before' ? 'var(--color-critical)' : 'var(--color-success)';
   return (
     <div style={{ minWidth: 0 }}>
       <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 2 }}>{label}</div>
-      {lines.length === 0 || (lines.length === 1 && !lines[0]) ? <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>(empty)</div> : (
+      {lines.length === 0 || (lines.length === 1 && !lines[0]) ? <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('updateDetail.empty')}</div> : (
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-sm)', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {lines.map((line, i) => {
             // Same number of lines: compared place by place, so a reorder still shows. Otherwise by occurrence: the
@@ -254,12 +262,13 @@ function ChangeSide({ label, lines, other, tone }: { label: string; lines: strin
 
 /** One line of a turn, the changed words marked: struck out before, underlined after. */
 function WordLine({ line, words, tone }: { line: string; words: string; tone: 'before' | 'after' }) {
+  const { t } = useLanguage();
   const at = line.indexOf(words);
   const color = tone === 'before' ? 'var(--color-critical)' : 'var(--color-success)';
   const Mark = tone === 'before' ? 'del' : 'ins';
   return (
     <div style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 2 }}>{tone === 'before' ? 'Before' : 'After'}</div>
+      <div style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 2 }}>{tone === 'before' ? t('updateDetail.before') : t('updateDetail.after')}</div>
       <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', overflowWrap: 'anywhere' }}>
         {at < 0 ? line : <>{line.slice(0, at)}<Mark style={{ color, fontWeight: 600 }}>{words}</Mark>{line.slice(at + words.length)}</>}
       </div>
@@ -272,6 +281,7 @@ function WordLine({ line, words, tone }: { line: string; words: string; tone: 'b
  * used are what approving writes, as a new version of the meeting's text; the others are offered, or say why not.
  */
 function TranscriptSection({ review, open, onUse, busy }: { review: TranscriptReview; open: boolean; onUse?: (index: number, use: boolean) => void; busy: boolean }) {
+  const { t } = useLanguage();
   const where = (c: TranscriptChangeView) => [c.file, `#${c.turn}`, c.time, c.speaker].filter(Boolean).join(' · ');
   // The server's reasons are phrased to follow a label ("Transcript change 2: it touches…"); shown alone, as a sentence.
   const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
@@ -279,7 +289,7 @@ function TranscriptSection({ review, open, onUse, busy }: { review: TranscriptRe
   const counted = review.changes.filter((c) => c.sure || c.used);
   const offered = review.changes.filter((c) => !c.sure && !c.used);
   const lines = (c: TranscriptChangeView) => c.line_before === null || c.line_after === null
-    ? <div style={{ fontSize: 'var(--text-sm)' }}>"{c.before}" to "{c.after}"</div>
+    ? <div style={{ fontSize: 'var(--text-sm)' }}>{rich(t, 'updateDetail.to', { before: c.before, after: c.after })}</div>
     : (
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
         <WordLine line={c.line_before} words={c.before} tone="before" />
@@ -289,25 +299,25 @@ function TranscriptSection({ review, open, onUse, busy }: { review: TranscriptRe
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8, borderTop: '1px solid var(--color-border)' }}>
       <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
-        Transcript{review.made ? ` · new version ${review.made.to}, from ${review.made.from}` : review.base ? ` · on ${review.base}` : ''}
+        {rich(t, 'updateDetail.transcript', { value: review.made ? t('updateDetail.newVersionFrom', { to: review.made.to, from: review.made.from }) : review.base ? t('updateDetail.on', { base: review.base }) : '' })}
       </div>
       {open && review.problem && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>{review.problem}</div>}
       {counted.length === 0 && (
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{open ? 'No words change yet: the agent was not sure of these.' : 'No words changed.'}</div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{open ? t('updateDetail.noWordsChangeYetThe') : t('updateDetail.noWordsChanged')}</div>
       )}
       {counted.map((c, i) => (
         <div key={c.index} style={item(i)}>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>{where(c)}</div>
           {lines(c)}
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span><strong>{c.used ? 'Used by you:' : 'Why:'}</strong> {c.reason}</span>
-            {c.used && onUse && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onUse(c.index, false)} aria-label={`Undo: transcript turn ${c.turn} "${c.before}" to "${c.after}"`}>Undo</Button>}
+            <span><strong>{c.used ? t('updateDetail.usedByYou') : t('updateDetail.why')}</strong> {c.reason}</span>
+            {c.used && onUse && <Button size="sm" variant="secondary" disabled={busy} onClick={() => onUse(c.index, false)} aria-label={t('updateDetail.undoTranscriptTurnTo', { turn: c.turn, before: c.before, after: c.after })}>{t('updateDetail.undo')}</Button>}
           </div>
           {open && c.problem && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-critical)' }}>{sentence(c.problem)}</div>}
         </div>
       ))}
       {open && offered.length > 0 && (
-        <HelpBox tone="warning" title="Not sure: suggested, not applied">
+        <HelpBox tone="warning" title={t('updateDetail.notSureSuggestedNotApplied')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {offered.map((c, i) => (
               <div key={c.index} style={item(i)}>
@@ -317,19 +327,19 @@ function TranscriptSection({ review, open, onUse, busy }: { review: TranscriptRe
                 {onUse && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <Button size="sm" variant="secondary" disabled={busy || Boolean(c.problem)} onClick={() => onUse(c.index, true)}
-                      aria-label={`Use suggestion: transcript turn ${c.turn} "${c.before}" to "${c.after}"`}>Use suggestion</Button>
+                      aria-label={t('updateDetail.useSuggestionTranscriptTurnTo', { turn: c.turn, before: c.before, after: c.after })}>{t('updateDetail.useSuggestion')}</Button>
                     {c.problem && <span style={{ fontSize: 'var(--text-xs)' }}>{sentence(c.problem)}</span>}
                   </div>
                 )}
               </div>
             ))}
           </div>
-          {onUse ? 'Using a suggestion updates this draft record. Confirm it again and approve to write the new version.' : 'These are not applied. Check them in the transcript.'}
+          {onUse ? t('updateDetail.usingASuggestionUpdatesThis') : t('updateDetail.theseAreNotAppliedCheck')}
         </HelpBox>
       )}
       {open && counted.length > 0 && (
         <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          Approving writes these as a new version of the meeting's text. The version before stays, and you can go back to it.
+          {t('updateDetail.approvingWritesTheseAsA')}
         </div>
       )}
     </div>
@@ -348,6 +358,7 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, onUseWord
   onUseWords?: (index: number, use: boolean) => void;
   busy?: boolean;
 }) {
+  const { t } = useLanguage();
   const words = review.transcript ?? null;
   const wordsCount = Boolean(words?.changes.some((c) => c.sure || c.used));
   const sure = explanations.filter((c) => c.sure);
@@ -356,27 +367,26 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, onUseWord
   const suggestions = explanations.map((c, index) => ({ c, index })).filter((x) => !x.c.sure && !x.c.taken);
   const stateOf = (index: number) => review.suggestions.find((s) => s.index === index);
   return (
-    <section aria-label="What the correction changes" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <h4 style={{ ...sectionLabel, margin: 0 }}>{open ? 'What this correction changes' : rejected ? 'What this correction suggested (rejected, not applied)' : 'What this correction changed'}</h4>
+    <section aria-label={t('updateDetail.whatTheCorrectionChanges')} style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <h4 style={{ ...sectionLabel, margin: 0 }}>{open ? t('updateDetail.whatThisCorrectionChanges') : rejected ? t('updateDetail.whatThisCorrectionSuggestedRejected') : t('updateDetail.whatThisCorrectionChanged')}</h4>
       {open && review.finishing && (
-        <HelpBox tone="warning" title="Finishing was interrupted">
-          The new version of the meeting's text may already be written. Approve to complete this correction. Until then nothing in it can
-          change; it can be closed only if it has not written its new version yet.
+        <HelpBox tone="warning" title={t('updateDetail.finishingWasInterrupted')}>
+          {t('updateDetail.theNewVersionOfThe')}
         </HelpBox>
       )}
       {open && review.blocked.length > 0 && (
-        <HelpBox tone="critical" title={review.stale ? 'Another correction of this meeting finished first' : 'This correction cannot be approved'}>
+        <HelpBox tone="critical" title={review.stale ? t('updateDetail.anotherCorrectionOfThisMeeting') : t('updateDetail.thisCorrectionCannotBeApproved')}>
           <ul style={{ margin: 0, paddingLeft: 18 }}>{review.blocked.map((b, i) => <li key={i}>{b}</li>)}</ul>
         </HelpBox>
       )}
       {!review.base && (
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          The version this corrected is no longer here, so the changes cannot be shown against it.
+          {t('updateDetail.theVersionThisCorrectedIs')}
         </p>
       )}
       {review.base && review.changes.length === 0 && !wordsCount && (
         <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-          {!open ? 'Nothing changed.' : suggestions.length || words?.changes.length ? 'No changes applied yet: the agent was not sure of these. Use the ones that are right, or close this correction.' : 'Nothing: the agent found nothing to correct. Close this correction to keep the record as it is.'}
+          {!open ? t('updateDetail.nothingChanged') : suggestions.length || words?.changes.length ? t('updateDetail.noChangesAppliedYetThe') : t('updateDetail.nothingTheAgentFoundNothing')}
         </p>
       )}
       {review.changes.map((c: FieldChange) => {
@@ -384,36 +394,36 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, onUseWord
         const chosen = used.filter((x) => x.c.field === c.field);
         return (
           <div key={c.field} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 8, borderTop: '1px solid var(--color-border)' }}>
-            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{FIELD_LABELS[c.field]}</div>
+            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{FIELD_LABELS()[c.field]}</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-              <ChangeSide label="Before" lines={c.before} other={c.after} tone="before" />
-              <ChangeSide label="After" lines={c.after} other={c.before} tone="after" />
+              <ChangeSide label={t('updateDetail.before')} lines={c.before} other={c.after} tone="before" />
+              <ChangeSide label={t('updateDetail.after')} lines={c.after} other={c.before} tone="after" />
             </div>
             {why.length + chosen.length > 0
               ? (
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
-                  {why.map((x, i) => <li key={`w${i}`}><strong>Why:</strong> {x.reason}</li>)}
-                  {chosen.map((x) => <li key={`c${x.index}`}><strong>Selected by you:</strong> "{x.c.before}" to "{x.c.after}". {x.c.reason}</li>)}
+                  {why.map((x, i) => <li key={`w${i}`}><strong>{t('updateDetail.why')}</strong> {x.reason}</li>)}
+                  {chosen.map((x) => <li key={`c${x.index}`}>{rich(t, 'updateDetail.to2', { strong: <strong>{t('updateDetail.selectedByYou')}</strong>, before: x.c.before, after: x.c.after, reason: x.c.reason })}</li>)}
                 </ul>
               )
-              : <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>The agent did not explain this change. Check it against the transcript.</div>}
+              : <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>{t('updateDetail.theAgentDidNotExplain')}</div>}
           </div>
         );
       })}
       {review.doubts_dropped.length > 0 && (
-        <HelpBox tone="warning" title="No longer marked not sure">
+        <HelpBox tone="warning" title={t('updateDetail.noLongerMarkedNotSure')}>
           <ul style={{ margin: 0, paddingLeft: 18 }}>{review.doubts_dropped.map((d, i) => <li key={i}>{doubtLine(d)}</li>)}</ul>
-          The version before had these doubts; the corrected record does not. Check that the correction really settles them.
+          {t('updateDetail.theVersionBeforeHadThese')}
         </HelpBox>
       )}
       {used.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>Used by you</div>
+          <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{t('updateDetail.usedByYou2')}</div>
           <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-sm)', display: 'flex', flexDirection: 'column', gap: 6 }}>
             {used.map(({ c, index }) => (
               <li key={index}>
-                {FIELD_LABELS[c.field] ?? c.field}: "{c.before}" to "{c.after}".{' '}
-                {onUse && <Button size="sm" variant="secondary" disabled={busy || Boolean(stateOf(index)?.blocked)} onClick={() => onUse(index, false)} aria-label={`Undo: ${FIELD_LABELS[c.field] ?? c.field} "${c.before}" to "${c.after}"`}>Undo</Button>}
+                {FIELD_LABELS()[c.field] ?? c.field}: "{c.before}{t('updateDetail.to3')}{c.after}".{' '}
+                {onUse && <Button size="sm" variant="secondary" disabled={busy || Boolean(stateOf(index)?.blocked)} onClick={() => onUse(index, false)} aria-label={t('updateDetail.undoTo', { value: FIELD_LABELS()[c.field] ?? c.field, before: c.before, after: c.after })}>{t('updateDetail.undo')}</Button>}
                 {onUse && stateOf(index)?.blocked && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}> {stateOf(index)!.blocked}</span>}
               </li>
             ))}
@@ -421,20 +431,20 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, onUseWord
         </div>
       )}
       {suggestions.length > 0 && (
-        <HelpBox tone="warning" title="Not sure: suggested, not applied">
+        <HelpBox tone="warning" title={t('updateDetail.notSureSuggestedNotApplied')}>
           <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {suggestions.map(({ c, index }) => {
               const state = stateOf(index);
               return (
                 <li key={index}>
-                  {FIELD_LABELS[c.field] ?? c.field}: "{c.before}" may be "{c.after}". {c.reason}
+                  {FIELD_LABELS()[c.field] ?? c.field}: "{c.before}{t('updateDetail.mayBe')}{c.after}". {c.reason}
                   {onUse && state && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
                       <Button size="sm" variant="secondary" disabled={busy || Boolean(state.blocked)} onClick={() => onUse(index, true)}
-                        aria-label={`Use suggestion: ${FIELD_LABELS[c.field] ?? c.field} "${c.before}" to "${c.after}"`}>Use suggestion</Button>
+                        aria-label={t('updateDetail.useSuggestionTo', { value: FIELD_LABELS()[c.field] ?? c.field, before: c.before, after: c.after })}>{t('updateDetail.useSuggestion')}</Button>
                       {state.blocked
                         ? <span style={{ fontSize: 'var(--text-xs)' }}>{state.blocked}</span>
-                        : state.unlinks && <span style={{ fontSize: 'var(--text-xs)' }}>The stakeholder link of "{c.before}" is removed.</span>}
+                        : state.unlinks && <span style={{ fontSize: 'var(--text-xs)' }}>{rich(t, 'updateDetail.theStakeholderLinkOfIs', { before: c.before })}</span>}
                     </div>
                   )}
                 </li>
@@ -442,8 +452,8 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, onUseWord
             })}
           </ul>
           {onUse
-            ? 'Using a suggestion updates this draft record. Confirm it again and approve to publish.'
-            : `The record keeps the current value for these${open ? ', and approving does not change them' : ''}. Check them in the transcript.`}
+            ? t('updateDetail.usingASuggestionUpdatesThis2')
+            : t('updateDetail.theRecordKeepsTheCurrent', { value: open ? t('updateDetail.andApprovingDoesNotChange') : '' })}
         </HelpBox>
       )}
       {words && !(rejected && !open) && <TranscriptSection review={words} open={open} busy={busy} {...(onUseWords ? { onUse: onUseWords } : {})} />}
@@ -456,27 +466,28 @@ function CorrectionCard({ review, explanations, open, rejected, onUse, onUseWord
  * each change fixes it.
  */
 function KaizenCard({ kaizen }: { kaizen: NonNullable<ContextUpdate['kaizen']> }) {
+  const { t } = useLanguage();
   return (
-    <section aria-label="Root cause">
-      <h3 style={sectionLabel}>Why this Kaizen</h3>
+    <section aria-label={t('updateDetail.rootCause')}>
+      <h3 style={sectionLabel}>{t('updateDetail.whyThisKaizen')}</h3>
       <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 10, borderLeft: '3px solid var(--color-accent)' }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
           {kaizen.task_ref
-            ? <span>After feedback on <Link to={`/board/task/${kaizen.task_ref}`} style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)' }}>{kaizen.task_ref}</Link></span>
-            : <span>The note does not name the task it came from.</span>}
+            ? <span>{rich(t, 'updateDetail.afterFeedbackOn', { link: <Link to={`/board/task/${kaizen.task_ref}`} style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-mono)' }}>{kaizen.task_ref}</Link> })}</span>
+            : <span>{t('updateDetail.theNoteDoesNotName')}</span>}
           {kaizen.area && <Badge variant="default">{kaizen.area}</Badge>}
         </div>
         {kaizen.symptom && (
           <div>
-            <div style={{ ...sectionLabel, marginBottom: 2 }}>What went wrong</div>
+            <div style={{ ...sectionLabel, marginBottom: 2 }}>{t('updateDetail.whatWentWrong')}</div>
             <MarkdownView content={kaizen.symptom} compact />
           </div>
         )}
         <div>
-          <div style={{ ...sectionLabel, marginBottom: 2 }}>Root cause</div>
+          <div style={{ ...sectionLabel, marginBottom: 2 }}>{t('updateDetail.rootCause')}</div>
           {kaizen.root_cause
             ? <MarkdownView content={kaizen.root_cause} compact />
-            : <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-warning)' }}>The note gives no root cause. Read the note under Materials before you accept any change.</p>}
+            : <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-warning)' }}>{t('updateDetail.theNoteGivesNoRoot')}</p>}
         </div>
       </div>
     </section>
@@ -490,6 +501,7 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
   onToggle: (accepted: boolean) => void;
   onNote: (note: string) => void;
 }) {
+  const { t } = useLanguage();
   const [showDiff, setShowDiff] = useState(proposal.action !== 'remove');
   const [note, setNote] = useState(decision.reviewer_note);
   useEffect(() => setNote(decision.reviewer_note), [decision.reviewer_note]);
@@ -499,8 +511,8 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
   // A removal shows the current file going away: every line removed.
   const after = removal ? (proposal.current != null ? '' : null) : proposal.proposed ?? null;
   const stats = useMemo(() => (after != null ? diffStats(diffLines(proposal.current ?? null, after)) : null), [proposal.current, after]);
-  const ACTION = { create: { label: 'New file', bg: 'var(--color-info-subtle)', fg: 'var(--color-info)' }, update: { label: 'Update', bg: 'var(--color-accent-subtle)', fg: 'var(--color-accent)' }, remove: { label: 'Remove', bg: 'var(--color-critical-subtle)', fg: 'var(--color-critical)' } }[proposal.action];
-  const confidence = CONFIDENCE[proposal.confidence];
+  const ACTION = { create: { label: t('updateDetail.newFile'), bg: 'var(--color-info-subtle)', fg: 'var(--color-info)' }, update: { label: t('updateDetail.update'), bg: 'var(--color-accent-subtle)', fg: 'var(--color-accent)' }, remove: { label: t('remove'), bg: 'var(--color-critical-subtle)', fg: 'var(--color-critical)' } }[proposal.action];
+  const confidence = CONFIDENCE()[proposal.confidence];
   const blocked = !!proposal.problem;
   const checkboxId = `accept-${proposal.id}`;
 
@@ -524,46 +536,43 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
             {confidence && <span title={confidence.hint} style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: confidence.color }}>{confidence.label}</span>}
             {!reviewing && decision.decision && (
               <span style={{ marginLeft: 'auto', fontSize: 'var(--text-xs)', fontWeight: 600, color: decision.decision === 'accepted' ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                {decision.decision === 'accepted' ? 'Accepted' : 'Rejected'}{proposal.outcome ? ` · ${OUTCOME[proposal.outcome] ?? proposal.outcome}` : ''}
+                {decision.decision === 'accepted' ? t('updateDetail.accepted') : t('updateDetail.rejected')}{proposal.outcome ? ` · ${OUTCOME()[proposal.outcome] ?? proposal.outcome}` : ''}
               </span>
             )}
           </div>
           <code style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-secondary)', overflowWrap: 'anywhere' }}>{proposal.target}</code>
           {proposal.app_provided && reviewing && !blocked && (
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              This file came with the app. Once you change it, it is yours: <code style={{ fontFamily: 'var(--font-mono)' }}>gtd upgrade</code> keeps
-              your version and puts the next app version beside it as <code style={{ fontFamily: 'var(--font-mono)' }}>{proposal.target.split('/').pop()}.new</code>.
+              {rich(t, 'updateDetail.thisFileCameWithThe', { code: <code style={{ fontFamily: 'var(--font-mono)' }}>gtd upgrade</code>, code2: <code style={{ fontFamily: 'var(--font-mono)' }}>{proposal.target.split('/').pop()}.new</code> })}
             </p>
           )}
 
           {proposal.rationale && (
             <div>
-              <div style={{ ...sectionLabel, marginBottom: 2 }}>Why</div>
+              <div style={{ ...sectionLabel, marginBottom: 2 }}>{t('updateDetail.why2')}</div>
               <MarkdownView content={proposal.rationale} compact />
             </div>
           )}
           {proposal.evidence && (
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-              <span style={{ fontWeight: 600 }}>Evidence: </span>{proposal.evidence}
+              <span style={{ fontWeight: 600 }}>{t('updateDetail.evidence')} </span>{proposal.evidence}
             </div>
           )}
-          {proposal.outcome_note && <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>{removal ? 'Dashboard: ' : 'Agent: '}</span>{proposal.outcome_note}</div>}
+          {proposal.outcome_note && <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>{removal ? t('updateDetail.dashboard') : t('updateDetail.agent')}</span>{proposal.outcome_note}</div>}
 
           {proposal.problem && <HelpBox tone="critical">{proposal.problem}</HelpBox>}
           {removal && reviewing && !proposal.problem && (
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-              If you accept, the dashboard moves this file{proposal.target.startsWith('context/') ? ' and its folder' : ''} to the trash
-              (<code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>.situation-board/trash/</code>) once the
-              update is done. Links to it stop working.
+              {rich(t, 'updateDetail.ifYouAcceptTheDashboard', { value: proposal.target.startsWith('context/') ? t('updateDetail.andItsFolder') : '', code: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>.situation-board/trash/</code> })}
             </div>
           )}
           {proposal.stale && (
-            <HelpBox tone="warning" title="This file changed after the analysis">
+            <HelpBox tone="warning" title={t('updateDetail.thisFileChangedAfterThe')}>
               {removal
-                ? 'Someone edited it since the agent looked. Removing it now would also remove those edits.'
+                ? t('updateDetail.someoneEditedItSinceThe')
                 : proposal.action === 'create' && proposal.target_exists
-                ? 'A file now exists at this path. The diff below is against it. If you accept, the agent merges instead of overwriting.'
-                : 'Someone edited it since the agent looked. The diff below is against the current version, so it may show more than the proposal meant. If you accept, the agent keeps the newer edits and merges.'}
+                ? t('updateDetail.aFileNowExistsAt')
+                : t('updateDetail.someoneEditedItSinceThe2')}
             </HelpBox>
           )}
 
@@ -571,7 +580,7 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
             <div>
               <button type="button" onClick={() => setShowDiff((v) => !v)} aria-expanded={showDiff}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: 0, marginBottom: 6, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-accent)' }}>
-                {removal ? (showDiff ? 'Hide what goes' : 'Show what goes') : showDiff ? 'Hide changes' : 'Show changes'}
+                {removal ? (showDiff ? t('updateDetail.hideWhatGoes') : t('updateDetail.showWhatGoes')) : showDiff ? t('updateDetail.hideChanges') : t('updateDetail.showChanges')}
                 {stats && (
                   <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                     <span style={{ color: 'var(--color-success)' }}>+{stats.added}</span>{' '}
@@ -586,18 +595,18 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
           {reviewing && accepted && !removal && (
             <div>
               <div style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
-                Note for the agent (optional)
+                {t('updateDetail.noteForTheAgentOptional')}
               </div>
               <p style={{ margin: '0 0 4px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                Almost right? Say what to adjust, for example "keep the old title" or "say this is still a draft". The agent applies the change with your adjustment.
+                {t('updateDetail.almostRightSayWhatTo')}
               </p>
               <div onBlur={() => { if (note !== decision.reviewer_note) onNote(note); }}>
-                <Textarea value={note} onChange={setNote} rows={2} aria-label={`Note for ${proposal.id}`} />
+                <Textarea value={note} onChange={setNote} rows={2} aria-label={t('updateDetail.noteFor', { id: proposal.id })} />
               </div>
             </div>
           )}
           {!reviewing && decision.reviewer_note && (
-            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>Your note: </span>{decision.reviewer_note}</div>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>{t('updateDetail.yourNote')} </span>{decision.reviewer_note}</div>
           )}
         </div>
       </div>
@@ -619,6 +628,7 @@ export default function UpdateDetail({ id, onBack, workspace }: { id: string; on
 }
 
 function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const navigate = useNavigate();
   const version = useDataVersion('context-updates');
@@ -699,22 +709,22 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
     setConfirmations((local) => mergeServerChoices(local, serverConfirmations, pendingRecords.current.ids()));
   }, [data]);
 
-  if (loading) return <LoadingSpinner text="Loading update..." />;
+  if (loading) return <LoadingSpinner text={t('updateDetail.loadingUpdate')} />;
   if (error || !data) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 600 }}>
         <HelpBox tone="critical">
           {api.workspace && error && /another workspace/.test(error)
-            ? <>This update is in another workspace ({api.workspace}). Switch to it, then open the update again.</>
-            : 'This update could not be loaded. It may have been deleted.'}
+            ? <>{rich(t, 'updateDetail.thisUpdateIsInAnother', { workspace: api.workspace })}</>
+            : t('updateDetail.thisUpdateCouldNotBe')}
         </HelpBox>
-        <div><Button variant="secondary" onClick={onBack}>Back to updates</Button></div>
+        <div><Button variant="secondary" onClick={onBack}>{t('updateDetail.backToUpdates')}</Button></div>
       </div>
     );
   }
 
   const u = data;
-  const meta = STATUS_META[u.status];
+  const meta = STATUS_META()[u.status];
   const reviewing = u.status === 'in_review';
   // Steps where nothing moves until the user runs a command in the agent.
   // A follow-up whose correction is no longer current is never offered for analysis or apply: it is closed or deleted.
@@ -732,16 +742,16 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   // updates need the apply command.
   const noFileToWrite = canApprove && u.proposals.every((p) => decisions[p.id]?.decision !== 'accepted' || p.action === 'remove');
   const isCorrection = u.kind === 'meeting-correction';
-  const approveHint = isCorrection ? 'Approving makes the confirmed record the meeting\'s current version.'
-    : !noFileToWrite ? 'After approving, apply your accepted changes in one step.'
-    : acceptedCount > 0 ? 'Approving moves the selected files to the trash right away.'
-    : 'Approving keeps the confirmed meeting records and finishes the update.';
+  const approveHint = isCorrection ? t('updateDetail.approvingMakesTheConfirmedRecord')
+    : !noFileToWrite ? t('updateDetail.afterApprovingApplyYourAccepted')
+    : acceptedCount > 0 ? t('updateDetail.approvingMovesTheSelectedFiles')
+    : t('updateDetail.approvingKeepsTheConfirmedMeeting');
 
   // A finished correction that is still the meeting's current version: look for its old values in the context.
   const followUp = () => run('follow', async () => {
     const created = await api.post<{ id: string }>(`/api/context-updates/${u.id}/follow-up`);
     navigate(`/context/updates/${created.id}`);
-  }, 'Follow-up opened. Analyze it to find notes that still use the old values.');
+  }, t('updateDetail.followUpOpenedAnalyzeIt'));
 
   const run = async (label: string, action: () => Promise<unknown>, success?: string) => {
     setBusy(label);
@@ -750,7 +760,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
       if (success) notify('success', success);
       changed();
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Something went wrong.');
+      notify('error', err instanceof Error ? err.message : t('updateDetail.somethingWentWrong'));
     } finally {
       setBusy(null);
     }
@@ -776,7 +786,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
         for (const [pid, ticket, previous] of tickets) if (previous && pendingDecisions.current.isLatest(pid, ticket)) next[pid] = previous;
         return next;
       });
-      notify('error', err instanceof Error ? err.message : 'Could not save your choice.');
+      notify('error', err instanceof Error ? err.message : t('updateDetail.couldNotSaveYourChoice'));
     } finally {
       for (const [pid, ticket] of tickets) pendingDecisions.current.finish(pid, ticket);
       updateSaving();
@@ -795,7 +805,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
       setConfirmations((c) => ({ ...c, [record.id]: null }));
       await refetch();
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Could not change the speaker.');
+      notify('error', err instanceof Error ? err.message : t('updateDetail.couldNotChangeTheSpeaker'));
     } finally {
       pendingRecords.current.finish(record.id, ticket);
       updateSaving();
@@ -811,7 +821,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
       setConfirmations((c) => ({ ...c, [record.id]: null }));
       await refetch();
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : 'Could not change the record.');
+      notify('error', err instanceof Error ? err.message : t('updateDetail.couldNotChangeTheRecord'));
       await refetch();
     } finally {
       pendingRecords.current.finish(record.id, ticket);
@@ -831,7 +841,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
       if (answer && pendingRecords.current.isLatest(rid, ticket)) setConfirmations((c) => ({ ...c, [rid]: answer.confirmation }));
     } catch (err) {
       if (pendingRecords.current.isLatest(rid, ticket)) setConfirmations((c) => ({ ...c, [rid]: previous }));
-      notify('error', err instanceof Error ? err.message : 'Could not save your choice.');
+      notify('error', err instanceof Error ? err.message : t('updateDetail.couldNotSaveYourChoice'));
       refetch();
     } finally {
       pendingRecords.current.finish(rid, ticket);
@@ -859,38 +869,38 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   });
 
   const removeFile = async (name: string) => {
-    if (!(await confirm({ title: `Remove "${name}" from this update?`, message: 'The file is deleted from the update before it is analyzed.', confirmLabel: 'Remove file', tone: 'danger' }))) return;
+    if (!(await confirm({ title: t('updateDetail.removeFromThisUpdate', { name }), message: t('updateDetail.theFileIsDeletedFrom'), confirmLabel: t('removeFile'), tone: 'danger' }))) return;
     void run('remove', () => api.del(`/api/context-updates/${u.id}/materials/${encodeURIComponent(name)}`));
   };
 
   const reopen = async () => {
     const msg = u.status === 'analyzing'
-      ? 'Stop waiting for the agent and go back to collecting? Run the analysis again afterwards.'
-      : `Add more material? The current proposals${records.length ? ' and meeting records (also confirmed ones)' : ''} are discarded, and the next analysis looks at all material together.`;
-    if (await confirm({ title: u.status === 'analyzing' ? 'Stop waiting for the agent?' : 'Add more material?', message: msg, confirmLabel: u.status === 'analyzing' ? 'Stop waiting' : 'Add material' })) void run('reopen', () => api.post(`/api/context-updates/${u.id}/reopen`));
+      ? t('updateDetail.stopWaitingForTheAgent')
+      : t('updateDetail.addMoreMaterialTheCurrent', { value: records.length ? t('updateDetail.andMeetingRecordsAlsoConfirmed') : '' });
+    if (await confirm({ title: u.status === 'analyzing' ? t('updateDetail.stopWaitingForTheAgent2') : t('updateDetail.addMoreMaterial'), message: msg, confirmLabel: u.status === 'analyzing' ? t('updateDetail.stopWaiting') : t('updateDetail.addMaterial') })) void run('reopen', () => api.post(`/api/context-updates/${u.id}/reopen`));
   };
 
   const close = async () => {
-    const files = u.keep_materials ? 'the materials are kept until you release them' : 'the materials are deleted';
-    const kept = confirmedCount > 0 ? ' Confirmed meeting records are kept.' : '';
-    if (!(await confirm({ title: 'Close without changes?', message: `No context file is changed. The record stays; ${files}.${kept}`, confirmLabel: 'Close without changes' }))) return;
-    void run('close', () => api.post(`/api/context-updates/${u.id}/close`), 'Closed without changes.');
+    const files = u.keep_materials ? t('updateDetail.theMaterialsAreKeptUntil') : t('updateDetail.theMaterialsAreDeleted');
+    const kept = confirmedCount > 0 ? t('updateDetail.confirmedMeetingRecordsAreKept') : '';
+    if (!(await confirm({ title: t('updateDetail.closeWithoutChanges'), message: t('updateDetail.noContextFileIsChanged', { files, kept }), confirmLabel: t('updateDetail.closeWithoutChanges2') }))) return;
+    void run('close', () => api.post(`/api/context-updates/${u.id}/close`), t('updateDetail.closedWithoutChanges'));
   };
 
   const remove = async () => {
     const msg = u.status === 'done'
-      ? `Delete this record? Context changes it made stay; only the record goes${records.some((r) => r.confirmation === 'confirmed') ? ', including its confirmed meeting records' : ''}.`
-      : `Delete this update and its materials${confirmedCount > 0 ? ', including the meeting records you confirmed' : ''}? Nothing in your context has changed yet.`;
+      ? t('updateDetail.deleteThisRecordContextChanges', { value: records.some((r) => r.confirmation === 'confirmed') ? t('updateDetail.includingItsConfirmedMeetingRecords') : '' })
+      : t('updateDetail.deleteThisUpdateAndIts', { value: confirmedCount > 0 ? t('updateDetail.includingTheMeetingRecordsYou') : '' });
     // A digest's meetings left the queue when it was made, so its folder (or, once done, their own folders, which go
     // with it) is their only copy.
     const meetings = u.digest_meetings?.length ?? 0;
     const onlyCopy = u.origin === 'meetings' && meetings > 0 && (u.status !== 'done' || u.keep_materials || u.meeting_folders)
-      ? ` ${meetings === 1 ? 'Its meeting already left' : `Its ${meetings} meetings already left`} the queue, so this is the only copy of their recordings, transcripts and speaker names.`
+      ? t('updateDetail.theQueueSoThisIs', { value: meetings === 1 ? t('updateDetail.itsMeetingAlreadyLeft') : t('updateDetail.itsMeetingsAlreadyLeft', { meetings }) })
       : '';
-    if (!(await confirm({ title: u.status === 'done' ? 'Delete this record?' : 'Delete this update?', message: `${msg}${onlyCopy} The update's folder${u.meeting_folders ? ' and its meetings\' folders go' : ' goes'} to the trash (.situation-board/trash/), where you can still get the files back.`, confirmLabel: u.status === 'done' ? 'Delete record' : 'Delete update', tone: 'danger' }))) return;
+    if (!(await confirm({ title: u.status === 'done' ? t('updateDetail.deleteThisRecord') : t('updateDetail.deleteThisUpdate'), message: t('updateDetail.theUpdateSFolderTo', { msg, onlyCopy, value: u.meeting_folders ? t('updateDetail.andItsMeetingsFoldersGo') : ' goes' }), confirmLabel: u.status === 'done' ? t('updateDetail.deleteRecord') : t('updateDetail.deleteUpdate'), tone: 'danger' }))) return;
     void (async () => {
-      try { await api.del(`/api/context-updates/${u.id}`); notify('success', 'Update moved to the trash.'); onBack(); changed(); } catch (err) {
-        notify('error', err instanceof Error ? err.message : 'Could not delete.');
+      try { await api.del(`/api/context-updates/${u.id}`); notify('success', t('updateDetail.updateMovedToTheTrash')); onBack(); changed(); } catch (err) {
+        notify('error', err instanceof Error ? err.message : t('updateDetail.couldNotDelete'));
       }
     })();
   };
@@ -898,8 +908,8 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   const keepMaterials = (keep: boolean) => run('keep', () => api.put(`/api/context-updates/${u.id}/keep-materials`, { keep }));
 
   const releaseMaterials = async () => {
-    if (!(await confirm({ title: 'Delete the kept files of this update?', message: 'The record stays. This cannot be undone.', confirmLabel: 'Delete files', tone: 'danger' }))) return;
-    void run('keep', () => api.put(`/api/context-updates/${u.id}/keep-materials`, { keep: false }), 'Files released.');
+    if (!(await confirm({ title: t('updateDetail.deleteTheKeptFilesOf'), message: t('updateDetail.theRecordStaysThisCannot'), confirmLabel: t('updateDetail.deleteFiles'), tone: 'danger' }))) return;
+    void run('keep', () => api.put(`/api/context-updates/${u.id}/keep-materials`, { keep: false }), t('updateDetail.filesReleased'));
   };
 
   // A finished update still has its files only when the user kept them; otherwise just the record's list.
@@ -908,39 +918,39 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   const keptSize = materials.reduce((sum, f) => sum + f.size, 0);
   const canChooseKeep = ['ready', 'analyzing', 'in_review', 'approved'].includes(u.status);
   const doneNext = u.keep_materials
-    ? 'Finished. The record below shows what was proposed and decided. You kept the uploaded materials; release them when you no longer need them.'
+    ? t('updateDetail.finishedTheRecordBelowShows')
     : meta.next;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 980, paddingBottom: reviewing || command ? 80 : 0 }}>
       <div>
         <button type="button" onClick={onBack} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'var(--text-sm)' }}>
-          ← All updates
+          {t('updateDetail.allUpdates')}
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
           <h2 style={{ margin: 0, fontSize: 'var(--text-xl)', fontWeight: 600 }}>{u.title}</h2>
           <TypeBadge origin={u.origin} kind={u.kind} />
           <StatusPill status={u.status} />
           <span style={{ marginLeft: 'auto' }}>
-            {u.status !== 'applying' && <Button variant="ghost" size="sm" onClick={remove}>Delete</Button>}
+            {u.status !== 'applying' && <Button variant="ghost" size="sm" onClick={remove}>{t('updateDetail.delete')}</Button>}
           </span>
         </div>
         <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {isCorrection ? <>correction of the meeting record {u.correction?.meeting}, opened from the meeting {formatRelativeDate(u.created_at)}</> : u.kind === 'correction-follow-up' ? <>follow-up of {u.follows ? <Link to={`/context/updates/${u.follows}`} className="gtd-link">{u.follows}</Link> : 'a correction'}, opened {formatRelativeDate(u.created_at)}</> : <>{u.kind === 'memory-review' ? 'review of your existing memory · ' : u.kaizen ? '' : <>material from {u.source_date || 'unknown date'} · </>}{u.origin === 'system-cleanup' ? 'opened by System cleanup' : u.kaizen ? 'opened from task feedback' : u.origin === 'meetings' ? `made by Meeting digest from ${u.digest_meetings?.length ?? 0} queued meeting${u.digest_meetings?.length === 1 ? '' : 's'}` : 'imported'} {formatRelativeDate(u.created_at)}</>}
-          {u.applied_at && <> · finished {formatRelativeDate(u.applied_at)}</>}
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{u.id}</span> · {isCorrection ? <>{rich(t, 'updateDetail.correctionOfTheMeetingRecord', { meeting: u.correction?.meeting, created_at: formatRelativeDate(u.created_at) })}</> : u.kind === 'correction-follow-up' ? <>{t('updateDetail.followUpOf')} {u.follows ? <Link to={`/context/updates/${u.follows}`} className="gtd-link">{u.follows}</Link> : t('updateDetail.aCorrection')}{t('updateDetail.opened')} {formatRelativeDate(u.created_at)}</> : <>{u.kind === 'memory-review' ? t('updateDetail.reviewOfYourExistingMemory') : u.kaizen ? '' : <>{rich(t, 'updateDetail.materialFrom', { source_date: u.source_date || t('updateDetail.unknownDate') })} </>}{u.origin === 'system-cleanup' ? t('updateDetail.openedBySystemCleanup') : u.kaizen ? t('updateDetail.openedFromTaskFeedback') : u.origin === 'meetings' ? t('updateDetail.madeByMeetingDigestFrom', { count: u.digest_meetings?.length ?? 0, length: u.digest_meetings?.length ?? 0 }) : 'imported'} {formatRelativeDate(u.created_at)}</>}
+          {u.applied_at && <> {rich(t, 'updateDetail.finished', { applied_at: formatRelativeDate(u.applied_at) })}</>}
         </div>
       </div>
 
       <div style={card}><StepIndicator status={u.status} /></div>
 
       {/* What to do next: always one clear action. */}
-      <section ref={(el) => { nextRef.current = el; setNextBox(el); }} aria-label="Next step" style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
-        <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>Next: </strong>{u.status === 'done' ? doneNext : u.follow_up_problem
-          ? `This follow-up is outdated: ${['in_review', 'approved'].includes(u.status) ? 'close' : 'delete'} it, then follow up the meeting's current correction from the meeting.`
+      <section ref={(el) => { nextRef.current = el; setNextBox(el); }} aria-label={t('updateDetail.nextStep')} style={{ ...card, display: 'flex', flexDirection: 'column', gap: 12, borderColor: meta.color }}>
+        <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.5 }}><strong>{t('updateDetail.next')} </strong>{u.status === 'done' ? doneNext : u.follow_up_problem
+          ? t('updateDetail.thisFollowUpIsOutdated', { value: ['in_review', 'approved'].includes(u.status) ? 'close' : 'delete' })
           : meta.next}</div>
         {/* A run going by hand (no dashboard run): its command stays at hand to run again. */}
         {u.status === 'analyzing' && !running && !u.follow_up_problem && (
-          <CommandBox command={`/gtd-context-analyze ${u.id}`} label="Run in Claude Code to analyze" onCopied={() => setCopiedFor(u.status)} />
+          <CommandBox command={`/gtd-context-analyze ${u.id}`} label={t('updateDetail.runInClaudeCodeTo')} onCopied={() => setCopiedFor(u.status)} />
         )}
         {/* One primary action (#246): the dashboard runs it, the command one click away under "Or run it yourself";
             when the dashboard cannot run it, copying the command is the main action, with the reason. */}
@@ -949,44 +959,44 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             {...(u.status === 'ready' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
               <>
                 <CommandBox command={`/gtd-context-analyze ${u.id}`} emphasis={emphasis}
-                  label={emphasis ? 'Your turn: copy this and run it in Claude Code to analyze' : 'Copy this and run it in Claude Code'}
+                  label={emphasis ? t('updateDetail.yourTurnCopyThisAnd') : t('updateDetail.copyThisAndRunIt')}
                   onCopied={() => setCopiedFor(u.status)} />
                 <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Using Codex or Copilot? Ask it to &quot;analyze context update {u.id}&quot;. The workspace instructions explain the steps.
+                  {rich(t, 'updateDetail.usingCodexOrCopilotAsk', { id: u.id })}
                 </p>
               </>
             ) } : {})} />
         )}
         {u.status === 'applying' && !running && !u.follow_up_problem && (
-          <CommandBox command={`/gtd-context-apply ${u.id}`} label="Run in Claude Code to apply your accepted changes" onCopied={() => setCopiedFor(u.status)} />
+          <CommandBox command={`/gtd-context-apply ${u.id}`} label={t('updateDetail.runInClaudeCodeTo2')} onCopied={() => setCopiedFor(u.status)} />
         )}
         {['approved', 'applying', 'done'].includes(u.status) && (
           <AnalysisRun ref={runRef} startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} onAction={setNextAction} onStartFailed={showNextBox}
             {...(u.status === 'approved' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
               <>
                 <CommandBox command={`/gtd-context-apply ${u.id}`} emphasis={emphasis}
-                  label={emphasis ? 'Last step: copy this and run it in Claude Code to apply your accepted changes' : 'Copy this and run it in Claude Code'}
+                  label={emphasis ? t('updateDetail.lastStepCopyThisAnd') : t('updateDetail.copyThisAndRunIt')}
                   onCopied={() => setCopiedFor(u.status)} />
                 <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Using Codex or Copilot? Ask it to &quot;apply context update {u.id}&quot;. The workspace instructions explain the steps.
+                  {rich(t, 'updateDetail.usingCodexOrCopilotAsk2', { id: u.id })}
                 </p>
               </>
             ) } : {})} />
         )}
         {(u.status === 'analyzing' || u.status === 'applying') && !running && !u.follow_up_problem && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            Taking too long, or the agent stopped? Run the same command again: it picks up where it left off.
-            {u.status === 'analyzing' && <> Or <button type="button" onClick={reopen} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'inherit' }}>go back to collecting</button>.</>}
+            {t('updateDetail.takingTooLongOrThe')}
+            {u.status === 'analyzing' && <> {t('updateDetail.or')} <button type="button" onClick={reopen} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'inherit' }}>{t('updateDetail.goBackToCollecting')}</button>.</>}
           </p>
         )}
         {u.status === 'analyzing' && !u.follow_up_problem && (
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            Using Codex or Copilot? Ask it to "analyze context update {u.id}". The workspace instructions explain the steps.
+            {rich(t, 'updateDetail.usingCodexOrCopilotAsk', { id: u.id })}
           </p>
         )}
         {u.status === 'approved' && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button variant="secondary" size="sm" loading={busy === 'back'} onClick={() => run('back', () => api.post(`/api/context-updates/${u.id}/back-to-review`))}>Change my selection</Button>
+            <Button variant="secondary" size="sm" loading={busy === 'back'} onClick={() => run('back', () => api.post(`/api/context-updates/${u.id}/back-to-review`))}>{t('updateDetail.changeMySelection')}</Button>
           </div>
         )}
       </section>
@@ -994,27 +1004,27 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
       {u.kaizen && <KaizenCard kaizen={u.kaizen} />}
 
       {u.follow_up_problem && (
-        <HelpBox tone="critical" title="This follow-up no longer matches the meeting's record">{u.follow_up_problem}.</HelpBox>
+        <HelpBox tone="critical" title={t('updateDetail.thisFollowUpNoLonger')}>{u.follow_up_problem}.</HelpBox>
       )}
 
       {u.notes && (
-        <section aria-label="Notes for the agent">
-          <h3 style={sectionLabel}>Your notes for the agent</h3>
+        <section aria-label={t('importUpdateModal.notesForTheAgent')}>
+          <h3 style={sectionLabel}>{t('updateDetail.yourNotesForTheAgent')}</h3>
           <div style={card}><MarkdownView content={u.notes} compact /></div>
         </section>
       )}
 
-      <section aria-label="Materials">
-        <h3 style={sectionLabel}>Materials · {materials.length}</h3>
+      <section aria-label={t('updateDetail.materials')}>
+        <h3 style={sectionLabel}>{rich(t, 'updateDetail.materials2', { length: materials.length })}</h3>
         <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {filesGone && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Deleted when the update finished. Only the list is kept.</p>}
+          {filesGone && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('updateDetail.deletedWhenTheUpdateFinished')}</p>}
           {u.status === 'done' && u.keep_materials && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-              <span style={{ flex: 1, minWidth: 0 }}>Kept at your request · {formatBytes(keptSize)} on disk. Nothing deletes them by age; agents do not read them as task input.</span>
-              <Button variant="secondary" size="sm" loading={busy === 'keep'} onClick={releaseMaterials}>Release files</Button>
+              <span style={{ flex: 1, minWidth: 0 }}>{rich(t, 'updateDetail.keptAtYourRequestOn', { keptSize: formatBytes(keptSize) })}</span>
+              <Button variant="secondary" size="sm" loading={busy === 'keep'} onClick={releaseMaterials}>{t('updateDetail.releaseFiles')}</Button>
             </div>
           )}
-          {materials.length === 0 && <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>No files yet.</p>}
+          {materials.length === 0 && <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('updateDetail.noFilesYet')}</p>}
           {materials.map((f) => (
             <div key={f.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)' }}>
               {filesGone
@@ -1026,18 +1036,18 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
                 if (copy) {
                   const outdated = copy.current === false;
                   return (
-                    <span title={outdated ? 'The original or this copy was changed after the copy was made; the agent reads the original.' : undefined}
+                    <span title={outdated ? t('updateDetail.theOriginalOrThisCopy') : undefined}
                       style={{ fontSize: 'var(--text-xs)', color: copy.complete && !outdated ? 'var(--color-text-muted)' : 'var(--color-warning)' }}>
-                      readable copy of {copy.source}{copy.complete ? '' : ' · incomplete'}{outdated ? ' · outdated' : ''}
+                      {rich(t, 'updateDetail.readableCopyOf', { source: copy.source, value: copy.complete ? '' : t('updateDetail.incomplete'), value2: outdated ? t('updateDetail.outdated') : '' })}
                     </span>
                   );
                 }
-                return problem ? <span title={problem.reason} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>no readable copy</span> : null;
+                return problem ? <span title={problem.reason} style={{ fontSize: 'var(--text-xs)', color: 'var(--color-warning)' }}>{t('updateDetail.noReadableCopy')}</span> : null;
               })()}
               <OfficeCheckBadge check={f.officeCheck} />
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
               {u.status === 'ready' && (
-                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.name)}
+                <button type="button" aria-label={t('removeNamedFile', { name: f.name })} onClick={() => removeFile(f.name)}
                   style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: 'var(--text-base)', padding: '0 4px' }}>×</button>
               )}
             </div>
@@ -1048,27 +1058,26 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
               <input type="checkbox" checked={u.keep_materials} disabled={busy === 'keep'} onChange={(e) => void keepMaterials(e.target.checked)}
                 style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0, accentColor: 'var(--color-accent)' }} />
               <span>
-                Keep the original files after this update finishes
-                <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Useful for a recording or deck you may need again. They stay until you release them, and cost disk space, not agent context.
-                </span>
+                {rich(t, 'updateDetail.keepTheOriginalFilesAfter', { part: <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  {t('updateDetail.usefulForARecordingOr')}
+                </span> })}
               </span>
             </label>
           )}
-          {busy === 'upload' && <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>Uploading...</span>}
+          {busy === 'upload' && <span aria-live="polite" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('updateDetail.uploading')}</span>}
           {(u.status === 'in_review' || u.status === 'approved') && (
-            <div><Button variant="ghost" size="sm" disabled={saving > 0} onClick={reopen}>+ Add more material</Button></div>
+            <div><Button variant="ghost" size="sm" disabled={saving > 0} onClick={reopen}>{t('updateDetail.addMoreMaterial2')}</Button></div>
           )}
         </div>
       </section>
 
       {['in_review', 'approved', 'applying', 'done'].includes(u.status) && (
-        <section aria-label="Analysis">
-          <h3 style={sectionLabel}>What the agent found</h3>
+        <section aria-label={t('analysisRun.analysis')}>
+          <h3 style={sectionLabel}>{t('updateDetail.whatTheAgentFound')}</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {u.summary && <div style={card}><MarkdownView content={u.summary} compact /></div>}
             {u.unread.length > 0 && (
-              <HelpBox tone="warning" title="Some files could not be read">
+              <HelpBox tone="warning" title={t('updateDetail.someFilesCouldNotBe')}>
                 <ul style={{ margin: 0, paddingLeft: 18 }}>
                   {u.unread.map((r) => <li key={r.name}><strong>{r.name}</strong>: {r.reason}</li>)}
                 </ul>
@@ -1076,8 +1085,8 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             )}
 
             {records.length > 0 && (
-              <section aria-label="Meeting records" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <h4 style={{ ...sectionLabel, margin: 0 }}>Meetings · {records.length}</h4>
+              <section aria-label={t('updateDetail.meetingRecords')} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <h4 style={{ ...sectionLabel, margin: 0 }}>{rich(t, 'updateDetail.meetings', { length: records.length })}</h4>
                 {isCorrection && u.correction_review && <CorrectionCard review={u.correction_review} explanations={records[0]?.corrections ?? []} open={u.status !== 'done'} rejected={records[0]?.confirmation === 'rejected'}
                   busy={saving > 0} {...(reviewing && records[0] && !u.correction_review.finishing ? {
                     onUse: (index: number, use: boolean) => void applySuggestion(records[0]!, index, use),
@@ -1085,23 +1094,20 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
                   } : {})} />}
                 {isCorrection && u.status === 'done' && u.correction_review?.current && (u.correction_review.changes.length > 0 || Boolean(u.correction_review.transcript?.made)) && records[0]?.confirmation === 'confirmed' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                    <Button size="sm" variant="secondary" loading={busy === 'follow'} onClick={() => void followUp()}>Check the context</Button>
+                    <Button size="sm" variant="secondary" loading={busy === 'follow'} onClick={() => void followUp()}>{t('updateDetail.checkTheContext')}</Button>
                     <span style={{ flex: '1 1 240px', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                      Notes written from the record before may still use the old names or terms. Your AI tool looks for them and proposes fixes you review.
+                      {t('updateDetail.notesWrittenFromTheRecord')}
                     </span>
                   </div>
                 )}
                 {reviewing && isCorrection && (
                   <HelpBox>
-                    The corrected record as a whole. Check the changes above against the transcript, then confirm it and approve: the
-                    meeting then shows this version, and the one before stays one click away. Reject it or close to keep the current record.
+                    {t('updateDetail.theCorrectedRecordAsA')}
                   </HelpBox>
                 )}
                 {reviewing && !isCorrection && (
                   <HelpBox>
-                    What each meeting was, as the agent read it. Confirm a record that is right, even when the meeting changes
-                    nothing in your context; it stays with this update as the reviewed account. Records you do not confirm are
-                    rejected when you approve or close. The transcript itself stays unreviewed material.
+                    {t('updateDetail.whatEachMeetingWasAs')}
                   </HelpBox>
                 )}
                 {records.map((r, i) => (
@@ -1114,20 +1120,18 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             )}
 
             {isCorrection ? null : u.proposals.length === 0 ? (
-              <HelpBox title="Nothing worth changing">
+              <HelpBox title={t('updateDetail.nothingWorthChanging')}>
                 {u.kind === 'correction-follow-up'
-                  ? 'The agent found no note in your context that still uses the old values.'
+                  ? t('updateDetail.theAgentFoundNoNote')
                   : u.kaizen
-                  ? 'The agent found no file change that would prevent this. Close the update, or add a note on what to change and analyze again.'
-                  : 'The agent found nothing in this material that should change your context. That is a normal result: not every meeting changes what is true.'}{' '}{reviewing && (records.length > 0 ? 'Confirm the meeting records you want to keep and approve, or close the update.' : 'Close the update to finish.')}
+                  ? t('updateDetail.theAgentFoundNoFile')
+                  : t('updateDetail.theAgentFoundNothingIn')}{' '}{reviewing && (records.length > 0 ? t('updateDetail.confirmTheMeetingRecordsYou') : t('updateDetail.closeTheUpdateToFinish'))}
               </HelpBox>
             ) : (
               <>
                 {reviewing && (
                   <HelpBox>
-                    Each proposal shows the file as it is now and as it would become: <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>+ green</span> lines
-                    are added, <span style={{ color: 'var(--color-critical)', fontWeight: 600 }}>− red</span> lines are removed. Tick what you accept. Anything left
-                    unticked is rejected when you approve. Your choices are saved as you go.
+                    {rich(t, 'updateDetail.eachProposalShowsTheFile', { part: <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>{t('updateDetail.green')}</span>, part2: <span style={{ color: 'var(--color-critical)', fontWeight: 600 }}>{t('updateDetail.red')}</span> })}
                   </HelpBox>
                 )}
                 {u.proposals.map((p) => (
@@ -1142,11 +1146,10 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             {u.skipped.length > 0 && (
               <details style={card}>
                 <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600 }}>
-                  Considered but not proposed · {u.skipped.length}
+                  {rich(t, 'updateDetail.consideredButNotProposed', { length: u.skipped.length })}
                 </summary>
                 <p style={{ margin: '8px 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  What the agent looked at and left out, and why. If something here should be in your context, add it
-                  to the notes and analyze again, or edit the note yourself.
+                  {t('updateDetail.whatTheAgentLookedAt')}
                 </p>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 'var(--text-sm)', display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {u.skipped.map((s, i) => <li key={i}><strong>{s.topic}</strong>: <span style={{ color: 'var(--color-text-secondary)' }}>{s.reason}</span></li>)}
@@ -1161,24 +1164,24 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
         <div style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md)' }}>
           {u.proposals.length > 0 && (
             <>
-              <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{acceptedCount} of {u.proposals.length} selected</span>
-              <Button variant="ghost" size="sm" onClick={() => void selectAll(true)}>Select all</Button>
-              <Button variant="ghost" size="sm" onClick={() => void selectAll(false)}>Clear</Button>
+              <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'updateDetail.ofSelected', { acceptedCount: acceptedCount, length: u.proposals.length })}</span>
+              <Button variant="ghost" size="sm" onClick={() => void selectAll(true)}>{t('updateDetail.selectAll')}</Button>
+              <Button variant="ghost" size="sm" onClick={() => void selectAll(false)}>{t('updateDetail.clear')}</Button>
             </>
           )}
-          {records.length > 0 && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{confirmedCount} of {records.length} meetings confirmed</span>}
+          {records.length > 0 && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'updateDetail.ofMeetingsConfirmed', { confirmedCount: confirmedCount, length: records.length })}</span>}
           {canApprove && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{approveHint}</span>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button variant="secondary" loading={busy === 'close'} disabled={saving > 0} onClick={close}
-              title="Finish without changing any context file">
-              {u.proposals.length === 0 && records.length === 0 ? 'Close update' : 'Close without changes'}
+              title={t('updateDetail.finishWithoutChangingAnyContext')}>
+              {u.proposals.length === 0 && records.length === 0 ? t('updateDetail.closeUpdate') : t('updateDetail.closeWithoutChanges2')}
             </Button>
             {(u.proposals.length > 0 || records.length > 0) && (
               <Button variant="primary" disabled={!canApprove || saving > 0} loading={busy === 'approve'}
-                title={saving > 0 ? 'Saving your choices...' : correctionBlocked ? (u.follow_up_problem ? 'This follow-up no longer matches the meeting\'s record: close or delete it' : 'This correction cannot be approved: see what it says above. Close it, or reject the record') : !canApprove ? 'Tick at least one proposal or confirm a meeting record, or close without changes' : noFileToWrite ? 'Finish this update now: nothing needs the apply command' : 'Lock your selection and get the apply command'}
+                title={saving > 0 ? t('updateDetail.savingYourChoices') : correctionBlocked ? (u.follow_up_problem ? t('updateDetail.thisFollowUpNoLonger2') : t('updateDetail.thisCorrectionCannotBeApproved2')) : !canApprove ? t('updateDetail.tickAtLeastOneProposal') : noFileToWrite ? t('updateDetail.finishThisUpdateNowNothing') : t('updateDetail.lockYourSelectionAndGet')}
                 onClick={() => run('approve', () => api.post(`/api/context-updates/${u.id}/approve`),
                   isCorrection ? 'Corrected. The meeting shows the new version of its record.' : !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.')}>
-                {acceptedCount > 0 ? `Approve ${acceptedCount} selected` : isCorrection ? 'Approve correction' : 'Approve'}
+                {acceptedCount > 0 ? t('updateDetail.approveSelected', { acceptedCount }) : isCorrection ? t('updateDetail.approveCorrection') : t('updateDetail.approve')}
               </Button>
             )}
           </span>
@@ -1187,22 +1190,21 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
 
       {/* Waiting on the next step: repeated here only while the Next box is scrolled away, with the same action. */}
       {command && !nextInView && ['run', 'starting', 'copy'].includes(nextAction) && (
-        <div role="region" aria-label="Your next step" style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1.5px solid var(--color-accent)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md)' }}>
+        <div role="region" aria-label={t('updateDetail.yourNextStep')} style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--color-surface)', border: '1.5px solid var(--color-accent)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-md)' }}>
           <span aria-live="polite" style={{ flex: '1 1 260px', minWidth: 0, fontSize: 'var(--text-sm)', lineHeight: 1.45 }}>
             {nextAction !== 'copy' ? (
-              <><strong>{u.status === 'ready' ? 'Your turn:' : 'Last step:'}</strong>{u.status === 'ready' ? ' run the analysis. The agent proposes changes; nothing in your context changes yet.' : ' apply your accepted changes. Nothing changes in your context until you do.'}</>
+              <><strong>{u.status === 'ready' ? t('updateDetail.yourTurn') : t('updateDetail.lastStep')}</strong>{u.status === 'ready' ? t('updateDetail.runTheAnalysisTheAgent') : t('updateDetail.applyYourAcceptedChangesNothing')}</>
             ) : copied ? (
-              <><strong style={{ color: 'var(--color-success)' }}>Copied.</strong> Paste it into Claude Code and press Enter. This page updates by itself when the agent starts.</>
+              <>{rich(t, 'updateDetail.pasteItIntoClaudeCode', { strong: <strong style={{ color: 'var(--color-success)' }}>{t('updateDetail.copied')}</strong> })}</>
             ) : (
-              <><strong>{u.status === 'ready' ? 'Your turn:' : 'Last step:'}</strong> run <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{command.split(' ')[0]}</code> in Claude Code
-                {u.status === 'ready' ? ' so the agent can analyze the material.' : ' to write the accepted changes. Nothing changes in your context until you do.'}</>
+              <>{rich(t, 'updateDetail.runInClaudeCode', { strong: <strong>{u.status === 'ready' ? t('updateDetail.yourTurn') : t('updateDetail.lastStep')}</strong>, code: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{command.split(' ')[0]}</code>, value: u.status === 'ready' ? t('updateDetail.soTheAgentCanAnalyze') : t('updateDetail.toWriteTheAcceptedChanges') })}</>
             )}
           </span>
           {nextAction !== 'copy'
-            ? <Button variant="primary" loading={nextAction === 'starting'} onClick={() => runRef.current?.start()}>{u.status === 'ready' ? 'Run analysis' : 'Apply with Claude Code'}</Button>
+            ? <Button variant="primary" loading={nextAction === 'starting'} onClick={() => runRef.current?.start()}>{u.status === 'ready' ? t('analysisRun.runAnalysis') : t('updateDetail.applyWithClaudeCode')}</Button>
             : (
               <Button variant={copied ? 'secondary' : 'primary'} onClick={() => void copyText(command).then((ok) => { if (ok) setCopiedFor(u.status); })}>
-                {copied ? 'Copy again' : 'Copy command'}
+                {copied ? t('updateDetail.copyAgain') : t('updateDetail.copyCommand')}
               </Button>
             )}
         </div>

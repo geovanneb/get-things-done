@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface ApiResult<T> {
@@ -9,6 +10,7 @@ interface ApiResult<T> {
 
 /** `workspace`: the request says it is about that workspace, and is refused when another is open (see apiFor). */
 export function useApi<T>(url: string, deps: unknown[] = [], workspace?: string): ApiResult<T> {
+  const { t } = useLanguage();
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,12 +41,12 @@ export function useApi<T>(url: string, deps: unknown[] = [], workspace?: string)
       loadedUrlRef.current = url;
     } catch (err) {
       if (controller.signal.aborted) return;
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : t('useApi.unknownError'));
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, workspace, ...deps]);
+  }, [url, workspace, ...deps, t]);
 
   useEffect(() => {
     fetchData();

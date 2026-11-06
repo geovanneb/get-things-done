@@ -1,3 +1,4 @@
+import { interfaceLanguage, setInterfaceLanguage } from '../services/interfaceLanguage';
 import { Router, Request, Response } from 'express';
 import { cancelDesktopRestart, checkNow, dismiss, install, prepareDesktopRestart, setAutoCheck, updateHandoffFailed, updateStatus } from '../services/appUpdates';
 import { WorkspaceService } from '../services/workspace';
@@ -6,6 +7,9 @@ import { WorkspaceService } from '../services/workspace';
 const workspace = (): string | null => { try { return new WorkspaceService().getWorkspacePath(); } catch { return null; } };
 
 const router = Router();
+
+router.get('/language', (_req, res) => { res.json(interfaceLanguage()); });
+router.put('/language', async (req, res) => { res.json(await setInterfaceLanguage(req.body?.language)); });
 
 // GET /api/app/update  this version, the newest one found, and how this install updates
 router.get('/update', async (_req: Request, res: Response) => {

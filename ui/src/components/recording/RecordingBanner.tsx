@@ -1,3 +1,6 @@
+import { languageName } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import type React from 'react';
 import Notice from '@/components/common/Notice';
 import { useConfirm } from '@/components/common/ConfirmDialog';
@@ -27,19 +30,20 @@ function Meter({ label, level }: { label: string; level: number }) {
  * or keep what is set. Switching from a set language applies from where that language started.
  */
 function LanguageSuggestion() {
+  const { t } = useLanguage();
   const r = useRecorder();
   const s = r.suggestion!;
-  const current = r.language === 'auto' ? 'Auto' : r.languages.find((l) => l.id === r.language)?.label ?? r.language;
+  const current = r.language === 'auto' ? t('recordingBanner.auto') : r.languages.find((l) => l.id === r.language)?.label ?? r.language;
   return (
     <div role="status" style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--color-warning-subtle)', border: '1px solid color-mix(in oklch, var(--color-warning) 40%, transparent)' }}>
       <span style={{ fontSize: 'var(--text-sm)' }}>
         {s.mode === 'auto'
-          ? <>Most speech sounds like <strong>{s.label}</strong>. Set it for a more accurate transcript?</>
-          : <>This sounds like <strong>{s.label}</strong>, but the language is set to {current}.</>}
+          ? <>{rich(t, 'recordingBanner.mostSpeechSoundsLikeSet', { strong: <strong>{s.label}</strong> })}</>
+          : <>{rich(t, 'recordingBanner.thisSoundsLikeButThe', { strong: <strong>{s.label}</strong>, current: current })}</>}
       </span>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button size="sm" variant="primary" onClick={() => void r.answerSuggestion('switch', s.id)}>{s.mode === 'auto' ? `Set ${s.label}` : `Switch to ${s.label}`}</Button>
-        <Button size="sm" variant="ghost" onClick={() => void r.answerSuggestion('keep', s.id)}>Keep {current}</Button>
+        <Button size="sm" variant="primary" onClick={() => void r.answerSuggestion('switch', s.id)}>{s.mode === 'auto' ? t('recordingBanner.set', { label: s.label }) : t('recordingBanner.switchTo', { label: s.label })}</Button>
+        <Button size="sm" variant="ghost" onClick={() => void r.answerSuggestion('keep', s.id)}>{rich(t, 'recordingBanner.keep', { current: current })}</Button>
       </div>
     </div>
   );
@@ -47,13 +51,14 @@ function LanguageSuggestion() {
 
 /** Shows on every view while a recording runs: what is captured, what is really saved, and how to stop. */
 export function RecordingBanner() {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const r = useRecorder();
   const onMeetings = useLocation().pathname === '/meetings';
   if (r.status === 'idle' && !r.notice) return null;
   const line: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
   return (
-    <div role="region" aria-label="Recording" className="gtd-card" style={{
+    <div role="region" aria-label={t('queuedMeetingActions.recording')} className="gtd-card" style={{
       position: 'fixed', right: 'var(--space-4)', bottom: 'var(--space-4)', zIndex: 'var(--z-floating)', width: 340, maxWidth: 'calc(100vw - 32px)',
       padding: 'var(--space-3) var(--space-4)', boxShadow: 'var(--shadow-md)', gap: 'var(--space-2)', fontSize: 'var(--text-sm)',
     }}>
@@ -61,33 +66,33 @@ export function RecordingBanner() {
         <>
           <p role="status" style={{ margin: 0 }}>{r.notice}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {!onMeetings && r.lastMeetingId && <Link to="/meetings" className="gtd-link">Open transcript</Link>}
-            <Button size="sm" variant="ghost" onClick={r.dismiss}>OK</Button>
+            {!onMeetings && r.lastMeetingId && <Link to="/meetings" className="gtd-link">{t('recordingBanner.openTranscript')}</Link>}
+            <Button size="sm" variant="ghost" onClick={r.dismiss}>{t('recordingBanner.ok')}</Button>
           </div>
         </>
       )}
-      {r.status === 'starting' && <p style={{ margin: 0 }}>Starting the microphone…</p>}
+      {r.status === 'starting' && <p style={{ margin: 0 }}>{t('recordingBanner.startingTheMicrophone')}</p>}
       {(r.status === 'recording' || r.status === 'saving') && (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
             <span aria-hidden className={r.status === 'recording' ? 'recording-dot' : undefined} style={{ width: 10, height: 10, borderRadius: 'var(--radius-full)', background: 'var(--color-critical)' }} />
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.status === 'saving' ? 'Saving…' : 'Recording'} {r.title}</span>
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.status === 'saving' ? t('saving') : t('queuedMeetingActions.recording')} {r.title}</span>
             <span style={{ fontFamily: 'var(--font-mono)' }}>{clock(r.elapsed)}</span>
           </div>
-          <Meter label="Microphone" level={r.level} />
-          {r.systemLevel !== null && <Meter label="Computer" level={r.systemLevel} />}
-          <p style={line}>Saved {clock(r.saved)} of {clock(r.captured)} captured.{r.systemLevel === null ? ' Microphone only: people heard through headphones are not recorded.' : ''}</p>
-          {r.gap > 0 && <p role="status" style={{ ...line, color: 'var(--color-warning)' }}>{clock(r.gap)} of this meeting was not captured, for example while the computer slept.</p>}
+          <Meter label={t('recordMeetingModal.microphone')} level={r.level} />
+          {r.systemLevel !== null && <Meter label={t('recordingBanner.computer')} level={r.systemLevel} />}
+          <p style={line}>{rich(t, 'recordingBanner.savedOfCaptured', { clock: clock(r.saved), clock2: clock(r.captured), value: r.systemLevel === null ? t('recordingBanner.microphoneOnlyPeopleHeardThrough') : '' })}</p>
+          {r.gap > 0 && <p role="status" style={{ ...line, color: 'var(--color-warning)' }}>{rich(t, 'recordingBanner.ofThisMeetingWasNot', { clock: clock(r.gap) })}</p>}
           {r.status === 'recording' && r.languages.length > 0 && (
             <label style={{ ...line, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ flexShrink: 0 }}>Spoken language</span>
-              <select aria-label="Spoken language" value={r.language} onChange={(e) => void r.setLanguage(e.target.value)}
+              <span style={{ flexShrink: 0 }}>{t('recordMeetingModal.spokenLanguage')}</span>
+              <select aria-label={t('recordMeetingModal.spokenLanguage')} value={r.language} onChange={(e) => void r.setLanguage(e.target.value)}
                 className="gtd-control gtd-control--sm" style={{ flex: 1 }}>
-                <option value="auto">Auto</option>
-                {r.languages.filter((l) => l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                <option value="auto">{t('recordingBanner.auto')}</option>
+                {r.languages.filter((l) => l.common).map((l) => <option key={l.id} value={l.id}>{languageName(l.id, l.label)}</option>)}
                 {r.languages.some((l) => !l.common) && (
-                  <optgroup label="Other languages">
-                    {r.languages.filter((l) => !l.common).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                  <optgroup label={t('recordMeetingModal.otherLanguages')}>
+                    {r.languages.filter((l) => !l.common).map((l) => <option key={l.id} value={l.id}>{languageName(l.id, l.label)}</option>)}
                   </optgroup>
                 )}
               </select>
@@ -95,20 +100,20 @@ export function RecordingBanner() {
           )}
           {r.status === 'recording' && r.suggestion && <LanguageSuggestion />}
           {r.languageError && <p role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{r.languageError}</p>}
-          {!onMeetings && <Link to="/meetings" className="gtd-link" style={{ fontSize: 'var(--text-xs)' }}>Open Meetings for the transcript</Link>}
+          {!onMeetings && <Link to="/meetings" className="gtd-link" style={{ fontSize: 'var(--text-xs)' }}>{t('recordingBanner.openMeetingsForTheTranscript')}</Link>}
           {r.lost.map((text) => <p key={text} role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{text}</p>)}
           {r.warning && <p role="alert" style={{ ...line, color: 'var(--color-warning)' }}>{r.warning}</p>}
           <div style={{ display: 'flex', gap: 8 }}>
-            <Button size="sm" variant="primary" disabled={r.status === 'saving'} onClick={() => void r.stop()}>Stop and save</Button>
+            <Button size="sm" variant="primary" disabled={r.status === 'saving'} onClick={() => void r.stop()}>{t('recordingBanner.stopAndSave')}</Button>
             <Button size="sm" variant="ghost" disabled={r.status === 'saving'}
-              onClick={async () => { if (await confirm({ title: `Discard "${r.title}"?`, message: 'Everything recorded so far is deleted. This cannot be undone.', confirmLabel: 'Discard recording', tone: 'danger' })) void r.discard(); }}>Discard</Button>
+              onClick={async () => { if (await confirm({ title: `Discard "${r.title}"?`, message: 'Everything recorded so far is deleted. This cannot be undone.', confirmLabel: 'Discard recording', tone: 'danger' })) void r.discard(); }}>{t('recordingBanner.discard')}</Button>
           </div>
         </>
       )}
       {r.status === 'failed' && (
         <>
-          <Notice tone="critical" title="The recording stopped.">{r.error}</Notice>
-          <div><Button size="sm" variant="ghost" onClick={r.dismiss}>OK</Button></div>
+          <Notice tone="critical" title={t('recordingBanner.theRecordingStopped')}>{r.error}</Notice>
+          <div><Button size="sm" variant="ghost" onClick={r.dismiss}>{t('recordingBanner.ok')}</Button></div>
         </>
       )}
     </div>

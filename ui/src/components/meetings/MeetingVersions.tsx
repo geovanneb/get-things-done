@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import { useState } from 'react';
 import Button from '@/components/common/Button';
 import Modal from '@/components/common/Modal';
@@ -16,6 +19,7 @@ const when = (iso: string) => new Date(iso).toLocaleString([], { day: 'numeric',
 export function TranscribeAgainDialog({ file, job, onClose, onStart }: {
   file: string | null; job: MeetingDigest | null; onClose: () => void; onStart: (file: string, model: string) => Promise<void>;
 }) {
+  const { t } = useLanguage();
   const installed = job?.installed_models ?? [];
   const names = job?.model_names ?? {};
   // A GPU model not verified here runs as its CPU counterpart: offer each model once, as it really runs.
@@ -29,18 +33,18 @@ export function TranscribeAgainDialog({ file, job, onClose, onStart }: {
     try { await onStart(file, model); onClose(); } catch { /* reported */ } finally { setSaving(false); }
   };
   return (
-    <Modal isOpen={file !== null} onClose={onClose} title="Transcribe again"
-      description="The new transcript is added as a version of this meeting. The one you reviewed stays in use until you choose the new one, and the record stays as it was confirmed."
+    <Modal isOpen={file !== null} onClose={onClose} title={t('meetingVersions.transcribeAgain')}
+      description={t('meetingVersions.theNewTranscriptIsAdded')}
       footer={<>
-        <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button variant="primary" onClick={() => void start()} loading={saving} disabled={!model}>Start transcribing</Button>
+        <Button variant="ghost" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
+        <Button variant="primary" onClick={() => void start()} loading={saving} disabled={!model}>{t('meetingVersions.startTranscribing')}</Button>
       </>}>
       {runnable.length ? (
-        <Select label="Model" value={model} onChange={setModel}
+        <Select label={t('meetingVersions.model')} value={model} onChange={setModel}
           options={runnable.map((m) => ({ value: m, label: names[m] ?? m }))}
-          hint="Uses the language and speaker settings of Settings > Transcription. It runs after any meeting in the queue." />
+          hint={t('meetingVersions.usesTheLanguageAndSpeaker')} />
       ) : (
-        <Notice tone="warning" title="No transcription model is downloaded.">Download one in Settings &gt; Transcription, then try again.</Notice>
+        <Notice tone="warning" title={t('meetingVersions.noTranscriptionModelIsDownloaded')}>{t('meetingVersions.downloadOneInSettingsTranscription')}</Notice>
       )}
     </Modal>
   );
@@ -56,16 +60,16 @@ export function TranscriptionNotice({ detail, names, busy, onStop }: {
   const p = detail.transcription_progress;
   if (t.status === 'failed') {
     return (
-      <Notice tone="warning" title="The new transcription was not kept." action={<Button size="sm" variant="secondary" disabled={busy} onClick={onStop}>Dismiss</Button>}>
-        {t.error ?? 'It failed.'} The reviewed transcript is still in use. Try again with another model from the Files tab.
+      <Notice tone="warning" title={tr('meetingVersions.theNewTranscriptionWasNot')} action={<Button size="sm" variant="secondary" disabled={busy} onClick={onStop}>{tr('dismiss')}</Button>}>
+        {rich(tr, 'meetingVersions.theReviewedTranscriptIsStill', { error: t.error ?? tr('meetingVersions.itFailed') })}
       </Notice>
     );
   }
   const progress = p && p.total > 0 ? ` ${Math.min(100, Math.round((p.done / p.total) * 100))}%` : '';
   return (
-    <Notice tone="info" title={t.status === 'running' ? `Transcribing again with ${model}${progress}` : `Waiting to transcribe again with ${model}`}
-      action={<Button size="sm" variant="secondary" disabled={busy} onClick={onStop}>Stop</Button>}>
-      {t.status === 'running' ? 'When it is done, it is added as a new version. The transcript you reviewed stays in use until you choose.' : 'It starts when the meetings in the queue are transcribed.'}
+    <Notice tone="info" title={t.status === 'running' ? tr('meetingVersions.transcribingAgainWith', { model, progress }) : tr('meetingVersions.waitingToTranscribeAgainWith', { model })}
+      action={<Button size="sm" variant="secondary" disabled={busy} onClick={onStop}>{tr('meetingVersions.stop')}</Button>}>
+      {t.status === 'running' ? tr('meetingVersions.whenItIsDoneIt') : tr('meetingVersions.itStartsWhenTheMeetings')}
     </Notice>
   );
 }
@@ -74,29 +78,30 @@ export function TranscriptionNotice({ detail, names, busy, onStop }: {
 export function VersionsSection({ detail, names, busy, onChoose }: {
   detail: MeetingDetail; names: Record<string, string>; busy: boolean; onChoose: (version: string) => void;
 }) {
+  const { t } = useLanguage();
   if (detail.versions.length < 2) return null;
   return (
-    <section aria-label="Versions" style={{ marginBottom: 'var(--space-5)' }}>
-      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>Versions</h3>
+    <section aria-label={t('meetingVersions.versions')} style={{ marginBottom: 'var(--space-5)' }}>
+      <h3 style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-base)', fontWeight: 600, color: 'var(--color-text)' }}>{t('meetingVersions.versions')}</h3>
       <ul className="gtd-stack" style={{ gap: 'var(--space-2)', margin: 0, padding: 0, listStyle: 'none', fontSize: 'var(--text-sm)' }}>
         {detail.versions.map((v) => (
           <li key={v.id} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
             <span style={{ flex: '1 1 140px', minWidth: 0 }}>
-              <strong>{v.id === 'v1' ? 'Reviewed' : `Version ${v.id.slice(1)}`}</strong>
+              <strong>{v.id === 'v1' ? t('taskMeetingSources.reviewed') : t('meetingVersions.version', { slice: v.id.slice(1) })}</strong>
               <span style={{ display: 'block', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                 {v.made_from === 'transcription' ? `${names[v.model ?? ''] ?? v.model}, ${when(v.at)}`
-                  : v.made_from === 'correction' ? `Corrected in ${v.correction}, ${when(v.at)}` : `As reviewed, ${when(v.at)}`}
+                  : v.made_from === 'correction' ? t('meetingVersions.correctedIn', { correction: v.correction, when: when(v.at) }) : t('meetingVersions.asReviewed', { when: when(v.at) })}
               </span>
             </span>
             {v.current
-              ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>In use</span>
-              : <Button size="sm" variant="secondary" disabled={busy} onClick={() => onChoose(v.id)}>Use this version</Button>}
+              ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('meetingVersions.inUse')}</span>
+              : <Button size="sm" variant="secondary" disabled={busy} onClick={() => onChoose(v.id)}>{t('meetingVersions.useThisVersion')}</Button>}
           </li>
         ))}
       </ul>
       {detail.versions.find((v) => v.current)?.made_from === 'transcription' && (
         <p style={{ margin: 'var(--space-2) 0 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          The record stays the account of the reviewed version. Tasks made from it keep what they used.
+          {t('meetingVersions.theRecordStaysTheAccount')}
         </p>
       )}
     </section>

@@ -1,3 +1,4 @@
+import { useLanguage } from '../../i18n/LanguageProvider';
 import React from 'react';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { NavLink, useLocation } from 'react-router-dom';
@@ -175,6 +176,7 @@ const NAV_WIDTH_COLLAPSED = '60px';
 const NAV_WIDTH_EDITING = '288px';
 
 export default function NavRail() {
+  const { t } = useLanguage();
   const { validationCount, agenticVisualMode, sidebar, sidebarEditing } = useAppState();
   const dispatch = useAppDispatch();
   const location = useLocation();
@@ -229,17 +231,17 @@ export default function NavRail() {
       : validationCount.warnings > 0
       ? 'var(--color-warning)'
       : 'var(--color-success)';
-  const healthLabel = `Workspace health: ${validationCount.errors > 0 ? 'errors' : validationCount.warnings > 0 ? 'warnings' : 'good'}`;
+  const healthLabel = t(validationCount.errors > 0 ? 'healthErrors' : validationCount.warnings > 0 ? 'healthWarnings' : 'healthGood');
 
   const toItem = (entry: { path: string; label: string; id: NavItemId }): NavItem => ({
     path: entry.path,
-    label: entry.label,
+    label: t(entry.id),
     icon: NAV_ICONS[entry.id],
     pending: pending.find((p) => p.navPath === entry.path),
   });
   const arranged = arrangeSidebar(navGroups({ agentFloor: agenticVisualMode }), sidebar);
   const groups = arranged
-    .map((group) => ({ ...group, items: group.items.filter((entry) => !entry.hidden).map(toItem) }))
+    .map((group) => ({ ...group, heading: group.id === 'memory' || group.id === 'automation' ? t(group.id) : group.heading, items: group.items.filter((entry) => !entry.hidden).map(toItem) }))
     .filter((group) => group.items.length > 0);
   const hiddenItems = arranged.flatMap((group) => group.items.filter((entry) => entry.hidden).map(toItem));
   const mainGroups = groups.filter((g) => g.id !== 'account');
@@ -247,7 +249,7 @@ export default function NavRail() {
 
   return (
     <nav
-      aria-label="Main navigation"
+      aria-label={t('mainNavigation')}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -276,8 +278,8 @@ export default function NavRail() {
           <button
             hidden={narrow}
             onClick={toggleCollapsed}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? t('expandSidebar') : t('collapseSidebar')}
+            title={collapsed ? t('expandSidebar') : t('collapseSidebar')}
             style={{
               display: narrow ? 'none' : 'flex',
               alignItems: 'center',
@@ -354,6 +356,7 @@ export default function NavRail() {
 function CustomizeLink({ visible, onClick, onFocusChange }: {
   visible: boolean; onClick: () => void; onFocusChange: (focused: boolean) => void;
 }) {
+  const { t } = useLanguage();
   const idle = { color: 'var(--nav-text)', borderColor: 'transparent', background: 'transparent' };
   const hover = { color: 'var(--nav-text-active)', borderColor: 'var(--nav-border)', background: 'var(--nav-hover-bg)' };
   return (
@@ -375,12 +378,13 @@ function CustomizeLink({ visible, onClick, onFocusChange }: {
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M10.5 2.5l3 3L6 13H3v-3l7.5-7.5Z" />
       </svg>
-      Customize sidebar
+      {t('customizeSidebar')}
     </button>
   );
 }
 
 function CustomizeMenu({ at, onCustomize, onClose }: { at: { x: number; y: number }; onCustomize: () => void; onClose: () => void }) {
+  const { t } = useLanguage();
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     ref.current?.querySelector('button')?.focus();
@@ -392,7 +396,7 @@ function CustomizeMenu({ at, onCustomize, onClose }: { at: { x: number; y: numbe
     <div
       ref={ref}
       role="menu"
-      aria-label="Sidebar"
+      aria-label={t('sidebar')}
       onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
       style={{
         position: 'fixed', left: Math.min(at.x, window.innerWidth - 200), top: Math.min(at.y, window.innerHeight - 50),
@@ -411,7 +415,7 @@ function CustomizeMenu({ at, onCustomize, onClose }: { at: { x: number; y: numbe
           fontSize: 'var(--text-sm)', cursor: 'pointer',
         }}
       >
-        Customize sidebar…
+        {t('customizeSidebarMenu')}
       </button>
     </div>
   );

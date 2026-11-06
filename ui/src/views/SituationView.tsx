@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Button from '@/components/common/Button';
 import IconButton from '@/components/common/IconButton';
@@ -65,9 +67,10 @@ function MetricCard({
 /* ---- Waiting on you ---------------------------------------------- */
 // Steps only the user can take (review, run a command, fix a routine): the same ones the nav marks with a dot.
 function WaitingOnYou({ items }: { items: PendingAction[] }) {
+  const { t } = useLanguage();
   return (
     <section aria-labelledby="waiting-heading" className="gtd-card" style={{ padding: 'var(--space-4) var(--space-5)', gap: 'var(--space-3)' }}>
-      <h2 id="waiting-heading" className="gtd-card__title">Waiting on you</h2>
+      <h2 id="waiting-heading" className="gtd-card__title">{t('attentionList.waitingOnYou')}</h2>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 8 }}>
         {items.map((item) => (
           <li key={item.navPath}>
@@ -157,13 +160,14 @@ function StakeholderAvatars({ names, max = 3 }: { names: string[]; max?: number 
 
 /* ---- Reason badge -------------------------------------------------- */
 function ReasonBadge({ reason }: { reason: string }) {
+  const { t } = useLanguage();
   if (reason === 'overdue') {
-    return <Badge variant="error" size="sm">OVERDUE</Badge>;
+    return <Badge variant="error" size="sm">{t('situation.overdue')}</Badge>;
   }
   if (reason === 'blocked') {
-    return <Badge variant="warning" size="sm">BLOCKED</Badge>;
+    return <Badge variant="warning" size="sm">{t('situation.blocked')}</Badge>;
   }
-  return <Badge variant="info" size="sm">DUE SOON</Badge>;
+  return <Badge variant="info" size="sm">{t('situation.dueSoon')}</Badge>;
 }
 
 /* ---- Status bar chart ---------------------------------------------- */
@@ -203,7 +207,8 @@ function StatusBarChart({ byStatus }: { byStatus: Record<string, number> }) {
 
 /* ---- Cycle time scatter plot --------------------------------------- */
 function CycleTimeScatter({ data }: { data: Array<{ title: string; days: number; priority?: string }> }) {
-  if (!data.length) return <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>No data</div>;
+  const { t } = useLanguage();
+  if (!data.length) return <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>{t('situation.noData')}</div>;
   const max = Math.max(...data.map((d) => d.days), 1);
   const w = 320;
   const h = 100;
@@ -211,7 +216,7 @@ function CycleTimeScatter({ data }: { data: Array<{ title: string; days: number;
     <svg
       width="100%"
       viewBox={`0 0 ${w} ${h}`}
-      aria-label="Cycle time scatter plot"
+      aria-label={t('situation.cycleTimeScatterPlot')}
       style={{ overflow: 'visible' }}
     >
       {data.map((d, i) => {
@@ -219,7 +224,7 @@ function CycleTimeScatter({ data }: { data: Array<{ title: string; days: number;
         const y = h - 10 - (d.days / max) * (h - 20);
         return (
           <circle key={`${d.title}-${i}`} cx={x} cy={y} r={5} fill="var(--color-accent)" opacity={0.65}>
-            <title>{d.title}: {d.days} days</title>
+            <title>{rich(t, 'situation.days', { title: d.title, days: d.days })}</title>
           </circle>
         );
       })}
@@ -247,16 +252,17 @@ function ProgressBar({ value }: { value: number }) {
 
 /* ---- Main View ----------------------------------------------------- */
 export default function SituationView() {
+  const { t } = useLanguage();
   const { data, loading } = useApi<SituationData>('/api/situation');
   const navigate = useNavigate();
   const pending = usePendingActions();
 
-  if (loading) return <LoadingSpinner text="Loading your situation…" />;
+  if (loading) return <LoadingSpinner text={t('situation.loadingYourSituation')} />;
   if (!data) {
     return (
       <Page width="wide">
-        <Notice tone="critical" title="Could not load your situation." action={<Button size="sm" onClick={() => window.location.reload()}>Reload</Button>}>
-          The dashboard did not get an answer from its server. Check that Get Things Done is still running, then reload.
+        <Notice tone="critical" title={t('situation.couldNotLoadYourSituation')} action={<Button size="sm" onClick={() => window.location.reload()}>{t('updateBanner.reload')}</Button>}>
+          {t('situation.theDashboardDidNotGet')}
         </Notice>
       </Page>
     );
@@ -269,9 +275,9 @@ export default function SituationView() {
   return (
     <Page width="wide" className="situation">
       {/* Metric cards */}
-      <div className="situation__metrics" role="region" aria-label="Key metrics">
+      <div className="situation__metrics" role="region" aria-label={t('situation.keyMetrics')}>
         <MetricCard
-          label="Overdue"
+          label={t('attentionList.overdue')}
           count={data.overdue_count}
           color="var(--color-critical)"
           icon={
@@ -282,7 +288,7 @@ export default function SituationView() {
           }
         />
         <MetricCard
-          label="Due soon"
+          label={t('attentionList.dueSoon')}
           count={data.due_soon_count}
           color="var(--color-warning)"
           icon={
@@ -294,7 +300,7 @@ export default function SituationView() {
           }
         />
         <MetricCard
-          label="Blocked"
+          label={t('renderer.blocked')}
           count={data.blocked_count}
           color="var(--color-critical)"
           icon={
@@ -305,7 +311,7 @@ export default function SituationView() {
           }
         />
         <MetricCard
-          label="In progress"
+          label={t('deliverableRow.inProgress')}
           count={data.in_progress_count}
           color="var(--color-accent)"
           icon={
@@ -328,13 +334,13 @@ export default function SituationView() {
             className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
             <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
-              <h2 id="attention-heading" className="gtd-card__title">Needs attention</h2>
+              <h2 id="attention-heading" className="gtd-card__title">{t('situation.needsAttention')}</h2>
               <Badge variant="error" size="sm">{data.attention_queue.length}</Badge>
             </div>
 
             {data.attention_queue.length === 0 ? (
               <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
-                Nothing needs attention right now.
+                {t('situation.nothingNeedsAttentionRightNow')}
               </div>
             ) : (
               <ul role="list" style={{ listStyle: 'none' }}>
@@ -370,7 +376,7 @@ export default function SituationView() {
                     <div className="situation__attention-meta">
                     <DueDateChip dueDate={item.due_date} />
                     <StakeholderAvatars names={item.stakeholders} />
-                    <IconButton label={`Open ${item.title}`} outline onClick={() => navigate(`/board/task/${item.id}`)}
+                    <IconButton label={t('situation.open', { title: item.title })} outline onClick={() => navigate(`/board/task/${item.id}`)}
                       icon={<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6H9.5M6.5 3L9.5 6L6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
                     </div>
                   </li>
@@ -385,25 +391,25 @@ export default function SituationView() {
             className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
             <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
-              <h2 id="upcoming-heading" className="gtd-card__title">Upcoming commitments</h2>
+              <h2 id="upcoming-heading" className="gtd-card__title">{t('situation.upcomingCommitments')}</h2>
               <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                next 14 days
+                {t('situation.next14Days')}
               </span>
             </div>
 
             {data.upcoming_commitments.length === 0 ? (
               <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
-                No upcoming commitments.
+                {t('situation.noUpcomingCommitments')}
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table
                   style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--text-sm)' }}
-                  aria-label="Upcoming commitments"
+                  aria-label={t('situation.upcomingCommitments')}
                 >
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                      {['Due date', 'Task', 'Stakeholders', 'Type'].map((h) => (
+                      {[t('newTaskModal.dueDate'), t('task'), t('stakeholders'), t('board.type')].map((h) => (
                         <th
                           key={h}
                           scope="col"
@@ -461,23 +467,23 @@ export default function SituationView() {
             className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
             <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
-              <h2 id="workflow-heading" className="gtd-card__title">Workflow snapshot</h2>
+              <h2 id="workflow-heading" className="gtd-card__title">{t('situation.workflowSnapshot')}</h2>
             </div>
             <div className="situation__snapshot">
               <div>
                 <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
-                  Tasks by status
+                  {t('situation.tasksByStatus')}
                 </div>
                 <StatusBarChart byStatus={data.workflow_snapshot.by_status} />
               </div>
               <div>
                 <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
-                  Cycle time (days)
+                  {t('situation.cycleTimeDays')}
                 </div>
                 {data.workflow_snapshot.cycle_time_data.length > 0 ? (
                   <CycleTimeScatter data={data.workflow_snapshot.cycle_time_data} />
                 ) : (
-                  <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>Not enough data yet.</div>
+                  <div style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>{t('situation.notEnoughDataYet')}</div>
                 )}
               </div>
             </div>
@@ -492,13 +498,13 @@ export default function SituationView() {
             className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
             <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
-              <h2 id="focus-heading" className="gtd-card__title">Current focus</h2>
+              <h2 id="focus-heading" className="gtd-card__title">{t('situation.currentFocus')}</h2>
               <Badge variant="accent" size="sm">{data.current_focus.length}</Badge>
             </div>
 
             {data.current_focus.length === 0 ? (
               <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
-                No tasks in progress.
+                {t('situation.noTasksInProgress')}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -565,11 +571,11 @@ export default function SituationView() {
             className="gtd-card gtd-card--flush" style={{ overflow: 'hidden' }}
           >
             <div className="gtd-card__header" style={{ alignItems: 'center', justifyContent: 'flex-start' }}>
-              <h2 id="activity-heading" className="gtd-card__title">Recent activity</h2>
+              <h2 id="activity-heading" className="gtd-card__title">{t('situation.recentActivity')}</h2>
             </div>
             {data.recent_activity.length === 0 ? (
               <div style={{ padding: '24px 20px', color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)', textAlign: 'center' }}>
-                No recent activity.
+                {t('situation.noRecentActivity')}
               </div>
             ) : (
               <ul role="list" style={{ listStyle: 'none', padding: 0 }}>
@@ -612,7 +618,7 @@ export default function SituationView() {
                         {a.title ?? a.filename}
                       </div>
                       <div className="truncate" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)' }}>
-                        <span style={{ fontFamily: 'var(--font-mono)' }}>{shortPath(a.path)}</span> · {a.event}
+                        <span style={{ fontFamily: 'var(--font-mono)' }}>{shortPath(a.path)}</span> · {a.event === 'modified' ? t('situation.eventModified') : a.event === 'created' ? t('situation.eventCreated') : a.event === 'deleted' ? t('situation.eventDeleted') : a.event}
                       </div>
                     </div>
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', flexShrink: 0 }}>

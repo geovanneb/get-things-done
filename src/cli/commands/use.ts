@@ -16,7 +16,7 @@ export const useCommand = new Command('use')
       process.exit(1);
     }
 
-    writeConfig({ workspace_path: resolved });
+    await writeConfig({ workspace_path: resolved });
     console.log(chalk.green('✓') + ` Workspace set to: ${chalk.cyan(resolved)}`);
     console.log('');
     console.log('Run ' + chalk.bold('gtd start') + ' to launch the dashboard.');

@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { TONE_COLOR, type PendingAction } from '../../hooks/usePendingActions';
@@ -14,6 +15,7 @@ export interface MoreItem {
  * Hidden items stay reachable here. Their dots show on More, so hiding Routines never hides a broken routine.
  */
 export default function NavMore({ items, collapsed, currentPath }: { items: MoreItem[]; collapsed: boolean; currentPath: string }) {
+  const { t } = useLanguage();
   const [open, setOpen] = React.useState(false);
   const [position, setPosition] = React.useState({ left: 0, top: 0 });
   const buttonRef = React.useRef<HTMLButtonElement>(null);
@@ -61,8 +63,8 @@ export default function NavMore({ items, collapsed, currentPath }: { items: More
         onClick={toggle}
         aria-expanded={open}
         aria-controls="nav-more-menu"
-        aria-label={summary ? `More, ${summary}` : 'More'}
-        title={summary ? `More: ${summary}` : collapsed ? 'More' : undefined}
+        aria-label={summary ? t('moreSummaryLabel', { summary }) : t('more')}
+        title={summary ? t('moreSummaryTitle', { summary }) : collapsed ? t('more') : undefined}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start', gap: 10,
           width: '100%', height: 40, padding: collapsed ? 0 : '0 10px', marginBottom: 2, border: 'none',
@@ -77,7 +79,7 @@ export default function NavMore({ items, collapsed, currentPath }: { items: More
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style={{ flexShrink: 0 }}>
           <circle cx="3.5" cy="8" r="1.3" /><circle cx="8" cy="8" r="1.3" /><circle cx="12.5" cy="8" r="1.3" />
         </svg>
-        {!collapsed && <span style={{ flex: 1 }}>More</span>}
+        {!collapsed && <span style={{ flex: 1 }}>{t('more')}</span>}
         {!collapsed && count > 0 && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--nav-text-active)' }}>
             <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: TONE_COLOR[tone] }} />
@@ -100,7 +102,7 @@ export default function NavMore({ items, collapsed, currentPath }: { items: More
           ref={menuRef}
           id="nav-more-menu"
           role="list"
-          aria-label="Hidden sidebar items"
+          aria-label={t('hiddenSidebarItems')}
           onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}
           style={{
             position: 'fixed', left: position.left, top: position.top, zIndex: 'var(--z-popover)', minWidth: 200, margin: 0,

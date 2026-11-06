@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React, { useEffect, useState } from 'react';
 import Card from '@/components/common/Card';
 import Notice from '@/components/common/Notice';
@@ -41,15 +44,15 @@ function influenceBadgeVariant(
 function influenceLabel(influence: Stakeholder['influence']): string {
   switch (influence) {
     case 'decision_maker':
-      return 'Decision Maker';
+      return tr('stakeholderDetail.decisionMaker');
     case 'influencer':
-      return 'Influencer';
+      return tr('stakeholderDetail.influencer');
     case 'informed':
-      return 'Informed';
+      return tr('stakeholderDetail.informed');
     case 'executor':
-      return 'Executor';
+      return tr('stakeholderDetail.executor');
     case 'sponsor':
-      return 'Sponsor';
+      return tr('stakeholderDetail.sponsor');
   }
 }
 
@@ -68,25 +71,25 @@ function statusBadgeVariant(status: Task['status']): StatusBadgeVariant {
 
 function statusLabel(status: Task['status']): string {
   const labels: Record<Task['status'], string> = {
-    backlog: 'Backlog',
-    ready: 'Ready',
+    backlog: tr('routineEditor.backlog'),
+    ready: tr('routineEditor.ready'),
     in_progress: 'In Progress',
-    blocked: 'Blocked',
-    review: 'Review',
-    done: 'Done',
-    in_review: 'Needs Review',
-    approved: 'Approved',
-    archived: 'Archived',
+    blocked: tr('renderer.blocked'),
+    review: tr('shared.review'),
+    done: tr('done'),
+    in_review: tr('simulation.needsReview'),
+    approved: tr('format.approved'),
+    archived: tr('format.archived'),
   };
   return labels[status];
 }
 
 function priorityLabel(priority: Task['priority']): string {
   const labels: Record<Task['priority'], string> = {
-    critical: 'Critical',
-    high: 'High',
-    medium: 'Medium',
-    low: 'Low',
+    critical: tr('attentionQueue.critical'),
+    high: tr('attentionQueue.high'),
+    medium: tr('attentionQueue.medium'),
+    low: tr('attentionQueue.low'),
   };
   return labels[priority];
 }
@@ -143,6 +146,7 @@ interface TaskItemProps {
 }
 
 function TaskItem({ task, isLast }: TaskItemProps) {
+  const { t } = useLanguage();
   const overdue = isOverdue(task.due_date);
   const dueSoon = isDueSoon(task.due_date);
 
@@ -162,8 +166,8 @@ function TaskItem({ task, isLast }: TaskItemProps) {
     >
       {/* Priority indicator dot */}
       <span
-        aria-label={`Priority: ${priorityLabel(task.priority)}`}
-        title={`${priorityLabel(task.priority)} priority`}
+        aria-label={t('stakeholderDetail.priority', { priorityLabel: priorityLabel(task.priority) })}
+        title={t('stakeholderDetail.priority2', { priorityLabel: priorityLabel(task.priority) })}
         style={{
           width: 8,
           height: 8,
@@ -208,7 +212,7 @@ function TaskItem({ task, isLast }: TaskItemProps) {
             flexShrink: 0,
           }}
         >
-          {overdue ? 'Overdue' : formatRelativeDate(task.due_date)}
+          {overdue ? t('attentionList.overdue') : formatRelativeDate(task.due_date)}
         </span>
       )}
     </div>
@@ -229,6 +233,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
   /** Embedded only: called when a link inside the profile is followed, so the dialog can close. */
   onNavigate?: () => void;
 } = {}) {
+  const { t } = useLanguage();
   const params = useParams<{ id: string }>();
   const id = stakeholderId ?? params.id;
 
@@ -278,7 +283,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
         setPositions(orgPositions);
       } catch (err: unknown) {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : 'Failed to load.';
+        const msg = err instanceof Error ? err.message : t('stakeholderDetail.failedToLoad');
         if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
           setNotFound(true);
         } else {
@@ -299,7 +304,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
     : <Page width="narrow" style={{ gap: 'var(--space-4)' }}>{children}</Page>;
 
   // ---- Loading ----
-  if (loading) return <LoadingSpinner text="Loading stakeholder…" />;
+  if (loading) return <LoadingSpinner text={t('stakeholderDetail.loadingStakeholder')} />;
 
   // ---- 404 ----
   if (notFound) {
@@ -307,8 +312,8 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
       <Frame>
         {!embedded && <BackButton />}
         <EmptyState
-          title="Stakeholder not found"
-          description="This stakeholder may have been deleted, or the link is out of date."
+          title={t('stakeholderDetail.stakeholderNotFound')}
+          description={t('stakeholderDetail.thisStakeholderMayHaveBeen')}
         />
       </Frame>
     );
@@ -319,7 +324,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
     return (
       <Frame>
         {!embedded && <BackButton />}
-        <Notice tone="critical" title="Could not load this stakeholder.">{fetchError}</Notice>
+        <Notice tone="critical" title={t('stakeholderDetail.couldNotLoadThisStakeholder')}>{fetchError}</Notice>
       </Frame>
     );
   }
@@ -410,17 +415,15 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
         </div>
 
         <Button variant="secondary" size="sm" loading={preparing} onClick={() => void prepareMeeting(stakeholder)} style={{ flexShrink: 0 }}>
-          Prepare meeting
+          {t('stakeholderDetail.prepareMeeting')}
         </Button>
       </div>
 
       {/* Organization */}
-      <Card headingLevel={embedded ? 3 : 2} title="Organization">
+      <Card headingLevel={embedded ? 3 : 2} title={t('orgChartDialogs.organization')}>
         {positions.length === 0 ? (
           <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-            Not in any org chart yet.{' '}
-            <Link to="/stakeholders?tab=charts" style={{ color: 'var(--color-accent)' }}>Open org charts</Link>
-            {' '}to set who they report to.
+            {rich(t, 'stakeholderDetail.notInAnyOrgChart', { link: <Link to="/stakeholders?tab=charts" style={{ color: 'var(--color-accent)' }}>{t('stakeholderDetail.openOrgCharts')}</Link> })}
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -436,25 +439,25 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
                 <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '6px 16px', margin: '8px 0 0', fontSize: 'var(--text-sm)' }}>
                   {p.title && (
                     <>
-                      <dt style={{ color: 'var(--color-text-muted)' }}>Title here</dt>
+                      <dt style={{ color: 'var(--color-text-muted)' }}>{t('stakeholderDetail.titleHere')}</dt>
                       <dd style={{ margin: 0, color: 'var(--color-text)' }}>{p.title}</dd>
                     </>
                   )}
                   {p.unit && (
                     <>
-                      <dt style={{ color: 'var(--color-text-muted)' }}>Unit</dt>
+                      <dt style={{ color: 'var(--color-text-muted)' }}>{t('routineEditor.unit')}</dt>
                       <dd style={{ margin: 0, color: 'var(--color-text)' }}>{p.unit.path.join(' › ')}</dd>
                     </>
                   )}
                   {p.head_of && (
                     <>
-                      <dt style={{ color: 'var(--color-text-muted)' }}>Leads</dt>
+                      <dt style={{ color: 'var(--color-text-muted)' }}>{t('stakeholderDetail.leads')}</dt>
                       <dd style={{ margin: 0, color: 'var(--color-text)' }}>{p.head_of.map((u) => u.name).join(', ')}</dd>
                     </>
                   )}
-                  <OrgRow label="Reports to" people={p.manager ? [p.manager] : []} empty="Nobody (top of the chart)" />
-                  <OrgRow label="Direct reports" people={p.direct_reports} empty="None" />
-                  {p.manager && <OrgRow label="Peers" people={p.peers} empty="None" />}
+                  <OrgRow label={t('stakeholderDetail.reportsTo')} people={p.manager ? [p.manager] : []} empty={t('orgChartsPanel.nobodyTopOfTheChart')} />
+                  <OrgRow label={t('stakeholderDetail.directReports')} people={p.direct_reports} empty={t('stakeholderDetail.none')} />
+                  {p.manager && <OrgRow label={t('stakeholderDetail.peers')} people={p.peers} empty={t('stakeholderDetail.none')} />}
                 </dl>
               </div>
             ))}
@@ -464,7 +467,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
 
       {/* What matters */}
       {stakeholder.what_matters && (
-        <Card headingLevel={embedded ? 3 : 2} title="What matters">
+        <Card headingLevel={embedded ? 3 : 2} title={t('stakeholderDetail.whatMatters')}>
           <p
             style={{
               margin: 0,
@@ -480,7 +483,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
 
       {/* Notes */}
       {notes && (
-        <Card headingLevel={embedded ? 3 : 2} title="Notes">
+        <Card headingLevel={embedded ? 3 : 2} title={t('orgChartsPanel.notes')}>
           <MarkdownView content={notes} />
         </Card>
       )}
@@ -490,7 +493,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
 
       {/* Related tasks */}
       <Card headingLevel={embedded ? 3 : 2}
-        title="Related tasks"
+        title={t('stakeholderDetail.relatedTasks')}
         badge={
           <Badge variant="default" size="sm">
             {tasks.length}
@@ -499,8 +502,8 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
       >
         {tasks.length === 0 ? (
           <EmptyState
-            title="No related tasks"
-            description="Tasks linked to this stakeholder will appear here."
+            title={t('stakeholderDetail.noRelatedTasks')}
+            description={t('stakeholderDetail.tasksLinkedToThisStakeholder')}
           />
         ) : (
           <div>
@@ -516,6 +519,7 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
 }
 
 function OrgRow({ label, people, empty }: { label: string; people: OrgPersonSummary[]; empty: string }) {
+  const { t } = useLanguage();
   return (
     <>
       <dt style={{ color: 'var(--color-text-muted)' }}>{label}</dt>
@@ -524,7 +528,7 @@ function OrgRow({ label, people, empty }: { label: string; people: OrgPersonSumm
           <React.Fragment key={person.id}>
             {i > 0 && ', '}
             {person.placeholder
-              ? <span title="Placeholder in the chart, not a stakeholder">{person.name} <em style={{ color: 'var(--color-text-muted)' }}>(placeholder)</em></span>
+              ? <span title={t('stakeholderDetail.placeholderInTheChartNot')}>{person.name} <em style={{ color: 'var(--color-text-muted)' }}>{t('stakeholderDetail.placeholder')}</em></span>
               : <Link to={`/stakeholders/${encodeURIComponent(person.id)}`} style={{ color: 'var(--color-accent)' }}>{person.name}</Link>}
             {person.role && <span style={{ color: 'var(--color-text-muted)' }}> ({person.role})</span>}
           </React.Fragment>
@@ -539,11 +543,11 @@ function OrgRow({ label, people, empty }: { label: string; people: OrgPersonSumm
 // ---------------------------------------------------------------------------
 
 function BackButton() {
+  const { t } = useLanguage();
   return (
     <div>
       <Link to="/stakeholders" className="gtd-btn gtd-btn--ghost gtd-btn--sm" style={{ marginLeft: -6 }}>
-        <span aria-hidden="true" style={{ display: 'flex' }}><BackArrowIcon /></span>
-        Back to stakeholders
+        {rich(t, 'stakeholderDetail.backToStakeholders', { part: <span aria-hidden="true" style={{ display: 'flex' }}><BackArrowIcon /></span> })}
       </Link>
     </div>
   );

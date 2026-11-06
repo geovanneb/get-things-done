@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
@@ -42,6 +44,7 @@ const textStyle: React.CSSProperties = { margin: 0, fontSize: 'var(--text-sm)', 
  * each sample with the meeting it came from (remove one), and Forget voice. Never the voice data itself.
  */
 export function StakeholderVoiceCard({ id, name, headingLevel }: { id: string; name: string; headingLevel: 2 | 3 }) {
+  const { t } = useLanguage();
   const confirm = useConfirm();
   const navigate = useNavigate();
   const version = useDataVersion('voiceprints');
@@ -56,17 +59,17 @@ export function StakeholderVoiceCard({ id, name, headingLevel }: { id: string; n
     try { await what(); refetch(); } catch (err) { setFailed((err as Error).message); } finally { setBusy(false); }
   };
   const forget = async () => {
-    if (!(await confirm({ title: `Forget ${name}'s voice?`, message: 'Every sample and the consent are removed. The app stops suggesting this name; names already given in transcripts stay. Copies in backups of this computer are not removed.', confirmLabel: 'Forget voice', tone: 'danger' }))) return;
+    if (!(await confirm({ title: t('rememberedVoices.forgetSVoice', { name }), message: t('voiceTag.everySampleAndTheConsent'), confirmLabel: t('rememberedVoices.forgetVoice'), tone: 'danger' }))) return;
     await act(() => apiDelete(`/api/voiceprints/${encodeURIComponent(id)}`));
   };
   const remove = async (s: VoiceSample, last: boolean) => {
-    const where = `${s.title ?? 'a meeting that is no longer here'}, ${s.label}`;
+    const where = `${s.title ?? t('voiceTag.aMeetingThatIsNo')}, ${s.label}`;
     const ok = await confirm({
-      title: last ? `Remove the last sample of ${name}'s voice?` : 'Remove this sample?',
+      title: last ? t('voiceTag.removeTheLastSampleOf', { name }) : t('voiceTag.removeThisSample'),
       message: last
-        ? `It is the only one, so ${name}'s voice is forgotten with it, consent and all. Remembering it again asks for consent again.`
-        : `The speech from ${where} is no longer part of ${name}'s voice. The speaker's name in that transcript stays.`,
-      confirmLabel: last ? 'Forget voice' : 'Remove sample', tone: 'danger',
+        ? t('voiceTag.itIsTheOnlyOne', { name })
+        : t('voiceTag.theSpeechFromIsNo', { where, name }),
+      confirmLabel: last ? t('rememberedVoices.forgetVoice') : t('voiceTag.removeSample'), tone: 'danger',
     });
     if (ok) await act(() => apiDelete(`/api/voiceprints/${encodeURIComponent(id)}/samples/${s.key}`));
   };
@@ -74,66 +77,64 @@ export function StakeholderVoiceCard({ id, name, headingLevel }: { id: string; n
   const voice = data?.voice ?? null;
   const tag = voice ? voiceTag(voice) : null;
   return (
-    <Card headingLevel={headingLevel} title="Voice"
+    <Card headingLevel={headingLevel} title={t('voiceTag.voice')}
       badge={tag ? <Badge variant={tag.warning ? 'warning' : 'accent-subtle'} size="sm">{tag.text}</Badge> : undefined}
-      actions={voice ? <Button size="sm" variant="danger" disabled={busy} onClick={() => void forget()}>Forget voice</Button> : undefined}>
+      actions={voice ? <Button size="sm" variant="danger" disabled={busy} onClick={() => void forget()}>{t('rememberedVoices.forgetVoice')}</Button> : undefined}>
       <div className="gtd-stack" style={{ gap: 'var(--space-3)' }}>
-        {failed && <Notice tone="critical" title="That did not work.">{failed}</Notice>}
-        {error ? <Notice tone="critical" title="The voice could not be read.">{error}</Notice>
-          : !data ? <LoadingSpinner inline text="Loading…" />
+        {failed && <Notice tone="critical" title={t('speakerNaming.thatDidNotWork')}>{failed}</Notice>}
+        {error ? <Notice tone="critical" title={t('voiceTag.theVoiceCouldNotBe')}>{error}</Notice>
+          : !data ? <LoadingSpinner inline text={t('loading')} />
             : !voice ? (
               data.enabled
-                ? <EmptyState size="compact" title="No voice remembered"
-                  description={`To remember ${name}'s voice, name them as a speaker in a meeting's transcript and choose Remember voice. Their consent is asked first.`}
-                  action={{ label: 'Open meetings', onClick: () => navigate('/meetings') }} />
-                : <EmptyState size="compact" title="No voice remembered"
-                  description="Recognize known voices is off. Turn it on in Settings > Transcription to remember a voice, with the person's consent, and get their name suggested in transcripts."
-                  action={{ label: 'Open settings', onClick: () => navigate('/settings') }} />
+                ? <EmptyState size="compact" title={t('voiceTag.noVoiceRemembered')}
+                  description={t('voiceTag.toRememberSVoiceName', { name })}
+                  action={{ label: t('voiceTag.openMeetings'), onClick: () => navigate('/meetings') }} />
+                : <EmptyState size="compact" title={t('voiceTag.noVoiceRemembered')}
+                  description={t('voiceTag.recognizeKnownVoicesIsOff')}
+                  action={{ label: t('voiceTag.openSettings'), onClick: () => navigate('/settings') }} />
             ) : voice.damaged ? (
-              <Notice tone="warning" title="This voice's file cannot be read.">It is never used. Forget it, then remember the voice again.</Notice>
+              <Notice tone="warning" title={t('voiceTag.thisVoiceSFileCannot')}>{t('voiceTag.itIsNeverUsedForget')}</Notice>
             ) : (
               <>
                 <p style={textStyle}>
-                  {speechLength(voice.seconds)} of clear speech from {voice.meetings} {voice.meetings === 1 ? 'meeting' : 'meetings'}.{' '}
-                  {voice.stale_model ? 'It was made with an older speaker model, so it is not used: forget it and remember the voice again.'
-                    : !voice.stakeholder ? 'They are no longer a stakeholder, so it is never used.'
-                      : !data.enabled ? 'Recognize known voices is off, so no name is suggested.'
-                        : voice.ready ? 'The app suggests their name when a transcript has a voice that clearly sounds like them.'
-                          : `Suggestions start once there are ${data.min_seconds} seconds of it.`}
+                  {rich(t, 'voiceTag.ofClearSpeechFromMeetings', { count: voice.meetings, seconds: speechLength(voice.seconds), value: voice.stale_model ? t('voiceTag.itWasMadeWithAn')
+                    : !voice.stakeholder ? t('voiceTag.theyAreNoLongerA')
+                      : !data.enabled ? t('voiceTag.recognizeKnownVoicesIsOff2')
+                        : voice.ready ? t('voiceTag.theAppSuggestsTheirName')
+                          : t('voiceTag.suggestionsStartOnceThereAre', { min_seconds: data.min_seconds }) })}
                 </p>
                 {voice.consent && (
                   <div className="gtd-stack" style={{ gap: 'var(--space-1)', fontSize: 'var(--text-sm)' }}>
-                    <span style={{ fontWeight: 600 }}>Consent</span>
+                    <span style={{ fontWeight: 600 }}>{t('voiceTag.consent')}</span>
                     <span style={{ color: 'var(--color-text-secondary)' }}>
                       &ldquo;{consentFor(data.consent_text, voice.consent.person)}&rdquo;
                     </span>
                     <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
-                      Recorded by {voice.consent.recorded_by} on {day(voice.consent.at)}
-                      {voice.old_consent ? `, under an earlier wording (version ${voice.consent.version}, now ${data.consent_version})` : ''}.
+                      {rich(t, 'voiceTag.recordedByOn', { recorded_by: voice.consent.recorded_by, day: day(voice.consent.at), value: voice.old_consent ? t('voiceTag.underAnEarlierWordingVersion', { version: voice.consent.version, consent_version: data.consent_version }) : '' })}
                     </span>
                   </div>
                 )}
                 <div className="gtd-stack" style={{ gap: 'var(--space-1)' }}>
-                  <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>Where it was heard</span>
-                  <ul aria-label={`Samples of ${name}'s voice`} style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+                  <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{t('voiceTag.whereItWasHeard')}</span>
+                  <ul aria-label={t('voiceTag.samplesOfSVoice', { name })} style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
                     {data.samples.map((s) => (
                       <li key={s.key} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', padding: 'var(--space-2) var(--space-3)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)' }}>
                         <span style={{ flex: '1 1 240px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                           {s.title
                             ? <Link to={`/meetings/${encodeURIComponent(s.meeting)}`} className="gtd-link">{s.title}</Link>
-                            : <span style={{ color: 'var(--color-text-muted)' }}>A meeting that is no longer here</span>}
+                            : <span style={{ color: 'var(--color-text-muted)' }}>{t('voiceTag.aMeetingThatIsNo2')}</span>}
                           <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-xs)' }}>
-                            {s.label}{s.version ? ` of ${s.version}` : ''} · {speechLength(s.seconds)} of speech · added {day(s.at)}
+                            {rich(t, 'voiceTag.ofSpeechAdded', { label: s.label, value: s.version ? t('voiceTag.of', { version: s.version }) : '', seconds: speechLength(s.seconds), day: day(s.at) })}
                           </span>
                         </span>
-                        <Button size="sm" variant="ghost" disabled={busy} aria-label={`Remove the sample from ${s.title ?? 'a meeting that is gone'}, ${s.label}`}
-                          onClick={() => void remove(s, data.samples.length === 1)}>Remove</Button>
+                        <Button size="sm" variant="ghost" disabled={busy} aria-label={t('voiceTag.removeTheSampleFrom', { title: s.title ?? t('voiceTag.aMeetingThatIsGone'), label: s.label })}
+                          onClick={() => void remove(s, data.samples.length === 1)}>{t('remove')}</Button>
                       </li>
                     ))}
                   </ul>
                 </div>
                 <p style={{ ...textStyle, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  Kept only on this computer, outside the workspace, and never given to AI tools.
+                  {t('voiceTag.keptOnlyOnThisComputer')}
                 </p>
               </>
             )}

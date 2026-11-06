@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import MarkdownView from './MarkdownView';
@@ -20,6 +21,7 @@ interface MarkdownEditorProps {
 
 /** A Markdown textarea with a Write / Preview switch, like an editor's preview pane. */
 export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, placeholder, textareaStyle, mentions, id }: MarkdownEditorProps) {
+  const { t } = useLanguage();
   const [tab, setTab] = useState<'write' | 'preview'>('write');
   const minHeight = `${rows * 1.5 + 1.5}em`;
 
@@ -27,8 +29,8 @@ export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, p
 
   return (
     <div>
-      <SegmentedControl label="Markdown editor" value={tab} onChange={setTab} style={{ marginBottom: 6 }}
-        options={[{ value: 'write', label: 'Write' }, { value: 'preview', label: 'Preview' }]} />
+      <SegmentedControl label={t('markdownEditor')} value={tab} onChange={setTab} style={{ marginBottom: 6 }}
+        options={[{ value: 'write', label: t('write') }, { value: 'preview', label: t('preview') }]} />
       {tab === 'write' && mentions ? (
         <MentionTextarea
           value={value}
@@ -61,7 +63,7 @@ export default function MarkdownEditor({ value, onChange, rows = 8, autoFocus, p
             background: 'var(--color-surface)',
           }}
         >
-          <MarkdownView content={value} emptyText="Nothing to preview" />
+          <MarkdownView content={value} emptyText={t('nothingToPreview')} />
         </div>
       )}
     </div>

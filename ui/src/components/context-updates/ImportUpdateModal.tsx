@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import { useEffect, useRef, useState } from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
@@ -33,7 +36,7 @@ function today(): string {
  * that workspace (opened from a run-finished notice), and the upload is refused when another one is open.
  */
 export async function uploadMaterial(updateId: string, file: File, workspace?: string): Promise<string | null> {
-  if (file.size > MAX_FILE) return `${file.name} is larger than 50 MB`;
+  if (file.size > MAX_FILE) return tr('importUpdateModal.isLargerThan50Mb', { name: file.name });
   const form = new FormData();
   form.append('file', file);
   try {
@@ -42,35 +45,36 @@ export async function uploadMaterial(updateId: string, file: File, workspace?: s
     });
     if (res.ok) return null;
     const body = await res.json().catch(() => null) as { message?: string } | null;
-    return `${file.name}: ${body?.message ?? `upload failed (${res.status})`}`;
+    return `${file.name}: ${body?.message ?? tr('newTaskModal.uploadFailed', { status: res.status })}`;
   } catch {
-    return `${file.name}: upload failed`;
+    return tr('newTaskModal.uploadFailed2', { name: file.name });
   }
 }
 
 /** Uploads one file to a meeting in the queue; resolves to an error message, or null when it worked. */
 async function uploadToMeeting(meetingId: string, file: File): Promise<string | null> {
-  if (file.size > limitFor(file, true)) return `${file.name} is larger than ${limitLabel(file, true)}`;
+  if (file.size > limitFor(file, true)) return tr('importUpdateModal.isLargerThan', { name: file.name, limitLabel: limitLabel(file, true) });
   const form = new FormData();
   form.append('file', file);
   try {
     const res = await fetch(`/api/meeting-queue/${meetingId}/files`, { method: 'POST', body: form });
     if (res.ok) return null;
     const body = await res.json().catch(() => null) as { message?: string } | null;
-    return `${file.name}: ${body?.message ?? `upload failed (${res.status})`}`;
+    return `${file.name}: ${body?.message ?? tr('newTaskModal.uploadFailed', { status: res.status })}`;
   } catch {
-    return `${file.name}: upload failed`;
+    return tr('newTaskModal.uploadFailed2', { name: file.name });
   }
 }
 
 /** Drop zone for many files at once; also opens the file picker on click or Enter. */
 export function DropZone({ onFiles, compact = false }: { onFiles: (files: File[]) => void; compact?: boolean }) {
+  const { t } = useLanguage();
   const [over, setOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div
       role="button" tabIndex={0}
-      aria-label="Add files: drop them here or press Enter to choose"
+      aria-label={t('importUpdateModal.addFilesDropThemHere')}
       onClick={() => inputRef.current?.click()}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click(); } }}
       onDragOver={(e) => { e.preventDefault(); setOver(true); }}
@@ -79,10 +83,10 @@ export function DropZone({ onFiles, compact = false }: { onFiles: (files: File[]
       style={{ border: `1.5px dashed ${over ? 'var(--color-accent)' : 'var(--color-border-strong)'}`, borderRadius: 'var(--radius-md)', background: over ? 'var(--color-accent-subtle)' : 'var(--color-bg)', padding: compact ? '12px' : '22px 16px', textAlign: 'center', cursor: 'pointer', transition: 'background 0.1s, border-color 0.1s' }}>
       <input ref={inputRef} type="file" multiple style={{ display: 'none' }}
         onChange={(e) => { onFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
-      <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>Drop files here, or click to choose</div>
+      <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text)' }}>{t('importUpdateModal.dropFilesHereOrClick')}</div>
       {!compact && (
         <div style={{ marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          Any format: transcripts, slides, PDFs, spreadsheets, photos, screenshots. Up to 50 MB each.
+          {t('importUpdateModal.anyFormatTranscriptsSlidesPdfs')}
         </div>
       )}
     </div>
@@ -98,6 +102,7 @@ interface Props {
 }
 
 export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued }: Props) {
+  const { t } = useLanguage();
   const [mode, setMode] = useState<'update' | 'meeting'>('update');
   const [title, setTitle] = useState('');
   const [sourceDate, setSourceDate] = useState(today);
@@ -123,11 +128,11 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
   const risky = files.filter((f) => hardToRead(f.name) && !(mode === 'meeting' && TRANSCRIBED.test(f.name)));
 
   const queueMeeting = async () => {
-    setSaving('Saving...');
+    setSaving(t('importUpdateModal.saving'));
     let meetingId: string | null = null;
     try {
       const meeting = await apiPost<QueuedMeeting>('/api/meeting-queue', {
-        title: title.trim() || (files[0] ? files[0].name.replace(/\.[^.]+$/, '') : 'Meeting'),
+        title: title.trim() || (files[0] ? files[0].name.replace(/\.[^.]+$/, '') : t('importUpdateModal.meeting')),
         meeting_date: sourceDate,
         participants,
       });
@@ -137,31 +142,31 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
         : files;
       const errors: string[] = [];
       for (let i = 0; i < all.length; i++) {
-        setSaving(`Uploading ${i + 1} of ${all.length}...`);
+        setSaving(t('newTaskModal.uploadingOf', { value: i + 1, length: all.length }));
         const failed = await uploadToMeeting(meeting.id, all[i]!);
         if (failed) errors.push(failed);
       }
       if (errors.length) {
         // A meeting with a missing file never goes into a digest: remove the draft and say why.
         await fetch(`/api/meeting-queue/${meeting.id}`, { method: 'DELETE' }).catch(() => {});
-        setError(`Nothing was queued, because some files did not upload: ${errors.join('; ')}`);
+        setError(t('importUpdateModal.nothingWasQueuedBecauseSome', { join: errors.join('; ') }));
         setSaving(null);
         return;
       }
       onQueued(await apiPost<QueuedMeeting>(`/api/meeting-queue/${meeting.id}/queue`));
     } catch (err) {
       if (meetingId) await fetch(`/api/meeting-queue/${meetingId}`, { method: 'DELETE' }).catch(() => {});
-      setError(err instanceof Error ? err.message : 'Could not queue the meeting.');
+      setError(err instanceof Error ? err.message : t('importUpdateModal.couldNotQueueTheMeeting'));
       setSaving(null);
     }
   };
 
   const save = async () => {
-    if (!hasContent) { setError('Add at least one file or paste some text.'); return; }
-    if (tooBig.length) { setError(`Remove files over their size limit: ${tooBig.map((f) => `${f.name} (${limitLabel(f, mode === 'meeting')})`).join(', ')}`); return; }
+    if (!hasContent) { setError(t('importUpdateModal.addAtLeastOneFile')); return; }
+    if (tooBig.length) { setError(t('importUpdateModal.removeFilesOverTheirSize', { join: tooBig.map((f) => `${f.name} (${limitLabel(f, mode === 'meeting')})`).join(', ') })); return; }
     setError(null);
     if (mode === 'meeting') { await queueMeeting(); return; }
-    setSaving('Saving...');
+    setSaving(t('importUpdateModal.saving'));
     try {
       const update = await apiPost<ContextUpdate>('/api/context-updates', {
         title: title.trim() || (files[0] ? files[0].name.replace(/\.[^.]+$/, '') : ''),
@@ -169,41 +174,36 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
       });
       const errors: string[] = [];
       for (let i = 0; i < files.length; i++) {
-        setSaving(`Uploading ${i + 1} of ${files.length}...`);
+        setSaving(t('newTaskModal.uploadingOf', { value: i + 1, length: files.length }));
         const failed = await uploadMaterial(update.id, files[i]!);
         if (failed) errors.push(failed);
       }
       onCreated(update, errors);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the update.');
+      setError(err instanceof Error ? err.message : t('importUpdateModal.couldNotSaveTheUpdate'));
       setSaving(null);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={saving ? () => {} : onClose} title="Import context update" size="lg">
+    <Modal isOpen={isOpen} onClose={saving ? () => {} : onClose} title={t('importUpdateModal.importContextUpdate')} size="lg">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <HelpBox title="How this works">
+        <HelpBox title={t('importUpdateModal.howThisWorks')}>
           {mode === 'meeting' ? (
             <>
-              Add a meeting&apos;s transcript or notes to the queue. The Meeting digest routine (see Routines) collects
-              queued meetings into one context update on its schedule; that update is analyzed like any other. <strong>Nothing
-              changes until you review and approve each proposal.</strong>
+              {rich(t, 'importUpdateModal.addAMeetingSTranscript', { strong: <strong>{t('importUpdateModal.nothingChangesUntilYouReview')}</strong> })}
             </>
           ) : (
             <>
-              Add anything that might change your context: a meeting transcript, a deck someone shared, a photo of a
-              whiteboard. After you save, you get a command to run in Claude Code. The agent compares the material with
-              your current context and proposes only the changes that matter. <strong>Nothing changes until you review
-              and approve each proposal.</strong>
+              {rich(t, 'importUpdateModal.addAnythingThatMightChange', { strong: <strong>{t('importUpdateModal.nothingChangesUntilYouReview')}</strong> })}
             </>
           )}
         </HelpBox>
 
-        <div role="radiogroup" aria-label="What to do with it" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div role="radiogroup" aria-label={t('importUpdateModal.whatToDoWithIt')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {([
-            ['update', 'Import now', 'One context update for this material, analyzed when you run the command.'],
-            ['meeting', 'Add to the meeting digest', 'A meeting for the queue. The Meeting digest routine collects queued meetings into one update.'],
+            ['update', t('importUpdateModal.importNow'), t('importUpdateModal.oneContextUpdateForThis')],
+            ['meeting', t('importUpdateModal.addToTheMeetingDigest'), t('importUpdateModal.aMeetingForTheQueue')],
           ] as const).map(([value, label, hint]) => (
             <label key={value} style={{ flex: '1 1 220px', display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', cursor: 'pointer',
               border: `1px solid ${mode === value ? 'var(--color-accent)' : 'var(--color-border)'}`, borderRadius: 'var(--radius-md)',
@@ -220,13 +220,11 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
         {error && <HelpBox tone="critical">{error}</HelpBox>}
 
         <div>
-          <label style={labelStyle}>Files</label>
+          <label style={labelStyle}>{t('newTaskModal.files')}</label>
           <DropZone onFiles={addFiles} />
           {mode === 'meeting' && (
             <p style={{ ...hintStyle, margin: '6px 0 0' }}>
-              A recording of the meeting can go in too, up to 4 GB: WAV, and on a Mac also M4A, MP3, AAC, FLAC or AIFF. It is
-              transcribed on this computer before a digest takes the meeting (choose the model in Settings &gt; Transcription);
-              until its transcript is ready, the meeting waits in the queue.
+              {t('importUpdateModal.aRecordingOfTheMeeting')}
             </p>
           )}
           {files.length > 0 && (
@@ -235,7 +233,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
                 <li key={`${f.name}-${f.size}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
                   <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
                   <span style={{ fontSize: 'var(--text-xs)', color: f.size > limitFor(f, mode === 'meeting') ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
-                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))}
+                  <button type="button" aria-label={t('removeNamedFile', { name: f.name })} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))}
                     style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 4px', fontSize: 'var(--text-base)' }}>×</button>
                 </li>
               ))}
@@ -244,29 +242,28 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
           {risky.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <HelpBox tone="warning">
-                The agent may not be able to read {risky.map((f) => f.name).join(', ')}. Audio, video and archives are
-                saved, but upload a transcript or the extracted files too if you can.
+                {t('importUpdateModal.theAgentMayNotBe')} {risky.map((f) => f.name).join(', ')}{t('importUpdateModal.audioVideoAndArchivesAre')}
               </HelpBox>
             </div>
           )}
         </div>
 
         <div>
-          <label style={labelStyle}>Or paste text</label>
-          <p style={hintStyle}>A transcript copied from your meeting tool, notes, or an email thread. Saved as a file with the rest.</p>
-          <Textarea value={text} onChange={setText} rows={5} placeholder="Paste a transcript or notes..." aria-label="Pasted text" />
+          <label style={labelStyle}>{t('importUpdateModal.orPasteText')}</label>
+          <p style={hintStyle}>{t('importUpdateModal.aTranscriptCopiedFromYour')}</p>
+          <Textarea value={text} onChange={setText} rows={5} placeholder={t('importUpdateModal.pasteATranscriptOrNotes')} aria-label={t('importUpdateModal.pastedText')} />
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
           <div>
-            <label style={labelStyle}>Title</label>
-            <p style={hintStyle}>Optional. Defaults to the first file name.</p>
-            <Input value={title} onChange={setTitle} placeholder={mode === 'meeting' ? 'e.g. Weekly sync' : 'e.g. Steering committee, October'} aria-label="Title" />
+            <label style={labelStyle}>{t('importUpdateModal.title')}</label>
+            <p style={hintStyle}>{t('importUpdateModal.optionalDefaultsToTheFirst')}</p>
+            <Input value={title} onChange={setTitle} placeholder={mode === 'meeting' ? t('importUpdateModal.eGWeeklySync') : t('importUpdateModal.eGSteeringCommitteeOctober')} aria-label={t('importUpdateModal.title')} />
           </div>
           <div>
-            <label style={labelStyle}>{mode === 'meeting' ? 'Meeting date' : 'Date of the material'}</label>
-            <p style={hintStyle}>{mode === 'meeting' ? 'When the meeting happened. The digest uses it to tell newer facts from older ones.' : 'When the meeting happened or the deck was shared. Used to tell newer facts from older ones.'}</p>
-            <Input type="date" value={sourceDate} onChange={setSourceDate} aria-label={mode === 'meeting' ? 'Meeting date' : 'Date of the material'} />
+            <label style={labelStyle}>{mode === 'meeting' ? t('importUpdateModal.meetingDate') : t('importUpdateModal.dateOfTheMaterial')}</label>
+            <p style={hintStyle}>{mode === 'meeting' ? t('importUpdateModal.whenTheMeetingHappenedThe') : t('importUpdateModal.whenTheMeetingHappenedOr')}</p>
+            <Input type="date" value={sourceDate} onChange={setSourceDate} aria-label={mode === 'meeting' ? t('importUpdateModal.meetingDate') : t('importUpdateModal.dateOfTheMaterial')} />
           </div>
         </div>
 
@@ -274,17 +271,17 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
 
         {mode === 'update' && (
           <div>
-            <label style={labelStyle}>Notes for the agent</label>
-            <p style={hintStyle}>Optional. What this is, who was there, what to trust or ignore. For example: "Budget figures are a first draft."</p>
-            <Textarea value={notes} onChange={setNotes} rows={3} placeholder="Anything the agent should know..." aria-label="Notes for the agent"
-              footer={<DictateButton fieldName="notes for the agent" onText={(text) => setNotes((n) => withDictation(n, text))} />} />
+            <label style={labelStyle}>{t('importUpdateModal.notesForTheAgent')}</label>
+            <p style={hintStyle}>{t('importUpdateModal.optionalWhatThisIsWho')}</p>
+            <Textarea value={notes} onChange={setNotes} rows={3} placeholder={t('importUpdateModal.anythingTheAgentShouldKnow')} aria-label={t('importUpdateModal.notesForTheAgent')}
+              footer={<DictateButton fieldName={t('importUpdateModal.notesForTheAgent2')} onText={(text) => setNotes((n) => withDictation(n, text))} />} />
           </div>
         )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, paddingTop: 4 }}>
           {saving && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginRight: 'auto' }}>{saving}</span>}
-          <Button variant="ghost" onClick={onClose} disabled={!!saving}>Cancel</Button>
-          <Button variant="primary" onClick={save} disabled={!!saving || !hasContent}>{mode === 'meeting' ? 'Add to the queue' : 'Save and get command'}</Button>
+          <Button variant="ghost" onClick={onClose} disabled={!!saving}>{t('cancel')}</Button>
+          <Button variant="primary" onClick={save} disabled={!!saving || !hasContent}>{mode === 'meeting' ? t('importUpdateModal.addToTheQueue') : t('importUpdateModal.saveAndGetCommand')}</Button>
         </div>
       </div>
     </Modal>

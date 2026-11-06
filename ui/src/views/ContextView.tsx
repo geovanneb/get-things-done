@@ -1,3 +1,6 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import Button from '@/components/common/Button';
@@ -29,21 +32,19 @@ import { withDictation } from '@/utils/dictation';
 // Constants
 // ---------------------------------------------------------------------------
 
-const CATEGORIES = [
-  'Company',
-  'Organization',
-  'Strategy',
-  'Programs',
-  'Decisions',
-  'Risks',
-  'Glossary',
-  'Situation',
-] as const;
+// Stored in each note's file: translate at display time, never here.
+const CATEGORIES = ['Company', 'Organization', 'Strategy', 'Programs', 'Decisions', 'Risks', 'Glossary', 'Situation'] as const;
+
+const categoryLabel = (category: string): string => ({
+  All: tr('all'), Company: tr('context.company'), Organization: tr('context.organization'), Strategy: tr('context.strategy'), Programs: tr('context.programs'),
+  Decisions: tr('updateDetail.decisions'), Risks: tr('context.risks'), Glossary: tr('context.glossary'), Situation: tr('situation'),
+} as Record<string, string>)[category] ?? category;
 
 type Category = (typeof CATEGORIES)[number] | 'All';
 
 const RELEVANCE_OPTIONS = ['required', 'recommended', 'optional'] as const;
 type Relevance = (typeof RELEVANCE_OPTIONS)[number];
+const relevanceLabel = (relevance: string): string => ({ required: tr('context.relevanceRequired'), recommended: tr('context.relevanceRecommended'), optional: tr('context.relevanceOptional') } as Record<string, string>)[relevance] ?? relevance;
 
 const RELEVANCE_BADGE: Record<Relevance, { bg: string; color: string }> = {
   required:    { bg: 'var(--color-critical-subtle)', color: 'var(--color-critical)' },
@@ -80,6 +81,7 @@ interface NoteModalProps {
 }
 
 function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) {
+  const { t } = useLanguage();
   const [form, setForm] = useState<NoteFormState>(() => noteToForm(initial ?? {}));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +99,7 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) { setError('Give the note a title.'); return; }
+    if (!form.title.trim()) { setError(t('context.giveTheNoteATitle')); return; }
     setSaving(true);
     setError(null);
     const payload = {
@@ -117,40 +119,40 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
       }
       onSaved(saved);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not save the note. Try again.');
+      setError(err instanceof Error ? err.message : t('context.couldNotSaveTheNote'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={effectiveMode === 'create' ? 'New context note' : 'Edit context note'} size="lg" keepWhileTyping
+    <Modal isOpen={isOpen} onClose={onClose} title={effectiveMode === 'create' ? t('context.newContextNote') : t('context.editContextNote')} size="lg" keepWhileTyping
       footer={
         <FormActions>
-          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
           <Button variant="primary" onClick={handleSave} loading={saving}>
-            {effectiveMode === 'create' ? 'Create note' : 'Save changes'}
+            {effectiveMode === 'create' ? t('context.createNote') : t('orgChartDialogs.saveChanges')}
           </Button>
         </FormActions>
       }>
       <div className="gtd-stack" style={{ gap: 'var(--space-5)' }}>
         {error && form.title.trim() && <Notice tone="critical">{error}</Notice>}
-        <Input label="Title" required value={form.title} onChange={(v) => set('title', v)} placeholder="FY27 operating plan" autoFocus
-          error={error && !form.title.trim() ? 'Give the note a title.' : undefined} />
+        <Input label={t('importUpdateModal.title')} required value={form.title} onChange={(v) => set('title', v)} placeholder={t('context.fy27OperatingPlan')} autoFocus
+          error={error && !form.title.trim() ? t('context.giveTheNoteATitle') : undefined} />
         <div className="gtd-form-grid">
-          <Select label="Category" value={form.category} onChange={(v) => set('category', v)}
-            options={CATEGORIES.map((c) => ({ value: c, label: c }))} />
-          <Select label="Relevance" value={form.relevance} onChange={(v) => set('relevance', v)}
-            hint="Required notes are read before every task."
-            options={RELEVANCE_OPTIONS.map((r) => ({ value: r, label: r.charAt(0).toUpperCase() + r.slice(1) }))} />
+          <Select label={t('context.category')} value={form.category} onChange={(v) => set('category', v)}
+            options={CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))} />
+          <Select label={t('context.relevance')} value={form.relevance} onChange={(v) => set('relevance', v)}
+            hint={t('context.requiredNotesAreReadBefore')}
+            options={RELEVANCE_OPTIONS.map((r) => ({ value: r, label: relevanceLabel(r) }))} />
         </div>
-        <Field label="Content" hint="Markdown is supported." htmlFor="context-note-body">
+        <Field label={t('context.content')} hint={t('context.markdownIsSupported')} htmlFor="context-note-body">
           <MarkdownEditor id="context-note-body" value={form.body} onChange={(v) => set('body', v)} rows={8}
-            placeholder="What an agent should know about this" />
-          <DictateButton fieldName="content" onText={(text) => setForm((f) => ({ ...f, body: withDictation(f.body, text) }))} />
+            placeholder={t('context.whatAnAgentShouldKnow')} />
+          <DictateButton fieldName={tr('dictation.fieldContent')} onText={(text) => setForm((f) => ({ ...f, body: withDictation(f.body, text) }))} />
         </Field>
         {effectiveNote?.id && (
-          <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label="Attached files" />
+          <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label={t('context.attachedFiles')} />
         )}
       </div>
     </Modal>
@@ -169,6 +171,7 @@ interface NoteCardProps {
 }
 
 function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
+  const { t } = useLanguage();
   const relevanceStyle = RELEVANCE_BADGE[note.relevance as Relevance] ?? RELEVANCE_BADGE.optional;
   const preview = note.body ? note.body.slice(0, 160).trimEnd() + (note.body.length > 160 ? '…' : '') : null;
   const chip: React.CSSProperties = { padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-xs)', fontWeight: 500 };
@@ -183,20 +186,20 @@ function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
             </button>
           </h3>
           <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-            <IconButton label={`Edit ${note.title}`} icon={icons.edit} onClick={onEdit} />
-            <IconButton label={`Delete ${note.title}`} icon={icons.trash} tone="danger" onClick={onDelete} />
+            <IconButton label={t('context.edit', { title: note.title })} icon={icons.edit} onClick={onEdit} />
+            <IconButton label={t('context.delete', { title: note.title })} icon={icons.trash} tone="danger" onClick={onDelete} />
           </div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           <span style={{ ...chip, background: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }}>
-            {(note.category ?? '').charAt(0).toUpperCase() + (note.category ?? '').slice(1)}
+            {categoryLabel((note.category ?? '').charAt(0).toUpperCase() + (note.category ?? '').slice(1))}
           </span>
           {note.relevance && (
             <span style={{ ...chip, background: relevanceStyle.bg, color: relevanceStyle.color }}>
-              {note.relevance.charAt(0).toUpperCase() + note.relevance.slice(1)}
+              {relevanceLabel(note.relevance)}
             </span>
           )}
-          <span>Updated {formatRelativeDate(note.updated_at)}</span>
+          <span>{rich(t, 'context.updated', { updated_at: formatRelativeDate(note.updated_at) })}</span>
         </div>
         {preview && (
           <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 'var(--leading-normal)' }}>{preview}</p>
@@ -225,9 +228,10 @@ interface SidebarProps {
  * neutral, the agent's turn. Each takes the list to its group.
  */
 function WaitingCounts({ waiting, onShow }: { waiting: { ready: number; toAnalyze: number }; onShow: (group: string) => void }) {
+  const { t } = useLanguage();
   const pills = [
-    { id: 'updates-ready-for-you', count: waiting.ready, text: 'ready for you', tone: 'warning' as const },
-    { id: 'updates-to-analyze', count: waiting.toAnalyze, text: 'to analyze', tone: 'neutral' as const },
+    { id: 'updates-ready-for-you', count: waiting.ready, text: t('context.readyForYou'), tone: 'warning' as const },
+    { id: 'updates-to-analyze', count: waiting.toAnalyze, text: t('context.toAnalyze'), tone: 'neutral' as const },
   ].filter((p) => p.count > 0);
   if (!pills.length) return null;
   return (
@@ -235,7 +239,7 @@ function WaitingCounts({ waiting, onShow }: { waiting: { ready: number; toAnalyz
       {pills.map((p) => (
         <Button key={p.id} size="sm" variant="secondary" icon={<CountBadge count={p.count > 99 ? 99 : p.count} tone={p.tone} />}
           onClick={() => onShow(p.id)}
-          aria-label={`${p.count} ${p.text}: show them`}>
+          aria-label={t('context.showThem', { amount: p.count, text: p.text })}>
           {p.text}
         </Button>
       ))}
@@ -244,6 +248,7 @@ function WaitingCounts({ waiting, onShow }: { waiting: { ready: number; toAnalyz
 }
 
 function Sidebar({ notes, activeCategory, onSelect, updatesActive, waiting, onSelectUpdates }: SidebarProps) {
+  const { t } = useLanguage();
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
     for (const note of notes) {
@@ -257,14 +262,14 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, waiting, onSe
 
   return (
     <div className="gtd-split__nav">
-      <nav aria-label="Context sections">
-        <div className="gtd-subnav__label">Context</div>
+      <nav aria-label={t('context.contextSections')}>
+        <div className="gtd-subnav__label">{t('context')}</div>
         {items.map((cat) => {
           const isActive = activeCategory === cat;
           const count = cat === 'All' ? notes.length : (counts[cat.toLowerCase()] ?? 0);
           return (
             <button key={cat} type="button" onClick={() => onSelect(cat)} className="gtd-subnav__item" aria-current={isActive ? 'true' : undefined}>
-              <span>{cat}</span>
+              <span>{categoryLabel(cat)}</span>
               {count > 0 && <CountBadge count={count} active={isActive} />}
             </button>
           );
@@ -272,15 +277,15 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, waiting, onSe
 
         {/* Right under the library, not pinned to the bottom: material that may change it. Its own group, so raw input never looks like context. */}
         <div style={{ borderTop: '1px solid var(--color-border)', marginTop: 'var(--space-2)', paddingBottom: 'var(--space-4)' }}>
-          <div className="gtd-subnav__label">Updates</div>
+          <div className="gtd-subnav__label">{t('updates')}</div>
           <button type="button" onClick={onSelectUpdates} aria-current={updatesActive ? 'page' : undefined} className="gtd-subnav__item"
-            aria-label={waiting.ready + waiting.toAnalyze > 0 ? `Import and review, ${waitingLabel(waiting)}` : 'Import and review'}
-            title={waiting.ready + waiting.toAnalyze > 0 ? waitingLabel(waiting) : 'Import meetings, decks or photos, and review the context changes an agent proposes'}>
-            <span>Import &amp; review</span>
+            aria-label={waiting.ready + waiting.toAnalyze > 0 ? t('context.importAndReview', { waitingLabel: waitingLabel(waiting) }) : t('context.importAndReview2')}
+            title={waiting.ready + waiting.toAnalyze > 0 ? waitingLabel(waiting) : t('context.importMeetingsDecksOrPhotos')}>
+            <span>{t('context.importReview')}</span>
             {waiting.ready > 0 && <CountBadge count={waiting.ready > 99 ? 99 : waiting.ready} tone="warning" />}
           </button>
           <p style={{ margin: 'var(--space-1) var(--space-4) 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 'var(--leading-normal)' }}>
-            Bring in meetings, decks and photos. An agent proposes changes; you approve.
+            {t('context.bringInMeetingsDecksAnd')}
           </p>
         </div>
       </nav>
@@ -293,6 +298,7 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, waiting, onSe
 // ---------------------------------------------------------------------------
 
 export default function ContextView() {
+  const { t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   const { id: updateId } = useParams<{ id?: string }>();
@@ -345,7 +351,7 @@ export default function ContextView() {
   useEffect(() => {
     apiGet<ContextNote[]>('/api/context')
       .then((data) => { setNotes(data); setLoading(false); })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : 'Failed to load notes.'); setLoading(false); });
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : t('context.failedToLoadNotes')); setLoading(false); });
   }, []);
 
   const filtered = useMemo(() => {
@@ -376,20 +382,20 @@ export default function ContextView() {
   const handleDelete = useCallback(async (note: ContextNote, e: React.MouseEvent) => {
     e.stopPropagation();
     const ok = await confirm({
-      title: `Delete "${note.title}"?`,
-      message: 'The note and its attached files are deleted. Agents will no longer read it. This cannot be undone.',
-      confirmLabel: 'Delete note',
+      title: t('context.delete2', { title: note.title }),
+      message: t('context.theNoteAndItsAttached'),
+      confirmLabel: t('context.deleteNote'),
       tone: 'danger',
     });
     if (!ok) return;
     try {
       await apiDelete(`/api/context/${note.id}`);
       setNotes((prev) => prev.filter((n) => n.id !== note.id));
-      notify.success(`Deleted "${note.title}".`);
+      notify.success(t('context.deleted', { title: note.title }));
     } catch (err: unknown) {
-      notify.error(err, 'Could not delete the note. Try again.');
+      notify.error(err, t('context.couldNotDeleteTheNote'));
     }
-  }, [confirm, notify]);
+  }, [confirm, notify, t]);
 
   const handleSaved = useCallback((saved: ContextNote) => {
     setNotes((prev) => {
@@ -401,23 +407,23 @@ export default function ContextView() {
     setSelectedNote(null);
   }, []);
 
-  if (loading) return <LoadingSpinner text="Loading context notes…" />;
+  if (loading) return <LoadingSpinner text={t('context.loadingContextNotes')} />;
 
-  const categoryTitle = showUpdates ? 'Context updates' : activeCategory === 'All' ? 'All notes' : activeCategory;
+  const categoryTitle = showUpdates ? t('context.contextUpdates') : activeCategory === 'All' ? t('context.allNotes') : categoryLabel(activeCategory);
 
   const handleImported = (update: ContextUpdate, uploadErrors: string[]) => {
     setImportOpen(false);
     // Also refreshes the sidebar dot, which counts the same updates.
     dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
     if (uploadErrors.length) {
-      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: `Saved, but some files did not upload: ${uploadErrors.join('; ')}` } });
+      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: t('context.savedButSomeFilesDid', { join: uploadErrors.join('; ') }) } });
     }
     navigate(`/context/updates/${update.id}`);
   };
 
   const handleQueued = (meeting: QueuedMeeting) => {
     setImportOpen(false);
-    dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'success', message: `"${meeting.title}" is in the meeting queue. The Meeting digest routine (Routines) collects it into the next digest.` } });
+    dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'success', message: t('context.isInTheMeetingQueue', { title: meeting.title }) } });
   };
 
   return (
@@ -438,23 +444,23 @@ export default function ContextView() {
           {updatesList && <WaitingCounts waiting={waiting} onShow={showGroup} />}
           </div>
           <div className="gtd-page-header__actions">
-            {!showUpdates && <SearchInput value={search} onChange={setSearch} placeholder="Search notes" width={220} />}
+            {!showUpdates && <SearchInput value={search} onChange={setSearch} placeholder={t('context.searchNotes')} width={220} />}
             {updatesList && (updates?.length ?? 0) > 0 && (
-              <SearchInput value={updateQuery} onChange={(v) => { setUpdateQuery(v); setHistoryShown(HISTORY_PAGE); }} placeholder="Search updates by title or ID" width={240} />
+              <SearchInput value={updateQuery} onChange={(v) => { setUpdateQuery(v); setHistoryShown(HISTORY_PAGE); }} placeholder={t('context.searchUpdatesByTitleOr')} width={240} />
             )}
             {waiting.ready > 0 && !updatesList && (
               <Button onClick={() => navigate('/context/updates')}
-                aria-label={`To review: ${waitingLabel(waiting)}`}
+                aria-label={t('context.toReview', { waitingLabel: waitingLabel(waiting) })}
                 title={waitingLabel(waiting)}
                 icon={<CountBadge count={waiting.ready > 99 ? 99 : waiting.ready} tone="warning" />}>
-                To review
+                {t('context.toReview2')}
               </Button>
             )}
             <Button variant={showUpdates ? 'primary' : 'secondary'} onClick={() => setImportOpen(true)}
-              title="Upload a transcript, deck, photo or any file that may change your context">
-              Import update
+              title={t('context.uploadATranscriptDeckPhoto')}>
+              {t('updatesList.importUpdate')}
             </Button>
-            {!showUpdates && <Button variant="primary" icon={icons.plus} onClick={openCreate}>New note</Button>}
+            {!showUpdates && <Button variant="primary" icon={icons.plus} onClick={openCreate}>{t('context.newNote')}</Button>}
           </div>
         </div>
 
@@ -473,13 +479,13 @@ export default function ContextView() {
 
         <div className="gtd-split__body" style={{ display: showUpdates ? 'none' : undefined }}>
           <div className="gtd-stack" style={{ gap: 'var(--space-3)', maxWidth: 'var(--page-width-default)' }}>
-            {error && <Notice tone="critical" title="Could not load the notes.">{error}</Notice>}
+            {error && <Notice tone="critical" title={t('context.couldNotLoadTheNotes')}>{error}</Notice>}
 
             {filtered.length === 0 && !error && (
               <EmptyState
-                title={search ? `No notes match "${search}"` : `No notes in ${categoryTitle}`}
-                description={search ? 'Try another word, or clear the search.' : 'Context notes hold the background agents need: your strategy, decisions, risks and glossary.'}
-                action={search ? { label: 'Clear search', onClick: () => setSearch('') } : { label: 'New note', onClick: openCreate }}
+                title={search ? t('context.noNotesMatch', { search }) : t('context.noNotesIn', { categoryTitle })}
+                description={search ? t('context.tryAnotherWordOrClear') : t('context.contextNotesHoldTheBackground')}
+                action={search ? { label: t('meetingsList.clearSearch'), onClick: () => setSearch('') } : { label: t('context.newNote'), onClick: openCreate }}
               />
             )}
 

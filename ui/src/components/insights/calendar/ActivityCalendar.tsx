@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Panel from '../Panel';
 import type { WindowValue } from '../WindowFilter';
@@ -39,6 +41,7 @@ type Hover =
  * for all time.
  */
 export default function ActivityCalendar({ window, windowLabel }: { window: WindowValue; windowLabel: string }) {
+  const { t } = useLanguage();
   const [metric, setMetric] = useState<CalendarMetric>('activity');
   const [pinned, setPinned] = useState<string | null>(null);
   const [focusDate, setFocusDate] = useState<string | null>(null);
@@ -76,7 +79,7 @@ export default function ActivityCalendar({ window, windowLabel }: { window: Wind
     const peak = Math.max(...byHour);
     if (peak > 0) {
       const h = byHour.indexOf(peak);
-      callouts.splice(1, 0, { label: 'Busiest hour', value: `${hourLabel(h)} to ${hourLabel((h + 1) % 24)}` });
+      callouts.splice(1, 0, { label: t('activityCalendar.busiestHour'), value: t('activityCalendar.to', { hourLabel: hourLabel(h), hourLabel2: hourLabel((h + 1) % 24) }) });
     }
   }
 
@@ -145,15 +148,15 @@ export default function ActivityCalendar({ window, windowLabel }: { window: Wind
 
   return (
     <Panel
-      title="Activity calendar"
-      hint={`How busy each day was, ${windowLabel}. Hover a day for a summary, click it for the details.`}
+      title={t('activityCalendar.activityCalendar')}
+      hint={t('activityCalendar.howBusyEachDayWas', { windowLabel })}
     >
       <div ref={rootRef} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {/* What to count, not which dates: the dates come from the filter above. */}
         <div>
           <Segmented
-            label="What to count"
-            options={METRICS.map((m) => ({ value: m.value, label: m.label }))}
+            label={t('activityCalendar.whatToCount')}
+            options={METRICS().map((m) => ({ value: m.value, label: m.label }))}
             value={metric}
             onChange={setMetric}
           />
@@ -180,7 +183,7 @@ export default function ActivityCalendar({ window, windowLabel }: { window: Wind
 
         {error && !data && (
           <p role="status" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-critical)', margin: 0 }}>
-            Could not load the calendar: {error}
+            {rich(t, 'activityCalendar.couldNotLoadTheCalendar', { error: error })}
           </p>
         )}
 
@@ -243,8 +246,7 @@ export default function ActivityCalendar({ window, windowLabel }: { window: Wind
                 color: 'var(--color-text-muted)',
               }}
             >
-              <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: 'var(--color-critical)' }} />
-              Has overdue tasks
+              {rich(t, 'activityCalendar.hasOverdueTasks', { part: <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: 'var(--color-critical)' }} /> })}
             </span>
           )}
         </div>

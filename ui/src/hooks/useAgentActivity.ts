@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet } from '../utils/api';
 import type { AgentActivitySnapshot } from '../components/agentic/engine/activityTypes';
@@ -29,6 +30,7 @@ export function useAgentActivity(
   onFileChange: (path: string) => void,
   enabled: boolean,
 ): UseAgentActivityResult {
+  const { t } = useLanguage();
   const [snapshot, setSnapshot] = useState<AgentActivitySnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,11 +47,11 @@ export function useAgentActivity(
       setSnapshot(data);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load agent activity.');
+      setError(err instanceof Error ? err.message : t('useAgentActivity.failedToLoadAgentActivity'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!enabled) return;

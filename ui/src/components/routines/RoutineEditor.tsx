@@ -1,3 +1,7 @@
+import { scheduleText } from '@/i18n/serverText';
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { currentLocale, tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
@@ -11,19 +15,19 @@ import { formatPriorityLabel } from '@/utils/format';
 import { useApi } from '@/hooks/useApi';
 import type { ClaudeAgent, Routine, RoutinePreview, RoutineSchedule, RoutineWeekday, Stakeholder } from '@/types';
 
-const WEEKDAYS: { id: RoutineWeekday; short: string; long: string }[] = [
-  { id: 'mon', short: 'M', long: 'Monday' },
-  { id: 'tue', short: 'T', long: 'Tuesday' },
-  { id: 'wed', short: 'W', long: 'Wednesday' },
-  { id: 'thu', short: 'T', long: 'Thursday' },
-  { id: 'fri', short: 'F', long: 'Friday' },
-  { id: 'sat', short: 'S', long: 'Saturday' },
-  { id: 'sun', short: 'S', long: 'Sunday' },
-];
-const ORDINALS = [
-  { value: 1, label: 'first' }, { value: 2, label: 'second' }, { value: 3, label: 'third' },
-  { value: 4, label: 'fourth' }, { value: -1, label: 'last' },
-];
+const WEEKDAYS = (): { id: RoutineWeekday; short: string; long: string }[] => ([
+  { id: 'mon', short: 'M', long: tr('calendarModel.monday') },
+  { id: 'tue', short: 'T', long: tr('calendarModel.tuesday') },
+  { id: 'wed', short: 'W', long: tr('calendarModel.wednesday') },
+  { id: 'thu', short: 'T', long: tr('calendarModel.thursday') },
+  { id: 'fri', short: 'F', long: tr('calendarModel.friday') },
+  { id: 'sat', short: 'S', long: tr('calendarModel.saturday') },
+  { id: 'sun', short: 'S', long: tr('calendarModel.sunday') },
+]);
+const ORDINALS = () => ([
+  { value: 1, label: tr('routineEditor.first') }, { value: 2, label: tr('routineEditor.second') }, { value: 3, label: tr('routineEditor.third') },
+  { value: 4, label: tr('routineEditor.fourth') }, { value: -1, label: tr('routineEditor.last') },
+]);
 
 interface Draft {
   title: string;
@@ -57,7 +61,7 @@ function today(): string {
 
 function weekdayOf(date: string): RoutineWeekday {
   const [y, m, d] = date.split('-').map(Number) as [number, number, number];
-  return WEEKDAYS[(new Date(y, m - 1, d).getDay() + 6) % 7]!.id;
+  return WEEKDAYS()[(new Date(y, m - 1, d).getDay() + 6) % 7]!.id;
 }
 
 function emptyDraft(): Draft {
@@ -101,12 +105,12 @@ function scheduleOf(d: Draft): Record<string, unknown> {
 function presets(d: Draft): { label: string; apply: Partial<Draft> }[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.starts_on)) return [];
   const wd = weekdayOf(d.starts_on);
-  const dayName = WEEKDAYS.find((w) => w.id === wd)!.long;
+  const dayName = WEEKDAYS().find((w) => w.id === wd)!.long;
   return [
-    { label: 'Every weekday', apply: { frequency: 'weekly', interval: '1', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] } },
-    { label: `Weekly on ${dayName}`, apply: { frequency: 'weekly', interval: '1', weekdays: [wd] } },
-    { label: `Every 2 weeks on ${dayName}`, apply: { frequency: 'weekly', interval: '2', weekdays: [wd] } },
-    { label: `Monthly on day ${Number(d.starts_on.slice(8))}`, apply: { frequency: 'monthly', interval: '1', monthlyBy: 'day', month_day: String(Number(d.starts_on.slice(8))) } },
+    { label: tr('routineEditor.everyWeekday'), apply: { frequency: 'weekly', interval: '1', weekdays: ['mon', 'tue', 'wed', 'thu', 'fri'] } },
+    { label: tr('routineEditor.weeklyOn', { dayName }), apply: { frequency: 'weekly', interval: '1', weekdays: [wd] } },
+    { label: tr('routineEditor.every2WeeksOn', { dayName }), apply: { frequency: 'weekly', interval: '2', weekdays: [wd] } },
+    { label: tr('routineEditor.monthlyOnDay', { Number: Number(d.starts_on.slice(8)) }), apply: { frequency: 'monthly', interval: '1', monthlyBy: 'day', month_day: String(Number(d.starts_on.slice(8))) } },
   ];
 }
 
@@ -125,7 +129,7 @@ function Field({ label, children, hint, htmlFor }: { label: string; children: Re
 }
 
 function formatRun(at: string): string {
-  return new Date(at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(at).toLocaleString(currentLocale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 interface RoutineEditorProps {
@@ -136,6 +140,7 @@ interface RoutineEditorProps {
 }
 
 export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: RoutineEditorProps) {
+  const { t } = useLanguage();
   const [draft, setDraft] = React.useState<Draft>(emptyDraft);
   const [stakeholders, setStakeholders] = React.useState<Stakeholder[]>([]);
   const loadedStakeholderIds = React.useRef(new Set<string>());
@@ -165,7 +170,7 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
             setStakeholdersLoading(false);
           }
         })
-        .catch((err: Error) => { if (!cancelled) setError(`Could not load stakeholders: ${err.message}. Reopen this routine to retry.`); });
+        .catch((err: Error) => { if (!cancelled) setError(t('routineEditor.couldNotLoadStakeholdersReopen', { message: err.message })); });
     }
     return () => { cancelled = true; };
   }, [isOpen, routine]);
@@ -193,7 +198,7 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
 
   const handleSave = async () => {
     if (stakeholdersLoading) return;
-    if (!draft.taskTitle.trim()) { setError('Give the task a title.'); return; }
+    if (!draft.taskTitle.trim()) { setError(t('routineEditor.giveTheTaskATitle')); return; }
     setSaving(true);
     setError('');
     const payload = {
@@ -246,62 +251,62 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
   });
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={routine ? `Edit routine ${routine.id}` : 'New routine'} size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} title={routine ? t('routineEditor.editRoutine', { id: routine.id }) : t('routineEditor.newRoutine')} size="xl">
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', maxHeight: '70vh', overflowY: 'auto', paddingRight: 4 }}>
         {/* Task the routine creates */}
         <div style={{ flex: '1 1 380px', minWidth: 0 }}>
-          <h3 style={{ ...sectionLabelStyle, marginBottom: 12 }}>Task it creates</h3>
-          <Field label="Task title" htmlFor={ids.task} hint="You can use {{date}} for the scheduled run date and {{due_date}} for the due date (YYYY-MM-DD).">
-            <input id={ids.task} style={fieldStyle} value={draft.taskTitle} placeholder="Prepare steering sync ({{due_date}})"
+          <h3 style={{ ...sectionLabelStyle, marginBottom: 12 }}>{t('routineEditor.taskItCreates')}</h3>
+          <Field label={t('newTaskModal.taskTitle')} htmlFor={ids.task} hint={t('routineEditor.dateTokensHint', { date: '{{date}}', due: '{{due_date}}' })}>
+            <input id={ids.task} style={fieldStyle} value={draft.taskTitle} placeholder={t('routineEditor.titleExample', { due: '{{due_date}}' })}
               onChange={(e) => set('taskTitle', e.target.value)} />
           </Field>
-          <Field label="Objective" hint="Copied into every task as written. Type @ to mention a stakeholder, template, context note or task.">
-            <MentionTextarea rows={5} style={textareaStyle} value={draft.body} placeholder="What the task is for, what to bring, what good looks like."
+          <Field label={t('newTaskModal.objective')} hint={t('routineEditor.copiedIntoEveryTaskAs')}>
+            <MentionTextarea rows={5} style={textareaStyle} value={draft.body} placeholder={t('routineEditor.whatTheTaskIsFor')}
               onChange={(v) => set('body', v)} />
           </Field>
           <div style={{ display: 'flex', gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <Field label="Priority">
-                <select aria-label="Priority" style={selectStyle} value={draft.priority} onChange={(e) => set('priority', e.target.value as Draft['priority'])}>
+              <Field label={t('newTaskModal.priority')}>
+                <select aria-label={t('newTaskModal.priority')} style={selectStyle} value={draft.priority} onChange={(e) => set('priority', e.target.value as Draft['priority'])}>
                   {(['critical', 'high', 'medium', 'low'] as const).map((p) => <option key={p} value={p}>{formatPriorityLabel(p)}</option>)}
                 </select>
               </Field>
             </div>
             <div style={{ flex: 1 }}>
-              <Field label="Lands in">
-                <select aria-label="Lands in" style={selectStyle} value={draft.status} onChange={(e) => set('status', e.target.value as Draft['status'])}>
-                  <option value="backlog">Backlog</option>
-                  <option value="ready">Ready</option>
+              <Field label={t('routineEditor.landsIn')}>
+                <select aria-label={t('routineEditor.landsIn')} style={selectStyle} value={draft.status} onChange={(e) => set('status', e.target.value as Draft['status'])}>
+                  <option value="backlog">{t('routineEditor.backlog')}</option>
+                  <option value="ready">{t('routineEditor.ready')}</option>
                 </select>
               </Field>
             </div>
           </div>
-          <Field label="Due" htmlFor={ids.due}>
+          <Field label={t('dayPanel.due')} htmlFor={ids.due}>
             <div style={rowStyle}>
-              <select aria-label="Due date" style={{ ...selectStyle, width: 'auto' }} value={draft.due_offset_days === '' ? 'none' : 'offset'}
+              <select aria-label={t('newTaskModal.dueDate')} style={{ ...selectStyle, width: 'auto' }} value={draft.due_offset_days === '' ? 'none' : 'offset'}
                 onChange={(e) => set('due_offset_days', e.target.value === 'none' ? '' : (draft.due_offset_days || '0'))}>
-                <option value="none">No due date</option>
-                <option value="offset">Due after the run</option>
+                <option value="none">{t('routineEditor.noDueDate')}</option>
+                <option value="offset">{t('routineEditor.dueAfterTheRun')}</option>
               </select>
               {draft.due_offset_days !== '' && (
                 <>
                   <input id={ids.due} type="number" min={0} max={365} style={{ ...fieldStyle, width: 80 }} value={draft.due_offset_days}
                     onChange={(e) => set('due_offset_days', e.target.value)} />
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>days later (0 = same day)</span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{t('routineEditor.daysLater0SameDay')}</span>
                 </>
               )}
             </div>
           </Field>
-          <Field label="Preferred agent" htmlFor={ids.agent} hint="Optional. The agent that should work on each task.">
+          <Field label={t('newTaskModal.preferredAgent')} htmlFor={ids.agent} hint={t('routineEditor.optionalTheAgentThatShould')}>
             <select id={ids.agent} style={selectStyle} value={draft.preferred_agent} onChange={(e) => set('preferred_agent', e.target.value)}>
-              <option value="">No preference</option>
+              <option value="">{t('newTaskModal.noPreference')}</option>
               {draft.preferred_agent && !(agents ?? []).some((a) => a.name === draft.preferred_agent) && (
                 <option value={draft.preferred_agent}>{draft.preferred_agent}</option>
               )}
               {(agents ?? []).map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
             </select>
           </Field>
-          <Field label="Tags" htmlFor={ids.tags} hint="Separate with commas.">
+          <Field label={t('routineEditor.tags')} htmlFor={ids.tags} hint={t('routineEditor.separateWithCommas')}>
             <input id={ids.tags} style={fieldStyle} value={draft.tags} placeholder="meeting-prep" onChange={(e) => set('tags', e.target.value)} />
           </Field>
           <div style={{ marginBottom: 14 }}>
@@ -316,25 +321,25 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
             onChange={(i, patch) => set('deliverables', draft.deliverables.map((d, j) => (j === i ? { ...d, ...patch } : d)))}
             onRemove={(i) => set('deliverables', draft.deliverables.filter((_, j) => j !== i))}
             onAdd={() => set('deliverables', [...draft.deliverables, { id: `DEL-${String(draft.deliverables.length + 1).padStart(2, '0')}` }])}
-            label="Output type"
-            emptyText="No outputs defined yet."
+            label={t('newTaskModal.outputType')}
+            emptyText={t('newTaskModal.noOutputsDefinedYet')}
           />
         </div>
 
         {/* Schedule */}
         <div style={{ flex: '1 1 340px', minWidth: 0 }}>
-          <h3 style={{ ...sectionLabelStyle, marginBottom: 12 }}>Schedule</h3>
-          <div style={{ ...rowStyle, marginBottom: 14 }} role="group" aria-label="Common schedules">
+          <h3 style={{ ...sectionLabelStyle, marginBottom: 12 }}>{t('routineEditor.schedule')}</h3>
+          <div style={{ ...rowStyle, marginBottom: 14 }} role="group" aria-label={t('routineEditor.commonSchedules')}>
             {presets(draft).map((p) => (
               <button key={p.label} type="button" style={chip(false)} onClick={() => setDraft((prev) => ({ ...prev, ...p.apply }))}>{p.label}</button>
             ))}
           </div>
 
-          <Field label="Repeat every" htmlFor={ids.every}>
+          <Field label={t('routineEditor.repeatEvery')} htmlFor={ids.every}>
             <div style={rowStyle}>
               <input id={ids.every} type="number" min={1} max={99} style={{ ...fieldStyle, width: 72 }} value={draft.interval}
                 onChange={(e) => set('interval', e.target.value)} />
-              <select aria-label="Unit" style={{ ...selectStyle, width: 'auto' }} value={draft.frequency}
+              <select aria-label={t('routineEditor.unit')} style={{ ...selectStyle, width: 'auto' }} value={draft.frequency}
                 onChange={(e) => set('frequency', e.target.value as Draft['frequency'])}>
                 <option value="daily">{draft.interval === '1' ? 'day' : 'days'}</option>
                 <option value="weekly">{draft.interval === '1' ? 'week' : 'weeks'}</option>
@@ -344,9 +349,9 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
           </Field>
 
           {draft.frequency === 'weekly' && (
-            <Field label="On">
-              <div style={rowStyle} role="group" aria-label="Days of the week">
-                {WEEKDAYS.map((w) => (
+            <Field label={t('routineEditor.on')}>
+              <div style={rowStyle} role="group" aria-label={t('weekGrid.daysOfTheWeek')}>
+                {WEEKDAYS().map((w) => (
                   <button key={w.id} type="button" aria-pressed={draft.weekdays.includes(w.id)} aria-label={w.long} title={w.long}
                     style={{ ...chip(draft.weekdays.includes(w.id)), width: 32, height: 32, padding: 0 }} onClick={() => toggleWeekday(w.id)}>
                     {w.short}
@@ -357,27 +362,27 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
           )}
 
           {draft.frequency === 'monthly' && (
-            <Field label="On">
+            <Field label={t('routineEditor.on')}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <label style={{ ...rowStyle, fontSize: 'var(--text-sm)' }}>
                   <input type="radio" checked={draft.monthlyBy === 'day'} onChange={() => set('monthlyBy', 'day')} />
-                  Day
-                  <select aria-label="Day of the month" style={{ ...selectStyle, width: 'auto' }} value={draft.month_day} disabled={draft.monthlyBy !== 'day'}
+                  {t('routineEditor.day')}
+                  <select aria-label={t('routineEditor.dayOfTheMonth')} style={{ ...selectStyle, width: 'auto' }} value={draft.month_day} disabled={draft.monthlyBy !== 'day'}
                     onChange={(e) => set('month_day', e.target.value)}>
                     {Array.from({ length: 31 }, (_, i) => <option key={i + 1} value={String(i + 1)}>{i + 1}</option>)}
-                    <option value="-1">last day</option>
+                    <option value="-1">{t('routineEditor.lastDay')}</option>
                   </select>
                 </label>
                 <label style={{ ...rowStyle, fontSize: 'var(--text-sm)' }}>
                   <input type="radio" checked={draft.monthlyBy === 'weekday'} onChange={() => set('monthlyBy', 'weekday')} />
-                  The
-                  <select aria-label="Which week" style={{ ...selectStyle, width: 'auto' }} value={draft.month_week} disabled={draft.monthlyBy !== 'weekday'}
+                  {t('routineEditor.the')}
+                  <select aria-label={t('routineEditor.whichWeek')} style={{ ...selectStyle, width: 'auto' }} value={draft.month_week} disabled={draft.monthlyBy !== 'weekday'}
                     onChange={(e) => set('month_week', Number(e.target.value))}>
-                    {ORDINALS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {ORDINALS().map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
-                  <select aria-label="Weekday" style={{ ...selectStyle, width: 'auto' }} value={draft.month_weekday} disabled={draft.monthlyBy !== 'weekday'}
+                  <select aria-label={t('routineEditor.weekday')} style={{ ...selectStyle, width: 'auto' }} value={draft.month_weekday} disabled={draft.monthlyBy !== 'weekday'}
                     onChange={(e) => set('month_weekday', e.target.value as RoutineWeekday)}>
-                    {WEEKDAYS.map((w) => <option key={w.id} value={w.id}>{w.long}</option>)}
+                    {WEEKDAYS().map((w) => <option key={w.id} value={w.id}>{w.long}</option>)}
                   </select>
                 </label>
               </div>
@@ -386,36 +391,36 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
 
           <div style={{ display: 'flex', gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <Field label="At" htmlFor={ids.time}>
+              <Field label={t('routineEditor.at')} htmlFor={ids.time}>
                 <input id={ids.time} type="time" style={fieldStyle} value={draft.time} onChange={(e) => set('time', e.target.value)} />
               </Field>
             </div>
             <div style={{ flex: 1 }}>
-              <Field label="Starts" htmlFor={ids.start}>
+              <Field label={t('routineEditor.starts')} htmlFor={ids.start}>
                 <input id={ids.start} type="date" style={fieldStyle} value={draft.starts_on} onChange={(e) => set('starts_on', e.target.value)} />
               </Field>
             </div>
             <div style={{ flex: 1 }}>
-              <Field label="Ends" htmlFor={ids.end} hint={draft.ends_on ? undefined : 'Never'}>
+              <Field label={t('routineEditor.ends')} htmlFor={ids.end} hint={draft.ends_on ? undefined : t('never')}>
                 <input id={ids.end} type="date" style={fieldStyle} value={draft.ends_on} onChange={(e) => set('ends_on', e.target.value)} />
               </Field>
             </div>
           </div>
 
-          <Field label="If runs were missed while the computer was off">
-            <select aria-label="Missed runs" style={selectStyle} value={draft.catch_up} onChange={(e) => set('catch_up', e.target.value as Draft['catch_up'])}>
-              <option value="latest">Create only the latest (recommended)</option>
-              <option value="all">Create each missed run (up to the latest 12)</option>
-              <option value="skip">Skip them (only create on the scheduled day)</option>
+          <Field label={t('routineEditor.ifRunsWereMissedWhile')}>
+            <select aria-label={t('routineEditor.missedRuns')} style={selectStyle} value={draft.catch_up} onChange={(e) => set('catch_up', e.target.value as Draft['catch_up'])}>
+              <option value="latest">{t('routineEditor.createOnlyTheLatestRecommended')}</option>
+              <option value="all">{t('routineEditor.createEachMissedRunUp')}</option>
+              <option value="skip">{t('routineEditor.skipThemOnlyCreateOn')}</option>
             </select>
           </Field>
 
-          <Field label="Pause until" htmlFor={ids.pause} hint={draft.paused_until ? 'Runs before this day are skipped, not caught up. It resumes on its own.' : 'Optional. For a long absence.'}>
+          <Field label={t('routineEditor.pauseUntil')} htmlFor={ids.pause} hint={draft.paused_until ? t('routineEditor.runsBeforeThisDayAre') : t('routineEditor.optionalForALongAbsence')}>
             <input id={ids.pause} type="date" style={fieldStyle} value={draft.paused_until} onChange={(e) => set('paused_until', e.target.value)} />
           </Field>
 
-          <Field label="Routine name" htmlFor={ids.name} hint="Optional. Defaults to the task title.">
-            <input id={ids.name} style={fieldStyle} value={draft.title} placeholder="Steering sync prep" onChange={(e) => set('title', e.target.value)} />
+          <Field label={t('routineEditor.routineName')} htmlFor={ids.name} hint={t('routineEditor.optionalDefaultsToTheTask')}>
+            <input id={ids.name} style={fieldStyle} value={draft.title} placeholder={t('routineEditor.nameExample')} onChange={(e) => set('title', e.target.value)} />
           </Field>
 
           <div aria-live="polite" style={{ padding: 12, borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
@@ -424,21 +429,21 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
             ) : preview ? (
               <>
                 <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, marginBottom: 8 }}>
-                  {preview.summary}
-                  {draft.due_offset_days !== '' && `, due ${draft.due_offset_days === '0' ? 'the same day' : `${draft.due_offset_days} day${draft.due_offset_days === '1' ? '' : 's'} later`}`}
+                  {scheduleText(preview.summary)}
+                  {draft.due_offset_days !== '' && t('routineEditor.due', { value: draft.due_offset_days === '0' ? t('routineEditor.theSameDay') : t('routineEditor.daysLater', { count: Number(draft.due_offset_days) }) })}
                 </div>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 4 }}>Next runs</div>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginBottom: 4 }}>{t('routineEditor.nextRuns')}</div>
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-                  {preview.next_runs.length === 0 && <li>No runs remain within these dates.</li>}
+                  {preview.next_runs.length === 0 && <li>{t('routineEditor.noRunsRemainWithinThese')}</li>}
                   {preview.next_runs.map((r) => (
                     <li key={r.at} style={{ padding: '2px 0' }}>
-                      {formatRun(r.at)}{r.due_date && <span style={{ color: 'var(--color-text-muted)' }}> · due {r.due_date}</span>}
+                      {formatRun(r.at)}{r.due_date && <span style={{ color: 'var(--color-text-muted)' }}> {rich(t, 'routineEditor.due2', { due_date: r.due_date })}</span>}
                     </li>
                   ))}
                 </ul>
               </>
             ) : (
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>Working out the next runs...</div>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('routineEditor.workingOutTheNextRuns')}</div>
             )}
           </div>
         </div>
@@ -446,8 +451,8 @@ export default function RoutineEditor({ isOpen, routine, onClose, onSaved }: Rou
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 16 }}>
         {error && <span role="alert" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-critical)', marginRight: 'auto' }}>{error}</span>}
-        <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-        <Button variant="primary" loading={saving} disabled={stakeholdersLoading} onClick={handleSave}>{routine ? 'Save routine' : 'Create routine'}</Button>
+        <Button variant="ghost" onClick={onClose} disabled={saving}>{t('cancel')}</Button>
+        <Button variant="primary" loading={saving} disabled={stakeholdersLoading} onClick={handleSave}>{routine ? t('routineEditor.saveRoutine') : t('routineEditor.createRoutine')}</Button>
       </div>
     </Modal>
   );

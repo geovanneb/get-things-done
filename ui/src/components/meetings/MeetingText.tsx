@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React from 'react';
 import Button from '@/components/common/Button';
 import Notice from '@/components/common/Notice';
@@ -21,6 +23,7 @@ export function MeetingText({ url, names = {}, audio, initialFind = '' }: {
   /** Words to find when it opens: the search the meeting was found with. */
   initialFind?: string;
 }) {
+  const { t } = useLanguage();
   const [loaded, setLoaded] = React.useState<{ text: string; turns: TranscriptPart[] | null } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [find, setFind] = React.useState(initialFind);
@@ -34,7 +37,7 @@ export function MeetingText({ url, names = {}, audio, initialFind = '' }: {
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => null) as { message?: string } | null;
-          throw new Error(body?.message ?? `The text could not be read (${res.status}). Try again.`);
+          throw new Error(body?.message ?? t('meetingText.theTextCouldNotBe', { status: res.status }));
         }
         return res.text();
       })
@@ -69,32 +72,32 @@ export function MeetingText({ url, names = {}, audio, initialFind = '' }: {
   return (
     <div className="gtd-stack" style={{ gap: 'var(--space-3)', minHeight: 0 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
-        {loaded?.turns && <SearchInput value={find} onChange={setFind} placeholder="Find in the transcript" size="sm" width={260} />}
+        {loaded?.turns && <SearchInput value={find} onChange={setFind} placeholder={t('meetingText.findInTheTranscript')} size="sm" width={260} />}
         <span style={{ flex: 1 }} />
         <Button size="sm" variant="secondary" disabled={!loaded}
           onClick={async () => { if (loaded && await copyText(loaded.text)) { setCopied(true); setTimeout(() => setCopied(false), 2000); } }}>
-          {copied ? 'Copied' : 'Copy text'}
+          {copied ? t('shared.copied') : t('meetingText.copyText')}
         </Button>
-        <a href={url} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">Open as a file</a>
+        <a href={url} target="_blank" rel="noreferrer" className="gtd-btn gtd-btn--ghost gtd-btn--sm">{t('meetingText.openAsAFile')}</a>
       </div>
       {audio && (
         <div className="gtd-stack" style={{ gap: 'var(--space-2)' }}>
           <audio ref={player} controls preload="metadata" src={audio.url} aria-label={audio.label} style={{ width: '100%' }}
             onTimeUpdate={follow} onSeeked={follow} onError={() => setAudioError(true)} />
-          {audioError && <Notice tone="warning" title="The recording could not be played here.">Open it from the Files tab to play it in another app. The transcript is still here.</Notice>}
+          {audioError && <Notice tone="warning" title={t('meetingText.theRecordingCouldNotBe')}>{t('meetingText.openItFromTheFiles')}</Notice>}
         </div>
       )}
-      {error && <Notice tone="critical" title="Could not read this file." action={<Button size="sm" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>Try again</Button>}>{error}</Notice>}
-      {!loaded && !error && <LoadingSpinner text="Reading the transcript…" />}
+      {error && <Notice tone="critical" title={t('meetingText.couldNotReadThisFile')} action={<Button size="sm" variant="secondary" onClick={() => setAttempt((n) => n + 1)}>{t('retry')}</Button>}>{error}</Notice>}
+      {!loaded && !error && <LoadingSpinner text={t('meetingText.readingTheTranscript')} />}
       {loaded && (
-        <div aria-label="Transcript text" tabIndex={0} className="gtd-reading-box">
+        <div aria-label={t('meetingText.transcriptText')} tabIndex={0} className="gtd-reading-box">
           {!loaded.turns && <pre style={{ margin: 0, whiteSpace: 'pre-wrap', font: 'inherit' }}>{loaded.text}</pre>}
-          {loaded.turns?.length === 0 && <span style={{ color: 'var(--color-text-muted)' }}>No speech was found.</span>}
-          {shown && shown.length === 0 && loaded.turns!.length > 0 && <span style={{ color: 'var(--color-text-muted)' }}>Nothing matches "{find}".</span>}
+          {loaded.turns?.length === 0 && <span style={{ color: 'var(--color-text-muted)' }}>{t('meetingText.noSpeechWasFound')}</span>}
+          {shown && shown.length === 0 && loaded.turns!.length > 0 && <span style={{ color: 'var(--color-text-muted)' }}>{rich(t, 'meetingText.nothingMatches', { find: find })}</span>}
           {shown?.map((p, i) => (
             <p key={i} className={playing && p === heard ? 'gtd-reading-box__heard' : undefined} aria-current={playing && p === heard ? 'time' : undefined}>
               {playing
-                ? <Button size="sm" variant="ghost" className="gtd-reading-box__time" aria-label={`Play from ${clockLine(p.time)}`} onClick={() => playFrom(p.time)}>{clockLine(p.time)}</Button>
+                ? <Button size="sm" variant="ghost" className="gtd-reading-box__time" aria-label={t('meetingText.playFrom', { clockLine: clockLine(p.time) })} onClick={() => playFrom(p.time)}>{clockLine(p.time)}</Button>
                 : <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>{clockLine(p.time)}</span>}
               {p.speaker && (
                 <span style={{ fontWeight: 600, marginRight: 'var(--space-1)' }}>

@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 /**
  * Saying that a run started from the dashboard finished, when the user is elsewhere (#246): a native notification in
  * the desktop app (which writes the words itself), the browser's in a browser (only once the user allowed it). On by
@@ -54,13 +55,13 @@ export function noticeWords(n: RunNotice): { title: string; body: string } {
   const what = n.title ? `${n.title}: ` : '';
   switch (n.outcome) {
     case 'review': {
-      const proposed = n.proposals === null ? 'the analysis finished. Open it to review.'
-        : `the analysis proposed ${n.proposals === 0 ? 'no changes' : n.proposals === 1 ? '1 change' : `${n.proposals} changes`}.`;
-      return { title: `${n.update_id} is ready for your review`, body: `${what}${proposed}` };
+      const proposed = n.proposals === null ? tr('runNotices.theAnalysisFinishedOpenIt')
+        : tr('runNotices.theAnalysisProposed', { value: n.proposals === 0 ? tr('runNotices.noChanges') : n.proposals === 1 ? tr('runNotices.1Change') : tr('runNotices.changes', { proposals: n.proposals }) });
+      return { title: tr('runNotices.isReadyForYourReview', { update_id: n.update_id }), body: `${what}${proposed}` };
     }
-    case 'applied': return { title: `${n.update_id} is applied`, body: `${what}your accepted changes are written.` };
-    case 'analyze-failed': return { title: `The analysis of ${n.update_id} did not finish`, body: `${what}open it to see why.` };
-    case 'apply-failed': return { title: `The apply of ${n.update_id} did not finish`, body: `${what}open it to see why.` };
+    case 'applied': return { title: tr('runNotices.isApplied', { update_id: n.update_id }), body: tr('runNotices.yourAcceptedChangesAreWritten', { what }) };
+    case 'analyze-failed': return { title: tr('runNotices.theAnalysisOfDidNot', { update_id: n.update_id }), body: tr('runNotices.openItToSeeWhy', { what }) };
+    case 'apply-failed': return { title: tr('runNotices.theApplyOfDidNot', { update_id: n.update_id }), body: tr('runNotices.openItToSeeWhy', { what }) };
   }
 }
 

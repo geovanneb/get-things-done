@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import type React from 'react';
 import type { GridProps } from './MonthGrid';
 import {
@@ -36,6 +37,7 @@ export default function YearGrid({
   step,
   cellProps,
 }: GridProps & { year: number }) {
+  const { t } = useLanguage();
   const start = `${year}-01-01`;
   const end = `${year}-12-31`;
   const days = keysBetween(startOfWeek(start), addDays(startOfWeek(end), 6));
@@ -76,7 +78,7 @@ export default function YearGrid({
 
         <div
           role="grid"
-          aria-label={`Days of ${year}`}
+          aria-label={t('yearGrid.daysOf', { year })}
           style={{
             display: 'grid',
             gridTemplateColumns: columns,
@@ -85,7 +87,7 @@ export default function YearGrid({
             gap: 2,
           }}
         >
-          {['', 'Mon', '', 'Wed', '', 'Fri', ''].map((label, i) => (
+          {['', t('yearGrid.mon'), '', t('yearGrid.wed'), '', t('yearGrid.fri'), ''].map((label, i) => (
             <span key={i} style={{ ...tiny, lineHeight: 1, alignSelf: 'center' }} aria-hidden>
               {label}
             </span>
@@ -110,8 +112,8 @@ export default function YearGrid({
                 type="button"
                 role="gridcell"
                 aria-selected={pinned === date}
-                aria-label={`${longDay(date)}: ${countLabel(value, metric)}${overdue ? `, ${overdue} overdue` : ''}${
-                  date === today ? ', today' : ''
+                aria-label={`${longDay(date)}: ${countLabel(value, metric)}${overdue ? t('monthGrid.overdue2', { overdue }) : ''}${
+                  date === today ? t('monthGrid.today') : ''
                 }`}
                 {...cellProps(date)}
                 style={{
@@ -137,12 +139,12 @@ export default function YearGrid({
 
         <div
           style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0, 1fr))', gap: 6, marginTop: 12 }}
-          aria-label={`Totals per month in ${year}`}
+          aria-label={t('yearGrid.totalsPerMonthIn', { year })}
         >
           {totals.map((total, m) => (
             <div
               key={m}
-              aria-label={`${monthShort(m)} ${year}: ${total === null ? 'outside the window' : countLabel(total, metric)}`}
+              aria-label={`${monthShort(m)} ${year}: ${total === null ? t('yearGrid.outsideTheWindow') : countLabel(total, metric)}`}
               style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 3 }}
             >
               <span

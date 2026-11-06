@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import Badge from '@/components/common/Badge';
 import type { OutputTemplate } from '@/types';
 import { selectStyle } from './styles';
@@ -30,6 +31,7 @@ interface DeliverableRowProps {
  * the New Task modal and the Edit Task overlay.
  */
 export default function DeliverableRow({ item, index, templates, onChange, onRemove }: DeliverableRowProps) {
+  const { t } = useLanguage();
   const isComplete = item.status === 'complete';
   const outputUrl = item.file_path ? `/api/workspace/files/${item.file_path}` : null;
   const hasStatus = !!item.status;
@@ -74,7 +76,7 @@ export default function DeliverableRow({ item, index, templates, onChange, onRem
           )}
           {hasStatus && (
             <Badge size="sm" variant={isComplete ? 'success' : item.status === 'in_progress' ? 'warning' : 'default'}>
-              {isComplete ? 'Complete' : item.status === 'in_progress' ? 'In progress' : item.status === 'cancelled' ? 'Cancelled' : 'Pending'}
+              {isComplete ? t('deliverableRow.complete') : item.status === 'in_progress' ? t('deliverableRow.inProgress') : item.status === 'cancelled' ? t('deliverableRow.cancelled') : t('deliverableRow.pending')}
             </Badge>
           )}
           <div style={{ flex: 1 }} />
@@ -83,7 +85,7 @@ export default function DeliverableRow({ item, index, templates, onChange, onRem
               href={outputUrl}
               target="_blank"
               rel="noopener noreferrer"
-              title="Open output"
+              title={t('deliverableRow.openOutput')}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5,
                 fontSize: 'var(--text-xs)', fontWeight: 600,
@@ -101,10 +103,10 @@ export default function DeliverableRow({ item, index, templates, onChange, onRem
               <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
                 <path d="M2 9L9 2M5 2h4v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Open output
+              {t('deliverableRow.openOutput')}
             </a>
           )}
-          <IconRemoveButton onClick={onRemove} aria-label={`Remove deliverable ${index + 1}`} title="Remove deliverable" />
+          <IconRemoveButton onClick={onRemove} aria-label={t('deliverableRow.removeDeliverable', { value: index + 1 })} title={t('deliverableRow.removeDeliverable2')} />
         </div>
       )}
 
@@ -119,10 +121,10 @@ export default function DeliverableRow({ item, index, templates, onChange, onRem
           value={item.template_ref ?? ''}
           onChange={(e) => handleTemplateChange(e.target.value)}
           style={{ ...selectStyle, flex: 1 }}
-          aria-label={`Deliverable ${index + 1} output template`}
-          title="Output template"
+          aria-label={t('deliverableRow.deliverableOutputTemplate', { value: index + 1 })}
+          title={t('deliverableRow.outputTemplate')}
         >
-          <option value="">Select an output template...</option>
+          <option value="">{t('deliverableRow.selectAnOutputTemplate')}</option>
           {templates.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name} ({t.format.toUpperCase()})
@@ -130,12 +132,12 @@ export default function DeliverableRow({ item, index, templates, onChange, onRem
           ))}
         </select>
         {effectiveFormat && (
-          <span style={{ display: 'flex', flexShrink: 0 }} title="Format defined by the output template">
+          <span style={{ display: 'flex', flexShrink: 0 }} title={t('deliverableRow.formatDefinedByTheOutput')}>
             <Badge size="sm">{effectiveFormat.toUpperCase()}</Badge>
           </span>
         )}
         {!hasStatus && !item.id && (
-          <IconRemoveButton onClick={onRemove} aria-label={`Remove deliverable ${index + 1}`} title="Remove deliverable" />
+          <IconRemoveButton onClick={onRemove} aria-label={t('deliverableRow.removeDeliverable', { value: index + 1 })} title={t('deliverableRow.removeDeliverable2')} />
         )}
       </div>
 

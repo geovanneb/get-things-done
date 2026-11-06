@@ -1,3 +1,5 @@
+import { tr } from '@/i18n/current';
+import { rich } from '@/i18n/rich';
 import type React from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '@/hooks/useApi';
@@ -5,12 +7,12 @@ import type { InsightsCalendarDayDetail, InsightsCalendarEvent } from '@/types';
 import { longDay } from './calendarModel';
 import { iconButton } from './parts';
 
-const EVENT_LABEL: Record<InsightsCalendarEvent, string> = {
-  created: 'Created',
-  ran: 'Agent ran',
-  completed: 'Completed',
-  due: 'Due',
-};
+const EVENT_LABEL = (): Record<InsightsCalendarEvent, string> => ({
+  created: tr('flowChart.created'),
+  ran: tr('dayPanel.agentRan'),
+  completed: tr('flowChart.completed'),
+  due: tr('dayPanel.due'),
+});
 
 function Chip({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'critical' }) {
   return (
@@ -59,7 +61,7 @@ export default function DayPanel({
 
   return (
     <section
-      aria-label={`Details for ${longDay(date)}`}
+      aria-label={tr('dayPanel.detailsFor', { longDay: longDay(date) })}
       style={{
         marginTop: 16,
         paddingTop: 14,
@@ -76,7 +78,7 @@ export default function DayPanel({
           style={{ ...iconButton, opacity: canMove(-1) ? 1 : 0.4 }}
           disabled={!canMove(-1)}
           onClick={() => onMove(-1)}
-          aria-label="Previous day"
+          aria-label={tr('dayPanel.previousDay')}
         >
           ‹
         </button>
@@ -85,31 +87,31 @@ export default function DayPanel({
           style={{ ...iconButton, opacity: canMove(1) ? 1 : 0.4 }}
           disabled={!canMove(1)}
           onClick={() => onMove(1)}
-          aria-label="Next day"
+          aria-label={tr('dayPanel.nextDay')}
         >
           ›
         </button>
-        <button type="button" style={iconButton} onClick={onClose} aria-label="Close day details">
+        <button type="button" style={iconButton} onClick={onClose} aria-label={tr('dayPanel.closeDayDetails')}>
           ✕
         </button>
       </div>
 
       {error && !detail && (
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-critical)', margin: 0 }}>
-          Could not load this day: {error}
+          {rich(tr, 'dayPanel.couldNotLoadThisDay', { error: error })}
         </p>
       )}
 
       {t && (
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', margin: '0 0 10px' }}>
-          {t.created} created · {t.completed} completed · {t.runs} agent {t.runs === 1 ? 'run' : 'runs'} · {t.due} due
-          {t.overdue > 0 && <span style={{ color: 'var(--color-critical)' }}> ({t.overdue} overdue)</span>}
+          {t.created} {tr('dayPanel.created')} {t.completed} {tr('dayPanel.completed')} {t.runs} {tr('dayPanel.agent')} {t.runs === 1 ? 'run' : 'runs'} · {t.due} {tr('dayPanel.due2')}
+          {t.overdue > 0 && <span style={{ color: 'var(--color-critical)' }}> {rich(tr, 'dayPanel.overdue', { overdue: t.overdue })}</span>}
         </p>
       )}
 
       {detail && detail.tasks.length === 0 && (
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', margin: 0 }}>
-          {date > today ? 'Nothing is due on this day yet.' : 'Nothing happened on this day.'}
+          {date > today ? tr('dayPanel.nothingIsDueOnThis') : tr('dayPanel.nothingHappenedOnThisDay')}
         </p>
       )}
 
@@ -138,7 +140,7 @@ export default function DayPanel({
                   const late = e === 'due' && task.overdue;
                   return (
                     <Chip key={e} tone={late ? 'critical' : 'neutral'}>
-                      {late ? 'Overdue' : EVENT_LABEL[e]}
+                      {late ? tr('attentionList.overdue') : EVENT_LABEL()[e]}
                       {e === 'ran' && task.runs > 1 ? ` x${task.runs}` : ''}
                     </Chip>
                   );
@@ -156,7 +158,7 @@ export default function DayPanel({
 
       {detail && detail.stakeholders.length > 0 && (
         <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: '10px 0 0' }}>
-          For:{' '}
+          {tr('dayPanel.for')}{' '}
           {detail.stakeholders.map((s, i) => (
             <span key={s.ref}>
               {i > 0 && ', '}

@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import type { ContextUpdate, ContextUpdateStatus } from '@/types';
 
 /**
@@ -6,15 +7,15 @@ import type { ContextUpdate, ContextUpdateStatus } from '@/types';
  */
 export type UpdateType = 'imported' | 'meeting-digest' | 'meeting-correction' | 'correction-follow-up' | 'memory-review' | 'kaizen' | 'other';
 
-export const UPDATE_TYPES: { id: UpdateType; label: string; hint: string }[] = [
-  { id: 'imported', label: 'Imported', hint: 'Material you imported: files or a pasted transcript.' },
-  { id: 'meeting-digest', label: 'Meeting digest', hint: 'Made by the Meeting digest routine from queued meetings.' },
-  { id: 'meeting-correction', label: 'Correction', hint: 'Opened from a meeting to correct its reviewed record: names, terms, people, the title or the date.' },
-  { id: 'correction-follow-up', label: 'Follow-up', hint: 'Opened from a finished correction to find notes in your context that still use the old names or terms.' },
-  { id: 'memory-review', label: 'Memory review', hint: 'Opened by the weekly System cleanup job to review your memory. Set it up under Routines.' },
-  { id: 'kaizen', label: 'Kaizen', hint: 'Opened after a task needed rework: a change to how the agent works, so the mistake does not repeat.' },
-  { id: 'other', label: 'Other', hint: 'Opened by something this version of the dashboard does not know.' },
-];
+export const UPDATE_TYPES = (): { id: UpdateType; label: string; hint: string }[] => ([
+  { id: 'imported', label: tr('updateTypes.imported'), hint: tr('updateTypes.materialYouImportedFilesOr') },
+  { id: 'meeting-digest', label: tr('meetingDigest.meetingDigest'), hint: tr('updateTypes.madeByTheMeetingDigest') },
+  { id: 'meeting-correction', label: tr('updateTypes.correction'), hint: tr('updateTypes.openedFromAMeetingTo') },
+  { id: 'correction-follow-up', label: tr('updateTypes.followUp'), hint: tr('updateTypes.openedFromAFinishedCorrection') },
+  { id: 'memory-review', label: tr('systemCleanup.memoryReview'), hint: tr('updateTypes.openedByTheWeeklySystem') },
+  { id: 'kaizen', label: tr('updateTypes.kaizen'), hint: tr('updateTypes.openedAfterATaskNeeded') },
+  { id: 'other', label: tr('updateTypes.other'), hint: tr('updateTypes.openedBySomethingThisVersion') },
+]);
 
 const BY_ORIGIN: Record<string, UpdateType> = { meetings: 'meeting-digest', 'system-cleanup': 'memory-review', kaizen: 'kaizen' };
 
@@ -29,7 +30,7 @@ export function updateType(u: Typed): UpdateType {
 }
 
 export function typeMeta(type: UpdateType): { id: UpdateType; label: string; hint: string } {
-  return UPDATE_TYPES.find((t) => t.id === type)!;
+  return UPDATE_TYPES().find((t) => t.id === type)!;
 }
 
 export type TypeFilter = UpdateType | 'all';
@@ -76,6 +77,6 @@ export function waitingCounts(updates: Pick<ContextUpdate, 'status'>[]): { ready
 /** Both counts in words, for a tooltip or an accessible name: status never rests on colour alone. */
 export function waitingLabel({ ready, toAnalyze }: { ready: number; toAnalyze: number }): string {
   const one = (n: number, a: string, many: string) => `${n} ${n === 1 ? a : many}`;
-  const parts = [ready ? `${one(ready, 'context update', 'context updates')} ready for you` : '', toAnalyze ? `${toAnalyze} to analyze` : ''];
+  const parts = [ready ? tr('updateTypes.readyForYou', { one: one(ready, tr('updateTypes.contextUpdate'), tr('updateTypes.contextUpdates')) }) : '', toAnalyze ? tr('updateTypes.toAnalyze', { toAnalyze }) : ''];
   return parts.filter(Boolean).join(', ');
 }

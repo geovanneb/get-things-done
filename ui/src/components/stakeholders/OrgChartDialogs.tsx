@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import React, { useEffect, useMemo, useState } from 'react';
 import Avatar from '@/components/common/Avatar';
 import Button from '@/components/common/Button';
@@ -22,20 +24,21 @@ interface TitleModalProps {
 }
 
 export function TitleModal({ isOpen, name, profileRole, current, onClose, onSave }: TitleModalProps) {
+  const { t } = useLanguage();
   const [value, setValue] = useState('');
   useEffect(() => { if (isOpen) setValue(current ?? ''); }, [isOpen, current]);
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`${name}: title in this chart`} size="sm">
+    <Modal isOpen={isOpen} onClose={onClose} title={t('orgChartDialogs.titleInThisChart', { name })} size="sm">
       <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-        Shown on the card and read by agents for this organization only. Their profile role stays as it is
-        {profileRole ? <> (<strong>{profileRole}</strong>)</> : null}. Leave empty to use the profile role.
+        {t('orgChartDialogs.shownOnTheCardAnd')}
+        {profileRole ? <> (<strong>{profileRole}</strong>)</> : null}{t('orgChartDialogs.leaveEmptyToUseThe')}
       </p>
-      <Input value={value} onChange={setValue} placeholder={profileRole || 'Title'} autoFocus aria-label="Title in this chart"
+      <Input value={value} onChange={setValue} placeholder={profileRole || t('importUpdateModal.title')} autoFocus aria-label={t('orgChartDialogs.titleInThisChart2')}
         onKeyDown={(e) => { if (e.key === 'Enter') onSave(value); }} />
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        {current && <Button variant="ghost" onClick={() => onSave('')}>Use profile role</Button>}
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={() => onSave(value)}>Save</Button>
+        {current && <Button variant="ghost" onClick={() => onSave('')}>{t('orgChartDialogs.useProfileRole')}</Button>}
+        <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+        <Button variant="primary" onClick={() => onSave(value)}>{t('updateDetail.save')}</Button>
       </div>
     </Modal>
   );
@@ -56,6 +59,7 @@ interface PlaceholderModalProps {
 }
 
 export function PlaceholderModal({ isOpen, current, managerName, onClose, onSave }: PlaceholderModalProps) {
+  const { t } = useLanguage();
   const [name, setName] = useState('');
   const [title, setTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -66,24 +70,23 @@ export function PlaceholderModal({ isOpen, current, managerName, onClose, onSave
     setError(null);
   }, [isOpen, current]);
   function submit() {
-    if (!name.trim()) { setError('Describe who this is, for example "Head of Sales (vacant)".'); return; }
+    if (!name.trim()) { setError(t('orgChartDialogs.describeWhoThisIsFor')); return; }
     onSave(name.trim(), title.trim());
   }
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={current ? 'Edit placeholder' : 'Add a placeholder'} size="sm">
+    <Modal isOpen={isOpen} onClose={onClose} title={current ? t('orgChartDialogs.editPlaceholder') : t('orgChartDialogs.addAPlaceholder')} size="sm">
       <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-        Someone who is not a stakeholder yet, or a role that is vacant{!current && managerName ? <>, reporting to <strong>{managerName}</strong></> : ''}.
-        It lives only in this chart. You can turn it into a stakeholder later.
+        {t('orgChartDialogs.someoneWhoIsNotA')}{!current && managerName ? <>{rich(t, 'orgChartDialogs.reportingTo', { strong: <strong>{managerName}</strong> })}</> : ''}{t('orgChartDialogs.itLivesOnlyInThis')}
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Input label="Name or description *" value={name} onChange={setName} placeholder="Head of Sales (vacant)" autoFocus
+        <Input label={t('orgChartDialogs.nameOrDescription')} value={name} onChange={setName} placeholder={t('orgChartDialogs.headOfSalesVacant')} autoFocus
           error={error ?? undefined} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
-        <Input label="Title" value={title} onChange={setTitle} placeholder="Head of Sales"
+        <Input label={t('importUpdateModal.title')} value={title} onChange={setTitle} placeholder={t('orgChartDialogs.headOfSales')}
           onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={submit}>{current ? 'Save' : 'Add placeholder'}</Button>
+        <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+        <Button variant="primary" onClick={submit}>{current ? t('updateDetail.save') : t('orgChartDialogs.addPlaceholder')}</Button>
       </div>
     </Modal>
   );
@@ -104,39 +107,39 @@ interface MakeStakeholderModalProps {
 }
 
 export function MakeStakeholderModal({ isOpen, initial, onClose, onSubmit }: MakeStakeholderModalProps) {
+  const { t } = useLanguage();
   const [values, setValues] = useState<NewStakeholderValues>(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (isOpen) { setValues(initial); setError(null); } }, [isOpen, initial]);
   const set = (key: keyof NewStakeholderValues) => (v: string) => setValues((x) => ({ ...x, [key]: v }));
   async function submit() {
-    if (!values.name.trim()) { setError('Enter their name.'); return; }
+    if (!values.name.trim()) { setError(t('orgChartDialogs.enterTheirName')); return; }
     setSaving(true);
     setError(null);
     try {
       await onSubmit({ name: values.name.trim(), role: values.role.trim(), organization: values.organization.trim() });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create the stakeholder.');
+      setError(err instanceof Error ? err.message : t('orgChartDialogs.couldNotCreateTheStakeholder'));
     } finally {
       setSaving(false);
     }
   }
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Make stakeholder" size="sm">
+    <Modal isOpen={isOpen} onClose={onClose} title={t('orgChartDialogs.makeStakeholder')} size="sm">
       <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-        Creates a stakeholder and puts them in the placeholder's place in this chart, with the same manager, reports and unit.
-        Other charts are not changed.
+        {t('orgChartDialogs.createsAStakeholderAndPuts')}
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Input label="Name *" value={values.name} onChange={set('name')} autoFocus error={error && !values.name.trim() ? error : undefined} />
-        <Input label="Role" value={values.role} onChange={set('role')} />
-        <Input label="Organization" value={values.organization} onChange={set('organization')} />
+        <Input label={t('orgChartDialogs.name')} value={values.name} onChange={set('name')} autoFocus error={error && !values.name.trim() ? error : undefined} />
+        <Input label={t('orgChartDialogs.role')} value={values.role} onChange={set('role')} />
+        <Input label={t('orgChartDialogs.organization')} value={values.organization} onChange={set('organization')} />
       </div>
       {error && values.name.trim() && <p role="alert" style={{ marginTop: 12, fontSize: 'var(--text-sm)', color: 'var(--color-critical)' }}>{error}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" loading={saving} onClick={submit}>Create stakeholder</Button>
+        <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+        <Button variant="primary" loading={saving} onClick={submit}>{t('orgChartDialogs.createStakeholder')}</Button>
       </div>
     </Modal>
   );
@@ -180,6 +183,7 @@ interface UnitFormModalProps {
 }
 
 export function UnitFormModal({ isOpen, editing, defaultParent, units, members, onClose, onSave }: UnitFormModalProps) {
+  const { t } = useLanguage();
   const [values, setValues] = useState<UnitFormValues>({ name: '', parent: null, head: null });
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -194,41 +198,41 @@ export function UnitFormModal({ isOpen, editing, defaultParent, units, members, 
   const sortedMembers = [...members].sort((a, b) => a.name.localeCompare(b.name));
 
   function submit() {
-    if (!values.name.trim()) { setError('Give the unit a name.'); return; }
+    if (!values.name.trim()) { setError(t('orgChartDialogs.giveTheUnitAName')); return; }
     onSave({ ...values, name: values.name.trim() });
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editing ? `Edit ${editing.name}` : 'New unit'} size="sm">
+    <Modal isOpen={isOpen} onClose={onClose} title={editing ? t('orgChartDialogs.edit', { name: editing.name }) : t('orgChartDialogs.newUnit')} size="sm">
       <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-        A department, team or other group. Units only group people; reporting lines stay as they are in the chart.
+        {t('orgChartDialogs.aDepartmentTeamOrOther')}
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Input label="Name *" value={values.name} onChange={(v) => setValues((x) => ({ ...x, name: v }))} placeholder="Engineering" autoFocus
+        <Input label={t('orgChartDialogs.name')} value={values.name} onChange={(v) => setValues((x) => ({ ...x, name: v }))} placeholder={t('orgChartDialogs.engineering')} autoFocus
           error={error ?? undefined} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
         <label>
-          <span style={fieldLabel}>Part of</span>
+          <span style={fieldLabel}>{t('orgChartDialogs.partOf')}</span>
           <select value={values.parent ?? ''} onChange={(e) => setValues((x) => ({ ...x, parent: e.target.value || null }))} style={selectStyle}>
-            <option value="">Nothing (a top-level unit)</option>
+            <option value="">{t('orgChartDialogs.nothingATopLevelUnit')}</option>
             {parents.map(({ unit, depth }) => (
               <option key={unit.id} value={unit.id}>{'\u00a0\u00a0'.repeat(depth)}{unit.name}</option>
             ))}
           </select>
         </label>
         <label>
-          <span style={fieldLabel}>Head</span>
+          <span style={fieldLabel}>{t('orgChartDialogs.head')}</span>
           <select value={values.head ?? ''} onChange={(e) => setValues((x) => ({ ...x, head: e.target.value || null }))} style={selectStyle}>
-            <option value="">Nobody</option>
+            <option value="">{t('orgChartDialogs.nobody')}</option>
             {sortedMembers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
           <span style={{ display: 'block', marginTop: 4, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            Anyone in this chart. Leading a unit does not make them everyone's manager.
+            {t('orgChartDialogs.anyoneInThisChartLeading')}
           </span>
         </label>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={submit}>{editing ? 'Save' : 'Create unit'}</Button>
+        <Button variant="ghost" onClick={onClose}>{t('cancel')}</Button>
+        <Button variant="primary" onClick={submit}>{editing ? t('updateDetail.save') : t('orgChartDialogs.createUnit')}</Button>
       </div>
     </Modal>
   );
@@ -247,6 +251,7 @@ interface UnitPickerModalProps {
 }
 
 export function UnitPickerModal({ isOpen, name, units, current, onClose, onPick, onCreate }: UnitPickerModalProps) {
+  const { t } = useLanguage();
   const [newName, setNewName] = useState('');
   useEffect(() => { if (isOpen) setNewName(''); }, [isOpen]);
   const rowStyle = (active: boolean): React.CSSProperties => ({
@@ -255,13 +260,13 @@ export function UnitPickerModal({ isOpen, name, units, current, onClose, onPick,
     background: active ? 'var(--color-accent-subtle)' : 'transparent', fontWeight: active ? 600 : 400,
   });
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`${name}: unit`} size="sm">
+    <Modal isOpen={isOpen} onClose={onClose} title={t('orgChartDialogs.unit', { name })} size="sm">
       <p style={{ margin: '0 0 10px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
-        Which department or team are they in? This does not change who they report to.
+        {t('orgChartDialogs.whichDepartmentOrTeamAre')}
       </p>
-      <div role="listbox" aria-label="Units" style={{ maxHeight: 300, overflowY: 'auto' }}>
+      <div role="listbox" aria-label={t('orgChartDialogs.units')} style={{ maxHeight: 300, overflowY: 'auto' }}>
         <button type="button" role="option" aria-selected={!current} style={rowStyle(!current)} onClick={() => onPick(null)}>
-          <span style={{ color: 'var(--color-text-muted)' }}>No unit</span>
+          <span style={{ color: 'var(--color-text-muted)' }}>{t('orgChartDialogs.noUnit')}</span>
         </button>
         {flatUnits(units).map(({ unit, depth }) => (
           <button key={unit.id} type="button" role="option" aria-selected={current === unit.id} style={{ ...rowStyle(current === unit.id), paddingLeft: 10 + depth * 16 }}
@@ -272,10 +277,10 @@ export function UnitPickerModal({ isOpen, name, units, current, onClose, onPick,
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--color-border)' }}>
         <div style={{ flex: 1 }}>
-          <Input value={newName} onChange={setNewName} placeholder="New unit name" aria-label="New unit name"
+          <Input value={newName} onChange={setNewName} placeholder={t('orgChartDialogs.newUnitName')} aria-label={t('orgChartDialogs.newUnitName')}
             onKeyDown={(e) => { if (e.key === 'Enter' && newName.trim()) onCreate(newName.trim()); }} />
         </div>
-        <Button variant="secondary" disabled={!newName.trim()} onClick={() => onCreate(newName.trim())}>Create and add</Button>
+        <Button variant="secondary" disabled={!newName.trim()} onClick={() => onCreate(newName.trim())}>{t('orgChartDialogs.createAndAdd')}</Button>
       </div>
     </Modal>
   );
@@ -303,6 +308,7 @@ interface ChartFormModalProps {
 }
 
 export function ChartFormModal({ isOpen, editing, stakeholders, onClose, onSubmit }: ChartFormModalProps) {
+  const { t } = useLanguage();
   const [values, setValues] = useState<ChartFormValues>({ name: '', organization: '', description: '', notes: '', prefill: true });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -336,27 +342,27 @@ export function ChartFormModal({ isOpen, editing, stakeholders, onClose, onSubmi
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!values.name.trim()) { setError('Give the chart a name.'); return; }
+    if (!values.name.trim()) { setError(t('orgChartDialogs.giveTheChartAName')); return; }
     setSaving(true);
     setError(null);
     try {
       await onSubmit(values);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save the chart.');
+      setError(err instanceof Error ? err.message : t('orgChartDialogs.couldNotSaveTheChart'));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={editing ? 'Edit org chart' : 'New org chart'} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={editing ? t('orgChartDialogs.editOrgChart') : t('orgChartDialogs.newOrgChart')} size="lg">
       <form onSubmit={handleSubmit} noValidate>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <Input label="Chart name *" value={values.name} onChange={(v) => set('name', v)} placeholder="Leadership team" autoFocus
-            error={error && !values.name.trim() ? 'Required' : undefined} />
+          <Input label={t('orgChartDialogs.chartName')} value={values.name} onChange={(v) => set('name', v)} placeholder={t('orgChartDialogs.leadershipTeam')} autoFocus
+            error={error && !values.name.trim() ? t('orgChartDialogs.required') : undefined} />
           <div>
-            <Input label="Company or organization" value={values.organization}
+            <Input label={t('orgChartDialogs.companyOrOrganization')} value={values.organization}
               onChange={(v) => {
                 set('organization', v);
                 if (!values.name.trim() || values.name === values.organization) set('name', v);
@@ -382,17 +388,17 @@ export function ChartFormModal({ isOpen, editing, stakeholders, onClose, onSubmi
             )}
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
-            <Input label="Description" value={values.description} onChange={(v) => set('description', v)}
-              placeholder="Executive team and their direct reports" />
+            <Input label={t('orgChartDialogs.description')} value={values.description} onChange={(v) => set('description', v)}
+              placeholder={t('orgChartDialogs.executiveTeamAndTheirDirect')} />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
-            <Textarea label="Notes (markdown)" value={values.notes} onChange={(v) => set('notes', v)} rows={3}
-              placeholder="Anything agents should know: informal influence, upcoming changes, dotted lines..." />
+            <Textarea label={t('orgChartDialogs.notesMarkdown')} value={values.notes} onChange={(v) => set('notes', v)} rows={3}
+              placeholder={t('orgChartDialogs.anythingAgentsShouldKnowInformal')} />
           </div>
           {!editing && matching > 0 && (
             <label style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--text-sm)', color: 'var(--color-text)', cursor: 'pointer' }}>
               <input type="checkbox" checked={values.prefill} onChange={(e) => set('prefill', e.target.checked)} />
-              Add the {matching} {matching === 1 ? 'stakeholder' : 'stakeholders'} from {values.organization.trim()} to start with
+              {t('orgChartDialogs.addThe')} {matching} {matching === 1 ? 'stakeholder' : 'stakeholders'} {t('orgChartDialogs.from')} {values.organization.trim()} {t('orgChartDialogs.toStartWith')}
             </label>
           )}
         </div>
@@ -400,8 +406,8 @@ export function ChartFormModal({ isOpen, editing, stakeholders, onClose, onSubmi
         {error && <p role="alert" style={{ marginTop: 12, fontSize: 'var(--text-sm)', color: 'var(--color-critical)' }}>{error}</p>}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--color-border)' }}>
-          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" type="submit" loading={saving}>{editing ? 'Save changes' : 'Create chart'}</Button>
+          <Button variant="ghost" type="button" onClick={onClose}>{t('cancel')}</Button>
+          <Button variant="primary" type="submit" loading={saving}>{editing ? t('orgChartDialogs.saveChanges') : t('orgChartDialogs.createChart')}</Button>
         </div>
       </form>
     </Modal>
@@ -427,6 +433,7 @@ interface PersonPickerModalProps {
 }
 
 export function PersonPickerModal({ isOpen, title, description, people, noneLabel, emptyText, onClose, onPick, footer }: PersonPickerModalProps) {
+  const { t } = useLanguage();
   const [query, setQuery] = useState('');
   useEffect(() => { if (isOpen) setQuery(''); }, [isOpen]);
 
@@ -442,7 +449,7 @@ export function PersonPickerModal({ isOpen, title, description, people, noneLabe
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="md">
       {description && <p style={{ margin: '0 0 12px', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{description}</p>}
-      <Input value={query} onChange={setQuery} placeholder="Search by name, role or organization" autoFocus aria-label="Search people"
+      <Input value={query} onChange={setQuery} placeholder={t('orgChartDialogs.searchByNameRoleOr')} autoFocus aria-label={t('orgChartDialogs.searchPeople')}
         onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) onPick(filtered[0].id); }} />
       <div style={{ marginTop: 10, maxHeight: 360, overflowY: 'auto' }}>
         {noneLabel && !q && (
@@ -468,7 +475,7 @@ export function PersonPickerModal({ isOpen, title, description, people, noneLabe
         ))}
         {filtered.length === 0 && (
           <p style={{ padding: '12px 10px', margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-            {q ? 'Nobody matches that search.' : emptyText}
+            {q ? t('orgChartDialogs.nobodyMatchesThatSearch') : emptyText}
           </p>
         )}
       </div>

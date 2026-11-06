@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -19,6 +20,7 @@ function mentionType(href: string): MentionType | null {
 
 /** A mention chip: icon by type, opens the item in the app, struck through if the file is gone. */
 function MentionChip({ href, route, children }: { href: string; route: string; children: ReactNode }) {
+  const { t } = useLanguage();
   // On a page that belongs to one workspace (an update opened from a notice), resolved there only.
   const api = usePageApi();
   const navigate = useNavigate();
@@ -37,7 +39,7 @@ function MentionChip({ href, route, children }: { href: string; route: string; c
     <a
       href={route}
       className={`mention-chip${type ? ` mention-chip--${type}` : ''}${missing ? ' mention-chip--missing' : ''}`}
-      title={missing ? `Not found: ${href}` : href}
+      title={missing ? t('markdownRenderer.notFound', { href }) : href}
       onClick={(e) => {
         e.preventDefault();
         if (!missing) navigate(route);

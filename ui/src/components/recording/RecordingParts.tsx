@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import Button from '@/components/common/Button';
 
 /**
@@ -37,12 +38,13 @@ interface RecordingPillProps {
 
 /** A recording that runs: red dot, time, Stop. Styles in primitives.css (.gtd-recording-pill). */
 export function RecordingPill({ label, elapsed, timeTitle, finishing, onStop, stopLabel, stopTitle }: RecordingPillProps) {
+  const { t } = useLanguage();
   return (
     <div role="group" aria-label={label} className="gtd-recording-pill">
       <span aria-hidden="true" className={finishing ? 'gtd-recording-pill__dot' : 'gtd-recording-pill__dot recording-dot'} />
       <span title={timeTitle} className="gtd-recording-pill__time">{finishing ?? recordingTimer(elapsed)}</span>
       <Button size="sm" variant="ghost" disabled={Boolean(finishing)} onClick={onStop} aria-label={stopLabel} title={stopTitle} className="gtd-recording-pill__stop">
-        Stop
+        {t('meetingVersions.stop')}
       </Button>
     </div>
   );

@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import type { InsightsData } from '@/types';
 import { SERIES } from './palette';
 import { formatShortDate } from './format';
@@ -12,6 +13,7 @@ import { PanelEmpty } from './Panel';
  * relationship that isn't in the data.
  */
 export default function FlowChart({ data }: { data: InsightsData['weekly'] }) {
+  const { t } = useLanguage();
   const VW = 440;
   const VH = 210;
   const M = { top: 12, right: 8, bottom: 34, left: 28 };
@@ -19,7 +21,7 @@ export default function FlowChart({ data }: { data: InsightsData['weekly'] }) {
   const CH = VH - M.top - M.bottom;
 
   const rows = data ?? [];
-  if (rows.length === 0) return <PanelEmpty message="No activity in this window." />;
+  if (rows.length === 0) return <PanelEmpty message={t('flowChart.noActivityInThisWindow')} />;
 
   const max = Math.max(...rows.map((r) => Math.max(r.created, r.completed)), 1);
   const ticks = [0, Math.round(max / 2), max].filter((t, i, a) => a.indexOf(t) === i);
@@ -37,7 +39,7 @@ export default function FlowChart({ data }: { data: InsightsData['weekly'] }) {
         viewBox={`0 0 ${VW} ${VH}`}
         width="100%"
         role="img"
-        aria-label="Tasks created and completed per week"
+        aria-label={t('flowChart.tasksCreatedAndCompletedPer')}
         style={{ display: 'block', overflow: 'visible' }}
       >
         {/* Solid hairline grid, one shade off the surface. */}
@@ -85,7 +87,7 @@ export default function FlowChart({ data }: { data: InsightsData['weekly'] }) {
                       fill={color}
                       rx={3}
                     >
-                      <title>{`Week of ${formatShortDate(row.week)}: ${value} ${name}`}</title>
+                      <title>{t('flowChart.weekOf', { week: formatShortDate(row.week), value, name })}</title>
                     </rect>
                     {/* Direct label above the bar — never inside, where a short
                         bar would crop it. */}
@@ -130,8 +132,8 @@ export default function FlowChart({ data }: { data: InsightsData['weekly'] }) {
 
       <figcaption style={{ display: 'flex', gap: 16, marginTop: 8 }}>
         {[
-          ['Created', SERIES.created],
-          ['Completed', SERIES.completed],
+          [t('flowChart.created'), SERIES.created],
+          [t('flowChart.completed'), SERIES.completed],
         ].map(([label, color]) => (
           <span
             key={label}

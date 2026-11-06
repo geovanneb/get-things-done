@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import Button from '@/components/common/Button';
 import Notice from '@/components/common/Notice';
@@ -14,6 +15,7 @@ const POLL_MS = 5000;
  * says there is more, so a reload or a lost connection only costs a moment. Follows the end unless the reader scrolled up.
  */
 export function LiveTranscript({ meetingId }: { meetingId: string }) {
+  const { t } = useLanguage();
   const [live, setLive] = React.useState<LiveState>(emptyLive);
   const [status, setStatus] = React.useState<{ status: string; reason: string | null; standIn?: string } | null>(null);
   const [following, setFollowing] = React.useState(true);
@@ -73,9 +75,9 @@ export function LiveTranscript({ meetingId }: { meetingId: string }) {
     if (el) setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 40);
   };
 
-  const note = status?.status === 'loading' ? 'Loading the model…'
-    : status?.status === 'unavailable' || status?.status === 'stopped' ? (status.reason ?? 'No live transcript for this recording; it is transcribed after the meeting.')
-      : status?.status === 'finishing' ? 'Finishing the transcript…'
+  const note = status?.status === 'loading' ? t('liveTranscript.loadingTheModel')
+    : status?.status === 'unavailable' || status?.status === 'stopped' ? (status.reason ?? t('liveTranscript.noLiveTranscriptForThis'))
+      : status?.status === 'finishing' ? t('liveTranscript.finishingTheTranscript')
         // Running, but not with the live model in Settings: say why.
         : status?.standIn ?? null;
 
@@ -84,9 +86,9 @@ export function LiveTranscript({ meetingId }: { meetingId: string }) {
       {note && (status?.status === 'stopped'
         ? <Notice tone="warning">{note}</Notice>
         : <p role="status" className="gtd-field__hint">{note}</p>)}
-      <div ref={box} onScroll={onScroll} aria-label="Live transcript" aria-live="off" tabIndex={0} className="gtd-reading-box" style={{ maxHeight: 360 }}>
+      <div ref={box} onScroll={onScroll} aria-label={t('liveTranscript.liveTranscript')} aria-live="off" tabIndex={0} className="gtd-reading-box" style={{ maxHeight: 360 }}>
         {live.pieces.length === 0
-          ? <span style={{ color: 'var(--color-text-muted)' }}>The text appears here as people speak.</span>
+          ? <span style={{ color: 'var(--color-text-muted)' }}>{t('liveTranscript.theTextAppearsHereAs')}</span>
           : live.pieces.map((p) => (
             <p key={p.i}>
               <span className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-2)' }}>{clockOf(p.start)}</span>
@@ -95,7 +97,7 @@ export function LiveTranscript({ meetingId }: { meetingId: string }) {
           ))}
       </div>
       {!following && (
-        <div><Button size="sm" variant="ghost" onClick={() => setFollowing(true)}>Jump to the latest</Button></div>
+        <div><Button size="sm" variant="ghost" onClick={() => setFollowing(true)}>{t('liveTranscript.jumpToTheLatest')}</Button></div>
       )}
     </div>
   );

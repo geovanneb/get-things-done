@@ -1,3 +1,5 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
+import { rich } from '@/i18n/rich';
 import { useState } from 'react';
 import Notice from '@/components/common/Notice';
 import Button from '@/components/common/Button';
@@ -74,6 +76,7 @@ async function postSetup(body: unknown): Promise<{ status: number; data: { error
 
 /** Shown instead of the dashboard until a workspace is open. Works the same in a browser and in the desktop app. */
 export default function SetupView({ status }: { status: SetupStatus }) {
+  const { t } = useLanguage();
   const [step, setStep] = useState<Step>('welcome');
   const [mode, setMode] = useState<Mode>('create');
   const [answers, setAnswers] = useState<SetupAnswers>(() => initialAnswers(status));
@@ -97,7 +100,7 @@ export default function SetupView({ status }: { status: SetupStatus }) {
         setNotWorkspace(false);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not open the folder picker. Type the folder path instead.');
+      setError(err instanceof Error ? err.message : t('setup.couldNotOpenTheFolder'));
     }
   };
 
@@ -112,7 +115,7 @@ export default function SetupView({ status }: { status: SetupStatus }) {
         return;
       }
       if (code >= 400) {
-        setError(data.error ?? `Could not open this folder (HTTP ${code}).`);
+        setError(data.error ?? t('setup.couldNotOpenThisFolder', { code }));
         return;
       }
       openDashboard();
@@ -127,7 +130,7 @@ export default function SetupView({ status }: { status: SetupStatus }) {
     try {
       const { status: code, data } = await postSetup(createRequest(answers));
       if (code >= 400) {
-        setError(data.error ?? `Could not create the workspace (HTTP ${code}).`);
+        setError(data.error ?? t('setup.couldNotCreateTheWorkspace', { code }));
         return;
       }
       go('done');
@@ -139,7 +142,7 @@ export default function SetupView({ status }: { status: SetupStatus }) {
   const stepNumber = CREATE_STEPS.indexOf(step) + 1;
   const progress = mode === 'create' && stepNumber > 0 ? (
     <div style={{ ...muted, marginBottom: 12 }} aria-live="polite">
-      Step {stepNumber} of {CREATE_STEPS.length}
+      {rich(t, 'setup.stepOf', { stepNumber: stepNumber, length: CREATE_STEPS.length })}
     </div>
   ) : null;
 
@@ -148,16 +151,15 @@ export default function SetupView({ status }: { status: SetupStatus }) {
   if (step === 'welcome') {
     content = (
       <>
-        <h1 style={title}>Welcome to Get Things Done</h1>
+        <h1 style={title}>{t('setup.welcomeToGetThingsDone')}</h1>
         <p style={lead}>
-          Your tasks, people and notes live in one folder on this computer. AI assistants can work in that folder with you.
-          Let&apos;s set it up. It takes about a minute.
+          {t('setup.yourTasksPeopleAndNotes')}
         </p>
         <div style={{ display: 'grid', gap: 12 }}>
           <Choice
             primary
-            heading="Create a new workspace"
-            text="Start fresh. You can change everything later."
+            heading={t('setup.createANewWorkspace')}
+            text={t('setup.startFreshYouCanChange')}
             onClick={() => {
               setMode('create');
               set({ path: status.suggested_path });
@@ -165,8 +167,8 @@ export default function SetupView({ status }: { status: SetupStatus }) {
             }}
           />
           <Choice
-            heading="Open an existing workspace"
-            text="You already use Get Things Done, or someone shared a workspace folder with you."
+            heading={t('setup.openAnExistingWorkspace')}
+            text={t('setup.youAlreadyUseGetThings')}
             onClick={() => {
               setMode('open');
               set({ path: '' });
@@ -177,7 +179,7 @@ export default function SetupView({ status }: { status: SetupStatus }) {
         </div>
         {status.recent.length > 0 && (
           <div style={{ marginTop: 24 }}>
-            <div style={{ ...muted, marginBottom: 8 }}>Recently opened on this computer</div>
+            <div style={{ ...muted, marginBottom: 8 }}>{t('setup.recentlyOpenedOnThisComputer')}</div>
             <div style={{ display: 'grid', gap: 8 }}>
               {status.recent.map((recent) => (
                 <Button key={recent.path} variant="secondary" disabled={busy} onClick={() => void openExisting(recent.path)} style={{ justifyContent: 'flex-start' }}>
@@ -195,49 +197,49 @@ export default function SetupView({ status }: { status: SetupStatus }) {
     content = (
       <>
         {progress}
-        <h1 style={title}>{creating ? 'Where should your workspace live?' : 'Which folder is your workspace?'}</h1>
+        <h1 style={title}>{creating ? t('setup.whereShouldYourWorkspaceLive') : t('setup.whichFolderIsYourWorkspace')}</h1>
         <p style={lead}>
           {creating
-            ? 'A folder of plain files you own. The suggested place is fine for most people. Pick a synced folder (OneDrive, iCloud, Dropbox) if you want a backup.'
-            : 'Choose the folder that contains workspace.yaml.'}
+            ? t('setup.aFolderOfPlainFiles')
+            : t('setup.chooseTheFolderThatContains')}
         </p>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <div style={{ flex: 1 }}>
             <Input
-              label="Folder"
+              label={t('setup.folder')}
               value={answers.path}
               onChange={(value) => {
                 set({ path: value });
                 setNotWorkspace(false);
               }}
-              placeholder={creating ? status.suggested_path : 'Choose a folder'}
+              placeholder={creating ? status.suggested_path : t('setup.chooseAFolder')}
               inputStyle={{ fontFamily: 'var(--font-mono)' }}
               autoFocus
             />
           </div>
-          <Button variant="secondary" onClick={() => void browse()}>Browse...</Button>
+          <Button variant="secondary" onClick={() => void browse()}>{t('setup.browse')}</Button>
         </div>
         {creating && answers.path.trim() === status.suggested_path && status.suggested_path_is_workspace && (
-          <p style={{ ...muted, marginTop: 12 }}>There is already a workspace here. It will be opened as it is.</p>
+          <p style={{ ...muted, marginTop: 12 }}>{t('setup.thereIsAlreadyAWorkspace')}</p>
         )}
         {notWorkspace && (
           <div style={{ marginTop: 16, padding: '12px 14px', borderRadius: 'var(--radius-md)', background: 'var(--color-warning-subtle)', fontSize: 'var(--text-sm)' }}>
-            This folder is not a Get Things Done workspace yet. You can create one here; files already in the folder are kept.
+            {t('setup.thisFolderIsNotA')}
             <div style={{ marginTop: 10 }}>
               <Button variant="primary" size="sm" onClick={() => { setMode('create'); setNotWorkspace(false); go('profile'); }}>
-                Create a workspace in this folder
+                {t('setup.createAWorkspaceInThis')}
               </Button>
             </div>
           </div>
         )}
         {error && <ErrorBox message={error} />}
         <div style={footer}>
-          <Button variant="ghost" onClick={() => go('welcome')}>Back</Button>
+          <Button variant="ghost" onClick={() => go('welcome')}>{t('setup.back')}</Button>
           {creating ? (
-            <Button variant="primary" disabled={!answers.path.trim()} onClick={() => go('profile')}>Next</Button>
+            <Button variant="primary" disabled={!answers.path.trim()} onClick={() => go('profile')}>{t('setup.next')}</Button>
           ) : (
             <Button variant="primary" disabled={!answers.path.trim() || busy} loading={busy} onClick={() => void openExisting(answers.path.trim())}>
-              Open workspace
+              {t('setup.openWorkspace')}
             </Button>
           )}
         </div>
@@ -247,24 +249,24 @@ export default function SetupView({ status }: { status: SetupStatus }) {
     content = (
       <>
         {progress}
-        <h1 style={title}>About you</h1>
-        <p style={lead}>AI assistants use this to write in your name and for your role. Everything is optional and stays in your workspace.</p>
+        <h1 style={title}>{t('setup.aboutYou')}</h1>
+        <p style={lead}>{t('setup.aiAssistantsUseThisTo')}</p>
         <div style={{ display: 'grid', gap: 14 }}>
-          <Input label="Your name" value={answers.name} onChange={(name) => set({ name })} placeholder="Alex Morgan" autoFocus />
-          <Input label="Your role" value={answers.role} onChange={(role) => set({ role })} placeholder="Chief Operating Officer" />
-          <Input label="Organization" value={answers.organization} onChange={(organization) => set({ organization })} placeholder="Northwind Labs" />
+          <Input label={t('profile.yourName')} value={answers.name} onChange={(name) => set({ name })} placeholder="Alex Morgan" autoFocus />
+          <Input label={t('setup.yourRole')} value={answers.role} onChange={(role) => set({ role })} placeholder={t('setup.chiefOperatingOfficer')} />
+          <Input label={t('orgChartDialogs.organization')} value={answers.organization} onChange={(organization) => set({ organization })} placeholder="Northwind Labs" />
           <Input
-            label="Workspace name"
+            label={t('workspaceName')}
             value={answers.workspaceName}
             onChange={(workspaceName) => set({ workspaceName })}
-            placeholder="Executive Workspace"
-            hint="Shown in the sidebar and the window title."
+            placeholder={t('setup.executiveWorkspace')}
+            hint={t('setup.shownInTheSidebarAnd')}
           />
         </div>
         {error && <ErrorBox message={error} />}
         <div style={footer}>
-          <Button variant="ghost" onClick={() => go('folder')}>Back</Button>
-          <Button variant="primary" onClick={() => go('ai')}>Next</Button>
+          <Button variant="ghost" onClick={() => go('folder')}>{t('setup.back')}</Button>
+          <Button variant="primary" onClick={() => go('ai')}>{t('setup.next')}</Button>
         </div>
       </>
     );
@@ -272,10 +274,9 @@ export default function SetupView({ status }: { status: SetupStatus }) {
     content = (
       <>
         {progress}
-        <h1 style={title}>Which AI assistant do you use?</h1>
+        <h1 style={title}>{t('setup.whichAiAssistantDoYou')}</h1>
         <p style={lead}>
-          The workspace gets instructions for the assistants you pick, so they know how to work in it. The dashboard itself
-          works without any of them.
+          {t('setup.theWorkspaceGetsInstructionsFor')}
         </p>
         <div style={{ display: 'grid', gap: 10 }}>
           {status.ai_tools.map((tool) => {
@@ -298,13 +299,13 @@ export default function SetupView({ status }: { status: SetupStatus }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
                     {tool.label}
-                    {tool.installed ? <Badge variant="success">Installed</Badge> : <Badge variant="default">Not found</Badge>}
+                    {tool.installed ? <Badge variant="success">{t('agents.installed')}</Badge> : <Badge variant="default">{t('setup.notFound')}</Badge>}
                   </div>
                   <div style={{ ...muted, marginTop: 4 }}>
                     {tool.description}{' '}
                     {!tool.installed && (
                       <a href={tool.install_url} target="_blank" rel="noreferrer" style={{ color: 'var(--color-accent)' }}>
-                        How to install
+                        {t('setup.howToInstall')}
                       </a>
                     )}
                   </div>
@@ -315,8 +316,8 @@ export default function SetupView({ status }: { status: SetupStatus }) {
         </div>
         {error && <ErrorBox message={error} />}
         <div style={footer}>
-          <Button variant="ghost" onClick={() => go('profile')}>Back</Button>
-          <Button variant="primary" loading={busy} disabled={busy} onClick={() => void create()}>Create workspace</Button>
+          <Button variant="ghost" onClick={() => go('profile')}>{t('setup.back')}</Button>
+          <Button variant="primary" loading={busy} disabled={busy} onClick={() => void create()}>{t('setup.createWorkspace')}</Button>
         </div>
       </>
     );
@@ -324,25 +325,24 @@ export default function SetupView({ status }: { status: SetupStatus }) {
     const pending = toolsToInstall(answers, status.ai_tools);
     content = (
       <>
-        <h1 style={title}>Your workspace is ready</h1>
+        <h1 style={title}>{t('setup.yourWorkspaceIsReady')}</h1>
         <p style={lead}>
-          It lives in <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{answers.path}</span>.
-          Start by adding a task or a stakeholder.
+          {rich(t, 'setup.itLivesInStartBy', { part: <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{answers.path}</span> })}
         </p>
         {pending.length > 0 && (
           <div style={{ padding: '12px 14px', borderRadius: 'var(--radius-md)', background: 'var(--color-info-subtle)', fontSize: 'var(--text-sm)', lineHeight: 1.5 }}>
-            To let AI work on your tasks, install{' '}
+            {t('setup.toLetAiWorkOn')}{' '}
             {pending.map((tool, i) => (
               <span key={tool.id}>
                 {i > 0 && (i === pending.length - 1 ? ' or ' : ', ')}
                 <a href={tool.install_url} target="_blank" rel="noreferrer" style={{ color: 'var(--color-accent)' }}>{tool.label}</a>
               </span>
             ))}
-            . You can do it any time; the workspace is already prepared for it.
+            {t('setup.youCanDoItAny')}
           </div>
         )}
         <div style={{ ...footer, justifyContent: 'flex-end' }}>
-          <Button variant="primary" onClick={openDashboard}>Open the dashboard</Button>
+          <Button variant="primary" onClick={openDashboard}>{t('setup.openTheDashboard')}</Button>
         </div>
       </>
     );

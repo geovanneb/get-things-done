@@ -1,3 +1,4 @@
+import { tr } from '@/i18n/current';
 import type { MeetingParticipant, Stakeholder, Task } from '@/types';
 import { MEETING_PREP_AGENT } from './meetingPrep';
 
@@ -12,21 +13,21 @@ export function addParticipant(list: MeetingParticipant[], next: MeetingParticip
 /** "A", "A and B", "A, B and C". */
 export function joinNames(list: MeetingParticipant[]): string {
   const names = list.map((p) => p.name);
-  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return names.length < 2 ? names.join('') : tr('meetingParticipants.and', { join: names.slice(0, -1).join(', '), value: names[names.length - 1] });
 }
 
 /** The reminder before recording: "everyone" stays, because the list is who was expected, not who is in the room. */
 export function consentSentence(list: MeetingParticipant[]): string {
   return list.length
-    ? `I have told everyone in the meeting, including ${joinNames(list)}, that it is being recorded.`
-    : 'I have told everyone in the meeting that it is being recorded.';
+    ? tr('meetingParticipants.iHaveToldEveryoneIn', { joinNames: joinNames(list) })
+    : tr('meetingParticipants.iHaveToldEveryoneIn2');
 }
 
 /** The title a new recording starts with, "Meeting 2026-11-01 14:30": when Record was clicked, in local time, so a quick
  * recording can start without typing one. */
 export function defaultRecordingTitle(now: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `Meeting ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  return tr('meetingParticipants.meeting', { getFullYear: now.getFullYear(), pad: pad(now.getMonth() + 1), pad2: pad(now.getDate()), pad3: pad(now.getHours()), pad4: pad(now.getMinutes()) });
 }
 
 /** What the record dialog starts from. */

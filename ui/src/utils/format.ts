@@ -1,4 +1,10 @@
-import { format, formatDistanceToNow, differenceInDays, isToday, isPast, isFuture, parseISO } from 'date-fns';
+import { es, ja, ptBR } from 'date-fns/locale';
+import type { Locale as DateFnsLocale } from 'date-fns';
+import type { Locale } from '../../../server/src/i18n/locale';
+import { currentLocale, tr } from '@/i18n/current';
+import { formatDistanceToNow, differenceInDays, isToday, isPast, isFuture, parseISO } from 'date-fns';
+
+const DATE_LOCALES: Partial<Record<Locale, DateFnsLocale>> = { ja, 'pt-BR': ptBR, 'es-419': es };
 
 function parseDate(date: string | Date): Date {
   if (date instanceof Date) return date;
@@ -7,7 +13,7 @@ function parseDate(date: string | Date): Date {
 
 export function formatDate(date: string | Date): string {
   try {
-    return format(parseDate(date), 'MMM d');
+    return new Intl.DateTimeFormat(currentLocale(), { month: 'short', day: 'numeric' }).format(parseDate(date));
   } catch {
     return '';
   }
@@ -17,11 +23,11 @@ export function formatRelativeDate(date: string | Date): string {
   try {
     const d = parseDate(date);
     const diff = differenceInDays(d, new Date());
-    if (isToday(d)) return 'today';
-    if (diff === 1) return 'tomorrow';
-    if (diff === -1) return 'yesterday';
-    if (diff > 0) return `in ${diff} days`;
-    return `${Math.abs(diff)} days ago`;
+    if (isToday(d)) return tr('format.today');
+    if (diff === 1) return tr('format.tomorrow');
+    if (diff === -1) return tr('format.yesterday');
+    if (diff > 0) return tr('format.inDays', { diff });
+    return tr('format.daysAgo', { abs: Math.abs(diff) });
   } catch {
     return '';
   }
@@ -44,25 +50,25 @@ export function formatDueStatus(dueDate: string): 'overdue' | 'due-today' | 'due
 
 export function formatPriorityLabel(p: string): string {
   const labels: Record<string, string> = {
-    critical: 'Critical',
-    high: 'High',
-    medium: 'Medium',
-    low: 'Low',
+    critical: tr('attentionQueue.critical'),
+    high: tr('attentionQueue.high'),
+    medium: tr('attentionQueue.medium'),
+    low: tr('attentionQueue.low'),
   };
   return labels[p] ?? p;
 }
 
 export function formatStatusLabel(s: string): string {
   const labels: Record<string, string> = {
-    backlog: 'Backlog',
-    ready: 'Ready',
-    in_progress: 'In Progress',
-    blocked: 'Blocked',
-    review: 'Review',
-    done: 'Done',
-    in_review: 'Needs Review',
-    approved: 'Approved',
-    archived: 'Archived',
+    backlog: tr('routineEditor.backlog'),
+    ready: tr('routineEditor.ready'),
+    in_progress: tr('board.columnInProgress'),
+    blocked: tr('renderer.blocked'),
+    review: tr('shared.review'),
+    done: tr('done'),
+    in_review: tr('simulation.needsReview'),
+    approved: tr('format.approved'),
+    archived: tr('format.archived'),
   };
   return labels[s] ?? s;
 }
@@ -102,7 +108,7 @@ export function getInitials(name: string): string {
 
 export function formatRelativeTime(date: string | Date): string {
   try {
-    return formatDistanceToNow(parseDate(date), { addSuffix: true });
+    return formatDistanceToNow(parseDate(date), { addSuffix: true, locale: DATE_LOCALES[currentLocale()] });
   } catch {
     return '';
   }

@@ -1,3 +1,4 @@
+import { useLanguage } from '@/i18n/LanguageProvider';
 import type { InsightsData } from '@/types';
 import { rampStep } from './palette';
 import { PanelEmpty } from './Panel';
@@ -15,10 +16,11 @@ export default function TurnaroundChart({
 }: {
   data: InsightsData['turnaround_buckets'];
 }) {
+  const { t } = useLanguage();
   const buckets = data ?? [];
   const total = buckets.reduce((sum, b) => sum + b.count, 0);
 
-  if (total === 0) return <PanelEmpty message="No tasks completed in this window." />;
+  if (total === 0) return <PanelEmpty message={t('turnaroundChart.noTasksCompletedInThis')} />;
 
   const max = Math.max(...buckets.map((b) => b.count), 1);
 
@@ -43,7 +45,7 @@ export default function TurnaroundChart({
               justifyContent: 'flex-end',
               height: '100%',
             }}
-            title={`${bucket.label}: ${bucket.count} of ${total} tasks`}
+            title={t('turnaroundChart.ofTasks', { label: bucket.label, amount: bucket.count, total })}
           >
             <span
               style={{

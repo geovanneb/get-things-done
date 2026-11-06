@@ -324,7 +324,7 @@ router.post('/recent/forget', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'The workspace you are in cannot be removed from the list.' });
     return;
   }
-  workspaceService.forgetWorkspace(workspacePath);
+  await workspaceService.forgetWorkspace(workspacePath);
   res.json(workspaceService.listRecentWorkspaces());
 });
 
