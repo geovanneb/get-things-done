@@ -704,12 +704,13 @@ try {
     const started = await json('POST', `/api/meetings/${meeting.id}-M-01/corrections`);
     const corr = await started.json();
     const corrDir = path.join(ws, 'context-updates', corr.id ?? 'none');
-    const env = corr.correction ?? {};
+    // Not `env`: that name is the sandbox environment, which later checks in this block pass to child processes.
+    const envelope = corr.correction ?? {};
     if (corr.id) {
       fs.writeFileSync(path.join(corrDir, 'update.md'), fs.readFileSync(path.join(corrDir, 'update.md'), 'utf-8').replace('status: ready', [
         'status: in_review', 'meeting_records:', '  - id: M-01', '    title: Weekly sync', "    meeting_date: '2026-10-20'",
-        `    meeting: ${JSON.stringify(env.meeting)}`, `    amends: ${JSON.stringify(env.base)}`, '    decisions:', '      - Fictional decision, corrected',
-        '    action_items:', `      - { description: Send the fictional plan, slot: ${JSON.stringify(env.slots?.[0]?.slot)} }`,
+        `    meeting: ${JSON.stringify(envelope.meeting)}`, `    amends: ${JSON.stringify(envelope.base)}`, '    decisions:', '      - Fictional decision, corrected',
+        '    action_items:', `      - { description: Send the fictional plan, slot: ${JSON.stringify(envelope.slots?.[0]?.slot)} }`,
         '    corrections:', '      - { field: decisions, before: Fictional decision, after: "Fictional decision, corrected", reason: Fictional reason, sure: true }',
       ].join('\n')));
       const corrRevision = (await (await fetch(`${base}/api/context-updates/${corr.id}`)).json()).meeting_records?.[0]?.revision;
@@ -749,6 +750,95 @@ try {
       runnerStatus.id === 'claude-code' && typeof runnerStatus.installed === 'boolean' && Array.isArray(runnerStatus.problems)
       && notReady.status === 409 && notApproved.status === 409 && badCommand.status === 400 && noRun === null,
       `installed=${runnerStatus.installed} notReady=${notReady.status} notApproved=${notApproved.status} bad=${badCommand.status}`);
+    // Trust is read where Claude Code files it: a trusted folder above the workspace does not count, because Claude
+    // Code would ignore the workspace's permission rules (#306). CI has no Claude Code, so a second server gets a
+    // stand-in that only answers the sign-in probe (anything else fails, so no AI work can happen) and a settings
+    // file of its own.
+    const trustCheck = 'a trusted folder above the workspace does not count as trust, and the run is refused before it starts';
+    const desk = path.join(tmp, 'Desktop');
+    const trustWs = path.join(desk, 'Northwind Workspace');
+    // A HOME of its own, so this workspace never becomes the configured one for the checks that follow.
+    const trustHome = path.join(tmp, 'trust-home');
+    fs.mkdirSync(trustHome);
+    const trustEnv = { ...env, HOME: trustHome, USERPROFILE: trustHome, GTD_SMOKE_NODE: process.execPath };
+    execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'init', '-y', '-d', trustWs,
+      '--name', 'Alex Morgan', '--role', 'COO', '--org', 'Northwind Labs'], { env: trustEnv, stdio: 'pipe' });
+    const trustConfig = path.join(trustHome, '.gtd', 'config.json');
+    check('gtd init records the trust check\'s workspace in its own HOME, never in the developer\'s',
+      fs.existsSync(trustConfig) && JSON.parse(fs.readFileSync(trustConfig, 'utf-8')).workspace_path === trustWs);
+    // Its own repository root, so the folder Claude Code files trust under is this one even when the temp folder sits
+    // inside another repository. Git's location variables (set inside git hooks) would point git init elsewhere.
+    execFileSync('git', ['init', '-q', trustWs], {
+      env: { ...trustEnv, GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined },
+      stdio: 'pipe',
+    });
+    const standInDir = path.join(tmp, 'stand-in');
+    const claudeConfig = path.join(tmp, 'claude-config');
+    fs.mkdirSync(standInDir);
+    fs.mkdirSync(claudeConfig);
+    fs.writeFileSync(path.join(standInDir, 'claude.cjs'), "if (process.argv.slice(2).join(' ') !== 'auth status --json') process.exit(1);\n"
+      + "console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }));\n");
+    // No paths inside the stand-in: cmd.exe reads a batch file in the OEM code page, and sh would expand $ or `.
+    if (process.platform === 'win32') {
+      fs.writeFileSync(path.join(standInDir, 'claude.cmd'), '@"%GTD_SMOKE_NODE%" "%~dp0claude.cjs" %*\r\n');
+    } else {
+      fs.writeFileSync(path.join(standInDir, 'claude'), '#!/bin/sh\nexec "$GTD_SMOKE_NODE" "$(dirname "$0")/claude.cjs" "$@"\n', { mode: 0o755 });
+    }
+    // Keys as Claude Code writes them: the real folder, accents composed, forward slashes on Windows.
+    const trustOnly = (folder) => fs.writeFileSync(path.join(claudeConfig, '.claude.json'), JSON.stringify({ projects: {
+      [fs.realpathSync.native(folder).normalize('NFC').replaceAll(path.sep, '/')]: { hasTrustDialogAccepted: true },
+    } }));
+    const { createServer } = await import('node:net');
+    const trustPort = await new Promise((resolve, reject) => {
+      const probe = createServer().once('error', reject).listen(0, '127.0.0.1', () => {
+        const free = probe.address().port;
+        probe.close(() => resolve(free));
+      });
+    });
+    const trustBase = `http://127.0.0.1:${trustPort}`;
+    const pathKey = Object.keys(trustEnv).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+    const trustServer = spawn(process.execPath, [path.join(root, 'dist/server/index.js')], {
+      // DISABLE_AUTOUPDATER: should a real Claude Code be reached through PATH after all, it must not update itself.
+      env: { ...trustEnv, [pathKey]: `${standInDir}${path.delimiter}${trustEnv[pathKey] ?? ''}`, CLAUDE_CONFIG_DIR: claudeConfig,
+        DISABLE_AUTOUPDATER: '1', ESB_WORKSPACE_PATH: trustWs, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(trustPort),
+        NODE_ENV: 'production', GTD_DISABLE_UPDATES: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const tagged = (d) => { serverLog += String(d).replace(/^(?=.)/gm, '[trust server] '); };
+    trustServer.stdout.on('data', tagged);
+    trustServer.stderr.on('data', tagged);
+    try {
+      let trustUp = false;
+      const trustDeadline = Date.now() + 60_000;
+      while (!trustUp && Date.now() < trustDeadline) {
+        try { trustUp = (await fetch(`${trustBase}/health`)).ok; } catch { /* not listening yet */ }
+        if (!trustUp) await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!trustUp) {
+        check(trustCheck, false, 'the second server did not start');
+      } else {
+        trustOnly(desk);
+        const parentOnly = await (await fetch(`${trustBase}/api/runner`)).json();
+        const ready = await (await fetch(`${trustBase}/api/context-updates`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Fictional weekly sync', source_date: '2026-11-05', text: 'Transcript of a fictional meeting' }),
+        })).json();
+        const refused = await fetch(`${trustBase}/api/context-updates/${ready.id}/run`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: 'analyze' }),
+        });
+        const refusedBody = await refused.json();
+        trustOnly(trustWs);
+        const exact = await (await fetch(`${trustBase}/api/runner`)).json();
+        check(trustCheck,
+          parentOnly.installed === true && parentOnly.trusted === false
+          && parentOnly.problems?.map((p) => p.code).join() === 'not_trusted'
+          && refused.status === 409 && /has not trusted this workspace folder/.test(refusedBody.message ?? '')
+          && exact.trusted === true && exact.problems?.length === 0,
+          `parent=${parentOnly.trusted}/${parentOnly.problems?.map((p) => p.code)} run=${refused.status} exact=${exact.trusted}/${exact.problems?.map((p) => p.code)}`);
+      }
+    } finally {
+      trustServer.kill();
+    }
     // The smallest fictional .docx: one stored (uncompressed) word/document.xml.
     const docXml = Buffer.from('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Fictional Speaker 0:03</w:t></w:r></w:p><w:p><w:r><w:t>Fictional words.</w:t></w:r></w:p></w:body></w:document>');
     const docName = Buffer.from('word/document.xml');
