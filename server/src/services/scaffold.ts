@@ -99,16 +99,39 @@ const TEMPLATE_NAME_MAP: Record<string, string> = {
 export interface ManifestEntry {
   path: string;
   sha256: string;
+  /** The `<path>.new` the app wrote beside a file the user changed, as it wrote it. Absent: any `.new` is the user's. */
+  new_sha256?: string;
 }
 
 export interface AppManifest {
   appVersion: string;
   generatedAt: string;
   files: ManifestEntry[];
+  /** Set by apps that record `new_sha256`. Without it the manifest is older and says nothing about `.new` files. */
+  newCopiesTracked?: boolean;
 }
 
 function sha256(buf: Buffer | string): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
+/** The hash of a `.new` only when it is a plain file that can be read; a link, folder or failed read gives null. */
+function appNewCopyHash(newPath: string): string | null {
+  try {
+    if (!fs.lstatSync(newPath).isFile()) return null;
+    return sha256(fs.readFileSync(newPath));
+  } catch {
+    return null;
+  }
+}
+
+/** Replaces the app's own `.new` with this version. A failure leaves it as it was, without stopping the upgrade. */
+function replaceNewCopy(newPath: string, content: string | Buffer, expected: string): boolean {
+  try {
+    return replaceFile(newPath, content, expected);
+  } catch {
+    return false;
+  }
 }
 
 /** Sorts object keys and array items, so two JSON values compare equal when only their order differs. */
@@ -388,12 +411,13 @@ export function writeManifest(workspacePath: string, files: ManifestEntry[]): vo
   // Nothing changed: the file stays as it is, so an opening leaves a git workspace clean.
   const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path));
   const previous = readManifest(workspacePath);
-  if (previous?.appVersion === getAppVersion() && JSON.stringify(previous.files) === JSON.stringify(sorted)) return;
+  if (previous?.appVersion === getAppVersion() && previous.newCopiesTracked && JSON.stringify(previous.files) === JSON.stringify(sorted)) return;
 
   const manifest: AppManifest = {
     appVersion: getAppVersion(),
     generatedAt: new Date().toISOString(),
     files: sorted,
+    newCopiesTracked: true,
   };
   replaceFile(manifestPath, JSON.stringify(manifest, null, 2), null);
 }
@@ -451,6 +475,12 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
 
   const previous = readManifest(workspacePath);
   const previousByPath = new Map((previous?.files ?? []).map((f) => [f.path, f.sha256]));
+  // Which `.new` beside a file is still the app's own copy. An older manifest did not record them: its `.new` is
+  // the app's only while it is exactly the version that manifest lists, which is what that release wrote.
+  const appNewCopy = new Map((previous?.files ?? []).flatMap((f) => {
+    const hash = previous?.newCopiesTracked ? f.new_sha256 : f.sha256;
+    return hash ? [[f.path, hash] as const] : [];
+  }));
 
   const result: UpgradeResult = {
     updated: [],
@@ -470,7 +500,14 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
     const nextContent = renderTemplate(srcPath, profile);
     const nextHash = sha256(nextContent);
 
-    manifestEntries.push({ path: relPath, sha256: nextHash });
+    const entry: ManifestEntry = { path: relPath, sha256: nextHash };
+    manifestEntries.push(entry);
+    // The app's own `.new` from before stays recorded while it is unchanged, whatever happens to the file this time:
+    // a conflict that comes back in a later release still finds it.
+    const newPath = `${destPath}.new`;
+    const ours = appNewCopy.get(relPath);
+    const existingNew = ours ? appNewCopyHash(newPath) : null;
+    if (ours && existingNew === ours) entry.new_sha256 = ours;
 
     if (!fs.existsSync(destPath)) {
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
@@ -492,13 +529,17 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
       if (replaceFile(destPath, nextContent, currentHash)) result.updated.push(relPath);
       else result.conflicted.push(relPath);
     } else {
-      // Either user-edited, or predates the manifest. Never clobber it, nor a `.new` already there: someone may be
-      // merging it. A new one is made only where there is none.
+      // Either user-edited, or predates the manifest. Never clobber it, nor a `.new` someone may be merging. A new one
+      // is made only where there is none.
       try {
-        fs.writeFileSync(`${destPath}.new`, nextContent, { flag: 'wx' });
+        fs.writeFileSync(newPath, nextContent, { flag: 'wx' });
+        entry.new_sha256 = nextHash;
       } catch (err) {
         // Only one already there is kept; any other failure is a failure.
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        // Still the app's copy from an earlier release: it would show an outdated version, so it becomes this one.
+        // Changed since, unreadable or not a plain file, it is the user's and stays as it is, untracked.
+        if (entry.new_sha256 && existingNew !== nextHash && replaceNewCopy(newPath, nextContent, entry.new_sha256)) entry.new_sha256 = nextHash;
       }
       result.conflicted.push(relPath);
     }
