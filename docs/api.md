@@ -124,7 +124,7 @@ GET /api/tasks?status=in_progress
 → 200 [{"id":"TASK-2026-0001","title":"Board update: Q3 operations review","status":"in_progress",
         "priority":"critical","due_date":"2026-10-30","stakeholder_refs":["STK-0001","STK-0005"],
         "deliverables":[{"id":"D1","format":"pptx","template_ref":"OUT-executive-deck",
-        "status":"in_progress","file_path":"deliverables/q3-board-update.pptx"}, …], …}]
+        "status":"in_progress","file_path":"tasks/active/TASK-2026-0001/deliverables/q3-board-update.pptx"}, …], …}]
 
 POST /api/tasks
 {"title":"Draft the Q4 hiring plan","priority":"medium","due_date":"2026-11-14",

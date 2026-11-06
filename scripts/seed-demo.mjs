@@ -106,22 +106,60 @@ const tasks = [
   ['Thank-you note to the logistics team', 'done', 'low', 'memo', 4, 4, null, [S('Daniel', 'audience', true)], ['people'], 'Short note after the warehouse audit.'],
 ];
 
+// `file` lands in the task's deliverables/ folder; file_path is written from the workspace root, as agents write it.
+// A complete deliverable has its file, so it opens from the dashboard.
 const deliverables = {
   'Board update: Q3 operations review': [
-    { id: 'D1', format: 'pptx', template_ref: 'OUT-executive-deck', status: 'in_progress', file_path: 'deliverables/q3-board-update.pptx' },
-    { id: 'D2', format: 'md', template_ref: 'OUT-plain-text', status: 'complete', file_path: 'deliverables/speaker-notes.md' },
+    { id: 'D1', format: 'pptx', template_ref: 'OUT-executive-deck', status: 'in_progress', file: 'q3-board-update.pptx' },
+    { id: 'D2', format: 'md', template_ref: 'OUT-plain-text', status: 'complete', file: 'speaker-notes.md' },
   ],
   'Decision brief: second freight carrier': [
-    { id: 'D1', format: 'docx', template_ref: 'OUT-executive-document', status: 'complete', file_path: 'deliverables/carrier-decision-brief.docx' },
+    { id: 'D1', format: 'docx', template_ref: 'OUT-executive-document', status: 'complete', file: 'carrier-decision-brief.docx' },
   ],
 };
+
+/** The smallest valid .docx: one stored (uncompressed) word/document.xml, plus its content types. */
+function demoDocx(text) {
+  const parts = [
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'],
+    ['word/document.xml', `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`],
+  ].map(([name, xml]) => [Buffer.from(name), Buffer.from(xml)]);
+  const crc = (buf) => {
+    let c = 0xffffffff;
+    for (const byte of buf) { c ^= byte; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; }
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const locals = []; const centrals = []; let offset = 0;
+  for (const [name, data] of parts) {
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(crc(data), 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+    central.writeUInt32LE(crc(data), 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(name.length, 28); central.writeUInt32LE(offset, 42);
+    locals.push(local, name, data); centrals.push(central, name);
+    offset += 30 + name.length + data.length;
+  }
+  const centralSize = centrals.reduce((n, b) => n + b.length, 0);
+  const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(parts.length, 8); end.writeUInt16LE(parts.length, 10);
+  end.writeUInt32LE(centralSize, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, ...centrals, end]);
+}
 
 for (const [title, status, priority, task_type, created, done, due, stakeholders, tags, objective] of tasks) {
   const t = await api('POST', '/api/tasks', {
     title, priority, tags, objective, stakeholders, description: objective,
-    deliverables: deliverables[title] ?? [],
     due_date: due === null ? undefined : inDays(due),
   });
+  if (deliverables[title]) {
+    const dir = path.join(workspace.path, 'tasks', 'active', t.id, 'deliverables');
+    fs.mkdirSync(dir, { recursive: true });
+    const placed = deliverables[title].map(({ file, ...d }) => {
+      if (d.status === 'complete') {
+        fs.writeFileSync(path.join(dir, file), file.endsWith('.docx') ? demoDocx(`${title}.`) : `# ${title}\n\nSpeaking notes for the meeting.\n`);
+      }
+      return { ...d, file_path: `tasks/active/${t.id}/deliverables/${file}` };
+    });
+    await api('PUT', `/api/tasks/${t.id}`, { deliverables: placed });
+  }
   const patch = { status, task_type, preferred_agent: 'executive-report-writer', created_at: daysAgo(created) };
   if (status !== 'backlog' && status !== 'ready') patch.start_date = daysAgo(created, 10);
   await api('PUT', `/api/tasks/${t.id}`, patch);

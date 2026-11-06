@@ -8,9 +8,11 @@ import { MentionService } from './mentionService';
 import { OrgChartService, findLoop, findUnitLoop, isPlaceholder } from './orgChartService';
 import { OutputService } from './outputService';
 import { isDone, isOpen } from './taskStatus';
-import { listFolderFiles } from '../utils/files';
+import { fileInside, listFolderFiles } from '../utils/files';
+import { WorkspaceService } from './workspace';
 
 const taskService = new TaskService();
+const workspaceService = new WorkspaceService();
 const stakeholderService = new StakeholderService();
 const mentionService = new MentionService();
 const orgChartService = new OrgChartService();
@@ -133,6 +135,36 @@ export class ValidationService {
     return results;
   }
 
+  /**
+   * Complete deliverables whose file the dashboard cannot open: missing, outside the workspace, or written relative
+   * to the task folder instead of the workspace root (the common slip, so it is named).
+   */
+  async checkDeliverableFiles(task: Task): Promise<ValidationResult[]> {
+    const results: ValidationResult[] = [];
+    const workspace = workspaceService.getWorkspacePath();
+    const deliverables = Array.isArray(task['deliverables']) ? task['deliverables'] as unknown[] : [];
+    for (const d of deliverables) {
+      if (!d || typeof d !== 'object') continue;
+      const { id, status, file_path: filePath } = d as { id?: unknown; status?: unknown; file_path?: unknown };
+      if (status !== 'complete' || typeof filePath !== 'string' || !filePath.trim()) continue;
+      const name = typeof id === 'string' ? id : 'a deliverable';
+      try {
+        await fileInside(workspace, filePath.trim());
+      } catch (err) {
+        const outside = err instanceof Error && err.message.startsWith('Invalid path traversal');
+        let message = outside
+          ? `Task ${task.id}: ${name} is complete, but its file_path points outside the workspace: ${filePath}`
+          : `Task ${task.id}: ${name} is complete, but its file is missing: ${filePath}`;
+        if (!outside && task.path) {
+          const inTaskFolder = await fileInside(path.dirname(task.path), filePath.trim()).then(() => true, () => false);
+          if (inTaskFolder) message += ' (it is there relative to the task folder; file_path must start at the workspace root)';
+        }
+        results.push({ level: 'warning', rule: 'missing_deliverable', message, path: task.path });
+      }
+    }
+    return results;
+  }
+
   async validateWorkspace(): Promise<ValidationResult[]> {
     const results: ValidationResult[] = [];
     const seenIds = new Set<string>();
@@ -200,6 +232,9 @@ export class ValidationService {
           results.push({ level: 'warning', rule: 'broken_mention', message: `Task ${task.id} mentions ${what}: @${m.label} (${m.href})`, path: task.path });
         }
       }
+
+      // A complete deliverable must open from the dashboard, which reads its file_path from the workspace root.
+      results.push(...await this.checkDeliverableFiles(task));
 
       // Office files agents cannot read, including ones an agent itself saved in the task folder.
       if (task.path && !isDone(task.status)) {
