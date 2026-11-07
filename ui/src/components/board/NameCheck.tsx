@@ -4,7 +4,8 @@ import Button from '@/components/common/Button';
 import { sectionLabelStyle } from '@/components/task-form/styles';
 import { useNotify } from '@/hooks/useNotify';
 import { apiPost, apiPut } from '@/utils/api';
-import { checkableDeliverables, visibleFindings, type NameCheckRun } from '@/utils/nameCheck';
+import { checkableDeliverables, runKey, visibleFindings, type NameCheckRun } from '@/utils/nameCheck';
+import { formatRelativeDate } from '@/utils/format';
 import type { Task } from '@/types';
 
 /**
@@ -16,17 +17,18 @@ export default function NameCheck({ task, dirty }: { task: Task; dirty: boolean 
   const notify = useNotify();
   const [runs, setRuns] = React.useState<Record<string, NameCheckRun>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [pending, setPending] = React.useState<string | null>(null);
   const [showDismissed, setShowDismissed] = React.useState<Record<string, boolean>>({});
   const items = checkableDeliverables(task.deliverables ?? []);
   if (items.length === 0) return null;
 
   const base = (id: string) => `/api/tasks/${encodeURIComponent(task.id)}/deliverables/${encodeURIComponent(id)}/name-check`;
 
-  const check = async (id: string) => {
+  const check = async (id: string, filePath: string) => {
     setBusy(id);
     try {
       const run = await apiPost<NameCheckRun>(base(id));
-      setRuns((r) => ({ ...r, [id]: run }));
+      setRuns((r) => ({ ...r, [runKey(task.id, id, run.file || filePath)]: run }));
     } catch (err) {
       notify.error(err, t('nameCheck.couldNotCheck'));
     } finally {
@@ -34,12 +36,16 @@ export default function NameCheck({ task, dirty }: { task: Task; dirty: boolean 
     }
   };
 
-  const dismiss = async (id: string, key: string, dismissed: boolean) => {
+  const dismiss = async (id: string, filePath: string, key: string, dismissed: boolean) => {
+    const k = runKey(task.id, id, filePath);
+    setPending(`${k}\u0000${key}`);
     try {
       await apiPut(`${base(id)}/dismissed`, { key, dismissed });
-      setRuns((r) => r[id] ? { ...r, [id]: { ...r[id]!, findings: r[id]!.findings.map((f) => f.key === key ? { ...f, dismissed } : f) } } : r);
+      setRuns((r) => r[k] ? { ...r, [k]: { ...r[k]!, findings: r[k]!.findings.map((f) => f.key === key ? { ...f, dismissed } : f) } } : r);
     } catch (err) {
       notify.error(err, t('nameCheck.couldNotSave'));
+    } finally {
+      setPending(null);
     }
   };
 
@@ -51,9 +57,10 @@ export default function NameCheck({ task, dirty }: { task: Task; dirty: boolean 
       </p>
       <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
         {items.map((d) => {
-          const run = runs[d.id];
+          const k = runKey(task.id, d.id, d.file_path);
+          const run = runs[k];
           const { shown, dismissed } = run ? visibleFindings(run.findings) : { shown: [], dismissed: [] };
-          const list = showDismissed[d.id] ? [...shown, ...dismissed] : shown;
+          const list = showDismissed[k] ? [...shown, ...dismissed] : shown;
           return (
             <div key={d.id} style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', padding: 'var(--space-3)' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
@@ -61,19 +68,23 @@ export default function NameCheck({ task, dirty }: { task: Task; dirty: boolean 
                 <span style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.file_path}>
                   {d.file_path.split('/').pop()}
                 </span>
-                <Button size="sm" variant="secondary" loading={busy === d.id} disabled={dirty || (busy !== null && busy !== d.id)} onClick={() => void check(d.id)}>
+                <Button size="sm" variant="secondary" loading={busy === d.id} disabled={dirty || (busy !== null && busy !== d.id)} onClick={() => void check(d.id, d.file_path)}>
                   {run ? t('nameCheck.checkAgain') : t('nameCheck.check')}
                 </Button>
               </div>
+              <div aria-live="polite" style={{ marginTop: run ? 'var(--space-2)' : 0 }}>
               {run && (
-                <div style={{ marginTop: 'var(--space-2)' }} aria-live="polite">
+                <>
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                       {shown.length === 0 ? t('nameCheck.nothingToLookAt') : t('nameCheck.toLookAt', { count: shown.length })}
+                      {run.total > run.findings.length && ` ${t('nameCheck.firstOnly', { shown: run.findings.length, total: run.total })}`}
+                      {` · ${t('nameCheck.checked', { when: formatRelativeDate(run.checked_at) })}`}
+                      {!run.recorded && ` · ${t('nameCheck.archivedReadOnly')}`}
                     </span>
                     {dismissed.length > 0 && (
-                      <Button size="sm" variant="ghost" onClick={() => setShowDismissed((s) => ({ ...s, [d.id]: !s[d.id] }))}>
-                        {showDismissed[d.id] ? t('nameCheck.hideDismissed') : t('nameCheck.showDismissed', { count: dismissed.length })}
+                      <Button size="sm" variant="ghost" onClick={() => setShowDismissed((s) => ({ ...s, [k]: !s[k] }))}>
+                        {showDismissed[k] ? t('nameCheck.hideDismissed') : t('nameCheck.showDismissed', { count: dismissed.length })}
                       </Button>
                     )}
                   </div>
@@ -92,15 +103,20 @@ export default function NameCheck({ task, dirty }: { task: Task; dirty: boolean 
                             </div>
                             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-secondary)', overflowWrap: 'anywhere' }}>{f.snippet}</div>
                           </div>
-                          <Button size="sm" variant="ghost" onClick={() => void dismiss(d.id, f.key, !f.dismissed)}>
-                            {f.dismissed ? t('nameCheck.restore') : t('nameCheck.dismiss')}
-                          </Button>
+                          {run.recorded && (
+                            <Button size="sm" variant="ghost" loading={pending === `${k}\u0000${f.key}`} disabled={pending !== null}
+                              aria-label={f.dismissed ? t('nameCheck.restoreLabel', { found: f.found }) : t('nameCheck.dismissLabel', { found: f.found })}
+                              onClick={() => void dismiss(d.id, d.file_path, f.key, !f.dismissed)}>
+                              {f.dismissed ? t('nameCheck.restore') : t('nameCheck.dismiss')}
+                            </Button>
+                          )}
                         </li>
                       ))}
                     </ul>
                   )}
-                </div>
+                </>
               )}
+              </div>
             </div>
           );
         })}

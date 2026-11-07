@@ -661,7 +661,8 @@ If the executive comes back with feedback on a task that is already \`in_review\
     const entries = await fsp.readdir(taskDir, { withFileTypes: true });
     const results: FolderFile[] = [];
     for (const entry of entries) {
-      if (!entry.isFile() || entry.name === 'task.md') continue;
+      // Dot files are the app's own records (such as the names and terms check's), never the user's files.
+      if (!entry.isFile() || entry.name === 'task.md' || entry.name.startsWith('.')) continue;
       const filePath = path.join(taskDir, entry.name);
       const stat = await fsp.stat(filePath);
       results.push(await withOfficeCheck({

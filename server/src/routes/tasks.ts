@@ -154,7 +154,6 @@ router.get('/:id/meeting-action', async (req: Request, res: Response) => {
   res.json(await actionNotice(await taskService.getTask(param(req, 'id')) as unknown as Record<string, unknown>));
 });
 
-// GET /api/tasks/:id/files
 // POST /api/tasks/:id/deliverables/:deliverable/name-check  check a Markdown, HTML or text deliverable's names and terms
 router.post('/:id/deliverables/:deliverable/name-check', async (req: Request, res: Response) => {
   res.json(await runNameCheck(param(req, 'id'), param(req, 'deliverable')));
@@ -165,6 +164,7 @@ router.put('/:id/deliverables/:deliverable/name-check/dismissed', async (req: Re
   res.json(await setDismissed(param(req, 'id'), param(req, 'deliverable'), req.body));
 });
 
+// GET /api/tasks/:id/files
 router.get('/:id/files', async (req: Request, res: Response) => {
   const files = await taskService.listTaskFiles(param(req, 'id'));
   res.json(files);

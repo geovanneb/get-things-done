@@ -16,6 +16,13 @@ export interface NameCheckRun {
   file: string;
   checked_at: string;
   findings: NameCheckFinding[];
+  total: number;
+  recorded: boolean;
+}
+
+/** Results are kept per task, deliverable and file: one for another task's DEL-01, or an older file, is never shown. */
+export function runKey(taskId: string, deliverableId: string, filePath: string): string {
+  return `${taskId}\u0000${deliverableId}\u0000${filePath}`;
 }
 
 const CHECKABLE = /\.(md|markdown|html?|txt)$/i;

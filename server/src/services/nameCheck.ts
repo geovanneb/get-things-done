@@ -8,6 +8,8 @@
  * An unknown full name is never a finding: names are not a dictionary.
  */
 
+import { COMMON_WORDS } from './nameCheckWords';
+
 export interface PersonEntry {
   /** The stakeholder's full `name`, as written. */
   name: string;
@@ -42,19 +44,24 @@ export interface Finding {
 const COMMON = new Set(('AI API APIS CEO CFO COO CTO CIO CEOS HR IT PR PDF PPT PPTX DOCX XLSX CSV HTML CSS JSON XML URL URLS ' +
   'UI UX QA KPI KPIS OKR OKRS ROI FY Q1 Q2 Q3 Q4 H1 H2 YOY MOM YTD EOD EOW EOM ETA FAQ TBD TBC NA N-A OK USA US UK EU ' +
   'JP JPY USD EUR GBP BRL VAT ID IDS IP SLA SLAS SaaS SAAS B2B B2C R&D PM AM MVP POC PoC NDA RFP RFQ SOW MOU CRM ERP ' +
-  'II III IV VI VII VIII IX XI XII AM PM GMT UTC JST TODO FYI ASAP CC BCC MD EN JA ES PT DE FR ZH KO').split(/\s+/));
+  'II III IV VI VII VIII IX XI XII AM PM GMT UTC JST TODO FYI ASAP CC BCC MD EN JA ES PT DE FR ZH KO ' +
+  'DRAFT NOTE NOTES WIP NB PS RACI PHD PhD FAQS').split(/\s+/));
 
+/** A word in a cased script (Latin, Greek, Cyrillic, with accents and combining marks); never Chinese or Japanese. */
+const LATIN_WORD = /[\p{Lu}\p{Ll}][\p{Lu}\p{Ll}\p{M}'’-]*/gu;
+/** Most findings listed for one file: enough to act on, never a flood. */
+export const MAX_FINDINGS = 200;
 const HONORIFIC_AFTER = /^(?:-?(?:san|sama|kun|chan|sensei|shi)\b|さん|様|さま|氏|君|くん|先生)/i;
 const CJK = /[㐀-䶿一-鿿豈-﫿]/;
 const CJK_RUN = /[㐀-䶿一-鿿豈-﫿々]+/g;
 
 /** Splits a stakeholder `name` like "Family Given (漢字 漢字)" into its Latin and bracketed parts. */
 export function personEntry(name: string): PersonEntry | null {
-  const trimmed = name.trim();
+  const trimmed = name.normalize('NFC').trim();
   if (!trimmed) return null;
   const bracket = /[(（]([^)）]+)[)）]/.exec(trimmed);
   const outside = trimmed.replace(/[(（][^)）]*[)）]/g, ' ');
-  const latin = (outside.match(/[\p{L}][\p{L}'’-]*/gu) ?? []).filter((p) => p.length >= 2 && !CJK.test(p));
+  const latin = (outside.match(LATIN_WORD) ?? []).filter((p) => p.length >= 2);
   let cjk: PersonEntry['cjk'] = null;
   const cjkSource = bracket?.[1] ?? (CJK.test(outside) ? outside : '');
   if (cjkSource && CJK.test(cjkSource)) {
@@ -109,7 +116,12 @@ export function buildRegistry(input: { names: string[]; organizations?: string[]
   return { people, known, terms };
 }
 
-/** Replaces a match with spaces of the same length, keeping line breaks, so line numbers and offsets stay right. */
+/** Spaces of the same length as `text`, keeping its line breaks. */
+function spaces(text: string): string {
+  return text.replace(/[^\n]/g, ' ');
+}
+
+/** Replaces each match with spaces (keeping line breaks), or keeps one part of it. Every pattern here must be linear. */
 function blank(text: string, re: RegExp, keep?: (m: RegExpExecArray) => string): string {
   return text.replace(re, (...args) => {
     const m = args.slice(0, -2) as unknown as RegExpExecArray;
@@ -117,42 +129,109 @@ function blank(text: string, re: RegExp, keep?: (m: RegExpExecArray) => string):
     if (keep) {
       const kept = keep(m);
       const i = whole.indexOf(kept);
-      if (kept && i >= 0) return whole.slice(0, i).replace(/[^\n]/g, ' ') + kept + whole.slice(i + kept.length).replace(/[^\n]/g, ' ');
+      if (kept && i >= 0) return spaces(whole.slice(0, i)) + kept + spaces(whole.slice(i + kept.length));
     }
-    return whole.replace(/[^\n]/g, ' ');
+    return spaces(whole);
   });
 }
 
+/** Blanks everything from each `open` to the next `close` (or to the end), searching forward only: linear in the text. */
+function blankBetween(text: string, open: RegExp, close: (opened: RegExpExecArray) => string): string {
+  let out = '';
+  let from = 0;
+  const opener = new RegExp(open.source, open.flags.includes('g') ? open.flags : open.flags + 'g');
+  for (;;) {
+    opener.lastIndex = from;
+    const m = opener.exec(text);
+    if (!m) break;
+    const closer = new RegExp(close(m).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    closer.lastIndex = m.index + m[0].length;
+    const found = closer.exec(text);
+    const stop = found ? found.index + found[0].length : text.length;
+    out += text.slice(from, m.index) + spaces(text.slice(m.index, stop));
+    from = stop;
+    if (!found) break;
+  }
+  return out + text.slice(from);
+}
+
+const BLOCK_TAGS = new Set(['p', 'div', 'li', 'td', 'th', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'br', 'section', 'article',
+  'header', 'footer', 'table', 'ul', 'ol', 'dt', 'dd', 'blockquote', 'figcaption', 'caption']);
+
 /**
- * The prose of a Markdown, HTML or text file: code, links' targets, URLs, markup, entities, frontmatter, placeholders
- * and workspace ids replaced by spaces. Offsets and line numbers of what remains are those of the file.
+ * Blanks every tag, however long (an embedded image can make one megabytes long), in one forward pass. A block
+ * boundary (cell, item, heading, paragraph, line break) ends in a line break, so the next word starts a sentence.
+ */
+function blankTags(text: string): string {
+  let out = '';
+  let from = 0;
+  const open = /<\/?([A-Za-z][A-Za-z0-9-]*)/g;
+  for (;;) {
+    open.lastIndex = from;
+    const m = open.exec(text);
+    if (!m) break;
+    const close = text.indexOf('>', m.index + m[0].length);
+    if (close < 0) break; // no '>' anywhere after: no later tag can close either
+    const tag = text.slice(m.index, close + 1);
+    const blanked = spaces(tag);
+    out += text.slice(from, m.index) + (BLOCK_TAGS.has(m[1]!.toLowerCase()) ? blanked.slice(0, -1) + '\n' : blanked);
+    from = close + 1;
+  }
+  return out + text.slice(from);
+}
+
+/** Fenced code blocks (``` or ~~~, indented up to 3 spaces), line by line. */
+function blankFences(text: string): string {
+  const lines = text.split('\n');
+  let fence: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i]!);
+    if (fence === null) {
+      if (open) { fence = open[1]!; lines[i] = spaces(lines[i]!); }
+    } else {
+      const closes = open && open[1]![0] === fence[0] && open[1]!.length >= fence.length && lines[i]!.trim() === open[1];
+      lines[i] = spaces(lines[i]!);
+      if (closes) fence = null;
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The prose of a Markdown, HTML or text file: code, links' targets, URLs, markup, emphasis, entities, frontmatter,
+ * placeholders and workspace ids replaced by spaces. It has exactly the length of `text`, so offsets are the file's.
+ * Every step is linear in the text: a deliverable can be large and must never stall the server.
  */
 export function proseOf(text: string, kind: 'md' | 'html' | 'txt'): string {
-  let s = text.replace(/\r\n?/g, (m) => ' '.repeat(m.length - 1) + '\n');
+  let s = text.replace(/\r\n?/g, (m) => ' '.repeat(m.length - 1) + '\n').replace(/^\ufeff/, ' ');
   if (kind === 'md') {
-    s = blank(s, /^---\n[\s\S]*?\n---(?=\n|$)/);
-    s = blank(s, /^(```|~~~)[^\n]*\n[\s\S]*?(?:\n\1[^\n]*|$)/gm);
-    s = blank(s, /`[^`\n]+`/g);
-    s = blank(s, /!\[[^\]\n]*\]\([^)\n]*\)/g);
-    s = blank(s, /\[([^\]\n]*)\]\([^)\n]*\)/g, (m) => m[1] ?? '');
-    s = blank(s, /^\s*\[[^\]\n]+\]:\s*\S+.*$/gm);
+    if (/^ ?---\n/.test(s)) {
+      const close = s.indexOf('\n---', 3);
+      const stop = close < 0 ? 0 : close + 4;
+      if (stop > 0) s = spaces(s.slice(0, stop)) + s.slice(stop);
+    }
+    s = blankFences(s);
+    s = blank(s, /`[^`\n]{1,500}`/g);
+    s = blank(s, /!\[[^\]\n]{0,500}\]\([^)\n]{0,2000}\)/g);
+    s = blank(s, /\[([^\]\n]{0,500})\]\([^)\n]{0,2000}\)/g, (m) => m[1] ?? '');
+    s = blank(s, /^ {0,3}\[[^\]\n]{1,200}\]:[^\n]*$/gm);
+    // Emphasis markers next to a word: "**Name**" reads as "Name" in the middle of its sentence.
+    s = s.replace(/(\*{1,3}|_{1,3})(?=[\p{L}\p{N}])|(?<=[\p{L}\p{N}.!?])(\*{1,3}|_{1,3})/gu, (m) => ' '.repeat(m.length));
   }
   if (kind === 'md' || kind === 'html') {
-    s = blank(s, /<!--[\s\S]*?-->/g);
-    s = blank(s, /<(script|style|code|pre|kbd|samp|title)\b[\s\S]*?<\/\1\s*>/gi);
-    // A block boundary (cell, item, heading, paragraph, line break) starts a new sentence: it ends in a line break here.
-    s = s.replace(/<\/?(?:p|div|li|td|th|tr|h[1-6]|br|section|article|header|footer|table|ul|ol|dt|dd|blockquote|figcaption|caption)\b[^>]*>/gi,
-      (tag) => tag.replace(/[^\n]/g, ' ').slice(0, -1) + '\n');
-    s = blank(s, /<[^>]*>/g);
-    s = blank(s, /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi);
+    s = blankBetween(s, /<!--/g, () => '-->');
+    s = blankBetween(s, /<(script|style|code|pre|kbd|samp|title)\b/gi, (m) => `</${m[1]!.toLowerCase()}`);
+    s = blankTags(s);
+    s = blank(s, /&(?:#\d{1,7}|#x[0-9a-f]{1,6}|[a-z][a-z0-9]{0,30});/gi);
   }
-  s = blank(s, /\b(?:https?|ftp|file|mailto):[^\s<>"')\]]+/gi);
-  s = blank(s, /\bwww\.[^\s<>"')\]]+/gi);
-  s = blank(s, /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g);
-  s = blank(s, /\[(?:PLACEHOLDER|INSERT|TBD|TODO)\b[^\]\n]*\]/gi);
-  s = blank(s, /\bINSERT FROM [A-Z][A-Z\s]*/g);
-  s = blank(s, /\b[A-Z]{1,7}-[A-Za-z0-9]*\d[A-Za-z0-9-]*\b/g);
-  s = blank(s, /(?:^|[\s(])[\w.-]+\.(?:md|html?|txt|pdf|pptx?|docx?|xlsx?|csv|json|ya?ml|png|jpe?g|svg)\b/gi);
+  s = blank(s, /\bdata:[\w/+.-]{1,100}(?:;[\w=.-]{1,100}){0,5},[A-Za-z0-9+/=%_-]+/g);
+  s = blank(s, /\b(?:https?|ftp|file|mailto):[^\s<>"')\]]{1,4000}/gi);
+  s = blank(s, /\bwww\.[^\s<>"')\]]{1,4000}/gi);
+  s = blank(s, /(?<![\w.+-])[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}/g);
+  s = blank(s, /\[(?:PLACEHOLDER|INSERT|TBD|TODO)\b[^\]\n]{0,1000}\]/gi);
+  s = blank(s, /\bINSERT FROM [A-Z][A-Z ]{0,80}/g);
+  s = blank(s, /(?<![A-Za-z0-9-])[A-Z]{1,7}-[A-Za-z0-9]{0,20}\d[A-Za-z0-9-]{0,40}/g);
+  s = blank(s, /(?<![\w.-])[\w.-]{1,200}\.(?:md|html?|txt|pdf|pptx?|docx?|xlsx?|csv|json|ya?ml|png|jpe?g|svg)\b/gi);
   return s;
 }
 
@@ -183,10 +262,21 @@ export function allowedDistance(length: number): number {
   return length <= 3 ? 0 : length <= 7 ? 1 : 2;
 }
 
-function lineAt(text: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index; i++) if (text.charCodeAt(i) === 10) line++;
-  return line;
+/** Start offsets of every line, for line numbers by binary search. */
+function lineStarts(text: string): number[] {
+  const starts = [0];
+  for (let i = text.indexOf('\n'); i >= 0; i = text.indexOf('\n', i + 1)) starts.push(i + 1);
+  return starts;
+}
+
+function lineOf(starts: number[], index: number): number {
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid]! <= index) lo = mid; else hi = mid - 1;
+  }
+  return lo + 1;
 }
 
 function snippetAt(original: string, index: number, length: number): string {
@@ -198,114 +288,164 @@ function snippetAt(original: string, index: number, length: number): string {
   return (from > start ? '…' : '') + original.slice(from, to).replace(/\s+/g, ' ').trim() + (to < end ? '…' : '');
 }
 
-/** True when the word at `index` starts a sentence (or a line, a heading, a list item, a table cell). */
+/** True when the word at `index` starts a sentence, a line, a heading or a list item. A table cell does not. */
 function sentenceStart(prose: string, index: number): boolean {
   let i = index - 1;
   while (i >= 0 && (prose[i] === ' ' || prose[i] === '\t')) i--;
   if (i < 0 || prose[i] === '\n') return true;
   const c = prose[i]!;
-  if (/[.!?:;|#>*•–—。！？]/.test(c)) return true;
-  if (c === '-' || c === '+') {
+  if (/[.!?:;#>•–—。！？]/.test(c)) return true;
+  if (c === '-' || c === '+' || c === '*' || /\d/.test(c)) {
     let j = i - 1;
-    while (j >= 0 && (prose[j] === ' ' || prose[j] === '\t')) j--;
+    while (j >= 0 && /[\d \t]/.test(prose[j]!)) j--;
     return j < 0 || prose[j] === '\n';
   }
   return false;
 }
 
+/** Fiscal and period labels such as FY26, FY2026, Q3FY26, H1, CY2025: never unknown abbreviations. */
+const PERIOD = /^(?:(?:FY|CY|Q[1-4]|H[12])\d{0,4})+$/;
+
+export interface CheckResult {
+  findings: Finding[];
+  /** All findings found, when more than MAX_FINDINGS were (only the first ones are listed). */
+  total: number;
+}
+
 /**
  * The findings for one file. `prose` is `proseOf(original, kind)`; `original` gives the snippets. Each finding is
- * listed once, at its first place, with how often it occurs.
+ * listed once, at its first place, with how often it occurs; at most MAX_FINDINGS of them. Linear in the text.
  */
 export function checkText(original: string, prose: string, registry: Registry): Finding[] {
-  const found = new Map<string, Finding>();
+  return checkTextFull(original, prose, registry).findings;
+}
+
+export function checkTextFull(original: string, prose: string, registry: Registry): CheckResult {
+  const starts = lineStarts(original);
+  const found = new Map<string, Finding & { at: number }>();
   const add = (f: Omit<Finding, 'line' | 'snippet' | 'count'>, index: number, length: number) => {
     const prev = found.get(f.key);
     if (prev) { prev.count++; return; }
-    found.set(f.key, { ...f, line: lineAt(original, index), snippet: snippetAt(original, index, length), count: 1 });
+    found.set(f.key, { ...f, at: index, line: lineOf(starts, index), snippet: snippetAt(original, index, length), count: 1 });
   };
 
   // Latin words: close to one part of a known name, with an anchor.
-  const words = [...prose.matchAll(/[A-Za-z\u00c0-\u024f][A-Za-z\u00c0-\u024f'’-]*/g)];
-  const parts = registry.people.flatMap((p) => p.latin.filter((x) => x.length >= 4).map((part) => ({ part, person: p })));
+  const words = [...prose.matchAll(LATIN_WORD)];
+  const parts = registry.people.flatMap((p) => p.latin.filter((x) => x.length >= 4).map((part) => ({ part, lower: part.toLowerCase(), person: p })));
+  const byInitial = new Map<string, typeof parts>();
+  for (const entry of parts) {
+    const k = entry.lower[0]!;
+    byInitial.set(k, [...(byInitial.get(k) ?? []), entry]);
+  }
+  const capitalised = (w: string | undefined) => !!w && w[0] !== w[0]!.toLowerCase();
   for (let w = 0; w < words.length; w++) {
     const token = words[w]![0];
-    const honorific = /-(?:san|sama|kun|chan|sensei|shi)$/i.exec(token);
-    const word = (honorific ? token.slice(0, honorific.index) : token).replace(/['’-]+$/, '');
     const index = words[w]!.index!;
-    if (word.length < 4 || word[0] !== word[0]!.toUpperCase() || word[0] === word[0]!.toLowerCase()) continue;
+    // "Okabe-san" is "Okabe" with an honorific; "Natarajan's" is "Natarajan".
+    const honorific = /-(?:san|sama|kun|chan|sensei|shi)$/i.exec(token);
+    const word = (honorific ? token.slice(0, honorific.index) : token).replace(/['’]s?$/i, '').replace(/[-'’]+$/, '');
+    if (word.length < 4 || word.length > 40 || !capitalised(word)) continue;
     if (word === word.toUpperCase()) continue; // capitals: an abbreviation, not a name
-    if (registry.known.has(word.toLowerCase())) continue;
+    const lower = word.toLowerCase();
+    if (registry.known.has(lower)) continue;
+    const candidates = byInitial.get(lower[0]!);
+    if (!candidates) continue;
     const max = allowedDistance(word.length);
     let best: { part: string; person: PersonEntry; d: number } | null = null;
-    for (const { part, person } of parts) {
-      if (part[0]!.toLowerCase() !== word[0]!.toLowerCase()) continue;
-      const d = editDistance(word.toLowerCase(), part.toLowerCase(), Math.min(max, allowedDistance(part.length)));
-      if (d === 0 || d > Math.min(max, allowedDistance(part.length))) continue;
+    for (const { part, lower: target, person } of candidates) {
+      const limit = Math.min(max, allowedDistance(part.length));
+      const d = editDistance(lower, target, limit);
+      if (d === 0 || d > limit) continue;
       if (!best || d < best.d) best = { part, person, d };
     }
     if (!best) continue;
-    const neighbours = [words[w - 1], words[w + 1]].filter(Boolean).map((m) => m![0].toLowerCase());
-    const after = prose.slice(index + word.length).replace(/^\s+/, '');
-    const anchored = neighbours.some((n) => best!.person.latin.some((p) => p.toLowerCase() === n && p !== best!.part))
-      || HONORIFIC_AFTER.test(after)
-      || !sentenceStart(prose, index);
-    if (!anchored) continue;
+    // Neighbours are words next to this one on the same line, with only spaces between.
+    const near = (m: RegExpMatchArray | undefined, before: boolean) => {
+      if (!m) return undefined;
+      const gap = before ? prose.slice(m.index! + m[0].length, index) : prose.slice(index + token.length, m.index!);
+      return /^[ \t]{1,3}$/.test(gap) ? m[0] : undefined;
+    };
+    const prev = near(words[w - 1], true);
+    const next = near(words[w + 1], false);
+    const sameName = [prev, next].some((n) => n && best!.person.latin.some((p) => p !== best!.part && p.toLowerCase() === n.replace(/['’]s?$/i, '').toLowerCase()));
+    const after = prose.slice(index + word.length, index + word.length + 12).replace(/^\s+/, '');
+    const strong = sameName || !!honorific || HONORIFIC_AFTER.test(after);
+    // A lone capital in mid-sentence also counts, unless the word is common English or sits in a run of capitalised
+    // words (a heading, a product or team name: "the Advisory Panel").
+    const weak = !sentenceStart(prose, index) && !COMMON_WORDS.has(lower) && !capitalised(prev) && !capitalised(next);
+    if (!strong && !weak) continue;
     add({ key: `person:${word}>${best.part}`, kind: 'person', found: word, suggestion: best.part }, index, word.length);
   }
 
-  // Scripts without spaces: a run of characters one character away from a known name of 3+ characters, or a
-  // 2-character family name one character away when an honorific follows.
+  // Scripts without spaces: a window one character off a known name of 3+ characters, or a 2-character family name
+  // one character off when an honorific follows. Each target is indexed under its one-wildcard variants, so the cost is
+  // the text times the name length, whatever the number of people.
+  const WILD = '\u0000';
+  const variants = new Map<number, Map<string, Array<{ target: string; needsHonorific: boolean }>>>();
+  for (const person of registry.people) {
+    if (!person.cjk) continue;
+    const targets: Array<{ target: string; needsHonorific: boolean }> = [];
+    if (person.cjk.full.length >= 3) targets.push({ target: person.cjk.full, needsHonorific: false });
+    for (const part of person.cjk.parts) {
+      if (part.length >= 3 && part !== person.cjk.full) targets.push({ target: part, needsHonorific: false });
+      else if (part.length === 2) targets.push({ target: part, needsHonorific: true });
+    }
+    for (const t of targets) {
+      if (t.target.length > 12) continue;
+      const byLength = variants.get(t.target.length) ?? new Map();
+      variants.set(t.target.length, byLength);
+      for (let k = 0; k < t.target.length; k++) {
+        const v = t.target.slice(0, k) + WILD + t.target.slice(k + 1);
+        byLength.set(v, [...(byLength.get(v) ?? []), t]);
+      }
+    }
+  }
+  const lengths = [...variants.keys()].sort((a, b) => b - a); // full names before their parts
   for (const run of prose.matchAll(CJK_RUN)) {
     const text = run[0];
-    // Places already reported in this run (a full name first), so a part of the same name is not reported again.
-    const covered: Array<[number, number]> = [];
-    for (const person of registry.people) {
-      if (!person.cjk) continue;
-      const targets: Array<{ target: string; needsHonorific: boolean }> = [];
-      if (person.cjk.full.length >= 3) targets.push({ target: person.cjk.full, needsHonorific: false });
-      for (const part of person.cjk.parts) {
-        if (part.length >= 3 && part !== person.cjk.full) targets.push({ target: part, needsHonorific: false });
-        else if (part.length === 2) targets.push({ target: part, needsHonorific: true });
-      }
-      for (const { target, needsHonorific } of targets) {
-        if (text.includes(target)) continue;
-        for (let i = 0; i + target.length <= text.length; i++) {
-          const window = text.slice(i, i + target.length);
-          let diff = 0;
-          for (let k = 0; k < target.length && diff <= 1; k++) if (window[k] !== target[k]) diff++;
-          if (diff !== 1 || registry.known.has(window)) continue;
-          const at = run.index! + i;
-          if (needsHonorific && !HONORIFIC_AFTER.test(prose.slice(at + window.length))) continue;
-          if (covered.some(([a, b]) => at < b && at + window.length > a)) continue;
-          covered.push([at, at + window.length]);
-          add({ key: `person:${window}>${target}`, kind: 'person', found: window, suggestion: target }, at, window.length);
+    const covered = new Uint8Array(text.length);
+    for (const L of lengths) {
+      const byLength = variants.get(L)!;
+      for (let i = 0; i + L <= text.length; i++) {
+        const window = text.slice(i, i + L);
+        if (registry.known.has(window)) continue;
+        let hit: { target: string; needsHonorific: boolean } | null = null;
+        for (let k = 0; k < L && !hit; k++) {
+          for (const t of byLength.get(window.slice(0, k) + WILD + window.slice(k + 1)) ?? []) {
+            if (t.target !== window) { hit = t; break; }
+          }
         }
+        if (!hit) continue;
+        const at = run.index! + i;
+        if (hit.needsHonorific && !HONORIFIC_AFTER.test(prose.slice(at + L, at + L + 4))) continue;
+        if (covered.subarray(i, i + L).some((x) => x === 1)) continue;
+        covered.fill(1, i, i + L);
+        add({ key: `person:${window}>${hit.target}`, kind: 'person', found: window, suggestion: hit.target }, at, L);
       }
     }
   }
 
   // Abbreviations: 2 to 6 capitals (digits, & or - inside), not known, not common, not defined in the text.
   const defined = new Set<string>();
-  for (const m of prose.matchAll(/[(（]\s*([A-Z][A-Za-z0-9&-]{1,7})\s*[)）]/g)) defined.add(m[1]!);
-  for (const m of prose.matchAll(/\b([A-Z][A-Z0-9&-]{1,7})\s*[(（]\s*[\p{L}][^)）]{3,}[)）]/gu)) defined.add(m[1]!);
-  for (const m of prose.matchAll(/(?<![A-Za-z0-9&-])([A-Z][A-Za-z0-9&-]*[A-Z][A-Za-z0-9&-]*)(?![A-Za-z0-9&])/g)) {
-    let abbr = m[1]!.replace(/-+$/, '');
+  for (const m of prose.matchAll(/[(（][ \t]{0,3}([A-Z][A-Za-z0-9&-]{1,7})[ \t]{0,3}[)）]/g)) defined.add(m[1]!);
+  for (const m of prose.matchAll(/(?<![A-Za-z0-9&-])([A-Z][A-Z0-9&-]{1,7})[ \t]{0,3}[(（][ \t]{0,3}\p{L}[^)）\n]{2,120}[)）]/gu)) defined.add(m[1]!);
+  for (const m of prose.matchAll(/(?<![A-Za-z0-9&-])[A-Z][A-Za-z0-9&-]{1,7}(?![A-Za-z0-9&])/g)) {
+    let abbr = m[0].replace(/-+$/, '');
     if (/^[A-Z]{2,}s$/.test(abbr)) abbr = abbr.slice(0, -1); // a plural: "POs" is "PO"
-    if (/^[A-Z]{3,}\d+$/.test(abbr)) continue; // a label with a number ("NEW1"), not an abbreviation
-    // Text set in capitals ("NEW GROUP LINE"): a neighbouring word in capitals too means styling, not abbreviations.
-    const before = /([A-Za-z]+)[^A-Za-z\n]{1,3}$/.exec(prose.slice(Math.max(0, m.index! - 40), m.index!))?.[1];
-    const next = /^[^A-Za-z\n]{1,3}([A-Za-z]+)/.exec(prose.slice(m.index! + m[1]!.length, m.index! + m[1]!.length + 40))?.[1];
-    if ([before, next].some((w) => w && w.length >= 4 && w === w.toUpperCase()) && abbr.length >= 4) continue;
-    // Part of a known name in capitals ("NORTHWIND GROUP" when NORTHWIND is known).
-    if ([before, next].some((w) => w && w.length >= 2 && w === w.toUpperCase() && registry.terms.has(w))) continue;
     const letters = abbr.replace(/[^A-Z]/g, '');
     if (letters.length < 2 || abbr.length > 6 || /[a-z]{2}/.test(abbr)) continue;
     if (abbr !== abbr.toUpperCase() && !/^[A-Z][a-z]?[A-Z]/.test(abbr)) continue;
+    if (/^[A-Z]{3,}\d+$/.test(abbr) || PERIOD.test(abbr)) continue; // a label with a number ("NEW1"), a period ("FY26")
     if (COMMON.has(abbr) || COMMON.has(abbr.toUpperCase()) || defined.has(abbr)) continue;
     if (registry.terms.has(abbr) || registry.known.has(abbr.toLowerCase())) continue;
+    // Text set in capitals ("NEW GROUP LINE"), or part of a known name in capitals ("NORTHWIND GROUP").
+    const before = /([A-Za-z]+)[^A-Za-z\n]{1,3}$/.exec(prose.slice(Math.max(0, m.index! - 40), m.index!))?.[1];
+    const next = /^[^A-Za-z\n]{1,3}([A-Za-z]+)/.exec(prose.slice(m.index! + m[0].length, m.index! + m[0].length + 40))?.[1];
+    if ([before, next].some((w) => w && w.length >= 4 && w === w.toUpperCase()) && abbr.length >= 4) continue;
+    if ([before, next].some((w) => w && w.length >= 2 && w === w.toUpperCase() && registry.terms.has(w))) continue;
     add({ key: `abbreviation:${abbr}`, kind: 'abbreviation', found: abbr }, m.index!, abbr.length);
   }
 
-  return [...found.values()].sort((a, b) => a.line - b.line || a.found.localeCompare(b.found));
+  const all = [...found.values()].sort((a, b) => a.at - b.at || a.found.localeCompare(b.found));
+  return { findings: all.slice(0, MAX_FINDINGS).map(({ at: _at, ...f }) => f), total: all.length };
 }

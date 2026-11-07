@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { buildRegistry, checkText, editDistance, glossaryTerms, proseOf, splitTerm } from '../src/services/nameCheck';
+import { buildRegistry, checkText, checkTextFull, editDistance, glossaryTerms, MAX_FINDINGS, proseOf, splitTerm } from '../src/services/nameCheck';
 
 const registry = buildRegistry({
-  names: ['Okabe Haruto (岡部 陽翔)', 'Lindqvist Maren', 'Tanaka Yui (田中 結衣)'],
+  names: ['Okabe Haruto (岡部 陽翔)', 'Lindqvist Maren', 'Tanaka Yui (田中 結衣)', 'Dana Patel', 'Natarajan Priya', 'Nguyễn Văn An'],
   organizations: ['Northwind Labs'],
   terms: glossaryTerms('Dual Lane', '### QRT / QRTX\n**Pallet Pool**: shared pallets.\n| **Cross Dock (XD)** | a dock |\n'),
 });
@@ -59,6 +59,50 @@ test('code, links, URLs, markup, placeholders and workspace ids are never checke
   assert.deepEqual(run(html, 'html'), ['person:Okkabe>Okabe@3', 'abbreviation:YYZ@3']);
 });
 
+test('review cases: fences, possessives, common words, emphasis, tables, periods, accents, BOM', () => {
+  assert.deepEqual(run('```\nfirst ZPA\nsecond ZPB\nthird Lindqvst\n```\nAfter ZPC.\n'), ['abbreviation:ZPC@6'], 'a whole fence is code');
+  assert.deepEqual(run('- item\n   ```js\n   ZQD here\n   ```\n'), [], 'an indented fence too');
+  assert.deepEqual(run("We read Natarajan's notes and Lindqvst's plan.\n"), ["person:Lindqvst>Lindqvist@1"]);
+  assert.deepEqual(run('The new Data Platform and the Advisory Panel met. We use Data daily.\n'), [], 'common words and title case are not names');
+  assert.deepEqual(run('We met **Lindqvst** today.\n'), ['person:Lindqvst>Lindqvist@1'], 'bold does not hide a name');
+  assert.deepEqual(run('| Owner | Plan |\n|---|---|\n| Lindqvst | ship |\n'), ['person:Lindqvst>Lindqvist@3'], 'a table cell is not a sentence start');
+  assert.deepEqual(run('FY2026, FY26, Q3FY26, CY2025, DRAFT, PhD and WIP.\n'), []);
+  assert.deepEqual(run('Notes from An Nguyển today.\n'), ['person:Nguyển>Nguyễn@1'], 'accents outside Latin-1 stay in the word');
+  assert.deepEqual(run('\ufeff---\ntitle: ZQK\n---\nBody ZQL.\n'), ['abbreviation:ZQL@4'], 'frontmatter after a BOM');
+  const image = 'data:image/png;base64,' + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA'.repeat(200);
+  assert.deepEqual(run(`<p>Report <img alt="logo" src="${image}"> by Lindqvst.</p>\n`, 'html'), ['person:Lindqvst>Lindqvist@1'], 'an embedded image is markup');
+  assert.deepEqual(run(`![logo](${image}) Plain ZQM.\n`), ['abbreviation:ZQM@1']);
+});
+
+test('a file with very many findings lists the first ones and says how many there were', () => {
+  const text = Array.from({ length: 1000 }, (_, i) => `Z${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(65 + Math.floor(i / 26) % 26)}Q`).join(' and ') + '\n';
+  const result = checkTextFull(text, proseOf(text, 'txt'), registry);
+  assert.equal(result.findings.length, MAX_FINDINGS);
+  assert.ok(result.total > MAX_FINDINGS);
+});
+
+test('adversarial input of 2 MB never stalls: every step is linear', () => {
+  const big = 2 * 1024 * 1024;
+  const cases: Array<[string, string, 'md' | 'html' | 'txt']> = [
+    ['an opening < with no >', 'costs < 5% ' + 'a'.repeat(big), 'md'],
+    ['a long word with no @', 'x'.repeat(big), 'txt'],
+    ['many comment openers', '<!-- '.repeat(big / 5), 'html'],
+    ['many script openers', '<script '.repeat(big / 8), 'html'],
+    ['many unclosed definitions', 'AB (word '.repeat(big / 9), 'md'],
+    ['many unclosed links', '[x'.repeat(big / 2), 'md'],
+    ['many backticks', '`a'.repeat(big / 2), 'md'],
+    ['many block tags', '<td '.repeat(big / 4), 'html'],
+    ['capital words', 'Lindqvst Okkabe Dana Data '.repeat(big / 26), 'md'],
+    ['kanji', '岡辺田仲陽斗結'.repeat(big / 21), 'txt'],
+  ];
+  for (const [name, text, kind] of cases) {
+    const started = Date.now();
+    checkTextFull(text, proseOf(text, kind), registry);
+    const ms = Date.now() - started;
+    assert.ok(ms < 3000, `${name}: ${ms} ms`);
+  }
+});
+
 test('the check reads only the deliverable file in its task folder, remembers dismissals and counts what was fixed', async (t) => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-name-check-'));
   const previous = process.env.ESB_WORKSPACE_PATH;
@@ -106,6 +150,26 @@ test('the check reads only the deliverable file in its task folder, remembers di
   await status(runNameCheck('TASK-2026-0001', 'DEL-09'), 404);
   await status(setDismissed('TASK-2026-0001', 'DEL-01', { key: 'something', dismissed: true }), 400);
 
+  // A deliverable id that is not one (never a key like __proto__) is refused, and nothing leaks into objects.
+  await status(setDismissed('TASK-2026-0001', '__proto__', { key: 'abbreviation:ZQX', dismissed: true }), 400);
+  assert.equal(({} as Record<string, unknown>)['dismissed'], undefined);
+
+  // A damaged record is set aside, never overwritten silently.
+  await fsp.writeFile(path.join(taskDir, '.name-check.json'), '{ not json');
+  await runNameCheck('TASK-2026-0001', 'DEL-01');
+  const names = await fsp.readdir(taskDir);
+  assert.ok(names.some((n) => n.startsWith('.name-check.json.bad-')), names.join(','));
+  assert.ok(!names.some((n) => n.endsWith('.tmp')), 'no temporary file is left behind');
+
+  // Dismissing needs only the task and the deliverable, even while its file is missing.
+  await fsp.rename(deliverable, deliverable + '.away');
+  await setDismissed('TASK-2026-0001', 'DEL-01', { key: 'abbreviation:ZPX', dismissed: true });
+  await fsp.rename(deliverable + '.away', deliverable);
+
+  // The app's own dot files are not shown among the task's files.
+  const { TaskService } = await import('../src/services/taskService');
+  assert.ok(!(await new TaskService().listTaskFiles('TASK-2026-0001')).some((f) => f.name.startsWith('.')));
+
   // A deliverable reached through a link is refused.
   await fsp.symlink(path.join(dir, 'outside.md'), path.join(taskDir, 'deliverables', 'linked.md'));
   await fsp.writeFile(path.join(taskDir, 'task.md'), taskMd('tasks/active/TASK-2026-0001/deliverables/linked.md'));
@@ -113,4 +177,16 @@ test('the check reads only the deliverable file in its task folder, remembers di
   // So is a dot file or a path that climbs out.
   await fsp.writeFile(path.join(taskDir, 'task.md'), taskMd('tasks/active/TASK-2026-0001/../TASK-2026-0001/deliverables/DEL-01_261107.md'));
   await status(runNameCheck('TASK-2026-0001', 'DEL-03'), 400);
+
+  // An archived task is only read: the run is shown, not recorded, and nothing can be dismissed.
+  await fsp.writeFile(path.join(taskDir, 'task.md'), taskMd());
+  const archiveDir = path.join(dir, 'tasks', 'archive', 'TASK-2026-0001');
+  await fsp.mkdir(path.dirname(archiveDir), { recursive: true });
+  await fsp.rename(taskDir, archiveDir);
+  const recordBefore = await fsp.readFile(path.join(archiveDir, '.name-check.json'), 'utf-8');
+  const archived = await runNameCheck('TASK-2026-0001', 'DEL-01');
+  assert.equal(archived.recorded, false);
+  assert.ok(archived.findings.some((f) => f.dismissed), 'dismissals still show');
+  assert.equal(await fsp.readFile(path.join(archiveDir, '.name-check.json'), 'utf-8'), recordBefore);
+  await status(setDismissed('TASK-2026-0001', 'DEL-01', { key: 'abbreviation:ZPX', dismissed: false }), 409);
 });
