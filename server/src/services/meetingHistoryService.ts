@@ -38,6 +38,10 @@ export interface HistoryMeeting {
   meeting_date: string;
   /** Who the record lists as attendees: the reviewed account, not who was expected. */
   people: string[];
+  /** The stakeholders (STK-/GRP-) among those attendees, by ref; never `me`, never a name match. */
+  attendee_refs: string[];
+  /** The shown record's own meeting date, empty when the record has none (never a fallback such as the update's date). */
+  record_date: string;
   recorded: boolean;
   update: { id: string; title: string; status: UpdateStatus; created_at: string; analyzed_at: string | null; applied_at: string | null; context_changed: boolean };
   /** `revision` is the record's version: it changes whenever its content does. */
@@ -168,7 +172,7 @@ function orphan(meeting: string, corrections: ContextUpdate[]): HistoryMeeting {
   const r = latest.meeting_records[0];
   return {
     id: meeting, linkable: false, review_state: 'final', record_state: 'none', update_id: latest.id, origin: 'update',
-    title: r?.title || meeting, meeting_date: r?.meeting_date ?? '', people: [], recorded: false,
+    title: r?.title || meeting, meeting_date: r?.meeting_date ?? '', people: [], attendee_refs: [], record_date: '', recorded: false,
     update: { id: latest.id, title: latest.title, status: latest.status, created_at: latest.created_at, analyzed_at: latest.analyzed_at, applied_at: latest.applied_at, context_changed: false },
     record: null, record_owner: null, unlinked_records: 0, kept: false, deleted: null,
     correction: { state: 'broken', head_at: null, original: latest.correction!.root, open: corrections.filter((u) => u.status !== 'done').map((u) => u.id) },
@@ -194,6 +198,8 @@ function summary(u: ContextUpdate, m: HeldMeeting, present: Set<string> | null, 
     title: current ? current.title : m.title,
     meeting_date: current ? current.meeting_date : m.meeting_date,
     people: (record?.attendees ?? []).map((p) => p.name).filter(Boolean),
+    attendee_refs: [...new Set((record?.attendees ?? []).map((p) => p.ref).filter((r): r is string => typeof r === 'string' && /^(STK|GRP)-\d{4}$/.test(r)))],
+    record_date: record?.meeting_date ?? '',
     recorded: m.recorded,
     update: {
       id: u.id, title: u.title, status: u.status, created_at: u.created_at, analyzed_at: u.analyzed_at, applied_at: u.applied_at,

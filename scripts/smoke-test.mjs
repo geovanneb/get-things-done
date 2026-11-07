@@ -931,6 +931,12 @@ try {
     check('a digested meeting is found by what was said in it, with where',
       saidSearch.results?.some((r) => r.id === queued.id && r.snippets?.[0]?.text?.includes('Standup words')) && saidShort.status === 400,
       `results=${JSON.stringify(saidSearch.results?.map((r) => r.id))} short=${saidShort.status}`);
+    // Latest meeting involving a stakeholder (#111): expected participants of a meeting not yet reviewed never count.
+    const lastMeeting = await (await fetch(`${base}/api/stakeholders/STK-0001/last-meeting`)).json();
+    const badLast = await fetch(`${base}/api/stakeholders/..%2Fx/last-meeting`);
+    check('a stakeholder\'s latest meeting comes from confirmed records only, not from who was expected',
+      lastMeeting.last === null && lastMeeting.undated === false && badLast.status === 400,
+      `${JSON.stringify(lastMeeting)} bad=${badLast.status}`);
     // A task made from that meeting: the picker offers it, saving pins what the agent may read, and the package holds it.
     const meetingPick = await (await fetch(`${base}/api/mentions?q=standup&limit=20`)).json();
     const fromMeeting = await (await json('POST', '/api/tasks', { title: 'Fictional standup summary', body: `Summarize [@Fictional standup](/meetings/${queued.id}).` })).json();

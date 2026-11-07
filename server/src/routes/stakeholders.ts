@@ -3,6 +3,7 @@ import { param } from '../utils/params';
 import { StakeholderService } from '../services/stakeholderService';
 import { orgChartService } from '../services/orgChartService';
 import { VoiceprintService } from '../services/voiceprints/service';
+import { lastMeetingInvolving } from '../services/stakeholderMeetings';
 
 const router = Router();
 const stakeholderService = new StakeholderService();
@@ -25,6 +26,11 @@ router.post('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   const stakeholder = await stakeholderService.getStakeholder(param(req, 'id'));
   res.json(stakeholder);
+});
+
+// GET /api/stakeholders/:id/last-meeting  the latest confirmed meeting involving them (#111, derived, never stored)
+router.get('/:id/last-meeting', async (req: Request, res: Response) => {
+  res.json(await lastMeetingInvolving(param(req, 'id')));
 });
 
 // PUT /api/stakeholders/:id
