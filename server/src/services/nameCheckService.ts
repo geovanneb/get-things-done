@@ -134,9 +134,12 @@ async function deliverableFile(ws: string, taskId: string, resolved: ResolvedDel
 
 /** Reads a file without following a link at its last step, and never more than `cap` bytes (null when larger). */
 async function readNoFollow(file: string, cap: number): Promise<Buffer | null> {
-  const handle = await fsp.open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  // A plain file only: a pipe or device would block the open itself, so look first, and open without blocking.
+  const before = await fsp.lstat(file);
+  if (!before.isFile()) throw Object.assign(new Error('Not a plain file.'), { code: 'ENOTFILE' });
+  const handle = await fsp.open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
   try {
-    if (!(await handle.stat()).isFile()) throw httpError(400, 'Not a plain file.');
+    if (!(await handle.stat()).isFile()) throw Object.assign(new Error('Not a plain file.'), { code: 'ENOTFILE' });
     const buffer = Buffer.alloc(cap + 1);
     let size = 0;
     for (;;) {
@@ -162,14 +165,24 @@ function emptyState(): State {
 async function readState(ws: string, taskDir: string, setAsideBad: boolean): Promise<State> {
   const file = path.join(taskDir, STATE_FILE);
   await workspaceEntry(ws, file, true).catch(() => { throw httpError(409, 'The check\'s record in the task folder is reached through a link.'); });
-  let raw: Partial<State>;
+  let bytes: Buffer | null;
   try {
-    const bytes = await readNoFollow(file, MAX_STATE_BYTES);
-    if (!bytes) throw new Error('too large');
-    raw = JSON.parse(bytes.toString('utf-8')) as Partial<State>;
-    if (!raw || typeof raw !== 'object') throw new Error('not an object');
+    bytes = await readNoFollow(file, MAX_STATE_BYTES);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return emptyState();
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return emptyState();
+    if (code === 'ENOTFILE' || code === 'ELOOP') throw httpError(409, 'The check\'s record in the task folder is not a plain file.');
+    // Busy, locked or not allowed right now (a sync tool, antivirus): leave the record as it is and try later.
+    throw httpError(503, 'The check\'s record in the task folder cannot be read right now. Try again in a moment.');
+  }
+  let raw: Partial<State> | null;
+  try {
+    raw = bytes ? JSON.parse(bytes.toString('utf-8')) as Partial<State> : null;
+  } catch {
+    raw = null;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    // Damaged or too large: set aside, never overwritten silently.
     if (setAsideBad) await fsp.rename(file, `${file}.bad-${Date.now()}`).catch(() => { throw httpError(409, 'The check\'s record in the task folder cannot be read or set aside.'); });
     return emptyState();
   }
@@ -211,8 +224,9 @@ export async function runNameCheck(taskId: string, deliverableId: string): Promi
   const resolved = await resolveDeliverable(ws, taskId, deliverableId);
   const { full, kind } = await deliverableFile(ws, taskId, resolved);
   const bytes = await readNoFollow(full, MAX_FILE_BYTES).catch((err) => {
-    if ((err as { statusCode?: number }).statusCode) throw err;
-    throw httpError(404, 'The file is missing or reached through a link.');
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') throw httpError(404, 'The file is missing.');
+    throw httpError(400, 'The file is not a plain file, or is reached through a link.');
   });
   if (!bytes) throw httpError(413, 'The file is too large to check (over 2 MB).');
   const text = bytes.toString('utf-8').normalize('NFC');

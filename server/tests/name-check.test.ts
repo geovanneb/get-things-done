@@ -6,7 +6,8 @@ import * as os from 'node:os';
 import { buildRegistry, checkText, checkTextFull, editDistance, glossaryTerms, MAX_FINDINGS, proseOf, splitTerm } from '../src/services/nameCheck';
 
 const registry = buildRegistry({
-  names: ['Okabe Haruto (岡部 陽翔)', 'Lindqvist Maren', 'Tanaka Yui (田中 結衣)', 'Dana Patel', 'Natarajan Priya', 'Nguyễn Văn An'],
+  names: ['Okabe Haruto (岡部 陽翔)', 'Lindqvist Maren', 'Tanaka Yui (田中 結衣)', 'Dana Patel', 'Natarajan Priya', 'Nguyễn Văn An',
+    'Lindqvist Dana', 'Kobayashi Mariko (小林木村佐藤 真理子)', 'Hasegawa Ken (長谷川 健太郎)'],
   organizations: ['Northwind Labs'],
   terms: glossaryTerms('Dual Lane', '### QRT / QRTX\n**Pallet Pool**: shared pallets.\n| **Cross Dock (XD)** | a dock |\n'),
 });
@@ -74,6 +75,17 @@ test('review cases: fences, possessives, common words, emphasis, tables, periods
   assert.deepEqual(run(`![logo](${image}) Plain ZQM.\n`), ['abbreviation:ZQM@1']);
 });
 
+test('second review cases: titles and neighbours, unclosed tags in Markdown, one-line fences', () => {
+  for (const line of ['We met Mr Lindqvst today.', 'Ms Natarjan agreed.', 'The Lindqvst report is out.', 'Our CEO Lindqvst said so.',
+    'Ask John Lindqvst about it.', 'We met Dnaa Lindqvst.', 'Notes from Dr. Lindqvst.']) {
+    assert.ok(run(line + '\n').some((f) => f.startsWith('person:')), line);
+  }
+  assert.deepEqual(run('Use the <pre> tag here.\n\nLater Lindqvst joined and ZQM.\n'), ['person:Lindqvst>Lindqvist@3', 'abbreviation:ZQM@3']);
+  assert.deepEqual(run('An <!-- open comment, then ZQN.\n'), ['abbreviation:ZQN@1']);
+  assert.deepEqual(run('```js```\nAfter it ZQG.\n'), ['abbreviation:ZQG@2']);
+  assert.deepEqual(run('<!-- hidden ZQH', 'html'), [], 'in HTML an unclosed comment runs to the end');
+});
+
 test('a file with very many findings lists the first ones and says how many there were', () => {
   const text = Array.from({ length: 1000 }, (_, i) => `Z${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(65 + Math.floor(i / 26) % 26)}Q`).join(' and ') + '\n';
   const result = checkTextFull(text, proseOf(text, 'txt'), registry);
@@ -94,12 +106,17 @@ test('adversarial input of 2 MB never stalls: every step is linear', () => {
     ['many block tags', '<td '.repeat(big / 4), 'html'],
     ['capital words', 'Lindqvst Okkabe Dana Data '.repeat(big / 26), 'md'],
     ['kanji', '岡辺田仲陽斗結'.repeat(big / 21), 'txt'],
+    ['kanji near long names', '小林木村佐藤真理子長谷川健太郎'.repeat(big / 45), 'txt'],
+    ['unclosed pre in Markdown', '<pre '.repeat(big / 5), 'md'],
+    ['many link openers', '[a]('.repeat(big / 4), 'md'],
+    ['many image openers', '![a]('.repeat(big / 5), 'md'],
+    ['many brackets', '['.repeat(big), 'md'],
   ];
   for (const [name, text, kind] of cases) {
     const started = Date.now();
     checkTextFull(text, proseOf(text, kind), registry);
     const ms = Date.now() - started;
-    assert.ok(ms < 3000, `${name}: ${ms} ms`);
+    assert.ok(ms < 1500, `${name}: ${ms} ms`);
   }
 });
 
@@ -165,6 +182,21 @@ test('the check reads only the deliverable file in its task folder, remembers di
   await fsp.rename(deliverable, deliverable + '.away');
   await setDismissed('TASK-2026-0001', 'DEL-01', { key: 'abbreviation:ZPX', dismissed: true });
   await fsp.rename(deliverable + '.away', deliverable);
+
+  // A pipe in place of the record or the deliverable is refused at once, never waited on.
+  if (process.platform !== 'win32') {
+    const { execFileSync } = await import('node:child_process');
+    await fsp.rename(path.join(taskDir, '.name-check.json'), path.join(taskDir, 'record.keep'));
+    execFileSync('mkfifo', [path.join(taskDir, '.name-check.json')]);
+    await status(runNameCheck('TASK-2026-0001', 'DEL-01'), 409);
+    await fsp.rm(path.join(taskDir, '.name-check.json'));
+    await fsp.rename(path.join(taskDir, 'record.keep'), path.join(taskDir, '.name-check.json'));
+    execFileSync('mkfifo', [path.join(taskDir, 'deliverables', 'pipe.md')]);
+    await fsp.writeFile(path.join(taskDir, 'task.md'), taskMd('tasks/active/TASK-2026-0001/deliverables/pipe.md'));
+    await status(runNameCheck('TASK-2026-0001', 'DEL-03'), 400);
+    await fsp.rm(path.join(taskDir, 'deliverables', 'pipe.md'));
+    await fsp.writeFile(path.join(taskDir, 'task.md'), taskMd());
+  }
 
   // The app's own dot files are not shown among the task's files.
   const { TaskService } = await import('../src/services/taskService');

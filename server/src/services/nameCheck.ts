@@ -136,21 +136,29 @@ function blank(text: string, re: RegExp, keep?: (m: RegExpExecArray) => string):
 }
 
 /** Blanks everything from each `open` to the next `close` (or to the end), searching forward only: linear in the text. */
-function blankBetween(text: string, open: RegExp, close: (opened: RegExpExecArray) => string): string {
+function blankBetween(text: string, open: RegExp, close: (opened: RegExpExecArray) => string, toEnd: boolean): string {
   let out = '';
   let from = 0;
+  const missing = new Set<string>();
   const opener = new RegExp(open.source, open.flags.includes('g') ? open.flags : open.flags + 'g');
   for (;;) {
     opener.lastIndex = from;
     const m = opener.exec(text);
     if (!m) break;
-    const closer = new RegExp(close(m).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    closer.lastIndex = m.index + m[0].length;
-    const found = closer.exec(text);
-    const stop = found ? found.index + found[0].length : text.length;
+    const closeText = close(m).toLowerCase();
+    let found: RegExpExecArray | null = null;
+    // Once a closer is known to be missing from some point on, it is missing from every later point: never search again.
+    if (!missing.has(closeText)) {
+      const closer = new RegExp(closeText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      closer.lastIndex = m.index + m[0].length;
+      found = closer.exec(text);
+      if (!found) missing.add(closeText);
+    }
+    // Unclosed: to the end in HTML (as a browser reads it); in Markdown it is usually literal text, so only the opener.
+    const stop = found ? found.index + found[0].length : toEnd ? text.length : m.index + m[0].length;
     out += text.slice(from, m.index) + spaces(text.slice(m.index, stop));
     from = stop;
-    if (!found) break;
+    if (!found && toEnd) break;
   }
   return out + text.slice(from);
 }
@@ -185,9 +193,10 @@ function blankFences(text: string): string {
   const lines = text.split('\n');
   let fence: string | null = null;
   for (let i = 0; i < lines.length; i++) {
-    const open = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i]!);
+    const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i]!);
     if (fence === null) {
-      if (open) { fence = open[1]!; lines[i] = spaces(lines[i]!); }
+      // A backtick fence's info string has no backtick ("```js```" on one line is inline code, not a fence).
+      if (open && !(open[1]![0] === '`' && open[2]!.includes('`'))) { fence = open[1]!; lines[i] = spaces(lines[i]!); }
     } else {
       const closes = open && open[1]![0] === fence[0] && open[1]!.length >= fence.length && lines[i]!.trim() === open[1];
       lines[i] = spaces(lines[i]!);
@@ -212,15 +221,15 @@ export function proseOf(text: string, kind: 'md' | 'html' | 'txt'): string {
     }
     s = blankFences(s);
     s = blank(s, /`[^`\n]{1,500}`/g);
-    s = blank(s, /!\[[^\]\n]{0,500}\]\([^)\n]{0,2000}\)/g);
-    s = blank(s, /\[([^\]\n]{0,500})\]\([^)\n]{0,2000}\)/g, (m) => m[1] ?? '');
+    s = blank(s, /!\[[^[\]\n]{0,200}\]\([^()\n]{0,500}\)/g);
+    s = blank(s, /\[([^[\]\n]{0,200})\]\([^()\n]{0,500}\)/g, (m) => m[1] ?? '');
     s = blank(s, /^ {0,3}\[[^\]\n]{1,200}\]:[^\n]*$/gm);
     // Emphasis markers next to a word: "**Name**" reads as "Name" in the middle of its sentence.
     s = s.replace(/(\*{1,3}|_{1,3})(?=[\p{L}\p{N}])|(?<=[\p{L}\p{N}.!?])(\*{1,3}|_{1,3})/gu, (m) => ' '.repeat(m.length));
   }
   if (kind === 'md' || kind === 'html') {
-    s = blankBetween(s, /<!--/g, () => '-->');
-    s = blankBetween(s, /<(script|style|code|pre|kbd|samp|title)\b/gi, (m) => `</${m[1]!.toLowerCase()}`);
+    s = blankBetween(s, /<!--/g, () => '-->', kind === 'html');
+    s = blankBetween(s, /<(script|style|code|pre|kbd|samp|title)(?=[\s>/])/gi, (m) => `</${m[1]!.toLowerCase()}`, kind === 'html');
     s = blankTags(s);
     s = blank(s, /&(?:#\d{1,7}|#x[0-9a-f]{1,6}|[a-z][a-z0-9]{0,30});/gi);
   }
@@ -367,12 +376,19 @@ export function checkTextFull(original: string, prose: string, registry: Registr
     };
     const prev = near(words[w - 1], true);
     const next = near(words[w + 1], false);
-    const sameName = [prev, next].some((n) => n && best!.person.latin.some((p) => p !== best!.part && p.toLowerCase() === n.replace(/['’]s?$/i, '').toLowerCase()));
+    // Another part of the same person next to it, spelt right or nearly ("Dnaa Lindqvst" for "Dana Lindqvist").
+    const sameName = [prev, next].some((n) => {
+      if (!n) return false;
+      const other = n.replace(/['’]s?$/i, '').toLowerCase();
+      return best!.person.latin.some((p) => p !== best!.part && editDistance(other, p.toLowerCase(), allowedDistance(p.length)) <= allowedDistance(p.length));
+    });
+    const title = /(?:^|[^\p{L}])(?:Mr|Ms|Mrs|Mx|Dr|Prof|Sir|Dame)\.?[ \t]{1,3}$/u.test(prose.slice(Math.max(0, index - 12), index));
     const after = prose.slice(index + word.length, index + word.length + 12).replace(/^\s+/, '');
-    const strong = sameName || !!honorific || HONORIFIC_AFTER.test(after);
-    // A lone capital in mid-sentence also counts, unless the word is common English or sits in a run of capitalised
-    // words (a heading, a product or team name: "the Advisory Panel").
-    const weak = !sentenceStart(prose, index) && !COMMON_WORDS.has(lower) && !capitalised(prev) && !capitalised(next);
+    const strong = sameName || title || !!honorific || HONORIFIC_AFTER.test(after);
+    // A capital in mid-sentence also counts, unless the word is common English or sits next to a capitalised common
+    // word (title case in a heading or a product or team name: "the Advisory Panel", "Meeting With ...").
+    const titleCase = (n: string | undefined) => capitalised(n) && COMMON_WORDS.has(n!.toLowerCase());
+    const weak = !sentenceStart(prose, index) && !COMMON_WORDS.has(lower) && !titleCase(prev) && !titleCase(next);
     if (!strong && !weak) continue;
     add({ key: `person:${word}>${best.part}`, kind: 'person', found: word, suggestion: best.part }, index, word.length);
   }
@@ -391,7 +407,7 @@ export function checkTextFull(original: string, prose: string, registry: Registr
       else if (part.length === 2) targets.push({ target: part, needsHonorific: true });
     }
     for (const t of targets) {
-      if (t.target.length > 12) continue;
+      if (t.target.length > 8) continue; // longer names in this script are rare; a misspelling is caught in their parts
       const byLength = variants.get(t.target.length) ?? new Map();
       variants.set(t.target.length, byLength);
       for (let k = 0; k < t.target.length; k++) {
@@ -401,12 +417,18 @@ export function checkTextFull(original: string, prose: string, registry: Registr
     }
   }
   const lengths = [...variants.keys()].sort((a, b) => b - a); // full names before their parts
+  // Characters used in any target: a window with two or more others cannot be one character off a name.
+  const nameChars = new Set<string>();
+  for (const byLength of variants.values()) for (const v of byLength.keys()) for (const ch of v) nameChars.add(ch);
   for (const run of prose.matchAll(CJK_RUN)) {
     const text = run[0];
     const covered = new Uint8Array(text.length);
+    const foreign = new Uint32Array(text.length + 1); // prefix counts of characters not in any name
+    for (let i = 0; i < text.length; i++) foreign[i + 1] = foreign[i]! + (nameChars.has(text[i]!) ? 0 : 1);
     for (const L of lengths) {
       const byLength = variants.get(L)!;
       for (let i = 0; i + L <= text.length; i++) {
+        if (foreign[i + L]! - foreign[i]! >= 2) continue;
         const window = text.slice(i, i + L);
         if (registry.known.has(window)) continue;
         let hit: { target: string; needsHonorific: boolean } | null = null;

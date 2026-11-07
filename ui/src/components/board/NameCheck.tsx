@@ -5,7 +5,7 @@ import { sectionLabelStyle } from '@/components/task-form/styles';
 import { useNotify } from '@/hooks/useNotify';
 import { apiPost, apiPut } from '@/utils/api';
 import { checkableDeliverables, runKey, visibleFindings, type NameCheckRun } from '@/utils/nameCheck';
-import { formatRelativeDate } from '@/utils/format';
+import { formatRelativeTime } from '@/utils/format';
 import type { Task } from '@/types';
 
 /**
@@ -28,7 +28,7 @@ export default function NameCheck({ task, dirty }: { task: Task; dirty: boolean 
     setBusy(id);
     try {
       const run = await apiPost<NameCheckRun>(base(id));
-      setRuns((r) => ({ ...r, [runKey(task.id, id, run.file || filePath)]: run }));
+      setRuns((r) => ({ ...r, [runKey(task.id, id, filePath)]: run }));
     } catch (err) {
       notify.error(err, t('nameCheck.couldNotCheck'));
     } finally {
@@ -79,7 +79,7 @@ export default function NameCheck({ task, dirty }: { task: Task; dirty: boolean 
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
                       {shown.length === 0 ? t('nameCheck.nothingToLookAt') : t('nameCheck.toLookAt', { count: shown.length })}
                       {run.total > run.findings.length && ` ${t('nameCheck.firstOnly', { shown: run.findings.length, total: run.total })}`}
-                      {` · ${t('nameCheck.checked', { when: formatRelativeDate(run.checked_at) })}`}
+                      {` · ${t('nameCheck.checked', { when: formatRelativeTime(run.checked_at) })}`}
                       {!run.recorded && ` · ${t('nameCheck.archivedReadOnly')}`}
                     </span>
                     {dismissed.length > 0 && (
