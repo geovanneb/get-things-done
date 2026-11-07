@@ -37,6 +37,13 @@ This workspace is managed by Get Things Done. When working in this directory:
 - Save deliverables to `tasks/active/<TASK-ID>/deliverables/`.
 - Read the executive profile before writing anything — adapt voice and tone to match.
 - Adapt tone and detail to each stakeholder's profile.
+- Sharing labels on context notes: a note's `sensitivity` is `shareable`, `internal` (also when it is missing
+  or not one of the three) or `personal`. A deliverable is outward-facing when the task's `confidentiality` is
+  `public`, or a stakeholder on the task has an `organization` other than the executive profile's (when unsure, treat
+  it as outward-facing). In an outward-facing deliverable use only facts from `shareable` notes, and say in your reply
+  which facts you left out because their note is not shareable. You may use `internal` and `personal` notes to inform
+  your work; never quote or reveal a `personal` note in a deliverable anyone but the executive will see, and never
+  treat an `internal` or `personal` note as shareable.
 - Read the org charts that include the task's stakeholders. Use their organization, manager, peers
   and direct reports to decide who approves, what level to pitch at, and who to keep informed.
   A member's optional `title` is their title in that chart and overrides their stakeholder `role` there.
@@ -88,6 +95,10 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    note it would change. Prefer updating to creating, one proposal per file, minimal
    edits that keep structure and frontmatter. Make contradictions explicit and set
    `confidence` accordingly. Never copy personal remarks into stakeholder files.
+   Sharing labels: keep a note's `sensitivity` unless you make it stricter. You may propose `internal` or
+   `personal` for a note without one, or `personal` for an `internal` one, with a one-line reason; never
+   `shareable` and never a looser label (only the executive does that, in the note editor). When you move or
+   merge facts between notes, the receiving note gets the strictest label of the notes they came from.
 4. Write the full proposed file to `proposals/P-NN.md` (never to the target). Targets
    must be `context/<category>/<slug>/note.md` or `stakeholders/{people,groups,org-charts}/<ID>.md`.
 5. In `update.md` keep the body and existing fields, and set `status: in_review`,
@@ -202,6 +213,9 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    instruction file), merge instead of overwriting newer content. Follow `reviewer_note`
    when set. Set `updated_at` on each file that has it. Record
    `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
+   Never write a looser `sensitivity` than the target note has now (personal, then internal or none, then
+   shareable), never write `shareable` on a new note, and never loosen a label because `reviewer_note` asks: keep
+   it, apply the rest, and say in `outcome_note` that the executive changes labels in the note editor.
 3. Give rejected proposals `outcome: skipped`, set `status: done` and `applied_at`, then
    delete `proposals/`, and `materials/` unless `update.md` has `keep_materials: true` or
    `keep_meeting_text: true` (then the dashboard keeps the meeting text and removes the

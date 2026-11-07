@@ -728,6 +728,24 @@ try {
       badKeep.status === 400 && keptDetail.status === 'done' && keptDetail.keep_materials === true
       && keptFile.status === 200 && released.status === 200 && !fs.existsSync(path.join(keptDir, 'materials')),
       `bad=${badKeep.status} file=${keptFile.status} released=${released.status}`);
+    // A context update never loosens a note's sharing label (#107): such a proposal cannot be accepted.
+    {
+      const personal = await (await json('POST', '/api/context', { title: 'Smoke private view', category: 'Risks', sensitivity: 'personal', body: 'Mine.\n' })).json();
+      const loose = await (await json('POST', '/api/context-updates', { title: 'Fictional label change', text: 'x' })).json();
+      const ldir = path.join(ws, 'context-updates', loose.id);
+      const target = path.relative(ws, personal.path).split(path.sep).join('/');
+      const lmd = fs.readFileSync(path.join(ldir, 'update.md'), 'utf-8');
+      fs.writeFileSync(path.join(ldir, 'update.md'), lmd.replace('status: ready', `status: in_review\nanalyzed_at: '${new Date(Date.now() + 5000).toISOString()}'`)
+        .replace('proposals: []', `proposals:\n  - id: P-01\n    action: update\n    target: ${target}\n    title: Loosen\n    rationale: x`));
+      fs.mkdirSync(path.join(ldir, 'proposals'));
+      fs.writeFileSync(path.join(ldir, 'proposals', 'P-01.md'), fs.readFileSync(personal.path, 'utf-8').replace('sensitivity: personal', 'sensitivity: internal'));
+      const refused = await json('PUT', `/api/context-updates/${loose.id}/decisions`, { decisions: { 'P-01': { decision: 'accepted' } } });
+      const shown = await (await fetch(`${base}/api/context-updates/${loose.id}`)).json();
+      check('a proposal that would loosen a sharing label is flagged and cannot be accepted',
+        refused.status === 409 && /sharing label looser/.test(shown.proposals?.[0]?.problem ?? ''), `status=${refused.status} problem=${shown.proposals?.[0]?.problem}`);
+      await json('DELETE', `/api/context-updates/${loose.id}`);
+      await fetch(`${base}/api/context/${personal.id}`, { method: 'DELETE' });
+    }
     // A meeting that changes no context: the record alone is confirmed, and approving finishes the update.
     const meeting = await (await json('POST', '/api/context-updates', { title: 'Fictional weekly sync', text: 'Fictional transcript' })).json();
     const meetingDir = path.join(ws, 'context-updates', meeting.id);

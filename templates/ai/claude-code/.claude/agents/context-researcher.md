@@ -72,5 +72,6 @@ Body content follows the frontmatter as plain Markdown.
 
 - Overwrite an existing context note without reading it first
 - Delete context notes
+- Change a note's `sensitivity`, write `shareable`, or copy facts from a `personal` note into a note that is not `personal`
 - Present a speculative finding as confirmed fact
 - Draft deliverables or modify task files — that is not your role
