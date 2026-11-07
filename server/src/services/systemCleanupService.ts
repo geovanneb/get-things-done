@@ -552,8 +552,17 @@ export class SystemCleanupService {
    * and the user or an agent may have reopened a task in the meantime. Returns false when it no longer does.
    */
   private async execute(item: CleanupItem, settings: CleanupSettings, now: Date): Promise<boolean> {
-    const ws = workspaceService.getWorkspacePath();
     if (item.type === 'meetings') return this.executeMeeting(item, settings, now);
+    // A task is checked and archived, trashed or deleted under its own lock: a reopen or a change request that comes in
+    // meanwhile is either done first (and seen by the check) or waits until the task is gone.
+    if (item.type === 'completed_tasks' || item.type === 'archived_tasks') {
+      return taskService.underTaskLock(item.id, (ops) => this.executeItem(item, settings, now, ops.archive));
+    }
+    return this.executeItem(item, settings, now, null);
+  }
+
+  private async executeItem(item: CleanupItem, settings: CleanupSettings, now: Date, archive: (() => Promise<void>) | null): Promise<boolean> {
+    const ws = workspaceService.getWorkspacePath();
     const full = path.join(ws, ...item.path.split('/'));
     await workspaceEntry(ws, full, true);
     const st = await fsp.lstat(full).catch(() => null);
@@ -579,7 +588,8 @@ export class SystemCleanupService {
       if (!oldEnough(date)) return false;
       if (item.action === 'archive') {
         await workspaceEntry(ws, path.join(ws, 'tasks', 'archive'), true);
-        await taskService.archiveTask(item.id);
+        if (!archive) return false;
+        await archive();
         return true;
       }
     }
