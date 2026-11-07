@@ -8,6 +8,7 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { reservedSequence } from './idReservations';
 import { lock, unlock } from '../utils/fileLock';
+import { StakeholderService } from './stakeholderService';
 
 const fileService = new FileService();
 
@@ -17,7 +18,29 @@ const fileService = new FileService();
  */
 const OPTIONAL_CREATE_FIELDS = ['slug', 'task_type', 'contexts', 'preferred_agent', 'confidentiality', 'review_date', 'estimated_hours'] as const;
 /** Written by the server when a task is made from a meeting action item; never taken from a request. */
-const SERVER_FIELDS = ['meeting_action', 'meeting_action_source', 'change_requests'] as const;
+const SERVER_FIELDS = ['meeting_action', 'meeting_action_source', 'change_requests', 'waiting'] as const;
+
+/**
+ * What a task waits for (#82): one record, set and resolved with its own actions, never by an ordinary save. Independent
+ * of the status: a task can wait on someone's input while other work on it continues. The follow-up date is the user's
+ * reminder to chase, separate from the task's due date.
+ */
+export interface Waiting {
+  for: string;
+  /** A stakeholder or group, or a free-text party (someone who is not a stakeholder); null when not said. */
+  party: { ref: string } | { name: string } | null;
+  /** The day the waiting started (YYYY-MM-DD). */
+  since: string;
+  follow_up?: string;
+  set_at: string;
+}
+
+const MAX_WAITING_TEXT = 500;
+const MAX_PARTY_NAME = 200;
+const STAKEHOLDER_REF = /^(STK|GRP)-\d{4}$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const isDay = (v: unknown): v is string => typeof v === 'string' && DAY.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
+const localToday = (): string => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
 
 /**
  * Feedback the executive gave on a task in review, with Request changes (#79): dated, kept in task.md, never in the
@@ -401,6 +424,60 @@ If the executive comes back with feedback on a task that is already \`in_review\
       await fileService.writeMarkdown(taskFile, frontmatter as Record<string, unknown>, content);
       await this.generateSlashCommand();
       return { task: { ...updated, body: content || undefined, path: taskFile }, request, created: true };
+    });
+  }
+
+  /**
+   * Sets what the task waits for (#82), replacing an earlier record. Under the task's lock; refused (409) when the task
+   * changed since the user saw it. The status is left as it is.
+   */
+  async setWaiting(id: string, input: unknown): Promise<Task> {
+    const b = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+    const w = b['waiting'] && typeof b['waiting'] === 'object' ? b['waiting'] as Record<string, unknown> : {};
+    const what = typeof w['for'] === 'string' ? w['for'].trim() : '';
+    if (!what) throw httpError(400, 'Say what the task is waiting for.');
+    if (what.length > MAX_WAITING_TEXT) throw httpError(400, `Keep it under ${MAX_WAITING_TEXT} characters.`);
+    const rawParty = w['party'] && typeof w['party'] === 'object' ? w['party'] as Record<string, unknown> : null;
+    let party: Waiting['party'] = null;
+    if (rawParty && typeof rawParty['ref'] === 'string' && rawParty['ref']) {
+      if (!STAKEHOLDER_REF.test(rawParty['ref'])) throw httpError(400, 'Invalid stakeholder.');
+      // A party that is not on file would show as a bare id: refused, so the user picks one or types a name.
+      const onFile = await new StakeholderService().getStakeholder(rawParty['ref']).then(() => true, () => false);
+      if (!onFile) throw httpError(400, 'That stakeholder does not exist. Pick one from the list, or type a name.');
+      party = { ref: rawParty['ref'] };
+    } else if (rawParty && typeof rawParty['name'] === 'string' && rawParty['name'].trim()) {
+      const name = rawParty['name'].trim();
+      if (name.length > MAX_PARTY_NAME) throw httpError(400, `Keep the name under ${MAX_PARTY_NAME} characters.`);
+      party = { name };
+    }
+    const since = w['since'] === undefined || w['since'] === '' ? localToday() : w['since'];
+    if (!isDay(since)) throw httpError(400, 'The since date must be a date.');
+    if (since > localToday()) throw httpError(400, 'The since date cannot be in the future.');
+    const followUp = w['follow_up'] === undefined || w['follow_up'] === '' || w['follow_up'] === null ? undefined : w['follow_up'];
+    if (followUp !== undefined && !isDay(followUp)) throw httpError(400, 'The follow-up date must be a date.');
+    if (followUp !== undefined && followUp < since) throw httpError(400, 'The follow-up date cannot be before the since date.');
+    const waiting: Waiting = { for: what, party, since, ...(followUp ? { follow_up: followUp } : {}), set_at: new Date().toISOString() };
+    return this.writeServerField(id, b['seen_updated_at'], { waiting });
+  }
+
+  /** Resolves the waiting (#82): the record goes, the task stays as it is. */
+  async resolveWaiting(id: string, input: unknown): Promise<Task> {
+    const b = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+    return this.writeServerField(id, b['seen_updated_at'], { waiting: undefined });
+  }
+
+  /** One server-owned field changed under the task's lock, after a stale-view check; nothing else is touched. */
+  private async writeServerField(id: string, seen: unknown, change: Record<string, unknown>): Promise<Task> {
+    if (typeof seen !== 'string') throw httpError(400, 'Say which version of the task you saw.');
+    return this.withTaskLock(id, async () => {
+      const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
+      const { data, content } = await fileService.readMarkdown<Task>(taskFile);
+      if (data.updated_at !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then try again.');
+      const updated: Record<string, unknown> = { ...data, ...change, updated_at: new Date().toISOString() };
+      for (const [key, value] of Object.entries(change)) if (value === undefined) delete updated[key];
+      await fileService.writeMarkdown(taskFile, updated, content);
+      await this.generateSlashCommand();
+      return { ...(updated as unknown as Task), body: content || undefined, path: taskFile };
     });
   }
 

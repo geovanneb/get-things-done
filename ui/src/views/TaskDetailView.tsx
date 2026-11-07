@@ -3,6 +3,7 @@ import { rich } from '@/i18n/rich';
 import TaskMeetingSources from '@/components/board/TaskMeetingSources';
 import TaskMeetingAction from '@/components/board/TaskMeetingAction';
 import ChangeRequests from '@/components/board/ChangeRequests';
+import TaskWaiting from '@/components/board/TaskWaiting';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { sectionLabelStyle } from '@/components/task-form/styles';
 import Input, { Select } from '@/components/common/Input';
@@ -177,6 +178,7 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
     <div className="gtd-detail">
       <div className="gtd-detail__main">
         <ChangeRequests task={task} dirty={dirty} onRequested={onRequested} />
+        <TaskWaiting task={task} dirty={dirty} onChanged={onRequested} />
         {task.meeting_action && <TaskMeetingAction taskId={task.id} refreshKey={savedCount} />}
         <MarkdownSection label={t('newTaskModal.objective')} content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
         {/\]\(\/meetings\//.test(task.body ?? '') && <TaskMeetingSources taskId={task.id} refreshKey={savedCount} pinError={pinError} onPinned={onPinned} />}

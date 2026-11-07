@@ -267,7 +267,9 @@ export interface AttentionItem {
   status: TaskStatus;
   priority: Priority;
   due_date?: string;
-  flag_type: 'overdue' | 'blocked' | 'due_soon' | 'high_priority';
+  flag_type: 'overdue' | 'follow_up' | 'blocked' | 'due_soon' | 'high_priority';
+  /** For `follow_up`: what the task waits for, and the follow-up date that came. */
+  waiting?: { for: string; follow_up: string; since: string };
 }
 
 export interface FocusItem {
@@ -295,10 +297,11 @@ export interface SituationData {
     id: string;
     title: string;
     slug: string;
-    reason: 'overdue' | 'blocked' | 'due_soon' | 'high_priority';
+    reason: 'overdue' | 'follow_up' | 'blocked' | 'due_soon' | 'high_priority';
     due_date?: string;
     stakeholders: string[];
     priority: Priority;
+    waiting?: { for: string; follow_up: string; since: string };
   }[];
   current_focus: {
     id: string;

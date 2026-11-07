@@ -52,6 +52,17 @@ export class SituationService {
     for (const t of overdueTasks) {
       attentionCandidates.push({ id: t.id, title: t.title, status: t.status, priority: t.priority, due_date: t.due_date, flag_type: 'overdue' });
     }
+    // A follow-up date that has come (#82): the user said they would chase it by then. Not the task's due date.
+    const nowDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    for (const t of openTasks) {
+      const w = (t as unknown as { waiting?: { for?: unknown; follow_up?: unknown; since?: unknown } }).waiting;
+      if (!w || typeof w.for !== 'string' || typeof w.follow_up !== 'string' || w.follow_up > nowDay) continue;
+      const waiting = { for: w.for, follow_up: w.follow_up, since: typeof w.since === 'string' ? w.since : '' };
+      // Already listed (overdue): it keeps that badge and also says what needs chasing.
+      const listed = attentionCandidates.find((a) => a.id === t.id);
+      if (listed) { listed.waiting = waiting; continue; }
+      attentionCandidates.push({ id: t.id, title: t.title, status: t.status, priority: t.priority, due_date: t.due_date, flag_type: 'follow_up', waiting: { for: w.for, follow_up: w.follow_up, since: typeof w.since === 'string' ? w.since : '' } });
+    }
     for (const t of blockedTasks) {
       if (!attentionCandidates.find((a) => a.id === t.id)) {
         attentionCandidates.push({ id: t.id, title: t.title, status: t.status, priority: t.priority, due_date: t.due_date, flag_type: 'blocked' });
@@ -71,7 +82,7 @@ export class SituationService {
 
     const attentionQueue = attentionCandidates
       .sort((a, b) => {
-        const flagOrder: Record<string, number> = { overdue: 0, blocked: 1, due_soon: 2, high_priority: 3 };
+        const flagOrder: Record<string, number> = { overdue: 0, follow_up: 1, blocked: 2, due_soon: 3, high_priority: 4 };
         const flagDiff = (flagOrder[a.flag_type] ?? 4) - (flagOrder[b.flag_type] ?? 4);
         if (flagDiff !== 0) return flagDiff;
         return PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
@@ -81,7 +92,8 @@ export class SituationService {
         id: item.id,
         title: item.title,
         slug: item.id,
-        reason: item.flag_type as 'overdue' | 'blocked' | 'due_soon',
+        reason: item.flag_type as 'overdue' | 'follow_up' | 'blocked' | 'due_soon',
+        ...(item.waiting ? { waiting: item.waiting } : {}),
         due_date: item.due_date,
         stakeholders: tasks.find((t) => t.id === item.id)?.stakeholder_refs ?? [],
         priority: item.priority,

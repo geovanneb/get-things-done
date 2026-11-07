@@ -37,6 +37,18 @@
         }
       }
     },
+    "waiting": {
+      "type": "object",
+      "description": "What the task waits for, from whom and since when, with an optional follow-up date (separate from due_date). Set and resolved by the executive in the dashboard; it does not change the status. Agents read it (mention it when the missing input matters) but never set or clear it.",
+      "required": ["for", "since"],
+      "properties": {
+        "for": {"type": "string"},
+        "party": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["ref"], "properties": {"ref": {"type": "string", "pattern": "^(STK|GRP)-\\d{4}$"}}}, {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}}]},
+        "since": {"type": "string", "format": "date"},
+        "follow_up": {"type": "string", "format": "date"},
+        "set_at": {"type": "string", "format": "date-time"}
+      }
+    },
     "change_requests": {
       "type": "array",
       "description": "Feedback the executive gave with Request changes on a task in review. Written by the dashboard; the agent that reworks the task only sets status to addressed and addressed_at. Never delete, reword or reorder.",
