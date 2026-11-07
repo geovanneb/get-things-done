@@ -1,4 +1,5 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
+import { currentLocale } from '@/i18n/current';
 import React from 'react';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
@@ -61,7 +62,7 @@ export default function ChangeRequests({ task, dirty, onRequested }: { task: Tas
       setSaving(false);
     }
   };
-  const day = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); };
+  const day = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(currentLocale(), { dateStyle: 'medium', timeStyle: 'short' }); };
 
   return (
     <section aria-labelledby={`change-requests-${task.id}`} style={{ marginBottom: 'var(--space-6)' }}>

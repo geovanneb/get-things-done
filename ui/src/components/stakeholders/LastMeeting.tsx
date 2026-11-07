@@ -1,4 +1,5 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
+import { currentLocale } from '@/i18n/current';
 import { Link } from 'react-router-dom';
 import Button from '@/components/common/Button';
 import { useApi } from '@/hooks/useApi';
@@ -28,7 +29,8 @@ export default function StakeholderLastMeeting({ id }: { id: string }) {
     );
   }
   if (!data) return null;
-  const date = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+  // In the language the app is shown in, not the computer's.
+  const date = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(currentLocale(), { year: 'numeric', month: 'short', day: 'numeric' });
 
   return (
     <p style={lineStyle} title={t('stakeholderLastMeeting.source')}>
