@@ -347,6 +347,7 @@ export function checkTextFull(original: string, prose: string, registry: Registr
     byInitial.set(k, [...(byInitial.get(k) ?? []), entry]);
   }
   const capitalised = (w: string | undefined) => !!w && w[0] !== w[0]!.toLowerCase();
+  const closest = new Map<string, { part: string; person: PersonEntry; d: number } | null>();
   for (let w = 0; w < words.length; w++) {
     const token = words[w]![0];
     const index = words[w]!.index!;
@@ -357,15 +358,18 @@ export function checkTextFull(original: string, prose: string, registry: Registr
     if (word === word.toUpperCase()) continue; // capitals: an abbreviation, not a name
     const lower = word.toLowerCase();
     if (registry.known.has(lower)) continue;
-    const candidates = byInitial.get(lower[0]!);
-    if (!candidates) continue;
-    const max = allowedDistance(word.length);
-    let best: { part: string; person: PersonEntry; d: number } | null = null;
-    for (const { part, lower: target, person } of candidates) {
-      const limit = Math.min(max, allowedDistance(part.length));
-      const d = editDistance(lower, target, limit);
-      if (d === 0 || d > limit) continue;
-      if (!best || d < best.d) best = { part, person, d };
+    // The closest known name part, worked out once per distinct word (documents repeat their words).
+    let best = closest.get(lower);
+    if (best === undefined) {
+      best = null;
+      const max = allowedDistance(word.length);
+      for (const { part, lower: target, person } of byInitial.get(lower[0]!) ?? []) {
+        const limit = Math.min(max, allowedDistance(part.length));
+        const d = editDistance(lower, target, limit);
+        if (d === 0 || d > limit) continue;
+        if (!best || d < best.d) best = { part, person, d };
+      }
+      closest.set(lower, best);
     }
     if (!best) continue;
     // Neighbours are words next to this one on the same line, with only spaces between.

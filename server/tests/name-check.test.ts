@@ -95,6 +95,13 @@ test('a file with very many findings lists the first ones and says how many ther
 
 test('adversarial input of 2 MB never stalls: every step is linear', () => {
   const big = 2 * 1024 * 1024;
+  // Linear means a four times larger input takes about four times as long; a quadratic step takes sixteen times.
+  // Compared on the same machine, so a slow CI runner does not fail it, with a generous ceiling as well.
+  const time = (text: string, kind: 'md' | 'html' | 'txt') => {
+    const started = process.hrtime.bigint();
+    checkTextFull(text, proseOf(text, kind), registry);
+    return Number(process.hrtime.bigint() - started) / 1e6;
+  };
   const cases: Array<[string, string, 'md' | 'html' | 'txt']> = [
     ['an opening < with no >', 'costs < 5% ' + 'a'.repeat(big), 'md'],
     ['a long word with no @', 'x'.repeat(big), 'txt'],
@@ -113,10 +120,12 @@ test('adversarial input of 2 MB never stalls: every step is linear', () => {
     ['many brackets', '['.repeat(big), 'md'],
   ];
   for (const [name, text, kind] of cases) {
-    const started = Date.now();
-    checkTextFull(text, proseOf(text, kind), registry);
-    const ms = Date.now() - started;
-    assert.ok(ms < 1500, `${name}: ${ms} ms`);
+    const quarter = text.slice(0, Math.floor(text.length / 4));
+    time(quarter, kind); // warm up
+    const small = time(quarter, kind);
+    const full = time(text, kind);
+    assert.ok(full < Math.max(10 * small, 250), `${name}: ${full.toFixed(0)} ms at 2 MB vs ${small.toFixed(0)} ms at 512 KB`);
+    assert.ok(full < 10_000, `${name}: ${full.toFixed(0)} ms`);
   }
 });
 
