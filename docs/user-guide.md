@@ -190,6 +190,13 @@ step. It starts no agent and keeps the body and start date. The next agent run o
 every open request, addresses it and marks it addressed when it sets the task back to review.
 The requests stay listed on the task, so the feedback is not lost in a chat.
 
+**Waiting for.** When a task needs someone's input, **Set waiting** (Work tab) records what it waits
+for, from whom (a stakeholder or anyone else) and since when, with an optional follow-up date. It
+does not change the status, so other work on the task can go on. The board card shows **Waiting**;
+once the follow-up date comes, the task appears under **Needs attention** on Situation with what it
+waits for. **Resolve** clears it and leaves the task as it is. The follow-up date is separate from
+the due date.
+
 **Dictate instead of typing.** **Dictate** under a task's Objective records your voice; press
 **Stop** and the words are added to the field. The same button is under a context note's
 Content, the Notes for the agent of an imported update, and a stakeholder's What matters and

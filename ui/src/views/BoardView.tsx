@@ -242,6 +242,11 @@ function TaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
       {/* Row: date + age */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <DueDateChip dueDate={task.due_date} />
+        {task.waiting && (
+          <span title={t('taskWaiting.cardTitle', { for: task.waiting.for })}>
+            <Badge size="sm" variant="info">{t('taskWaiting.cardBadge')}</Badge>
+          </span>
+        )}
         <AgeChip createdAt={task.created_at} />
         {(task.deliverables ?? []).slice(0, 2).map((d, i) =>
           d.format ? <Badge key={i} size="sm">{d.format}</Badge> : null

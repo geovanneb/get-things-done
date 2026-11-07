@@ -314,6 +314,18 @@ try {
     && afterRequest.change_requests?.length === 1 && afterRequest.change_requests[0].status === 'open',
     `first=${requested.status} again=${requestedAgain.status} status=${afterRequest.status} n=${afterRequest.change_requests?.length}`);
 
+  // Waiting for (#82): set with its own action, kept through a save, resolved without changing the status.
+  const waitingSet = await send('PUT', `/api/tasks/${createdTask.id}/waiting`, { waiting: { for: 'Fictional pricing sheet', party: { name: 'A supplier' }, follow_up: '2020-01-01', since: '2020-01-01' }, seen_updated_at: afterRequest.updated_at });
+  const waitingTask = await waitingSet.json();
+  const situationNow = await (await fetch(`${base}/api/situation`)).json();
+  const waitingResolved = await send('POST', `/api/tasks/${createdTask.id}/waiting/resolve`, { seen_updated_at: waitingTask.updated_at });
+  const afterResolve = await waitingResolved.json();
+  check('a task records what it waits for, shows a due follow-up on Situation, and resolving keeps the status',
+    waitingSet.status === 200 && waitingTask.waiting?.for === 'Fictional pricing sheet' && waitingTask.status === 'in_progress'
+    && situationNow.attention_queue?.some((a) => a.id === createdTask.id && a.reason === 'follow_up')
+    && waitingResolved.status === 200 && !afterResolve.waiting && afterResolve.status === 'in_progress',
+    `set=${waitingSet.status} resolved=${waitingResolved.status} follow=${JSON.stringify(situationNow.attention_queue?.map((a) => a.reason))}`);
+
   // "Prepare meeting" relies on the shipped meeting brief template and meeting-prep agent, and a task that keeps them.
   {
     const brief = (await (await fetch(`${base}/api/outputs/templates`)).json()).find((t) => t.slug === 'meeting-brief');

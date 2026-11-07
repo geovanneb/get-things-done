@@ -167,6 +167,9 @@ function ReasonBadge({ reason }: { reason: string }) {
   if (reason === 'blocked') {
     return <Badge variant="warning" size="sm">{t('situation.blocked')}</Badge>;
   }
+  if (reason === 'follow_up') {
+    return <Badge variant="warning" size="sm">{t('situation.followUp')}</Badge>;
+  }
   return <Badge variant="info" size="sm">{t('situation.dueSoon')}</Badge>;
 }
 
@@ -371,7 +374,12 @@ export default function SituationView() {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      <span title={item.title}>{item.title}</span>
+                      <span title={item.waiting ? `${item.title}: ${t('taskWaiting.cardTitle', { for: item.waiting.for })}` : item.title}>{item.title}</span>
+                      {item.waiting && (
+                        <span className="truncate" style={{ display: 'block', fontSize: 'var(--text-xs)', fontWeight: 400, color: 'var(--color-text-muted)' }}>
+                          {t('taskWaiting.cardTitle', { for: item.waiting.for })}
+                        </span>
+                      )}
                     </button>
                     <div className="situation__attention-meta">
                     <DueDateChip dueDate={item.due_date} />

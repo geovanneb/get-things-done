@@ -74,6 +74,16 @@ router.post('/:id/request-changes', async (req: Request, res: Response) => {
   res.status(result.created ? 201 : 200).json(result);
 });
 
+// PUT /api/tasks/:id/waiting  { waiting: { for, party, since, follow_up }, seen_updated_at }  what the task waits for
+router.put('/:id/waiting', async (req: Request, res: Response) => {
+  res.json(await taskService.setWaiting(param(req, 'id'), req.body));
+});
+
+// POST /api/tasks/:id/waiting/resolve  { seen_updated_at }  the waiting is over; the task stays as it is
+router.post('/:id/waiting/resolve', async (req: Request, res: Response) => {
+  res.json(await taskService.resolveWaiting(param(req, 'id'), req.body));
+});
+
 // DELETE /api/tasks/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   await taskService.deleteTask(param(req, 'id'));

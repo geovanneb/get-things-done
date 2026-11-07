@@ -27,6 +27,11 @@ const REASON_CONFIG = (): Record<
     stripColor: 'var(--color-warning)',
     badgeVariant: 'warning',
   },
+  follow_up: {
+    label: tr('taskWaiting.followUpBadge'),
+    stripColor: 'var(--color-warning)',
+    badgeVariant: 'warning',
+  },
   due_soon: {
     label: tr('attentionQueue.dueSoon'),
     stripColor: 'var(--color-info)',
