@@ -538,6 +538,14 @@ If the executive comes back with feedback on a task that is already \`in_review\
     }, false);
   }
 
+  /**
+   * For a caller that must decide and act on a task in one step (System cleanup): runs `fn` under the task's lock, with
+   * an archive that does not take the lock again. Whatever `fn` reads there is what it acts on.
+   */
+  async underTaskLock<T>(id: string, fn: (ops: { archive: () => Promise<void> }) => Promise<T>): Promise<T> {
+    return this.withTaskLock(id, () => fn({ archive: () => this.archiveTaskUnlocked(id) }), false);
+  }
+
   async archiveTask(id: string): Promise<void> {
     await this.withTaskLock(id, () => this.archiveTaskUnlocked(id), false);
   }
