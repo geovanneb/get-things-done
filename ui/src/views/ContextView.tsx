@@ -2,7 +2,7 @@ import { useLanguage } from '@/i18n/LanguageProvider';
 import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
 import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import Button from '@/components/common/Button';
 import Input, { Field, SearchInput, Select } from '@/components/common/Input';
 import Modal, { FormActions } from '@/components/common/Modal';
@@ -379,6 +379,19 @@ export default function ContextView() {
 
   const confirm = useConfirm();
   const notify = useNotify();
+  // A link to one note (`?note=<id>`, from global search) opens it once the notes are loaded, then leaves the address
+  // as the Context page, so Back and a reload behave as usual. A note that is gone says so.
+  const [params, setParams] = useSearchParams();
+  const wanted = params.get('note');
+  useEffect(() => {
+    if (!wanted || loading) return;
+    const note = notes.find((n) => n.id === wanted);
+    if (note) openEdit(note);
+    else if (!error) notify.error(null, t('context.noteNotFound'));
+    setParams((p) => { p.delete('note'); return p; }, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when a note is asked for and the list is there
+  }, [wanted, loading]);
+
   const handleDelete = useCallback(async (note: ContextNote, e: React.MouseEvent) => {
     e.stopPropagation();
     const ok = await confirm({

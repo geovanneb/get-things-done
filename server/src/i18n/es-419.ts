@@ -2061,6 +2061,7 @@ export default {
   "context.deleteNote": "Eliminar nota",
   "context.deleted": "\"{title}\" se eliminó.",
   "context.couldNotDeleteTheNote": "No se pudo eliminar la nota. Inténtalo de nuevo.",
+  "context.noteNotFound": "Esa nota ya no existe.",
   "context.loadingContextNotes": "Cargando notas de contexto…",
   "context.contextUpdates": "Actualizaciones de contexto",
   "context.allNotes": "Todas las notas",
