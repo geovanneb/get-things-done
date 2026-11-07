@@ -508,6 +508,7 @@ export default function BoardView() {
           <span role="status" style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginLeft: 'auto' }}>
             {rich(t, 'board.tasks2', { count: filtered.length })}
           </span>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/share-pack')}>{t('sharePack.title')}</Button>
           {tab === 'kanban' && placed.unplaced.length > 0 && (
             // The user removed the only column for these statuses. The tasks are not lost: the List view has them.
             <Button variant="ghost" size="sm" onClick={() => setTab('list')}
