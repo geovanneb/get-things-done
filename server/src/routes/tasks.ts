@@ -8,6 +8,7 @@ import { MentionService } from '../services/mentionService';
 import { checkTaskMeetings, refreshTaskMeetings, syncTaskMeetings } from '../services/meetingSources';
 import { actionNotice } from '../services/meetingActionNotice';
 import { utf8FileNames } from '../utils/uploadNames';
+import { runNameCheck, setDismissed } from '../services/nameCheckService';
 
 const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -151,6 +152,16 @@ router.post('/:id/meeting-sources/refresh', async (req: Request, res: Response) 
 // GET /api/tasks/:id/meeting-action  for a task made from a meeting action item: whether the meeting record changed since
 router.get('/:id/meeting-action', async (req: Request, res: Response) => {
   res.json(await actionNotice(await taskService.getTask(param(req, 'id')) as unknown as Record<string, unknown>));
+});
+
+// POST /api/tasks/:id/deliverables/:deliverable/name-check  check a Markdown, HTML or text deliverable's names and terms
+router.post('/:id/deliverables/:deliverable/name-check', async (req: Request, res: Response) => {
+  res.json(await runNameCheck(param(req, 'id'), param(req, 'deliverable')));
+});
+
+// PUT /api/tasks/:id/deliverables/:deliverable/name-check/dismissed  { key, dismissed }  remembered for this deliverable only
+router.put('/:id/deliverables/:deliverable/name-check/dismissed', async (req: Request, res: Response) => {
+  res.json(await setDismissed(param(req, 'id'), param(req, 'deliverable'), req.body));
 });
 
 // GET /api/tasks/:id/files

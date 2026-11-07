@@ -280,7 +280,6 @@ try {
   check('completing a task again replaces a stale done_date', Boolean(recompleted.done_date) && recompleted.done_date !== stale,
     `done_date=${recompleted.done_date}`);
 
-  // Creating a task through the API keeps the optional schema fields it is given (they used to be dropped).
   // Sharing labels on context notes (#107): only known labels, kept by an edit that does not mention them, removed by ''.
   {
     const post = (body) => fetch(`${base}/api/context`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -294,6 +293,38 @@ try {
       JSON.stringify({ bad: bad.status, created: created.sensitivity, kept: kept.sensitivity, cleared: cleared.sensitivity }));
     await fetch(`${base}/api/context/${created.id}`, { method: 'DELETE' });
   }
+
+  // Names and terms check (#85): a Markdown deliverable is checked, an Office file is not, and task.md is not touched.
+  {
+    const created = await (await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Smoke name check', status: 'backlog', priority: 'low' }) })).json();
+    const dir = path.join(ws, 'tasks', 'active', created.id, 'deliverables');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'DEL-01_smoke.md'), 'The ZQX figures are in.\n');
+    fs.writeFileSync(path.join(dir, 'DEL-02_smoke.pptx'), 'x');
+    const deliverables = [
+      { id: 'DEL-01', status: 'complete', file_path: `tasks/active/${created.id}/deliverables/DEL-01_smoke.md` },
+      { id: 'DEL-02', status: 'complete', file_path: `tasks/active/${created.id}/deliverables/DEL-02_smoke.pptx` },
+    ];
+    const saved = await (await fetch(`${base}/api/tasks/${created.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deliverables, expected_updated_at: created.updated_at }) })).json();
+    const taskFile = path.join(ws, 'tasks', 'active', created.id, 'task.md');
+    const before = fs.readFileSync(taskFile, 'utf-8');
+    const res = await fetch(`${base}/api/tasks/${created.id}/deliverables/DEL-01/name-check`, { method: 'POST' });
+    const runBody = await res.json();
+    const office = await fetch(`${base}/api/tasks/${created.id}/deliverables/DEL-02/name-check`, { method: 'POST' });
+    const dismissRes = await fetch(`${base}/api/tasks/${created.id}/deliverables/DEL-01/name-check/dismissed`, { method: 'PUT',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'abbreviation:ZQX', dismissed: true }) });
+    const again = await (await fetch(`${base}/api/tasks/${created.id}/deliverables/DEL-01/name-check`, { method: 'POST' })).json();
+    check('a dismissed finding stays dismissed on the next check',
+      dismissRes.status === 200 && again.findings?.find((f) => f.key === 'abbreviation:ZQX')?.dismissed === true, JSON.stringify(again).slice(0, 300));
+    check('the names and terms check lists an unknown abbreviation, skips Office files and leaves task.md alone',
+      Boolean(saved.id) && res.status === 200 && runBody.findings?.some((f) => f.key === 'abbreviation:ZQX') && office.status === 400
+        && fs.readFileSync(taskFile, 'utf-8') === before,
+      JSON.stringify({ status: res.status, office: office.status, findings: runBody.findings?.map((f) => f.key) }));
+  }
+
+  // Creating a task through the API keeps the optional schema fields it is given (they used to be dropped).
   const contextRef = (await (await fetch(`${base}/api/context`)).json())[0]?.id;
   const fields = {
     title: 'Smoke task with optional fields', body: 'Fictional zephyrbrief objective.', slug: 'smoke-optional-fields', task_type: 'analysis',

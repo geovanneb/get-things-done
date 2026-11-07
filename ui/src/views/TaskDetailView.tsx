@@ -4,6 +4,7 @@ import TaskMeetingSources from '@/components/board/TaskMeetingSources';
 import TaskMeetingAction from '@/components/board/TaskMeetingAction';
 import ChangeRequests from '@/components/board/ChangeRequests';
 import TaskWaiting from '@/components/board/TaskWaiting';
+import NameCheck from '@/components/board/NameCheck';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { sectionLabelStyle } from '@/components/task-form/styles';
 import Input, { Select } from '@/components/common/Input';
@@ -190,6 +191,7 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
             onAdd={addDeliverable}
           />
         </div>
+        <NameCheck task={task} dirty={dirty} />
       </div>
 
       <aside className="gtd-detail__aside" aria-label={t('newTaskModal.taskFields')}>
