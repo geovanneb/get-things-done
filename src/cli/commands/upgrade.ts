@@ -78,6 +78,8 @@ export const upgradeCommand = new Command('upgrade')
       console.log('');
     }
 
+    report('Kept your merged version (no .new until the app changes it again)', result.merged ?? [], chalk.dim);
+
     if (result.conflicted.length > 0) {
       console.log(chalk.yellow(`  Kept your version (${result.conflicted.length})`));
       for (const file of result.conflicted) {

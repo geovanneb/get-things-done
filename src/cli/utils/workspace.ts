@@ -37,6 +37,7 @@ export interface UpgradeResult {
   unchanged: string[];
   removed?: string[];
   retired_kept?: string[];
+  merged?: string[];
   fromVersion: string | null;
   toVersion: string;
 }

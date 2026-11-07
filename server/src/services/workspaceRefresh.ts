@@ -9,7 +9,7 @@ export type RefreshOutcome =
   | { status: 'skipped'; reason: string };
 
 /** Whether an agent started from the dashboard is working in the workspace: its files are not changed under it. */
-async function agentRunning(workspacePath: string): Promise<boolean> {
+export async function agentRunning(workspacePath: string): Promise<boolean> {
   const runs = await fsp.readdir(path.join(workspacePath, '.situation-board', 'runs')).catch(() => [] as string[]);
   for (const name of runs) if (name.endsWith('.json') && await isAnalysisRunning(workspacePath, name.slice(0, -'.json'.length))) return true;
   return false;

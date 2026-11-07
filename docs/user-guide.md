@@ -962,8 +962,11 @@ too). On Node 20 the app falls back to an in-memory scan automatically — every
 still works, ranking is just simpler. The log line starting `[search]` confirms it.
 
 **I edited `CLAUDE.md` and now there is a `CLAUDE.md.new` next to it.**
-Working as intended. A new version shipped, but your edits were kept. Diff the two
-and merge whatever you want, then delete the `.new` file.
+Working as intended. A new version shipped, but your edits were kept. **Settings >
+Instruction updates** lists each such file: **Compare** shows yours against the app's,
+merge whatever you want into your own file, then choose **I merged it**. The app removes
+its `.new` and writes no new one until a later release changes that file again (deleting
+the `.new` by hand is not enough: the next start writes it again).
 
 **I upgraded from the old `esb` command.**
 `gtd` is the command now. `esb` still works as an alias, and your old `~/.esb/config.json`
