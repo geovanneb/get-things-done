@@ -37,6 +37,22 @@
         }
       }
     },
+    "change_requests": {
+      "type": "array",
+      "description": "Feedback the executive gave with Request changes on a task in review. Written by the dashboard; the agent that reworks the task only sets status to addressed and addressed_at. Never delete, reword or reorder.",
+      "items": {
+        "type": "object",
+        "required": ["id", "requested_at", "feedback", "status"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^CR-\\d{2,}$"},
+          "requested_at": {"type": "string", "format": "date-time"},
+          "feedback": {"type": "string"},
+          "status": {"type": "string", "enum": ["open", "addressed"]},
+          "addressed_at": {"type": "string", "format": "date-time"},
+          "request_id": {"type": "string"}
+        }
+      }
+    },
     "deliverables": {
       "type": "array",
       "items": {

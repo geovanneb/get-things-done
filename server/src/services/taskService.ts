@@ -7,6 +7,7 @@ import { BOARD_COLUMN_ID } from './boardColumns';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { reservedSequence } from './idReservations';
+import { lock, unlock } from '../utils/fileLock';
 
 const fileService = new FileService();
 
@@ -16,7 +17,36 @@ const fileService = new FileService();
  */
 const OPTIONAL_CREATE_FIELDS = ['slug', 'task_type', 'contexts', 'preferred_agent', 'confidentiality', 'review_date', 'estimated_hours'] as const;
 /** Written by the server when a task is made from a meeting action item; never taken from a request. */
-const SERVER_FIELDS = ['meeting_action', 'meeting_action_source'] as const;
+const SERVER_FIELDS = ['meeting_action', 'meeting_action_source', 'change_requests'] as const;
+
+/**
+ * Feedback the executive gave on a task in review, with Request changes (#79): dated, kept in task.md, never in the
+ * body. `open` until the agent that reworks the task marks it `addressed`. Written by the dashboard and agents only;
+ * an ordinary task save never changes it.
+ */
+export interface ChangeRequest {
+  id: string;
+  requested_at: string;
+  feedback: string;
+  status: 'open' | 'addressed';
+  addressed_at?: string;
+  /** The dashboard's id for the submission, so sending it twice records it once. */
+  request_id: string;
+}
+
+const MAX_FEEDBACK = 4000;
+const REQUEST_ID = /^[A-Za-z0-9-]{8,64}$/;
+const IN_REVIEW: TaskStatus[] = ['in_review', 'review'];
+const TASK_LOCK_WAIT_MS = 5000;
+
+function httpError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { statusCode: status });
+}
+
+/** The change requests a task holds, as written; anything that is not one is left out of the count but never dropped. */
+function changeRequestsOf(task: Record<string, unknown>): unknown[] {
+  return Array.isArray(task['change_requests']) ? task['change_requests'] as unknown[] : [];
+}
 
 /** Which version of a meeting record a task was made from, and which original action item it stands for. */
 export interface MeetingActionSource { update_id: string; record_id: string; revision: string; root_index: number }
@@ -315,8 +345,71 @@ If the executive comes back with feedback on a task that is already \`in_review\
     return created;
   }
 
+  /** One writer at a time per task, across dashboards: a save and a change request never lose each other's write. */
+  private async withTaskLock<T>(id: string, operation: () => Promise<T>, requireTask = true): Promise<T> {
+    // Outside the task's own folder, which archiving moves: a write and an archive or delete wait for each other.
+    const locks = path.join(workspaceService.getWorkspacePath(), '.situation-board', 'task-locks');
+    await fileService.ensureDir(locks);
+    const held = await lock(path.join(locks, `${topLevelName(id)}.lock`), TASK_LOCK_WAIT_MS, () => httpError(409, 'The task is being saved elsewhere; try again in a moment.'));
+    try {
+      // Checked under the lock: a task archived or deleted a moment ago is never written back into tasks/active.
+      if (requireTask && !(await fileService.exists(path.join(this.getActiveDir(), topLevelName(id), 'task.md')))) throw httpError(404, `Task not found: ${id}`);
+      return await operation();
+    } finally {
+      await unlock(held);
+    }
+  }
+
+  /**
+   * Request changes on a task in review (#79): records the dated feedback and moves the task back to rework, in one
+   * write under the task's lock. Never starts an agent, never touches the body, keeps the start date. Refused (409) when
+   * the task is not in review or changed since the user saw it (`seen_updated_at`). The same `request_id` twice records
+   * it once and answers with the first.
+   */
+  async requestChanges(id: string, input: unknown): Promise<{ task: Task; request: ChangeRequest; created: boolean }> {
+    const b = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+    const feedback = typeof b['feedback'] === 'string' ? b['feedback'].trim() : '';
+    if (!feedback) throw httpError(400, 'Write what should change.');
+    if (feedback.length > MAX_FEEDBACK) throw httpError(400, `Keep the feedback under ${MAX_FEEDBACK} characters.`);
+    const requestId = b['request_id'];
+    if (typeof requestId !== 'string' || !REQUEST_ID.test(requestId)) throw httpError(400, 'Invalid request id.');
+    const seen = b['seen_updated_at'];
+    if (typeof seen !== 'string') throw httpError(400, 'Say which version of the task you reviewed.');
+
+    return this.withTaskLock(id, async () => {
+      const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
+      const { data, content } = await fileService.readMarkdown<Task>(taskFile);
+      const existing = data as Task & Record<string, unknown>;
+      const requests = changeRequestsOf(existing);
+      const again = requests.find((r) => r && typeof r === 'object' && (r as ChangeRequest).request_id === requestId) as ChangeRequest | undefined;
+      if (again) return { task: { ...(await this.getTask(id)) }, request: again, created: false };
+      if (!IN_REVIEW.includes(existing.status)) throw httpError(409, 'Changes can be requested only on a task in review.');
+      if (existing.updated_at !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then request the changes.');
+
+      const now = new Date().toISOString();
+      const numbers = requests.map((r) => Number(/^CR-(\d+)$/.exec(String((r as ChangeRequest | null)?.id ?? ''))?.[1] ?? 0));
+      const request: ChangeRequest = {
+        id: `CR-${String(Math.max(0, ...numbers) + 1).padStart(2, '0')}`,
+        requested_at: now,
+        feedback,
+        status: 'open',
+        request_id: requestId,
+      };
+      const updated = { ...existing, status: 'in_progress' as TaskStatus, change_requests: [...requests, request], updated_at: now } as Task;
+      stampStatusDates(existing.status, updated, now);
+      const { path: _path, body: _body, ...frontmatter } = updated;
+      await fileService.writeMarkdown(taskFile, frontmatter as Record<string, unknown>, content);
+      await this.generateSlashCommand();
+      return { task: { ...updated, body: content || undefined, path: taskFile }, request, created: true };
+    });
+  }
+
   async updateTask(id: string, data: Partial<Task>): Promise<Task> {
     checkBoardColumn((data as Record<string, unknown>)['board_column'], true);
+    return this.withTaskLock(id, () => this.updateTaskUnlocked(id, data));
+  }
+
+  private async updateTaskUnlocked(id: string, data: Partial<Task>): Promise<Task> {
     const existing = await this.getTask(id);
     const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
     const { content: existingContent } = await fileService.readMarkdown<Task>(taskFile);
@@ -347,14 +440,20 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async deleteTask(id: string): Promise<void> {
-    const taskDir = path.join(this.getActiveDir(), topLevelName(id));
-    if (!(await fileService.exists(taskDir))) {
-      throw new Error(`Task not found: ${id}`);
-    }
-    await fsp.rm(taskDir, { recursive: true, force: true });
+    await this.withTaskLock(id, async () => {
+      const taskDir = path.join(this.getActiveDir(), topLevelName(id));
+      if (!(await fileService.exists(taskDir))) {
+        throw new Error(`Task not found: ${id}`);
+      }
+      await fsp.rm(taskDir, { recursive: true, force: true });
+    }, false);
   }
 
   async archiveTask(id: string): Promise<void> {
+    await this.withTaskLock(id, () => this.archiveTaskUnlocked(id), false);
+  }
+
+  private async archiveTaskUnlocked(id: string): Promise<void> {
     const activeDir = path.join(this.getActiveDir(), topLevelName(id));
     const archiveDir = path.join(this.getArchiveDir(), topLevelName(id));
 
@@ -383,13 +482,12 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async updateTaskContent(id: string, content: string): Promise<void> {
-    const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
-    if (!(await fileService.exists(taskFile))) {
-      throw new Error(`Task not found: ${id}`);
-    }
-    const { data } = await fileService.readMarkdown<Task>(taskFile);
-    data.updated_at = new Date().toISOString();
-    await fileService.writeMarkdown(taskFile, data as unknown as Record<string, unknown>, content);
+    await this.withTaskLock(id, async () => {
+      const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
+      const { data } = await fileService.readMarkdown<Task>(taskFile);
+      data.updated_at = new Date().toISOString();
+      await fileService.writeMarkdown(taskFile, data as unknown as Record<string, unknown>, content);
+    });
   }
 
   private async generateTaskId(): Promise<string> {

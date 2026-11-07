@@ -133,6 +133,12 @@ deliverable, before you edit it, and before you reply. The board must show that 
 is being worked on again. Never leave it at `in_review` while you are changing the
 output.
 
+If task.md has `change_requests` with `status: open`, they are the executive's feedback from
+**Request changes** in the dashboard: read each before working and address it. When you run
+Step 9 again, set each one you addressed to `status: addressed` with `addressed_at` (current
+UTC timestamp); leave one you could not address `open` and say why in the execution log and
+your reply. Never delete, reword or reorder them.
+
 Then apply the fix, save the deliverable, and run Step 9 again to set the task back to
 `in_review` with a fresh `updated_at` and a new execution log entry.
 

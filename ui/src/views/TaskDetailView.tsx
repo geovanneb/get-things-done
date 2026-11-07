@@ -2,6 +2,7 @@ import { useLanguage } from '@/i18n/LanguageProvider';
 import { rich } from '@/i18n/rich';
 import TaskMeetingSources from '@/components/board/TaskMeetingSources';
 import TaskMeetingAction from '@/components/board/TaskMeetingAction';
+import ChangeRequests from '@/components/board/ChangeRequests';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { sectionLabelStyle } from '@/components/task-form/styles';
 import Input, { Select } from '@/components/common/Input';
@@ -145,7 +146,7 @@ function nextDeliverableId(deliverables: Task['deliverables']): string {
   return `DEL-${String(next).padStart(2, '0')}`;
 }
 
-function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number; pinError: string | null; onPinned: () => void }) {
+function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, onRequested }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number; pinError: string | null; onPinned: () => void; dirty: boolean; onRequested: () => void }) {
   const { t } = useLanguage();
   const { data: allStakeholders } = useApi<Stakeholder[]>('/api/stakeholders');
 
@@ -175,6 +176,7 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned }: { task
   return (
     <div className="gtd-detail">
       <div className="gtd-detail__main">
+        <ChangeRequests task={task} dirty={dirty} onRequested={onRequested} />
         {task.meeting_action && <TaskMeetingAction taskId={task.id} refreshKey={savedCount} />}
         <MarkdownSection label={t('newTaskModal.objective')} content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
         {/\]\(\/meetings\//.test(task.body ?? '') && <TaskMeetingSources taskId={task.id} refreshKey={savedCount} pinError={pinError} onPinned={onPinned} />}
@@ -449,7 +451,7 @@ export default function TaskDetailView() {
 
       <div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${tab}`}
         style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)' }}>
-        {tab === 'work' && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} />}
+        {tab === 'work' && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} dirty={isDirty} onRequested={() => { refetch(); refetchTasks(); }} />}
         {tab === 'files' && id && <FilesTab taskId={id} />}
       </div>
     </>,

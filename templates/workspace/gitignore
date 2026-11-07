@@ -2,6 +2,7 @@
 .situation-board/logs/
 .situation-board/trash/
 .situation-board/runs/
+.situation-board/task-locks/
 context-updates/meeting-queue/
 meetings/
 node_modules/

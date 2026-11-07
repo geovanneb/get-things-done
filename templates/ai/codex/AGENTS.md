@@ -41,6 +41,11 @@ Tasks with `meeting_action` were made from a meeting's action item; never change
    `status: in_progress` again as your very first action, before editing anything.
    Set it back to `in_review` when the fix is saved. This applies to every correction,
    however small.
+   Feedback from **Request changes** in the dashboard is in task.md `change_requests`
+   (`status: open`): read each before working and address it; when you set `in_review`,
+   mark each one you addressed `status: addressed` with `addressed_at` (UTC), leave one you
+   could not address `open` and say why in the execution log and your reply. Never delete,
+   reword or reorder them.
    Then write down why the instructions did not prevent it: a Kaizen note at
    `kaizen/KAIZEN-YYYY-NNN.md` (the next free number), following
    `.schemas/kaizen.schema.json`: `title`, `task_ref`, `symptom` (what went wrong),
