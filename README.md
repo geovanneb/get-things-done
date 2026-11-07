@@ -51,7 +51,7 @@ Choose your AI tool during setup. The local dashboard opens in your browser. You
 
 The workspace and offline transcription need no Get Things Done account. AI analysis and task execution use the AI tool you bring; that tool may require its own account or subscription.
 
-> **New in 0.11.0:** update and restart from the app, Kanban columns you can rename, add and reorder, and dictation into text fields, transcribed offline. [See what changed](CHANGELOG.md).
+> **New in 0.12.0:** the dashboard speaks Japanese, Portuguese and Spanish, a task in review takes feedback that stays on the task, and a task can say what it waits for and when to follow up. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 
