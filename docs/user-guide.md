@@ -147,6 +147,10 @@ person as stakeholder, a **Meeting brief** output and the `meeting-prep` agent (
 workspace has them). Add the other attendees, the meeting date and your goal, then save.
 Nothing runs until you start the task.
 
+A person's page also shows the **latest meeting involving them**: the newest confirmed meeting
+record that lists them as an attendee, with its date and a link. Expected participants, a name
+in a transcript or a meeting still in review never count, and it is not proof that you attended.
+
 ### 3. Context — `context/`
 
 Your background knowledge library, filed by category: `company/`, `organization/`,

@@ -19,6 +19,7 @@ import { useAppDispatch } from '@/store';
 import { meetingPrepDraft } from '@/utils/meetingPrep';
 import type { ClaudeAgent, OrgPersonSummary, OrgPosition, OutputTemplate, Stakeholder, Task } from '@/types';
 import { StakeholderVoice, StakeholderVoiceCard } from '@/components/stakeholders/VoiceTag';
+import StakeholderLastMeeting from '@/components/stakeholders/LastMeeting';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -418,6 +419,8 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
           {t('stakeholderDetail.prepareMeeting')}
         </Button>
       </div>
+
+      <StakeholderLastMeeting id={stakeholder.id} />
 
       {/* Organization */}
       <Card headingLevel={embedded ? 3 : 2} title={t('orgChartDialogs.organization')}>
