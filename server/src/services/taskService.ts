@@ -515,8 +515,15 @@ If the executive comes back with feedback on a task that is already \`in_review\
     return this.withTaskLock(id, () => this.updateTaskUnlocked(id, data));
   }
 
-  private async updateTaskUnlocked(id: string, data: Partial<Task>): Promise<Task> {
+  private async updateTaskUnlocked(id: string, input: Partial<Task>): Promise<Task> {
+    // `expected_updated_at`: the version the user started editing from (the task page sends it). A save made from an
+    // older version is refused, so it can never undo what happened meanwhile (a Request changes, an agent's update).
+    // Without it (board moves, scripts), a save applies as before.
+    const { expected_updated_at: expected, ...data } = input as Partial<Task> & { expected_updated_at?: unknown };
     const existing = await this.getTask(id);
+    if (typeof expected === 'string' && expected !== existing.updated_at) {
+      throw httpError(409, 'The task changed since you started editing. Your edits are not saved: load the latest version, then make them again.');
+    }
     const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
     const { content: existingContent } = await fileService.readMarkdown<Task>(taskFile);
 
