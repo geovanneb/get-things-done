@@ -2,15 +2,12 @@ import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { createHash } from 'crypto';
 import { constants as fsConstants } from 'fs';
-import { fromMarkdown } from 'mdast-util-from-markdown';
-import { gfmFromMarkdown, gfmToMarkdown } from 'mdast-util-gfm';
-import { toMarkdown } from 'mdast-util-to-markdown';
-import { gfm } from 'micromark-extension-gfm';
-import type { Nodes, Parents, Root, RootContent } from 'mdast';
+import { Worker } from 'worker_threads';
 import { WorkspaceService } from './workspace';
 import { effectiveSensitivity } from './contextService';
 import { parseMarkdown } from '../utils/markdown';
 import { workspaceEntry } from '../utils/files';
+import type { exportSection } from './contextShareExport';
 
 /**
  * Share context notes as one Markdown file (#107). Only notes labelled `shareable` can be shared, checked here on
@@ -21,6 +18,9 @@ import { workspaceEntry } from '../utils/files';
  * Preview, then download: the preview returns the exact text and a token (a hash of that text and of every note file
  * it came from). The download rebuilds the text and refuses it (409) unless the token is the same, so the bytes saved
  * are exactly the bytes previewed, and a note changed, moved or relabelled in between needs a new preview.
+ *
+ * Parsing runs in a worker thread with a deadline and a memory limit: a pathological note (deep nesting, long runs of
+ * emphasis markers) is reported as too complex instead of stalling the dashboard.
  */
 
 const workspace = new WorkspaceService();
@@ -30,88 +30,78 @@ const MAX_NOTES = 50;
 const MAX_NOTE_BYTES = 512 * 1024;
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 const NOTE_ID = /^CTX-[a-z0-9][a-z0-9-]{0,120}$/;
+/** Time one note may take to export, and one whole request. */
+const NOTE_DEADLINE_MS = 3000;
+const REQUEST_DEADLINE_MS = 20_000;
 
-function httpError(status: number, message: string, details?: unknown): Error {
-  return Object.assign(new Error(message), { statusCode: status, ...(details === undefined ? {} : { details }) });
+function httpError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { statusCode: status });
 }
 
-class NoteProblem extends Error {}
+/** Why a chosen note cannot be shared. The dashboard words each code in the user's language; `problem` is the English. */
+export type ShareProblem = 'gone' | 'unreadable' | 'duplicate_id' | 'not_shareable' | 'invalid_label' | 'too_large_total'
+  | 'too_complex' | 'unknown_part' | 'took_too_long';
 
-/** Block and inline parts kept, with their children rebuilt the same way. Anything else in a note refuses it. */
-const KEEP = new Set(['root', 'heading', 'paragraph', 'list', 'listItem', 'table', 'tableRow', 'tableCell', 'code', 'inlineCode',
-  'blockquote', 'thematicBreak', 'text', 'emphasis', 'strong', 'delete', 'break']);
-/** Parts left out on purpose (nothing of them is in the file). */
-const DROP = new Set(['html', 'image', 'imageReference', 'definition', 'footnoteDefinition', 'footnoteReference', 'yaml']);
-/** Parts reduced to their text: a link keeps its words, never its target. */
-const UNWRAP = new Set(['link', 'linkReference']);
+const PROBLEMS: Record<ShareProblem, string> = {
+  gone: 'This note is no longer there.',
+  unreadable: 'This note could not be read (too large, reached through a link, or not a plain file).',
+  duplicate_id: 'Two notes have this id; fix that before sharing.',
+  not_shareable: 'Only notes labelled shareable can be shared.',
+  invalid_label: 'Its sharing label is not one the app knows, so it is never shared.',
+  too_large_total: 'The file would be too large; choose fewer notes.',
+  too_complex: 'This note is too complex to export safely (very deep nesting or very long runs of markup).',
+  unknown_part: 'It contains a part the export cannot handle safely.',
+  took_too_long: 'Building the file took too long; choose fewer notes.',
+};
 
-/** The note body rebuilt from allowed parts only, its headings placed under the note's title. */
-export function exportBody(body: string): string {
-  const tree = fromMarkdown(body, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
-  // The note's top heading level becomes 2, right under the note's title; levels below keep their steps.
-  let top = 6;
-  const visit = (n: Nodes) => { if (n.type === 'heading') top = Math.min(top, n.depth); if ('children' in n) (n as Parents).children.forEach((c) => visit(c as Nodes)); };
-  visit(tree);
-  const shift = 2 - top;
-  const clean = (node: Nodes): RootContent[] => {
-    if (DROP.has(node.type)) return [];
-    if (UNWRAP.has(node.type)) return (node as Parents).children.flatMap((c) => clean(c as Nodes));
-    if (!KEEP.has(node.type)) throw new NoteProblem(`It contains a part the export cannot handle safely (${node.type}).`);
-    const copy = { ...node } as Nodes & { position?: unknown; data?: unknown };
-    delete copy.position;
-    delete copy.data;
-    if (copy.type === 'heading') copy.depth = Math.max(2, Math.min(6, copy.depth + shift)) as 1 | 2 | 3 | 4 | 5 | 6;
-    if (copy.type === 'listItem' && typeof copy.checked === 'boolean') copy.checked = null; // task boxes read as plain items
-    if ('children' in copy) (copy as Parents).children = (copy as Parents).children.flatMap((c) => clean(c as Nodes)) as never;
-    // Space left at the edges by what was taken out ("text <!-- note -->") is trimmed, never written as an escape.
-    if (copy.type === 'paragraph' || copy.type === 'heading' || copy.type === 'tableCell') {
-      const kids = copy.children as RootContent[];
-      const first = kids[0];
-      const last = kids[kids.length - 1];
-      if (first?.type === 'text') first.value = first.value.replace(/^[ \t]+/, '');
-      if (last?.type === 'text') last.value = last.value.replace(/[ \t]+$/, '');
-      copy.children = kids.filter((k) => k.type !== 'text' || k.value !== '') as never;
-    }
-    // A paragraph left empty by what was taken out (an image on its own line) is dropped too.
-    if (copy.type === 'paragraph' && copy.children.length === 0) return [];
-    return [copy as RootContent];
-  };
-  const root: Root = { type: 'root', children: tree.children.flatMap((c) => clean(c)) };
-  return toMarkdown(root, { extensions: [gfmToMarkdown()], bullet: '-', emphasis: '_', strong: '*', fences: true, rule: '-' }).trim();
-}
-
-/** A note's title as a heading line: one line, Markdown characters that would change it escaped. */
-function titleLine(title: string): string {
-  const one = title.replace(/\s+/g, ' ').trim() || 'Untitled';
-  return '# ' + toMarkdown({ type: 'paragraph', children: [{ type: 'text', value: one }] }).trim();
+class NoteProblem extends Error {
+  constructor(readonly code: ShareProblem) { super(PROBLEMS[code]); }
 }
 
 interface FoundNote { id: string; file: string; title: string; body: string; label: unknown; sha256: string }
 
-/** Reads a plain file reached through no link, without blocking on a pipe, at most `cap` bytes. */
-async function readPlain(ws: string, file: string, cap: number): Promise<Buffer> {
+/** Reads a plain file reached through no link, without blocking on a pipe; null when it holds more than `cap` bytes. */
+async function readPlain(ws: string, file: string, cap: number, firstBytesOnly = false): Promise<Buffer | null> {
   await workspaceEntry(ws, file);
-  if (!(await fsp.lstat(file)).isFile()) throw new NoteProblem('Its file is not a plain file.');
+  const before = await fsp.lstat(file);
+  if (!before.isFile()) throw new NoteProblem('unreadable');
   const handle = await fsp.open(file, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
   try {
-    if (!(await handle.stat()).isFile()) throw new NoteProblem('Its file is not a plain file.');
-    const buffer = Buffer.alloc(cap + 1);
+    const stat = await handle.stat();
+    // The same file that was looked at: not another one swapped in between.
+    if (!stat.isFile() || stat.ino !== before.ino || stat.dev !== before.dev) throw new NoteProblem('unreadable');
+    const buffer = Buffer.allocUnsafe(Math.min(stat.size, cap) + 1);
     let size = 0;
     for (;;) {
       const { bytesRead } = await handle.read(buffer, size, buffer.length - size, size);
       if (bytesRead === 0) break;
       size += bytesRead;
-      if (size > cap) throw new NoteProblem('The note is too large to share as text.');
+      if (size === buffer.length) break;
     }
-    return buffer.subarray(0, size);
+    if (firstBytesOnly) return buffer.subarray(0, Math.min(size, cap));
+    // More than the cap, or grown since it was looked at: not read as a note.
+    return size > Math.min(stat.size, cap) ? null : buffer.subarray(0, size);
   } finally {
     await handle.close();
   }
 }
 
-/** Every context note by id, read only (no folder is created or moved), through no link. */
-async function findNotes(ws: string, wanted: Set<string>): Promise<Map<string, FoundNote[]>> {
+/** The id in a note's frontmatter, from its first bytes only: to name a note that could not be read in full. */
+async function peekId(ws: string, file: string): Promise<string | null> {
+  try {
+    const head = await readPlain(ws, file, 64 * 1024, true);
+    const source = head ? head.toString('utf-8') : '';
+    return /^---\r?\n[\s\S]*?^id:\s*['"]?(CTX-[a-z0-9-]+)['"]?\s*$/m.exec(source)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every chosen context note, read only (no folder is created or moved), through no link; ids of unreadable ones too. */
+async function findNotes(ws: string, wanted: Set<string>): Promise<{ found: Map<string, FoundNote[]>; unreadable: Set<string>; anyUnreadable: boolean }> {
   const found = new Map<string, FoundNote[]>();
+  const unreadable = new Set<string>();
+  let anyUnreadable = false;
   const base = path.join(ws, 'context');
   for (const cat of CATEGORIES) {
     const dir = path.join(base, cat);
@@ -125,89 +115,157 @@ async function findNotes(ws: string, wanted: Set<string>): Promise<Map<string, F
     for (const entry of entries) {
       const file = entry.isDirectory() ? path.join(dir, entry.name, 'note.md') : entry.isFile() && entry.name.endsWith('.md') ? path.join(dir, entry.name) : null;
       if (!file) continue;
-      let bytes: Buffer;
+      let parsed: { data: Record<string, unknown>; content: string } | null = null;
+      let bytes: Buffer | null = null;
       try {
         bytes = await readPlain(ws, file, MAX_NOTE_BYTES);
-      } catch {
-        continue;
+        if (bytes) parsed = parseMarkdown(bytes.toString('utf-8')) as unknown as { data: Record<string, unknown>; content: string };
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
       }
-      let parsed: { data: Record<string, unknown>; content: string };
-      try {
-        parsed = parseMarkdown(bytes.toString('utf-8')) as unknown as { data: Record<string, unknown>; content: string };
-      } catch {
+      if (!parsed || !bytes) {
+        if (entry.isDirectory() && !(await fsp.lstat(file).catch(() => null))) continue; // a folder without a note
+        anyUnreadable = true;
+        const id = await peekId(ws, file);
+        if (id && wanted.has(id)) unreadable.add(id);
         continue;
       }
       const id = parsed.data['id'];
       if (typeof id !== 'string' || !wanted.has(id)) continue;
-      const note: FoundNote = {
+      found.set(id, [...(found.get(id) ?? []), {
         id, file, title: typeof parsed.data['title'] === 'string' ? parsed.data['title'] : 'Untitled', body: parsed.content,
         label: parsed.data['sensitivity'], sha256: createHash('sha256').update(bytes).digest('hex'),
-      };
-      found.set(id, [...(found.get(id) ?? []), note]);
+      }]);
     }
   }
-  return found;
+  return { found, unreadable, anyUnreadable };
 }
 
-export interface ShareRow { id: string; title: string; problem: string | null }
+type Section = ReturnType<typeof exportSection>;
+
+/** Exports notes one by one in a worker thread; a note that runs past its deadline or memory is stopped. */
+class ExportWorker {
+  private worker: Worker | null = null;
+  private readonly module = path.join(__dirname, `contextShareExport${path.extname(__filename)}`);
+
+  private start(): Worker {
+    // Built, the module is JavaScript. Under the test runner it is TypeScript: load it the way the tests do.
+    const code = `const { parentPort, workerData } = require('worker_threads');
+if (workerData.endsWith('.ts')) require('tsx/cjs');
+const m = require(workerData);
+parentPort.on('message', ({ title, body }) => {
+  try { parentPort.postMessage(m.exportSection(title, body)); }
+  catch (e) { parentPort.postMessage({ ok: false, code: 'too_complex', message: String(e && e.message) }); }
+});`;
+    this.worker = new Worker(code, {
+      eval: true, workerData: this.module,
+      resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32, stackSizeMb: 4 },
+    });
+    this.worker.unref();
+    return this.worker;
+  }
+
+  async run(title: string, body: string, ms: number): Promise<Section> {
+    const worker = this.worker ?? this.start();
+    return new Promise<Section>((resolve) => {
+      let settled = false;
+      const finish = (result: Section, stop: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        worker.off('message', onMessage);
+        worker.off('error', onError);
+        worker.off('exit', onExit);
+        if (stop) { this.worker = null; void worker.terminate(); }
+        resolve(result);
+      };
+      const tooComplex: Section = { ok: false, code: 'too_complex', message: PROBLEMS.too_complex };
+      const onMessage = (result: Section) => finish(result, false);
+      const onError = () => finish(tooComplex, true); // out of memory, or a crash
+      const onExit = () => finish(tooComplex, true);
+      const timer = setTimeout(() => finish(tooComplex, true), ms);
+      worker.on('message', onMessage);
+      worker.once('error', onError);
+      worker.once('exit', onExit);
+      worker.postMessage({ title, body });
+    });
+  }
+
+  async close(): Promise<void> {
+    const worker = this.worker;
+    this.worker = null;
+    if (worker) await worker.terminate();
+  }
+}
+
+export interface ShareRow { id: string; title: string; problem: string | null; code: ShareProblem | null }
 export interface SharePreview { rows: ShareRow[]; text: string | null; token: string | null; file_name: string }
 
-function noteIds(body: unknown): string[] {
-  const notes = (body as { notes?: unknown } | null)?.notes;
+function request(body: unknown): { ids: string[]; day: string } {
+  const b = (body ?? {}) as { notes?: unknown; day?: unknown };
+  const notes = b.notes;
   if (!Array.isArray(notes) || notes.length === 0) throw httpError(400, 'Choose at least one note.');
   if (notes.length > MAX_NOTES) throw httpError(400, `Choose at most ${MAX_NOTES} notes.`);
   const ids = notes.map((n) => (typeof n === 'string' && NOTE_ID.test(n) ? n : null));
   if (ids.some((n) => n === null)) throw httpError(400, 'Not a context note id.');
   if (new Set(ids).size !== ids.length) throw httpError(400, 'A note is chosen twice.');
-  return ids as string[];
+  // The file is named after the user's own day, which the dashboard sends; the server's day otherwise.
+  const day = typeof b.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.day) ? b.day : new Date().toISOString().slice(0, 10);
+  return { ids: ids as string[], day };
 }
 
 /** The text of the file, the rows (with a reason for each note that cannot be shared) and the token. */
-async function build(body: unknown): Promise<SharePreview & { hashes: string[] }> {
-  const ids = noteIds(body);
+async function build(body: unknown): Promise<SharePreview> {
+  const { ids, day } = request(body);
   const ws = workspace.getWorkspacePath();
-  const found = await findNotes(ws, new Set(ids));
+  const { found, unreadable, anyUnreadable } = await findNotes(ws, new Set(ids));
   const rows: ShareRow[] = [];
   const parts: string[] = [];
   const hashes: string[] = [];
+  const exporter = new ExportWorker();
+  const started = Date.now();
   let total = 0;
-  for (const id of ids) {
-    const matches = found.get(id) ?? [];
-    const row: ShareRow = { id, title: matches[0]?.title ?? id, problem: null };
-    try {
-      if (matches.length === 0) throw new NoteProblem('This note is no longer there.');
-      if (matches.length > 1) throw new NoteProblem('Two notes have this id; fix that before sharing.');
-      const note = matches[0]!;
-      const label = effectiveSensitivity(note.label);
-      if (label !== 'shareable') {
-        throw new NoteProblem(label === 'invalid' ? 'Its sharing label is not one the app knows, so it is never shared.' : 'Only notes labelled shareable can be shared.');
+  try {
+    for (const id of ids) {
+      const matches = found.get(id) ?? [];
+      const row: ShareRow = { id, title: matches[0]?.title ?? id, problem: null, code: null };
+      try {
+        if (matches.length === 0) throw new NoteProblem(unreadable.has(id) || anyUnreadable ? 'unreadable' : 'gone');
+        if (matches.length > 1 || unreadable.has(id)) throw new NoteProblem('duplicate_id');
+        const note = matches[0]!;
+        const label = effectiveSensitivity(note.label);
+        if (label !== 'shareable') throw new NoteProblem(label === 'invalid' ? 'invalid_label' : 'not_shareable');
+        const left = REQUEST_DEADLINE_MS - (Date.now() - started);
+        if (left <= 0) throw new NoteProblem('took_too_long');
+        const section = await exporter.run(note.title, note.body, Math.min(NOTE_DEADLINE_MS, left));
+        if (!section.ok) throw new NoteProblem(section.code);
+        total += Buffer.byteLength(section.text, 'utf-8');
+        if (total > MAX_TOTAL_BYTES) throw new NoteProblem('too_large_total');
+        parts.push(section.text);
+        hashes.push(`${note.id}\u0000${path.relative(ws, note.file)}\u0000${note.sha256}`);
+      } catch (err) {
+        if (!(err instanceof NoteProblem)) throw err;
+        row.problem = err.message;
+        row.code = err.code;
       }
-      const section = `${titleLine(note.title)}\n\n${exportBody(note.body)}`.trimEnd();
-      total += Buffer.byteLength(section, 'utf-8');
-      if (total > MAX_TOTAL_BYTES) throw new NoteProblem('The file would be too large; choose fewer notes.');
-      parts.push(section);
-      hashes.push(`${note.id}\u0000${path.relative(ws, note.file)}\u0000${note.sha256}`);
-    } catch (err) {
-      if (!(err instanceof NoteProblem)) throw err;
-      row.problem = err.message;
+      rows.push(row);
     }
-    rows.push(row);
+  } finally {
+    await exporter.close();
   }
-  const day = new Date().toISOString().slice(0, 10);
   const fileName = `context-notes-${day}.md`;
-  if (rows.some((r) => r.problem)) return { rows, text: null, token: null, file_name: fileName, hashes };
+  if (rows.some((r) => r.problem)) return { rows, text: null, token: null, file_name: fileName };
   const text = parts.join('\n\n---\n\n') + '\n';
-  const token = createHash('sha256').update(text).update('\u0001').update(hashes.join('\u0002')).digest('hex');
-  return { rows, text, token, file_name: fileName, hashes };
+  const token = createHash('sha256').update(text).update('\u0001').update(fileName).update('\u0001').update(hashes.join('\u0002')).digest('hex');
+  return { rows, text, token, file_name: fileName };
 }
 
 /** What the file would hold, exactly; no token while any chosen note cannot be shared. */
 export async function previewContextShare(body: unknown): Promise<SharePreview> {
-  const { hashes: _hashes, ...preview } = await build(body);
-  return preview;
+  return build(body);
 }
 
-/** The file itself, only when it is exactly what was previewed. */
+/** The file itself, only when it is exactly what was previewed (same notes, files, order and name). */
 export async function downloadContextShare(body: unknown): Promise<{ name: string; text: string }> {
   const token = (body as { token?: unknown } | null)?.token;
   if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) throw httpError(400, 'Preview the file first.');

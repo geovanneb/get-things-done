@@ -1,7 +1,7 @@
 /**
  * Unit tests for choosing notes to share. Run with `npm run test:context-share --workspace=ui`.
  */
-import { shareableNotes } from './contextShare';
+import { localDay, shareableNotes, stillChosen } from './contextShare';
 import type { ContextNote } from '@/types';
 
 let failures = 0;
@@ -15,6 +15,9 @@ const notes = [note('a', 'Beta', 'shareable'), note('b', 'Alpha', 'shareable'), 
 const all = shareableNotes(notes, '');
 check('only notes labelled exactly shareable are offered, sorted by title', all.shareable.map((n) => n.id).join() === 'b,a' && all.others === 3, JSON.stringify(all));
 check('search narrows the offer', shareableNotes(notes, 'bet').shareable.map((n) => n.id).join() === 'a');
+
+check('a chosen note relabelled or removed meanwhile drops out, order kept', stillChosen(['b', 'c', 'a', 'z'], notes).join() === 'b,a');
+check('the file is named after the local day', localDay(new Date(2026, 0, 2, 23, 30)) === '2026-01-02');
 
 if (failures > 0) { console.error(`${failures} check(s) failed`); process.exit(1); }
 console.log('All context share checks passed');

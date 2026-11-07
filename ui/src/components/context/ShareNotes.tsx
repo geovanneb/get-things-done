@@ -6,7 +6,7 @@ import Notice from '@/components/common/Notice';
 import { Checkbox, SearchInput } from '@/components/common/Input';
 import { useNotify } from '@/hooks/useNotify';
 import { apiPost, errorMessage } from '@/utils/api';
-import { shareableNotes, type ContextSharePreview } from '@/utils/contextShare';
+import { localDay, shareableNotes, stillChosen, type ContextSharePreview, type ShareProblem } from '@/utils/contextShare';
 import type { ContextNote } from '@/types';
 
 /**
@@ -21,12 +21,17 @@ export default function ShareNotes({ isOpen, onClose, notes, categoryLabel }: { 
   const [preview, setPreview] = React.useState<ContextSharePreview | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [stale, setStale] = React.useState<string | null>(null);
+  const [day, setDay] = React.useState('');
 
   React.useEffect(() => {
     if (isOpen) { setChosen([]); setQuery(''); setPreview(null); setStale(null); }
   }, [isOpen]);
 
   const { shareable, others } = shareableNotes(notes, query);
+  // Only notes still offered are sent; one relabelled or removed meanwhile drops out of the selection.
+  const picked = stillChosen(chosen, notes);
+  const hiddenBySearch = picked.filter((id) => !shareable.some((n) => n.id === id)).length;
+  const problemText = (code: ShareProblem | null, fallback: string | null) => (code ? t(`shareNotes.problem.${code}`) : fallback ?? '');
   const toggle = (id: string, on: boolean) => {
     setChosen((c) => on ? [...c, id] : c.filter((x) => x !== id));
     setPreview(null);
@@ -36,7 +41,9 @@ export default function ShareNotes({ isOpen, onClose, notes, categoryLabel }: { 
     setBusy(true);
     setStale(null);
     try {
-      setPreview(await apiPost<ContextSharePreview>('/api/context/share/preview', { notes: chosen }));
+      const today = localDay();
+      setDay(today);
+      setPreview(await apiPost<ContextSharePreview>('/api/context/share/preview', { notes: picked, day: today }));
     } catch (err) {
       notify.error(err, t('shareNotes.couldNotPreview'));
     } finally {
@@ -50,11 +57,11 @@ export default function ShareNotes({ isOpen, onClose, notes, categoryLabel }: { 
     try {
       const res = await fetch('/api/context/share/download', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes: chosen, token: preview.token }),
+        body: JSON.stringify({ notes: picked, day, token: preview.token }),
       });
       if (!res.ok) {
         const message = errorMessage(await res.json().catch(() => null), t('shareNotes.couldNotDownload'));
-        if (res.status === 409) { setPreview(null); setStale(message); return; }
+        if (res.status === 409) { setPreview(null); setStale(t('shareNotes.changedSincePreview')); return; }
         throw new Error(message);
       }
       const blob = await res.blob();
@@ -64,6 +71,7 @@ export default function ShareNotes({ isOpen, onClose, notes, categoryLabel }: { 
       a.download = preview.file_name;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notify.success(t('shareNotes.downloaded', { name: preview.file_name }));
     } catch (err) {
       notify.error(err, t('shareNotes.couldNotDownload'));
     } finally {
@@ -84,8 +92,8 @@ export default function ShareNotes({ isOpen, onClose, notes, categoryLabel }: { 
       ) : (
         <>
           <Button variant="ghost" onClick={onClose} disabled={busy}>{t('cancel')}</Button>
-          <Button variant="primary" loading={busy} disabled={chosen.length === 0} onClick={() => void makePreview()}>
-            {t('shareNotes.preview', { count: chosen.length })}
+          <Button variant="primary" loading={busy} disabled={picked.length === 0} onClick={() => void makePreview()}>
+            {t('shareNotes.preview', { count: picked.length })}
           </Button>
         </>
       )}>
@@ -104,8 +112,16 @@ export default function ShareNotes({ isOpen, onClose, notes, categoryLabel }: { 
           {problems.length > 0 && (
             <Notice tone="critical">
               {t('shareNotes.cannotShare')}
-              <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.2em' }}>
-                {problems.map((r) => <li key={r.id}>{r.title}: {r.problem}</li>)}
+              <ul style={{ margin: 'var(--space-1) 0 0', paddingLeft: '1.2em', display: 'grid', gap: 'var(--space-1)' }}>
+                {problems.map((r) => (
+                  <li key={r.id}>
+                    {r.title}: {problemText(r.code, r.problem)}{' '}
+                    <Button size="sm" variant="ghost" aria-label={t('shareNotes.removeLabel', { title: r.title })}
+                      onClick={() => { setChosen((c) => c.filter((x) => x !== r.id)); setPreview(null); }}>
+                      {t('shareNotes.remove')}
+                    </Button>
+                  </li>
+                ))}
               </ul>
             </Notice>
           )}
@@ -119,6 +135,9 @@ export default function ShareNotes({ isOpen, onClose, notes, categoryLabel }: { 
                   description={categoryLabel(n.category)} />
               ))}
             </div>
+          )}
+          {hiddenBySearch > 0 && (
+            <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('shareNotes.chosenHidden', { count: hiddenBySearch })}</p>
           )}
           {others > 0 && (
             <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('shareNotes.othersHidden', { count: others })}</p>

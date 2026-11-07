@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { exportBody } from '../src/services/contextShare';
+import { exportBody, exportSection, titleLine } from '../src/services/contextShareExport';
 
 test('the export keeps headings, paragraphs, lists, tables, emphasis and code, and leaves out the rest', () => {
   const out = exportBody([
@@ -28,6 +28,18 @@ test('the export keeps headings, paragraphs, lists, tables, emphasis and code, a
   for (const hidden of ['secret.example', 'img.example', 'private comment', 'block html secret', 'secret footnote', 'hidden.example', '<span', '<b>', '[ ]']) {
     assert.ok(!out.includes(hidden), `${hidden} is left out`);
   }
+});
+
+test('review cases: addresses, code info strings, titles, heading levels, empty shells, deep nesting', () => {
+  const out = exportBody('Visit [the portal](https://intra.example/x) or <https://intra.example/y> or https://intra.example/z, www.intra.example and a@b.example.\n');
+  assert.equal(out, 'Visit the portal or or , and .', 'addresses are link targets: left out');
+  assert.equal(exportBody('```js title="https://internal.example/s?token=abc"\nx\n```\n'), '```js\nx\n```');
+  assert.equal(titleLine('Issue #'), '# Issue \\#');
+  assert.equal(exportBody('[^1]: # Deep\n\n### Only\n'), '## Only', 'dropped parts do not count for heading levels');
+  assert.equal(exportBody('## ![logo](a.png)\n\n- <!-- gone -->\n\n> ![x](y.png)\n\nKept.\n'), 'Kept.', 'nothing left where only removed parts were');
+  const deep = exportSection('Deep', '>'.repeat(5000) + ' x\n');
+  assert.equal(deep.ok, false);
+  assert.equal(!deep.ok && deep.code, 'too_complex');
 });
 
 test('only shareable notes are shared; the download is exactly the preview, and a change in between needs a new preview', async (t) => {
@@ -90,6 +102,27 @@ test('only shareable notes are shared; the download is exactly the preview, and 
   await fsp.writeFile(path.join(dir, 'outside', 'note.md'), '---\nid: CTX-linked\ntitle: Linked\nsensitivity: shareable\n---\nOutside.\n');
   await fsp.symlink(path.join(dir, 'outside'), path.join(dir, 'context', 'company', 'linked'));
   assert.ok((await previewContextShare({ notes: ['CTX-linked'] })).rows[0]!.problem);
+
+  // A note too complex to parse quickly is stopped by the deadline and reported; the server answers meanwhile.
+  await write('company', 'heavy', 'sensitivity: shareable\n', '*a'.repeat(200_000) + '\n');
+  const started = Date.now();
+  let ticks = 0;
+  const ticker = setInterval(() => { ticks++; }, 50);
+  const heavy = await previewContextShare({ notes: ['CTX-heavy'] });
+  clearInterval(ticker);
+  assert.equal(heavy.rows[0]!.code, 'too_complex');
+  assert.ok(Date.now() - started < 8000, `${Date.now() - started} ms`);
+  assert.ok(ticks >= 10, 'the event loop kept running while the note was parsed');
+
+  // A note over the size limit is named as unreadable, not as gone.
+  await write('company', 'huge', 'sensitivity: shareable\n', 'x'.repeat(600 * 1024) + '\n');
+  assert.equal((await previewContextShare({ notes: ['CTX-huge'] })).rows[0]!.code, 'unreadable');
+
+  // The file is named after the user's day, and that name is part of what was previewed.
+  const named = await previewContextShare({ notes: ['CTX-second'], day: '2026-01-02' });
+  assert.equal(named.file_name, 'context-notes-2026-01-02.md');
+  await status(downloadContextShare({ notes: ['CTX-second'], day: '2026-01-03', token: named.token }), 409);
+  assert.equal((await downloadContextShare({ notes: ['CTX-second'], day: '2026-01-02', token: named.token })).name, 'context-notes-2026-01-02.md');
 
   // Two notes with one id are refused, not guessed.
   await write('situation', 'public-facts-copy', 'sensitivity: shareable\n', 'Copy.\n');
