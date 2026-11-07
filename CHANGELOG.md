@@ -8,6 +8,65 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-07
+
+**In your language, with your feedback on the record.** The dashboard now speaks **Japanese,
+Portuguese and Spanish** as well as English. A task in review takes your **feedback right on the
+task**, a task can say **what it is waiting for and when to follow up**, and after you correct a
+meeting you can see **which work used it**.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.12.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.12.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.12.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.12.0`, or **Update and restart** in Settings from 0.11.0
+on. The task schema gains the optional `change_requests` and `waiting` fields, and the agent
+instructions for Claude Code, Codex and Copilot learn to work through change requests. The dashboard
+brings these up to date when it opens a workspace, or run `gtd upgrade`. If you changed your
+instructions file, it is kept: **Settings > Instruction updates** shows the new version to merge.
+Existing tasks keep working as they are.
+
+### Added
+
+#### Your language
+
+- **The dashboard in four languages.** Every screen, dialog and notice is available in English,
+  Japanese, Brazilian Portuguese and Latin American Spanish. It follows the language of your system
+  or browser, and **Settings** lets you pick one. Your choice applies across workspaces and takes
+  effect without a restart. Some text can still appear in English, and the `gtd` command stays in
+  English for now. (#305)
+- **READMEs in Japanese, Portuguese and Spanish.** Each one is a short version of the English
+  README. (#305)
+
+#### Review and follow-up
+
+- **Request changes on a task in review.** **Request changes** (Work tab) records your feedback in
+  the task, with the date, and moves the task back to In progress in one step. It starts no agent.
+  The next agent run reads every open request, addresses it and marks it addressed, so the feedback
+  stays with the task instead of getting lost in a chat. (#315)
+- **Say what a task is waiting for.** **Set waiting** records what the task waits for, from whom
+  (a stakeholder or anyone else), since when, and an optional follow-up date separate from the due
+  date. The board card shows **Waiting**. Once the follow-up date comes, the task appears under
+  **Needs attention** on Situation as **FOLLOW UP**. It never changes the status, so other work can
+  go on, and **Resolve** clears it. (#316)
+
+#### After you correct a meeting
+
+- **See the work that used a meeting.** A meeting's **Tasks** tab now has **Check related work**:
+  every task, active or archived, that pinned the meeting, mentions it or was made from its action
+  items, with how each one stands now (changes to review, an earlier version that is still valid,
+  not pinned yet, and so on) and its complete deliverables. It changes nothing: open a task to
+  look. (#312)
+
+#### Instruction updates
+
+- **See and settle new instructions in Settings.** When you changed an app file such as `CLAUDE.md`
+  or `AGENTS.md` and the app ships a newer version, **Settings > Instruction updates** lists it.
+  **Compare** shows yours against the app's. Once you have merged what you want, **I merged it**
+  removes the `.new` file, and none comes back until a later release changes that file. (#314)
+
 ### Fixed
 
 - **The dashboard warns before a run when Claude Code does not trust the workspace folder itself.**
@@ -15,7 +74,20 @@ minor versions may include breaking changes.
   repository, the repository's root), not another folder further up. The dashboard also counted a
   trusted folder further up, so **Run analysis**, **Apply with Claude Code** and the meeting
   digest's analysis started and stopped within a second. It now shows the trust problem before the
-  run, with the steps to fix it.
+  run, with the steps to fix it. (#306, #313)
+- **Search finds words inside context notes.** Search only looked at a note's title and tags. No
+  action needed: existing notes are found right away. (#307)
+- **Enter opens the search result you highlighted.** With mixed result types it could open a
+  different one. An older answer can no longer replace newer results, and a failed search now says
+  so instead of showing "No results". (#308)
+- **The `.new` copy stays current.** After the first conflict on a file you changed, the `.new`
+  beside it was never refreshed, so you could be comparing against an old release. It now follows
+  each release, and a `.new` you edited yourself is left alone. (#309)
+- **A task's Files tab says when it could not load.** A failed request showed "No files attached",
+  which looked like the files were gone. It now shows an error with **Try again**. (#310)
+- **Validation flags a complete deliverable whose file won't open.** A wrong `file_path` passed
+  silently and the dashboard showed a link that returned 404. It is now a warning that says what to
+  fix, so a workspace that had this problem may show new warnings. (#311)
 
 ## [0.11.0] - 2026-11-05
 
@@ -899,7 +971,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/geovanneb/get-things-done/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/geovanneb/get-things-done/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/geovanneb/get-things-done/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/geovanneb/get-things-done/compare/v0.8.0...v0.9.0
