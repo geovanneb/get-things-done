@@ -281,6 +281,19 @@ try {
     `done_date=${recompleted.done_date}`);
 
   // Creating a task through the API keeps the optional schema fields it is given (they used to be dropped).
+  // Sharing labels on context notes (#107): only known labels, kept by an edit that does not mention them, removed by ''.
+  {
+    const post = (body) => fetch(`${base}/api/context`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const put = (id, body) => fetch(`${base}/api/context/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const bad = await post({ title: 'Smoke label bad', category: 'Company', sensitivity: 'public' });
+    const created = await (await post({ title: 'Smoke label', category: 'Company', sensitivity: 'shareable' })).json();
+    const kept = await (await put(created.id, { body: 'Edited.\n' })).json();
+    const cleared = await (await put(created.id, { sensitivity: '' })).json();
+    check('a context note keeps only a known sharing label, keeps it on edit and removes it on empty',
+      bad.status === 400 && created.sensitivity === 'shareable' && kept.sensitivity === 'shareable' && cleared.sensitivity === undefined,
+      JSON.stringify({ bad: bad.status, created: created.sensitivity, kept: kept.sensitivity, cleared: cleared.sensitivity }));
+    await fetch(`${base}/api/context/${created.id}`, { method: 'DELETE' });
+  }
   const contextRef = (await (await fetch(`${base}/api/context`)).json())[0]?.id;
   const fields = {
     title: 'Smoke task with optional fields', body: 'Fictional zephyrbrief objective.', slug: 'smoke-optional-fields', task_type: 'analysis',

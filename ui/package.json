@@ -26,6 +26,7 @@
     "test:setup": "tsx src/utils/setup.test.ts",
     "test:nav": "tsx src/components/layout/navGroups.test.ts",
     "test:search-results": "tsx src/utils/searchResults.test.ts",
+    "test:context-sensitivity": "tsx src/utils/contextSensitivity.test.ts",
     "test:board-columns": "tsx src/utils/boardColumns.test.ts",
     "test:dictation": "tsx src/utils/dictation.test.ts && node --test ../scripts/dictation-lifecycle.test.mjs",
     "test:icon-crop": "tsx src/utils/iconCrop.test.ts",

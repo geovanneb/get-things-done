@@ -93,6 +93,8 @@ export interface ContextNote {
   tags: string[];
   body?: string;
   relevance: string;
+  /** shareable | internal | personal; none counts as internal. As read from the file, so it may be anything. */
+  sensitivity?: unknown;
   created_at: string;
   updated_at: string;
   expiry_date?: string;

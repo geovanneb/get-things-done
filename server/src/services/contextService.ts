@@ -6,6 +6,28 @@ import { WorkspaceService } from './workspace';
 import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
 
 const fileService = new FileService();
+
+/** Whole-note sensitivity labels (#107). A note without one counts as `internal`. */
+export const SENSITIVITIES = ['shareable', 'internal', 'personal'] as const;
+export type Sensitivity = (typeof SENSITIVITIES)[number];
+
+function httpError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { statusCode: status });
+}
+
+/** How a note's label counts: none is `internal`; anything that is not a known label is `invalid` (never shareable). */
+export function effectiveSensitivity(value: unknown): Sensitivity | 'invalid' {
+  if (value === undefined || value === null || value === '') return 'internal';
+  return (SENSITIVITIES as readonly unknown[]).includes(value) ? (value as Sensitivity) : 'invalid';
+}
+
+/** A label sent by the user: undefined keeps the current one, null or '' removes it, anything else must be a known label. */
+function requestedSensitivity(value: unknown): Sensitivity | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  if ((SENSITIVITIES as readonly unknown[]).includes(value)) return value as Sensitivity;
+  throw httpError(400, `sensitivity must be one of ${SENSITIVITIES.join(', ')}, or empty for none.`);
+}
 const workspaceService = new WorkspaceService();
 
 // Per-note folder structure: context/category/slug/note.md
@@ -106,10 +128,13 @@ export class ContextService {
     const now = new Date().toISOString();
     const category: ContextCategory = ((data.category || 'situation').toLowerCase() as ContextCategory);
     const slug = data.slug || this.slugify(data.title || 'untitled');
+    const sensitivity = requestedSensitivity(data.sensitivity);
     const id = `CTX-${slug}`;
     const noteDir = this.getNoteDir(category, slug);
     const filePath = this.getNoteFile(category, slug);
 
+    // Never replace another note (and its sharing label) by creating one with the same title.
+    if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
     await fileService.ensureDir(noteDir);
 
     const note: ContextNote = {
@@ -119,6 +144,7 @@ export class ContextService {
       slug,
       tags: [],
       relevance: data.relevance,
+      ...(sensitivity ? { sensitivity } : {}),
       created_at: now,
       updated_at: now,
     };
@@ -130,6 +156,7 @@ export class ContextService {
   }
 
   async updateContextNote(id: string, data: Partial<ContextNote>): Promise<ContextNote> {
+    const sensitivity = requestedSensitivity(data.sensitivity);
     const existing = await this.getContextNote(id);
     const incomingCategory = data.category
       ? (data.category.toLowerCase() as ContextCategory)
@@ -167,6 +194,10 @@ export class ContextService {
       tags: [],
       updated_at: new Date().toISOString(),
     };
+    if (sensitivity === null) delete updated.sensitivity;
+    else if (sensitivity) updated.sensitivity = sensitivity;
+    // A label left empty in the file (`sensitivity:`) means none: never write it back as `null`.
+    else if (existing.sensitivity == null || existing.sensitivity === '') delete updated.sensitivity;
 
     const { content: _c, body: _b, path: _path, ...frontmatter } = updated;
     await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);
