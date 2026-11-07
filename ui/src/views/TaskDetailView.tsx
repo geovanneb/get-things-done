@@ -29,7 +29,7 @@ import StakeholderPicker from '../components/task-form/StakeholderPicker';
 import DeliverableList from '../components/task-form/DeliverableList';
 import { useRecordLauncher } from '../components/recording/RecordLauncher';
 import { useRecorder } from '../components/recording/RecordingProvider';
-import { apiPut, apiDelete } from '../utils/api';
+import { apiDelete, apiGet, errorMessage } from '../utils/api';
 import { isMeetingPrepTask, recordPrefillFromTask } from '../utils/meetingParticipants';
 import { formatDate, formatPriorityLabel, formatStatusLabel } from '../utils/format';
 
@@ -310,6 +310,7 @@ function FilesTab({ taskId }: { taskId: string }) {
 export default function TaskDetailView() {
   const { t } = useLanguage();
   const confirm = useConfirm();
+  const notify = useNotify();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { refetchTasks } = useOutletContext<{ refetchTasks: () => void }>();
@@ -319,8 +320,10 @@ export default function TaskDetailView() {
   const [savedCount, setSavedCount] = useState(0);
   // The task saved, but its meetings could not be pinned: the meeting sources say so and offer a refresh.
   const [pinError, setPinError] = useState<string | null>(null);
+  // The task changed since editing began, so the save was refused: the draft stays until the user loads the latest.
+  const [conflict, setConflict] = useState(false);
   // Another task: its own diagnostics only.
-  useEffect(() => { setPinError(null); }, [id]);
+  useEffect(() => { setPinError(null); setConflict(false); }, [id]);
 
   // Re-read the task when it changes on disk (agent updating status, deliverables)
   const tasksVersion = useDataVersion('tasks');
@@ -329,9 +332,19 @@ export default function TaskDetailView() {
   // Set while the user has unsaved edits, so a background refresh never
   // overwrites what they are typing.
   const editingRef = useRef(false);
+  // The version the draft started from. A draft equal to it has no edits (changed and changed back, or discarded),
+  // so a refresh is taken again; its `updated_at` is what a save says it started from.
+  const baselineRef = useRef<Task | null>(null);
 
   useEffect(() => {
-    if (task && !editingRef.current) setLocalTask(task);
+    if (!task) return;
+    setLocalTask((prev) => {
+      const clean = !prev || !editingRef.current || JSON.stringify(prev) === JSON.stringify(baselineRef.current);
+      if (!clean) return prev;
+      editingRef.current = false;
+      baselineRef.current = task;
+      return task;
+    });
   }, [task]);
 
   const close = useCallback(() => navigate('/board'), [navigate]);
@@ -354,20 +367,51 @@ export default function TaskDetailView() {
 
   const handleSave = useCallback(async () => {
     if (!localTask || !id) return;
+    const sent = localTask;
     setSaving(true);
     try {
-      const saved = await apiPut<Task & { meeting_sources_error?: string }>(`/api/tasks/${id}`, localTask);
+      // The version editing started from: a save from an older one is refused rather than undoing what changed meanwhile.
+      const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ ...sent, expected_updated_at: sent.updated_at }),
+      });
+      if (res.status === 409) { setConflict(true); return; }
+      if (!res.ok) throw new Error(errorMessage(await res.json().catch(() => null), t('taskDetail.couldNotSave')));
+      const saved = await res.json() as Task & { meeting_sources_error?: string };
       setPinError(saved?.meeting_sources_error ?? null);
-      editingRef.current = false;
+      setConflict(false);
+      // The saved version is the new start at once, before the refresh: edits made while saving keep going from it,
+      // so the next save never claims the old version and is never refused for it.
+      setLocalTask((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, updated_at: saved.updated_at };
+        if (prev === sent) { editingRef.current = false; baselineRef.current = next; }
+        return next;
+      });
       setSavedCount((n) => n + 1);
       refetch();
       refetchTasks();
-    } catch {
-      // ignore for now
+    } catch (err) {
+      notify.error(err, t('taskDetail.couldNotSave'));
     } finally {
       setSaving(false);
     }
-  }, [localTask, id, refetch, refetchTasks]);
+  }, [localTask, id, refetch, refetchTasks, notify, t]);
+
+  /** Drops the draft and shows the task as it is now: read fresh, never from an older copy. */
+  const loadLatest = useCallback(async () => {
+    if (!id) return;
+    try {
+      const fresh = await apiGet<Task>(`/api/tasks/${encodeURIComponent(id)}`);
+      editingRef.current = false;
+      baselineRef.current = fresh;
+      setLocalTask(fresh);
+      setConflict(false);
+      refetch();
+    } catch (err) {
+      notify.error(err, t('checkConnectionRetry'));
+    }
+  }, [id, refetch, notify, t]);
 
   const handleDelete = useCallback(async () => {
     if (!id || !localTask) return;
@@ -453,6 +497,14 @@ export default function TaskDetailView() {
 
       <div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${tab}`}
         style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)' }}>
+        {conflict && (
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <Notice tone="critical" title={t('taskDetail.changedElsewhereTitle')}
+              action={<Button size="sm" variant="secondary" onClick={() => void loadLatest()}>{t('taskDetail.loadLatest')}</Button>}>
+              {t('taskDetail.changedElsewhereBody')}
+            </Notice>
+          </div>
+        )}
         {tab === 'work' && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} dirty={isDirty} onRequested={() => { refetch(); refetchTasks(); }} />}
         {tab === 'files' && id && <FilesTab taskId={id} />}
       </div>
