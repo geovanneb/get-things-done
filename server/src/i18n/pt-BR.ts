@@ -2529,6 +2529,7 @@ export default {
   "format.today": "hoje",
   "format.tomorrow": "amanhã",
   "format.yesterday": "ontem",
+  "server.looserLabel": "Esta proposta deixaria o rótulo de compartilhamento da nota menos restrito. Só você pode fazer isso, no editor da nota: rejeite esta proposta ou mude o rótulo você mesmo.",
   "server.mostAccurateSlow": "O mais preciso. Lento.",
   "server.mostAccurateTranscripts": "As transcrições mais precisas, também de falas curtas",
   "server.fullPunctuation": "Pontuação completa",

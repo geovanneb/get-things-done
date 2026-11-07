@@ -2528,6 +2528,7 @@ export const en = {
   "format.today": "today",
   "format.tomorrow": "tomorrow",
   "format.yesterday": "yesterday",
+  "server.looserLabel": "This proposal would make the note's sharing label looser. Only you can do that, in the note's editor: reject this proposal, or change the label yourself.",
   "server.mostAccurateSlow": "Most accurate. Slow.",
   "server.mostAccurateTranscripts": "The most accurate transcripts, also of short remarks",
   "server.fullPunctuation": "Full punctuation",

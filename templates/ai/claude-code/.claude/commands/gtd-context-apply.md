@@ -55,6 +55,9 @@ done, and only when no other accepted change failed.
    to it in the other accepted proposals.
 5. Keep frontmatter valid against `.schemas/`. Set `updated_at` on every file you
    write, when the file has that field. Never change a note's `id` or `created_at`.
+   Never write a looser `sensitivity` than the target note has now (personal, then
+   internal or none, then shareable): if its label became stricter after the analysis,
+   keep the current label, apply the rest, and say so in `outcome_note`.
    `CLAUDE.md` and `AGENTS.md` steer every later run: write exactly the reviewed
    change there, nothing around it. An app update may have changed one of them since
    the analysis; then merge as above.

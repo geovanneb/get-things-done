@@ -37,6 +37,10 @@ This workspace is managed by Get Things Done. When working in this directory:
 - Save deliverables to `tasks/active/<TASK-ID>/deliverables/`.
 - Read the executive profile before writing anything — adapt voice and tone to match.
 - Adapt tone and detail to each stakeholder's profile.
+- Sharing labels on context notes: a note's `sensitivity` is `shareable`, `internal` (also when it is missing or
+  unknown) or `personal`. In a deliverable meant for people outside the organization, use only `shareable` notes, and
+  say in your reply which facts you left out because their note is not shareable. Never quote or reveal a `personal`
+  note in any deliverable, and never treat an `internal` or `personal` note as shareable.
 - Read the org charts that include the task's stakeholders. Use their organization, manager, peers
   and direct reports to decide who approves, what level to pitch at, and who to keep informed.
   A member's optional `title` is their title in that chart and overrides their stakeholder `role` there.
@@ -88,6 +92,9 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    note it would change. Prefer updating to creating, one proposal per file, minimal
    edits that keep structure and frontmatter. Make contradictions explicit and set
    `confidence` accordingly. Never copy personal remarks into stakeholder files.
+   Keep a note's `sensitivity`; for a note without one you may propose `internal` or
+   `personal` with a one-line reason, never `shareable`, and never a looser label (only
+   the executive does that, in the note editor).
 4. Write the full proposed file to `proposals/P-NN.md` (never to the target). Targets
    must be `context/<category>/<slug>/note.md` or `stakeholders/{people,groups,org-charts}/<ID>.md`.
 5. In `update.md` keep the body and existing fields, and set `status: in_review`,
@@ -200,8 +207,10 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    the dashboard, with no outcome): write `proposals/<id>.md` to the target
    as reviewed. If the target changed after `analyzed_at` (an app update can change an
    instruction file), merge instead of overwriting newer content. Follow `reviewer_note`
-   when set. Set `updated_at` on each file that has it. Record
-   `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
+   when set. Set `updated_at` on each file that has it. Never write a looser
+   `sensitivity` than the target note has now (personal, then internal or none, then
+   shareable): if its label became stricter, keep it and say so in `outcome_note`.
+   Record `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
 3. Give rejected proposals `outcome: skipped`, set `status: done` and `applied_at`, then
    delete `proposals/`, and `materials/` unless `update.md` has `keep_materials: true` or
    `keep_meeting_text: true` (then the dashboard keeps the meeting text and removes the

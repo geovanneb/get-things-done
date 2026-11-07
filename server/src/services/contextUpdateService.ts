@@ -25,6 +25,7 @@ import { parseChange } from './transcriptChanges';
 import { effectiveChanges, effectiveProblems, suggestionProblem, transcriptBase, transcriptReview, writerChange, type TranscriptReview } from './correctionTranscript';
 import { readFolder } from './meetingFolder';
 import { writeCorrectedVersion } from './meetingVersions';
+import { effectiveSensitivity } from './contextService';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -96,6 +97,21 @@ const MAX_NOTE = 2000;
 const MAX_TEXT = 200_000;
 /** Larger files are not shown as a diff; the dashboard offers to open them instead. */
 const MAX_DIFF_BYTES = 512 * 1024;
+
+/**
+ * A context update may make a note's sharing label stricter, never looser (#107): only the user makes a note shareable,
+ * or less private, in the note's editor. Order: personal, then internal (also none or unknown), then shareable.
+ */
+export const LOOSER_LABEL = "This proposal would make the note's sharing label looser. Only you can do that, in the note's editor: reject this proposal, or change the label yourself.";
+const LABEL_RANK: Record<string, number> = { personal: 0, internal: 1, invalid: 1, shareable: 2 };
+function labelIn(text: string | null): unknown {
+  if (text == null) return undefined;
+  try { return (parseMarkdown(text).data as Record<string, unknown>)['sensitivity']; } catch { return undefined; }
+}
+/** True when the proposed note has a looser sharing label than the note has now (a new note counts as internal). */
+export function loosensLabel(current: string | null, proposed: string): boolean {
+  return LABEL_RANK[effectiveSensitivity(labelIn(proposed))]! > LABEL_RANK[effectiveSensitivity(labelIn(current))]!;
+}
 
 export interface UpdateMaterial {
   name: string; size: number; type: string;
@@ -1835,6 +1851,10 @@ export class ContextUpdateService {
         detail.problem = `The proposed content is missing (proposals/${p.id}.md).`;
       }
     }
+    // A sharing label made looser is the user's own edit, never a proposal's.
+    if (target.startsWith('context/') && detail.proposed != null && !detail.problem && loosensLabel(detail.current, detail.proposed)) {
+      detail.problem = LOOSER_LABEL;
+    }
     // Once applying starts the targets change on purpose; "stale" only matters while reviewing.
     if (!['in_review', 'approved'].includes(update.status)) detail.stale = false;
     return detail;
@@ -2210,6 +2230,13 @@ export class ContextUpdateService {
       for (const key of Object.keys(decisions)) {
         if (!known.has(key)) throw httpError(400, `Invalid proposal id: ${key}`);
       }
+      // A proposal that would loosen a note's sharing label cannot be accepted (the review shows why).
+      for (const p of update.proposals) {
+        const change = decisions[p.id] as Record<string, unknown> | undefined;
+        if (!change || typeof change !== 'object' || change['decision'] !== 'accepted') continue;
+        const detail = await this.proposalDetail(this.updateDir(id), update, p, new Set());
+        if (detail.problem === LOOSER_LABEL) throw httpError(409, LOOSER_LABEL);
+      }
       const proposals = this.rawProposals(data).map((raw, i) => {
         const p = normalizeProposal(raw, i);
         const change = decisions[p.id] as Record<string, unknown> | undefined;
@@ -2375,6 +2402,10 @@ export class ContextUpdateService {
       if (update.kind === CORRECTION_KIND) { this.frozenRecords(update, data); made = await this.finishCorrection(update, data, file); }
       else await this.checkSpeakerEvidence(id, update, data);
       const records = this.frozenRecords(update, data);
+      // The label may have become stricter since a proposal was accepted: it must not be loosened now either.
+      for (const p of update.proposals.filter((x) => x.decision === 'accepted')) {
+        if ((await this.proposalDetail(this.updateDir(id), update, p, new Set())).problem === LOOSER_LABEL) throw httpError(409, LOOSER_LABEL);
+      }
       const confirmed = update.meeting_records.some((r) => r.confirmation === 'confirmed');
       if (!update.proposals.some((p) => p.decision === 'accepted') && !confirmed) {
         throw httpError(400, 'Invalid approval: select at least one proposal or confirm a meeting record, or close the update without changes');

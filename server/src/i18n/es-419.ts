@@ -2529,6 +2529,7 @@ export default {
   "format.today": "hoy",
   "format.tomorrow": "mañana",
   "format.yesterday": "ayer",
+  "server.looserLabel": "Esta propuesta haría menos estricta la etiqueta de uso compartido de la nota. Solo tú puedes hacerlo, en el editor de la nota: rechaza esta propuesta o cambia la etiqueta tú mismo.",
   "server.mostAccurateSlow": "El más preciso. Lento.",
   "server.mostAccurateTranscripts": "Las transcripciones más precisas, también de comentarios breves",
   "server.fullPunctuation": "Puntuación completa",

@@ -157,6 +157,10 @@ Then shape the proposals:
   near miss in the rationale instead.
 - **Confidential material:** keep only what the context needs. Never add figures or
   quotes beyond what the fact requires.
+- **Sharing labels:** keep a note's `sensitivity` (`shareable`, `internal`, `personal`) as it is. For a note
+  without one you may propose `internal` or `personal`, with a one-line reason in the rationale. Never propose
+  `shareable` and never a looser label (personal to internal or none, anything to shareable): only the executive
+  does that, in the note editor, and the dashboard refuses such a proposal.
 
 Everything you considered and dropped goes under `skipped`, one line each, with the
 reason (for example "Already in context/strategy/growth-plan", "Transient: meeting

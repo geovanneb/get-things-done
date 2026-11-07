@@ -1,3 +1,4 @@
+import { serverText } from '@/i18n/serverText';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
@@ -560,7 +561,7 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
           )}
           {proposal.outcome_note && <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>{removal ? t('updateDetail.dashboard') : t('updateDetail.agent')}</span>{proposal.outcome_note}</div>}
 
-          {proposal.problem && <HelpBox tone="critical">{proposal.problem}</HelpBox>}
+          {proposal.problem && <HelpBox tone="critical">{serverText(proposal.problem)}</HelpBox>}
           {removal && reviewing && !proposal.problem && (
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
               {rich(t, 'updateDetail.ifYouAcceptTheDashboard', { value: proposal.target.startsWith('context/') ? t('updateDetail.andItsFolder') : '', code: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>.situation-board/trash/</code> })}

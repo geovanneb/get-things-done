@@ -867,3 +867,36 @@ test('two dashboards making a task from the same action item at once get one tas
   await assert.rejects(service.createActionItemTask(id, 'M-01', { item: 1, revision: shown.revision, task: { title: 'x' } }), /belongs to another action item/);
   assert.notEqual(second.task.id, a.task);
 });
+
+test('a proposal never loosens a note\'s sharing label: shown as a problem, refused when accepted or approved', async (t) => {
+  const ws = await workspace(t);
+  const note = (label: string) => `---\nid: CTX-growth-plan\ntitle: Growth plan\n${label ? `sensitivity: ${label}\n` : ''}---\nPlan\n`;
+  await fsp.writeFile(path.join(ws, 'context', 'strategy', 'growth-plan', 'note.md'), note('personal'));
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'x' });
+  await analyze(ws, id, [
+    { id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md', title: 'Loosen', rationale: 'x' },
+    { id: 'P-02', action: 'create', target: 'context/glossary/open-term/note.md', title: 'New shareable', rationale: 'x' },
+    { id: 'P-03', action: 'create', target: 'context/glossary/private-term/note.md', title: 'New personal', rationale: 'x' },
+  ], {
+    'P-01.md': note('internal'),
+    'P-02.md': '---\nid: CTX-open-term\ntitle: Open\nsensitivity: shareable\n---\nTerm\n',
+    'P-03.md': '---\nid: CTX-private-term\ntitle: Private\nsensitivity: personal\n---\nTerm\n',
+  });
+
+  const [p1, p2, p3] = (await service.get(id)).proposals;
+  assert.match(p1!.problem ?? '', /sharing label looser/, 'personal to internal is looser');
+  assert.match(p2!.problem ?? '', /sharing label looser/, 'a new shareable note is looser than the default');
+  assert.equal(p3!.problem, null, 'stricter is fine');
+  await assert.rejects(service.saveDecisions(id, { 'P-01': { decision: 'accepted' } }), (e: { statusCode?: number }) => e.statusCode === 409);
+  await assert.rejects(service.saveDecisions(id, { 'P-02': { decision: 'accepted' } }), (e: { statusCode?: number }) => e.statusCode === 409);
+  await service.saveDecisions(id, { 'P-03': { decision: 'accepted' } });
+
+  // Made stricter after a proposal was accepted: approving is refused too.
+  await fsp.writeFile(path.join(ws, 'context', 'strategy', 'growth-plan', 'note.md'), note(''));
+  const { id: second } = await service.create({ text: 'y' });
+  await analyze(ws, second, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md', title: 'Same', rationale: 'x' }], { 'P-01.md': note('internal') });
+  await service.saveDecisions(second, { 'P-01': { decision: 'accepted' } });
+  await fsp.writeFile(path.join(ws, 'context', 'strategy', 'growth-plan', 'note.md'), note('personal'));
+  await assert.rejects(service.approve(second), (e: { statusCode?: number }) => e.statusCode === 409);
+});
