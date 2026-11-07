@@ -68,6 +68,12 @@ router.put('/:id', async (req: Request, res: Response) => {
   res.json({ ...task, ...await pinMeetings(task) });
 });
 
+// POST /api/tasks/:id/request-changes  { feedback, seen_updated_at, request_id }  feedback on a task in review, back to rework
+router.post('/:id/request-changes', async (req: Request, res: Response) => {
+  const result = await taskService.requestChanges(param(req, 'id'), req.body);
+  res.status(result.created ? 201 : 200).json(result);
+});
+
 // DELETE /api/tasks/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   await taskService.deleteTask(param(req, 'id'));

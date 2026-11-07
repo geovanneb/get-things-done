@@ -22,6 +22,11 @@ This workspace is managed by Get Things Done. When working in this directory:
 - When the user gives feedback on a task that is already `in_review`, set the status back
   to `in_progress` as your first action, before editing anything. Return it to `in_review`
   once the fix is saved. Every correction counts, however small.
+  Feedback from **Request changes** in the dashboard is in task.md `change_requests`
+  (`status: open`): read each before working and address it; when you set `in_review`,
+  mark each one you addressed `status: addressed` with `addressed_at` (UTC), leave one you
+  could not address `open` and say why in the execution log and your reply. Never delete,
+  reword or reorder them.
   Then write down why the instructions did not prevent it: a Kaizen note at
   `kaizen/KAIZEN-YYYY-NNN.md` (the next free number), following
   `.schemas/kaizen.schema.json`: `title`, `task_ref`, `symptom` (what went wrong),

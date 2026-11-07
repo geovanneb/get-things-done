@@ -302,6 +302,18 @@ try {
     objectiveSearch.results.some((task) => task.id === createdTask.id)
     && objectiveFilter.some((task) => task.id === createdTask.id));
 
+  // Request changes (#79): dated feedback on a task in review, back to rework in one step; sent twice, recorded once.
+  const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const reviewTask = await (await send('PUT', `/api/tasks/${createdTask.id}`, { ...readBack, status: 'in_review' })).json();
+  const changeBody = { feedback: 'Fictional: shorten the summary.', seen_updated_at: reviewTask.updated_at, request_id: 'smoke-request-0001' };
+  const requested = await send('POST', `/api/tasks/${createdTask.id}/request-changes`, changeBody);
+  const requestedAgain = await send('POST', `/api/tasks/${createdTask.id}/request-changes`, changeBody);
+  const afterRequest = await (await fetch(`${base}/api/tasks/${createdTask.id}`)).json();
+  check('Request changes records the feedback once and moves the task back to rework',
+    requested.status === 201 && requestedAgain.status === 200 && afterRequest.status === 'in_progress'
+    && afterRequest.change_requests?.length === 1 && afterRequest.change_requests[0].status === 'open',
+    `first=${requested.status} again=${requestedAgain.status} status=${afterRequest.status} n=${afterRequest.change_requests?.length}`);
+
   // "Prepare meeting" relies on the shipped meeting brief template and meeting-prep agent, and a task that keeps them.
   {
     const brief = (await (await fetch(`${base}/api/outputs/templates`)).json()).find((t) => t.slug === 'meeting-brief');

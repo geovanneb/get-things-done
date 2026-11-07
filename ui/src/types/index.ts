@@ -11,7 +11,12 @@ export type TaskStatus =
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low';
 
+/** Feedback from Request changes on a task in review (#79); `open` until the agent that reworks the task addresses it. */
+export interface ChangeRequest { id: string; requested_at: string; feedback: string; status: 'open' | 'addressed'; addressed_at?: string }
+
 export interface Task {
+  /** Written by the server and agents only; a task save never changes it. */
+  change_requests?: ChangeRequest[];
   id: string;
   title: string;
   status: TaskStatus;

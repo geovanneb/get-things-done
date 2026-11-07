@@ -184,6 +184,12 @@ Tasks move `backlog` → `in_progress` → `in_review` → `done`. Agents set
 `in_progress` when they pick work up and `in_review` when they finish. **Only you set
 `done`**, and only after reading the output.
 
+**Request changes.** On a task in review, **Request changes** (Work tab) records what should
+change, with the date, in the task's `change_requests` and moves it back to `in_progress` in one
+step. It starts no agent and keeps the body and start date. The next agent run on the task reads
+every open request, addresses it and marks it addressed when it sets the task back to review.
+The requests stay listed on the task, so the feedback is not lost in a chat.
+
 **Dictate instead of typing.** **Dictate** under a task's Objective records your voice; press
 **Stop** and the words are added to the field. The same button is under a context note's
 Content, the Notes for the agent of an imported update, and a stakeholder's What matters and

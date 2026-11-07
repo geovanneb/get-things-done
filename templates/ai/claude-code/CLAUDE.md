@@ -114,6 +114,14 @@ triggers the same rule.
 
 Do not skip this because the change looks small. A one line edit is still rework.
 
+**Change requests.** When the executive uses **Request changes** in the dashboard, the task comes
+back as `in_progress` with the feedback in task.md `change_requests` (`id`, `requested_at`,
+`feedback`, `status: open`). Read every open request before working: it is the executive's
+feedback for this rework, the same as feedback in chat. Address each one. When you set the task
+back to `in_review`, set each request you addressed to `status: addressed` with `addressed_at`
+(the current UTC timestamp); leave one you could not address `open`, and say why in the
+execution log and your reply. Never delete, reword or reorder change requests.
+
 When the rework is finished and saved, set the status back to `in_review`, exactly as
 you would for a first pass.
 
