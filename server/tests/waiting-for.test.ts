@@ -87,3 +87,44 @@ test('the Situation screen shows a follow-up once its date has come, apart from 
   const again = (await new SituationService().getSituationData()).attention_queue.filter((a) => a.id === both.id);
   assert.deepEqual(again.map((a) => [a.reason, a.waiting?.for]), [['overdue', 'Sign-off']]);
 });
+
+test('stale waiting edits are rejected even when the clock has not advanced', async (t) => {
+  await workspace(t);
+  const task = await tasks.createTask({ title: 'Fictional same-clock task' });
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(task.updated_at) });
+  t.after(() => t.mock.timers.reset());
+  const first = await tasks.setWaiting(task.id, { waiting: { for: 'First reply' }, seen_updated_at: task.updated_at });
+  assert.notEqual(first.updated_at, task.updated_at, 'each persisted version needs a different timestamp');
+  await assert.rejects(tasks.setWaiting(task.id, { waiting: { for: 'Stale replacement' }, seen_updated_at: task.updated_at }), status(409));
+  await tasks.updateTaskContent(task.id, 'A new body');
+  await assert.rejects(tasks.resolveWaiting(task.id, { seen_updated_at: first.updated_at }), status(409));
+  assert.equal((await waitingOf(task.id))?.for, 'First reply');
+  const latest = await tasks.getTask(task.id);
+  t.mock.timers.setTime(Date.parse(task.updated_at) - 60_000);
+  const saved = await tasks.updateTask(task.id, { title: 'Fictional clock moved backwards' });
+  assert.ok(saved.updated_at > latest.updated_at);
+  await assert.rejects(tasks.resolveWaiting(task.id, { seen_updated_at: latest.updated_at }), status(409));
+});
+
+test('waiting writes refuse linked task folders and linked lock directories', { skip: process.platform === 'win32' }, async (t) => {
+  const ws = await workspace(t);
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-waiting-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  const task = await tasks.createTask({ title: 'Fictional linked task' });
+  const folder = path.join(ws, 'tasks/active', task.id);
+  const target = path.join(outside, 'task');
+  await fsp.rename(folder, target);
+  await fsp.symlink(target, folder);
+  const before = await fsp.readFile(path.join(target, 'task.md'), 'utf8');
+  await assert.rejects(tasks.setWaiting(task.id, { waiting: { for: 'A reply' }, seen_updated_at: task.updated_at }), /Invalid path traversal/);
+  assert.equal(await fsp.readFile(path.join(target, 'task.md'), 'utf8'), before);
+  await fsp.unlink(folder);
+  await fsp.rename(target, folder);
+  const locks = path.join(ws, '.situation-board/task-locks');
+  await fsp.rm(locks, { recursive: true, force: true });
+  await fsp.mkdir(path.dirname(locks), { recursive: true });
+  await fsp.symlink(outside, locks);
+  await assert.rejects(tasks.setWaiting(task.id, { waiting: { for: 'A reply' }, seen_updated_at: task.updated_at }), /Invalid path traversal/);
+  assert.equal(await fsp.readFile(path.join(folder, 'task.md'), 'utf8'), before);
+  assert.deepEqual(await fsp.readdir(outside), []);
+});

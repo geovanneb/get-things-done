@@ -144,3 +144,36 @@ test('an interrupted removal is finished even when the file now equals the app v
   assert.ok(upgradeWorkspace(dir, opts).unchanged.includes('AGENTS.md'));
   await assert.rejects(fsp.access(`${file}.new`), 'the app\'s own copy is gone');
 });
+
+test('a dangling .new link is edited, never acknowledged as an absent copy', { skip: process.platform === 'win32' }, async (t) => {
+  const { dir, file } = await changed(t);
+  await fsp.rm(`${file}.new`);
+  await fsp.symlink(path.join(dir, 'missing-merge.md'), `${file}.new`);
+  const [row] = await listInstructionUpdates(dir);
+  assert.equal(row!.state, 'edited');
+  await assert.rejects(acknowledgeInstructionUpdate(dir, row), status(409));
+  assert.ok((await fsp.lstat(`${file}.new`)).isSymbolicLink());
+});
+
+test('a linked profile cannot leak outside text into an instruction comparison', { skip: process.platform === 'win32' }, async (t) => {
+  const { dir } = await changed(t);
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-profile-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  const profile = path.join(outside, 'profile.md');
+  await fsp.writeFile(profile, '---\nname: Fictional private marker\nrole: Fictional private role\norganization: Fictional private organization\n---\n');
+  await fsp.rm(path.join(dir, 'profile/executive-profile.md'));
+  await fsp.symlink(profile, path.join(dir, 'profile/executive-profile.md'));
+  const comparison = await compareInstructionUpdate(dir, 'AGENTS.md');
+  assert.ok(!comparison.app.includes('Fictional private'), 'rendering must not read an outside profile');
+});
+
+test('valid JSON with damaged manifest structure is treated as untracked metadata', async (t) => {
+  const { dir } = await changed(t);
+  for (const damaged of [{ newCopiesTracked: true }, { newCopiesTracked: true, files: [null] }, { appVersion: 42, files: [] }]) {
+    await fsp.writeFile(path.join(dir, MANIFEST_RELATIVE_PATH), JSON.stringify(damaged));
+    const rows = await listInstructionUpdates(dir);
+    assert.equal(rows.find((row) => row.path === 'AGENTS.md')?.state, 'edited');
+    await assert.rejects(acknowledgeInstructionUpdate(dir, rows[0]), status(409));
+    assert.equal(await fsp.readFile(path.join(dir, MANIFEST_RELATIVE_PATH), 'utf8'), JSON.stringify(damaged));
+  }
+});

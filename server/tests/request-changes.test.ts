@@ -137,3 +137,15 @@ test('archiving between the request\'s read and write waits, and never brings th
   const kept = parseMarkdown(await fsp.readFile(path.join(ws, 'tasks', 'archive', task.id, 'task.md'), 'utf-8')).data;
   assert.equal((kept['change_requests'] as unknown[]).length, 1, 'recorded first, then archived with it');
 });
+
+test('damaged feedback metadata is never discarded by Request changes', async (t) => {
+  const ws = await workspace(t);
+  const task = await inReview();
+  const file = path.join(ws, 'tasks/active', task.id, 'task.md');
+  const files = new FileService();
+  const { data, content } = await files.readMarkdown<Record<string, unknown>>(file);
+  await files.writeMarkdown(file, { ...data, change_requests: { feedback: 'Fictional earlier feedback' } }, content);
+  const before = await fsp.readFile(file, 'utf8');
+  await assert.rejects(tasks.requestChanges(task.id, { feedback: 'New feedback', seen_updated_at: task.updated_at, request_id: 'req-damaged-history' }), status(409));
+  assert.equal(await fsp.readFile(file, 'utf8'), before);
+});

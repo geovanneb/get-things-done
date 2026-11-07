@@ -123,6 +123,10 @@ export default function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
       setLoading(false);
       return;
     }
+    // Results already displayed also belong to the previous query: Enter must not open them during the debounce.
+    setResults([]);
+    setFailed(false);
+    setLoading(true);
     debounceRef.current = window.setTimeout(() => search(query), 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);

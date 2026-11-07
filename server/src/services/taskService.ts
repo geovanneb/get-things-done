@@ -1,4 +1,4 @@
-import { saveAttachment, topLevelName, withOfficeCheck, FolderFile } from '../utils/files';
+import { saveAttachment, topLevelName, workspaceEntry, withOfficeCheck, FolderFile } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
@@ -66,9 +66,17 @@ function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
 }
 
+/** A timestamp is also the optimistic version: rapid writes and a backwards clock must advance it. */
+function nextUpdatedAt(previous: unknown): string {
+  const before = typeof previous === 'string' ? Date.parse(previous) : NaN;
+  return new Date(Math.max(Date.now(), Number.isFinite(before) ? before + 1 : 0)).toISOString();
+}
+
 /** The change requests a task holds, as written; anything that is not one is left out of the count but never dropped. */
 function changeRequestsOf(task: Record<string, unknown>): unknown[] {
-  return Array.isArray(task['change_requests']) ? task['change_requests'] as unknown[] : [];
+  if (task['change_requests'] === undefined) return [];
+  if (!Array.isArray(task['change_requests'])) throw httpError(409, "The task's change_requests must be a list. Repair task.md before requesting more changes.");
+  return task['change_requests'] as unknown[];
 }
 
 /** Which version of a meeting record a task was made from, and which original action item it stands for. */
@@ -371,12 +379,16 @@ If the executive comes back with feedback on a task that is already \`in_review\
   /** One writer at a time per task, across dashboards: a save and a change request never lose each other's write. */
   private async withTaskLock<T>(id: string, operation: () => Promise<T>, requireTask = true): Promise<T> {
     // Outside the task's own folder, which archiving moves: a write and an archive or delete wait for each other.
-    const locks = path.join(workspaceService.getWorkspacePath(), '.situation-board', 'task-locks');
+    const ws = workspaceService.getWorkspacePath();
+    const name = topLevelName(id);
+    const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'task-locks'), true);
     await fileService.ensureDir(locks);
-    const held = await lock(path.join(locks, `${topLevelName(id)}.lock`), TASK_LOCK_WAIT_MS, () => httpError(409, 'The task is being saved elsewhere; try again in a moment.'));
+    const lockFile = await workspaceEntry(ws, path.join(locks, `${name}.lock`), true);
+    const held = await lock(lockFile, TASK_LOCK_WAIT_MS, () => httpError(409, 'The task is being saved elsewhere; try again in a moment.'));
     try {
       // Checked under the lock: a task archived or deleted a moment ago is never written back into tasks/active.
-      if (requireTask && !(await fileService.exists(path.join(this.getActiveDir(), topLevelName(id), 'task.md')))) throw httpError(404, `Task not found: ${id}`);
+      await workspaceEntry(ws, path.join(this.getActiveDir(), name, 'task.md'), true);
+      if (requireTask && !(await fileService.exists(path.join(this.getActiveDir(), name, 'task.md')))) throw httpError(404, `Task not found: ${id}`);
       return await operation();
     } finally {
       await unlock(held);
@@ -409,7 +421,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
       if (!IN_REVIEW.includes(existing.status)) throw httpError(409, 'Changes can be requested only on a task in review.');
       if (existing.updated_at !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then request the changes.');
 
-      const now = new Date().toISOString();
+      const now = nextUpdatedAt(existing.updated_at);
       const numbers = requests.map((r) => Number(/^CR-(\d+)$/.exec(String((r as ChangeRequest | null)?.id ?? ''))?.[1] ?? 0));
       const request: ChangeRequest = {
         id: `CR-${String(Math.max(0, ...numbers) + 1).padStart(2, '0')}`,
@@ -473,7 +485,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
       const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
       const { data, content } = await fileService.readMarkdown<Task>(taskFile);
       if (data.updated_at !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then try again.');
-      const updated: Record<string, unknown> = { ...data, ...change, updated_at: new Date().toISOString() };
+      const updated: Record<string, unknown> = { ...data, ...change, updated_at: nextUpdatedAt(data.updated_at) };
       for (const [key, value] of Object.entries(change)) if (value === undefined) delete updated[key];
       await fileService.writeMarkdown(taskFile, updated, content);
       await this.generateSlashCommand();
@@ -491,7 +503,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
     const { content: existingContent } = await fileService.readMarkdown<Task>(taskFile);
 
-    const now = new Date().toISOString();
+    const now = nextUpdatedAt(existing.updated_at);
     const updated: Task = {
       ...existing,
       ...data,
@@ -545,7 +557,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     const taskFile = path.join(archiveDir, 'task.md');
     const { data, content } = await fileService.readMarkdown<Task>(taskFile);
     data.status = 'archived';
-    data.updated_at = new Date().toISOString();
+    data.updated_at = nextUpdatedAt(data.updated_at);
     await fileService.writeMarkdown(taskFile, data as unknown as Record<string, unknown>, content);
   }
 
@@ -562,7 +574,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     await this.withTaskLock(id, async () => {
       const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
       const { data } = await fileService.readMarkdown<Task>(taskFile);
-      data.updated_at = new Date().toISOString();
+      data.updated_at = nextUpdatedAt(data.updated_at);
       await fileService.writeMarkdown(taskFile, data as unknown as Record<string, unknown>, content);
     });
   }

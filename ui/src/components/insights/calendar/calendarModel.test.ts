@@ -16,6 +16,9 @@ import {
   summarize,
   typicalDay,
 } from './calendarModel';
+import { setCurrentLanguage } from '@/i18n/current';
+import { translator } from '../../../../../server/src/i18n/messages';
+import { en } from '../../../../../server/src/i18n/en';
 import type { InsightsCalendarDay } from '@/types';
 
 let failures = 0;
@@ -57,12 +60,18 @@ const days = keysBetween('2026-09-01', '2026-09-30').map((d) =>
 const callouts = summarize(days, 'activity', 'month');
 const find = (label: string) => callouts.find((c) => c.label === label)?.value;
 check('busiest day is the first of the heaviest', find('Busiest day') === 'Tue 1 Sep (4)', find('Busiest day'));
-check('busiest weekday is by average', find('Busiest weekday') === 'Tuesdays', find('Busiest weekday'));
+check('busiest weekday is by average', find('Busiest weekday') === 'Tuesday', find('Busiest weekday'));
 check('longest streak counts consecutive active days', find('Longest streak') === '3 days in a row', find('Longest streak'));
 check('busiest month only on the all-time strips', find('Busiest month') === undefined);
 const all = summarize([...days, day('2026-10-02', 30)], 'activity', 'years');
 check('busiest month names month and year', all.find((c) => c.label === 'Busiest month')?.value === 'October 2026 (30)');
 check('a quiet window has no callouts', summarize([day('2026-10-01', 0)], 'activity', 'week').length === 0);
+
+const ja = { ...en, 'calendarModel.busiestWeekday': '最も忙しい曜日', 'calendarModel.tuesday': '火曜日' };
+setCurrentLanguage(translator(ja, 'ja'), 'ja');
+const japanese = summarize(days, 'activity', 'month');
+check('Japanese weekdays never get an English plural suffix', japanese.find(c => c.label === ja['calendarModel.busiestWeekday'])?.value === ja['calendarModel.tuesday']);
+setCurrentLanguage(translator(en), 'en');
 
 if (failures > 0) {
   console.error(`\n${failures} calendar check(s) failed`);
