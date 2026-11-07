@@ -28,6 +28,9 @@ function getBreadcrumb(pathname: string, t: Translate): { label: string; sub?: s
   if (pathname.startsWith('/board/task/')) {
     return { label: t('board'), sub: t('task') };
   }
+  if (pathname.startsWith('/share-pack')) {
+    return { label: t('board'), sub: t('sharePack.title') };
+  }
   if (pathname.startsWith('/stakeholders/') && pathname !== '/stakeholders') {
     return { label: t('stakeholders'), sub: t('detail') };
   }

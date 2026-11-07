@@ -16,6 +16,7 @@ import type { SetupStatus } from './utils/setup';
 
 const SituationView = lazy(() => import('./views/SituationView'));
 const BoardView = lazy(() => import('./views/BoardView'));
+const SharePackView = lazy(() => import('./views/SharePackView'));
 const TaskDetailView = lazy(() => import('./views/TaskDetailView'));
 const MeetingDetailView = lazy(() => import('./views/MeetingDetailView'));
 const StakeholdersView = lazy(() => import('./views/StakeholdersView'));
@@ -95,6 +96,7 @@ function AppRoutes() {
           <Route path="stakeholders" element={<StakeholdersView />} />
           <Route path="stakeholders/:id" element={<StakeholderDetailView />} />
           <Route path="outputs" element={<OutputsView />} />
+          <Route path="share-pack" element={<SharePackView />} />
           <Route path="context" element={<ContextView />} />
           <Route path="context/updates" element={<ContextView />} />
           <Route path="context/updates/:id" element={<ContextView />} />

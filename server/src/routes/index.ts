@@ -22,6 +22,7 @@ import transcriptionRouter from './transcription';
 import voiceprintsRouter from './voiceprints';
 import setupRouter from './setup';
 import appRouter from './app';
+import sharePackRouter from './sharePack';
 
 export function registerRoutes(app: Express): void {
   app.use('/api', (_req, _res, next) => {
@@ -69,4 +70,5 @@ export function registerRoutes(app: Express): void {
   app.use('/api/transcription', transcriptionRouter);
   app.use('/api/voiceprints', voiceprintsRouter);
   app.use('/api/app', appRouter);
+  app.use('/api/share-pack', sharePackRouter);
 }

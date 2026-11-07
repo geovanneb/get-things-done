@@ -188,6 +188,13 @@ Tasks move `backlog` → `in_progress` → `in_review` → `done`. Agents set
 `in_progress` when they pick work up and `in_review` when they finish. **Only you set
 `done`**, and only after reading the output.
 
+**Share pack.** **Board > Share pack** gathers deliverables and files attached to tasks into one ZIP
+for a colleague: choose the files from any active task, put them in reading order, **Preview** the
+final list (names, output types, confidentiality, sizes, missing files), edit the README, and
+**Download ZIP**. Only what you choose goes in: never a task's own text, its logs or backups.
+Confidentiality is shown as information, not permission. If a file changes after the preview, the
+download is refused until you preview again.
+
 **Request changes.** On a task in review, **Request changes** (Work tab) records what should
 change, with the date, in the task's `change_requests` and moves it back to `in_progress` in one
 step. It starts no agent and keeps the body and start date. The next agent run on the task reads

@@ -302,6 +302,15 @@ try {
     objectiveSearch.results.some((task) => task.id === createdTask.id)
     && objectiveFilter.some((task) => task.id === createdTask.id));
 
+  // Share pack (#81): only files attached to a task go in, never task.md; the download holds exactly what was previewed.
+  const packSend = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const packItems = [{ task: createdTask.id, kind: 'attachment', ref: 'task.md' }];
+  const packPreview = await (await packSend('/api/share-pack/preview', { items: packItems })).json();
+  const packDownload = await packSend('/api/share-pack/download', { items: packItems, readme: '', token: packPreview.token });
+  check('a share pack never takes task.md, and nothing is downloaded that the preview did not clear',
+    packPreview.ready === false && Boolean(packPreview.rows?.[0]?.problem) && packDownload.status === 409,
+    `ready=${packPreview.ready} problem=${packPreview.rows?.[0]?.problem} download=${packDownload.status}`);
+
   // Request changes (#79): dated feedback on a task in review, back to rework in one step; sent twice, recorded once.
   const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const reviewTask = await (await send('PUT', `/api/tasks/${createdTask.id}`, { ...readBack, status: 'in_review' })).json();
