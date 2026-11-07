@@ -22,6 +22,7 @@ import { formatRelativeDate } from '@/utils/format';
 import { useApi } from '@/hooks/useApi';
 import { useAppDispatch, useDataVersion } from '@/store';
 import ImportUpdateModal from '@/components/context-updates/ImportUpdateModal';
+import ShareNotes from '@/components/context/ShareNotes';
 import UpdatesList from '@/components/context-updates/UpdatesList';
 import UpdateDetail from '@/components/context-updates/UpdateDetail';
 import { filterUpdates, HISTORY_PAGE, waitingCounts, waitingLabel, type TypeFilter } from '@/utils/updateTypes';
@@ -175,7 +176,8 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
           <DictateButton fieldName={tr('dictation.fieldContent')} onText={(text) => setForm((f) => ({ ...f, body: withDictation(f.body, text) }))} />
         </Field>
         {effectiveNote?.id && (
-          <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label={t('context.attachedFiles')} />
+          <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label={t('context.attachedFiles')}
+            archiveLabel={t('shareNotes.rawDownload')} archiveTitle={t('shareNotes.rawDownloadTitle')} />
         )}
       </div>
     </Modal>
@@ -342,6 +344,7 @@ export default function ContextView() {
   const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
   const waiting = waitingCounts(updates ?? []);
   const [importOpen, setImportOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   // Kept here, not in the list, so opening an update and coming back keeps the filter and the page.
   const [updateType, setUpdateType] = useState<TypeFilter>('all');
   const [updateQuery, setUpdateQuery] = useState('');
@@ -505,6 +508,7 @@ export default function ContextView() {
               title={t('context.uploadATranscriptDeckPhoto')}>
               {t('updatesList.importUpdate')}
             </Button>
+            {!showUpdates && <Button onClick={() => setShareOpen(true)} title={t('shareNotes.buttonTitle')}>{t('shareNotes.button')}</Button>}
             {!showUpdates && <Button variant="primary" icon={icons.plus} onClick={openCreate}>{t('context.newNote')}</Button>}
           </div>
         </div>
@@ -544,6 +548,8 @@ export default function ContextView() {
         </div>
       </div>
 
+      <ShareNotes isOpen={shareOpen} onClose={() => setShareOpen(false)} notes={notes}
+        categoryLabel={(c) => categoryLabel(c.charAt(0).toUpperCase() + c.slice(1))} />
       <ImportUpdateModal isOpen={importOpen} onClose={() => setImportOpen(false)} onCreated={handleImported} onQueued={handleQueued} />
 
       <NoteModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}

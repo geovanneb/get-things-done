@@ -294,6 +294,24 @@ try {
     await fetch(`${base}/api/context/${created.id}`, { method: 'DELETE' });
   }
 
+  // Share context notes as one Markdown file (#107): only shareable notes, the download is the preview, a change refuses it.
+  {
+    const post = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const open = await (await post('/api/context', { title: 'Smoke share open', category: 'Company', sensitivity: 'shareable', body: 'Public text. <!-- hidden -->\n' })).json();
+    const closed = await (await post('/api/context', { title: 'Smoke share closed', category: 'Company', body: 'Internal text.\n' })).json();
+    const preview = await (await post('/api/context/share/preview', { notes: [open.id] })).json();
+    const refused = await (await post('/api/context/share/preview', { notes: [open.id, closed.id] })).json();
+    const download = await post('/api/context/share/download', { notes: [open.id], token: preview.token });
+    const text = await download.text();
+    await fetch(`${base}/api/context/${open.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Changed.\n' }) });
+    const stale = await post('/api/context/share/download', { notes: [open.id], token: preview.token });
+    check('sharing notes: shareable only, the download is exactly the preview, a change after it is refused',
+      preview.text?.includes('Public text.') && !preview.text.includes('hidden') && refused.token === null
+        && download.status === 200 && text === preview.text && stale.status === 409,
+      JSON.stringify({ preview: preview.text, refused: refused.rows, download: download.status, stale: stale.status }).slice(0, 300));
+    for (const n of [open, closed]) await fetch(`${base}/api/context/${n.id}`, { method: 'DELETE' });
+  }
+
   // Names and terms check (#85): a Markdown deliverable is checked, an Office file is not, and task.md is not touched.
   {
     const created = await (await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' },

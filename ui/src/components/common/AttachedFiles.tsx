@@ -20,6 +20,9 @@ interface AttachedFilesProps {
   label: string;
   /** URL of a ZIP with the whole folder; shows a "Download all" link. */
   archiveUrl?: string;
+  /** Overrides the archive link's text and tooltip (Context says it is the raw folder, not a filtered share). */
+  archiveLabel?: string;
+  archiveTitle?: string;
 }
 
 const labelStyle: React.CSSProperties = {
@@ -38,7 +41,7 @@ async function responseError(res: Response, fallback: string): Promise<Error> {
  * Subfolders (e.g. assets/, source/) are listed read-only: attach and remove act on the top level only.
  * Each subfolder starts collapsed, showing its name and file count; clicking it shows its files.
  */
-export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFilesProps) {
+export default function AttachedFiles({ baseUrl, label, archiveUrl, archiveLabel, archiveTitle }: AttachedFilesProps) {
   const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
@@ -112,12 +115,12 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl }: AttachedFi
         <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleUpload} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {archiveUrl && files.length > 0 && (
-            <a href={archiveUrl} download title={t('downloadZipTitle')}
+            <a href={archiveUrl} download title={archiveTitle ?? t('downloadZipTitle')}
               onClick={(e) => { e.preventDefault(); void downloadArchive(archiveUrl, t).catch((err) => notify.error(err, 'Could not download the files. Try again.')); }}
               style={{ fontSize: 'var(--text-sm)', color: 'var(--color-accent)', textDecoration: 'none', whiteSpace: 'nowrap' }}
               onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
               onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}>
-              {t('downloadAllZip')}
+              {archiveLabel ?? t('downloadAllZip')}
             </a>
           )}
           <Button variant="secondary" size="sm" loading={uploading} onClick={() => inputRef.current?.click()}>

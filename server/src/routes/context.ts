@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import multer from 'multer';
 import { ContextService } from '../services/contextService';
+import { downloadContextShare, previewContextShare } from '../services/contextShare';
 import { sendFile, sendZip } from '../utils/files';
 import { ContextCategory } from '../types';
 import { utf8FileNames } from '../utils/uploadNames';
@@ -21,6 +22,20 @@ router.get('/', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   const note = await contextService.createContextNote(req.body);
   res.status(201).json(note);
+});
+
+// POST /api/context/share/preview  { notes: [id] }  the exact text of one Markdown file, and a token; only shareable notes
+router.post('/share/preview', async (req: Request, res: Response) => {
+  res.json(await previewContextShare(req.body));
+});
+
+// POST /api/context/share/download  { notes, token }  that file, only when it is still exactly what was previewed
+router.post('/share/download', async (req: Request, res: Response) => {
+  const { name, text } = await downloadContextShare(req.body);
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(Buffer.from(text, 'utf-8'));
 });
 
 // GET /api/context/:id
