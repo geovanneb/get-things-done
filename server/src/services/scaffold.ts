@@ -41,6 +41,8 @@ export interface UpgradeResult {
   removed: string[];
   /** Files the app no longer ships, kept because the user changed them. */
   retired_kept: string[];
+  /** Files the user changed and said they merged this exact app version into: kept, with no `.new`. */
+  merged: string[];
   fromVersion: string | null;
   toVersion: string;
 }
@@ -101,6 +103,11 @@ export interface ManifestEntry {
   sha256: string;
   /** The `<path>.new` the app wrote beside a file the user changed, as it wrote it. Absent: any `.new` is the user's. */
   new_sha256?: string;
+  /**
+   * The app version (`sha256`) the user said they merged into their own file. While the app ships exactly that
+   * version, their file is not a conflict and no `.new` is written; a later version clears it and the `.new` comes back.
+   */
+  merged_sha256?: string;
 }
 
 export interface AppManifest {
@@ -111,17 +118,30 @@ export interface AppManifest {
   newCopiesTracked?: boolean;
 }
 
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
 function sha256(buf: Buffer | string): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
 /** The hash of a `.new` only when it is a plain file that can be read; a link, folder or failed read gives null. */
-function appNewCopyHash(newPath: string): string | null {
+export function appNewCopyHash(newPath: string): string | null {
   try {
     if (!fs.lstatSync(newPath).isFile()) return null;
     return sha256(fs.readFileSync(newPath));
   } catch {
     return null;
+  }
+}
+
+/** Removes the app's own `.new` when it still has exactly `expected`; anything else is left. Never stops the upgrade. */
+export function removeNewCopy(newPath: string, expected: string): boolean {
+  try {
+    if (appNewCopyHash(newPath) !== expected) return false;
+    fs.rmSync(newPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -477,6 +497,9 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
   const previousByPath = new Map((previous?.files ?? []).map((f) => [f.path, f.sha256]));
   // Which `.new` beside a file is still the app's own copy. An older manifest did not record them: its `.new` is
   // the app's only while it is exactly the version that manifest lists, which is what that release wrote.
+  // What the user acknowledged merging, only from a manifest that records `.new` copies (an older one never wrote it).
+  const mergedVersion = new Map((previous?.newCopiesTracked ? previous.files : []).flatMap((f) =>
+    (typeof f.merged_sha256 === 'string' && SHA256_HEX.test(f.merged_sha256) ? [[f.path, f.merged_sha256] as const] : [])));
   const appNewCopy = new Map((previous?.files ?? []).flatMap((f) => {
     const hash = previous?.newCopiesTracked ? f.new_sha256 : f.sha256;
     return hash ? [[f.path, hash] as const] : [];
@@ -489,6 +512,7 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
     unchanged: [],
     removed: [],
     retired_kept: [],
+    merged: [],
     fromVersion: previous?.appVersion ?? null,
     toVersion: getAppVersion(),
   };
@@ -508,6 +532,11 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
     const ours = appNewCopy.get(relPath);
     const existingNew = ours ? appNewCopyHash(newPath) : null;
     if (ours && existingNew === ours) entry.new_sha256 = ours;
+    // An acknowledgement holds only for the exact version the app ships now, whatever happens to the file this time.
+    if (mergedVersion.get(relPath) === nextHash) entry.merged_sha256 = nextHash;
+    // An "I merged it" interrupted before its `.new` was removed: the app's own unchanged copy of this exact version goes
+    // now, whatever the file looks like since. Any other `.new` is the user's and stays.
+    if (entry.merged_sha256 && entry.new_sha256 === nextHash && existingNew === nextHash && removeNewCopy(newPath, nextHash)) delete entry.new_sha256;
 
     if (!fs.existsSync(destPath)) {
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
@@ -528,6 +557,9 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
       // Untouched since we wrote it, so replacing it loses nothing; unless it changes while this runs.
       if (replaceFile(destPath, nextContent, currentHash)) result.updated.push(relPath);
       else result.conflicted.push(relPath);
+    } else if (entry.merged_sha256) {
+      // The user merged this exact version into their own file: not a conflict, and no `.new` for it.
+      result.merged.push(relPath);
     } else {
       // Either user-edited, or predates the manifest. Never clobber it, nor a `.new` someone may be merging. A new one
       // is made only where there is none.
@@ -595,6 +627,25 @@ export function detectAiTools(workspacePath: string): AiTool[] {
     codex: 'AGENTS.md',
   };
   return (Object.keys(markers) as AiTool[]).filter((tool) => fs.existsSync(path.join(workspacePath, markers[tool])));
+}
+
+/**
+ * The app's current version of every file it ships to this workspace, rendered as an upgrade would render it now:
+ * workspace-relative path, bytes and hash. What an upgrade compares against; never read from the manifest.
+ */
+export function appFileVersions(workspacePath: string): Map<string, { content: Buffer; sha256: string }> {
+  const profile = readWorkspaceProfile(workspacePath);
+  const versions = new Map<string, { content: Buffer; sha256: string }>();
+  for (const [srcPath, relPath] of collectAppFiles(detectAiTools(workspacePath))) {
+    const content = renderTemplate(srcPath, profile);
+    versions.set(relPath, { content, sha256: sha256(content) });
+  }
+  return versions;
+}
+
+/** Whether two versions of an app file mean the same (equal bytes, or JSON that only differs in order). */
+export function sameAppFile(relPath: string, a: Buffer, b: Buffer): boolean {
+  return sha256(a) === sha256(b) || isEquivalentJson(relPath, a, b);
 }
 
 /**

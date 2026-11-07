@@ -24,6 +24,7 @@ import { cleanupSummary } from '@/components/routines/SystemCleanup';
 import WorkspaceAvatar from '@/components/layout/WorkspaceAvatar';
 import WorkspaceIconCrop from '@/components/layout/WorkspaceIconCrop';
 import UpdatesSettings from '@/components/settings/UpdatesSettings';
+import InstructionUpdates from '@/components/settings/InstructionUpdates';
 import RunNoticeSettings from '@/components/settings/RunNoticeSettings';
 import TranscriptionSettings from '@/components/settings/TranscriptionSettings';
 import SidebarSettings from '@/components/settings/SidebarSettings';
@@ -940,6 +941,7 @@ export default function SettingsView() {
           <UpdatesSettings />
         </Card>
       </div>
+      <InstructionUpdates />
 
       {/* Section 5: About */}
       <Card title={t('about')}>

@@ -1019,6 +1019,13 @@ try {
       fs.rmSync(runsDir, { force: true });
       if (hadRuns) fs.renameSync(savedRuns, runsDir);
     }
+    // Instruction updates: a list of changed app files; anything not listed is refused before a file is read.
+    const instructionUpdates = await (await fetch(`${base}/api/app/instruction-updates`)).json();
+    const compareOutside = await fetch(`${base}/api/app/instruction-updates/compare?path=${encodeURIComponent('../package.json')}`);
+    const mergedOutside = await json('POST', '/api/app/instruction-updates/merged', { path: 'profile/executive-profile.md', mine_sha256: 'a'.repeat(64), app_sha256: 'b'.repeat(64) });
+    check('instruction updates are listed, and a file the app does not ship is never compared or marked merged',
+      Array.isArray(instructionUpdates) && compareOutside.status === 404 && mergedOutside.status === 404,
+      `list=${JSON.stringify(instructionUpdates).slice(0, 120)} compare=${compareOutside.status} merged=${mergedOutside.status}`);
     // Recognize known voices (#287): off by default, nothing remembered, and nothing is remembered without the model
     // and a confirmed stakeholder name; requests that could reach a path are refused before anything is read.
     const voices = await (await fetch(`${base}/api/voiceprints`)).json();

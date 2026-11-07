@@ -2,6 +2,7 @@ import { interfaceLanguage, setInterfaceLanguage } from '../services/interfaceLa
 import { Router, Request, Response } from 'express';
 import { cancelDesktopRestart, checkNow, dismiss, install, prepareDesktopRestart, setAutoCheck, updateHandoffFailed, updateStatus } from '../services/appUpdates';
 import { WorkspaceService } from '../services/workspace';
+import { acknowledgeInstructionUpdate, compareInstructionUpdate, listInstructionUpdates } from '../services/instructionUpdates';
 
 /** The workspace this request is about, or none yet (the update state itself is the user's, not a workspace's). */
 const workspace = (): string | null => { try { return new WorkspaceService().getWorkspacePath(); } catch { return null; } };
@@ -14,6 +15,28 @@ router.put('/language', async (req, res) => { res.json(await setInterfaceLanguag
 // GET /api/app/update  this version, the newest one found, and how this install updates
 router.get('/update', async (_req: Request, res: Response) => {
   res.json(await updateStatus(workspace()));
+});
+
+/** The open workspace, for the instruction updates: they are always about one. */
+function openWorkspace(): string {
+  const ws = workspace();
+  if (!ws) throw Object.assign(new Error('Open a workspace first.'), { statusCode: 409 });
+  return ws;
+}
+
+// GET /api/app/instruction-updates  app files you changed while the app ships a newer version of them
+router.get('/instruction-updates', async (_req: Request, res: Response) => {
+  res.json(await listInstructionUpdates(openWorkspace()));
+});
+
+// GET /api/app/instruction-updates/compare?path=  yours and the app's, as text
+router.get('/instruction-updates/compare', async (req: Request, res: Response) => {
+  res.json(await compareInstructionUpdate(openWorkspace(), req.query['path']));
+});
+
+// POST /api/app/instruction-updates/merged  { path, mine_sha256, app_sha256 }  "I merged it"
+router.post('/instruction-updates/merged', async (req: Request, res: Response) => {
+  res.json(await acknowledgeInstructionUpdate(openWorkspace(), req.body));
 });
 
 // POST /api/app/update/check  asks for the newest version now
