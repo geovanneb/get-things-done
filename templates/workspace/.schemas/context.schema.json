@@ -19,6 +19,11 @@
       "type": "string",
       "enum": ["required", "recommended", "optional"]
     },
+    "sensitivity": {
+      "type": "string",
+      "enum": ["shareable", "internal", "personal"],
+      "description": "Who may see the whole note. No label counts as internal. Only the user makes a note shareable."
+    },
     "expiry_date": {"type": "string", "format": "date"},
     "source": {"type": "string"},
     "related_tasks": {
