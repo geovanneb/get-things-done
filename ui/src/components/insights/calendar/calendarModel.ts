@@ -204,7 +204,7 @@ export function summarize(
       counts[weekday(d.date)] += 1;
     }
     const avg = sums.map((s, i) => (counts[i] ? s / counts[i] : 0));
-    out.push({ label: tr('calendarModel.busiestWeekday'), value: `${WEEKDAYS_LONG()[avg.indexOf(Math.max(...avg))]}s` });
+    out.push({ label: tr('calendarModel.busiestWeekday'), value: WEEKDAYS_LONG()[avg.indexOf(Math.max(...avg))] });
   }
 
   let best = 0;

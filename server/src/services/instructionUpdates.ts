@@ -1,8 +1,7 @@
-import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import { appFileVersions, getAppVersion, MANIFEST_RELATIVE_PATH, newerVersion, readManifest, removeNewCopy, sameAppFile, writeManifest } from './scaffold';
+import { appFileVersions, getAppVersion, MANIFEST_RELATIVE_PATH, newerVersion, readManifest, readWorkspaceProfile, removeNewCopy, sameAppFile, writeManifest } from './scaffold';
 import { agentRunning } from './workspaceRefresh';
 import { workspaceEntry } from '../utils/files';
 import { hashFile } from '../utils/fileHash';
@@ -86,14 +85,19 @@ async function rows(workspace: string): Promise<{ update: InstructionUpdate; app
   const manifest = await metadataIsPlain(workspace) ? readManifest(workspace) : null;
   const tracked = manifest?.newCopiesTracked ? manifest.files : [];
   const out: { update: InstructionUpdate; app: Buffer }[] = [];
-  for (const [relPath, app] of appFileVersions(workspace)) {
+  // Template interpolation reads the profile too; it must obey the same no-link boundary as the compared files.
+  const profilePath = path.join(workspace, 'profile', 'executive-profile.md');
+  const profileIsPlain = await workspaceEntry(workspace, profilePath)
+    .then(() => fsp.lstat(profilePath)).then((stat) => stat.isFile(), () => false);
+  const profile = profileIsPlain ? readWorkspaceProfile(workspace) : { name: '', role: '', organization: '' };
+  for (const [relPath, app] of appFileVersions(workspace, profile)) {
     const mine = await plainFileHash(workspace, relPath);
     if (!mine || await sameAsApp(workspace, relPath, mine, app)) continue;
     const entry = tracked.find((f) => f.path === relPath);
     if (entry?.merged_sha256 === app.sha256) continue;
     const copy = await plainFileHash(workspace, `${relPath}.new`);
     const state: InstructionUpdateState = copy === null
-      ? (fs.existsSync(path.join(workspace, `${relPath}.new`)) ? 'edited' : 'no_copy')
+      ? (await fsp.lstat(path.join(workspace, `${relPath}.new`)).then(() => true, (err: NodeJS.ErrnoException) => err.code !== 'ENOENT') ? 'edited' : 'no_copy')
       : copy.sha256 === app.sha256 && entry?.new_sha256 === app.sha256 ? 'ready' : 'edited';
     out.push({ update: { path: relPath, state, mine_sha256: mine.sha256, app_sha256: app.sha256 }, app: app.content });
   }

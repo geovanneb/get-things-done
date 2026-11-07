@@ -207,3 +207,26 @@ test('a context-updates folder that cannot be read is reported, not taken for "n
   }
   assert.ok(result.skipped.some((s) => s.item === 'context-updates' && s.reason === 'folder_unreadable'), JSON.stringify(result.skipped));
 });
+
+test('checking many action tasks reads the update collection once for their comparisons', async (t) => {
+  const ws = await workspace(t);
+  await finishedDigest(ws);
+  const updates = new ContextUpdateService();
+  const shown = (await updates.get('CU-2026-0001')).meeting_records[0]!;
+  const made = await updates.createActionItemTask('CU-2026-0001', 'M-01', { item: 0, revision: shown.revision, task: { title: 'Fictional budget task' } });
+  const original = path.join(ws, 'tasks/active', made.task.id, 'task.md');
+  const text = await fsp.readFile(original, 'utf8');
+  for (let i = 900; i < 910; i++) {
+    const id = `TASK-2026-${String(i).padStart(4, '0')}`;
+    const dir = path.join(ws, 'tasks/active', id);
+    await fsp.mkdir(dir);
+    await fsp.writeFile(path.join(dir, 'task.md'), text.replace(made.task.id, id));
+  }
+  const spy = t.mock.method(ContextUpdateService.prototype, 'list');
+  const start = performance.now();
+  const result = await relatedWork(MEETING);
+  t.diagnostic(`11 action tasks: ${Math.round(performance.now() - start)} ms, ${spy.mock.callCount()} update collection scans`);
+  assert.equal(result.tasks.length, 11);
+  assert.ok(result.tasks.every((row) => row.state === 'related' && row.via.action));
+  assert.ok(spy.mock.callCount() <= 3, 'update scans must not grow with the number of tasks');
+});

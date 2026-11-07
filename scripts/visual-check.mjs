@@ -150,6 +150,60 @@ try {
     await page.waitForTimeout(300);
   };
 
+  // Release regressions: old results must not be actionable while a new query is pending.
+  for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
+    const { context, page } = await open(width, theme);
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    await page.route('**/api/search?*', async route => {
+      const q = new URL(route.request().url()).searchParams.get('q');
+      if (q === 'second') await pending;
+      await route.fulfill({ json: q === 'first' ? [{ id: 'TASK-2026-0001', type: 'task', title: 'Fictional first result' }] : [] });
+    });
+    await page.goto(base + '/board');
+    await settle(page);
+    await page.getByRole('button', { name: 'Open search', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    const field = page.getByRole('dialog').getByRole('textbox');
+    await field.fill('first');
+    await page.getByRole('option', { name: /Fictional first result/ }).waitFor();
+    await field.fill('second');
+    await field.press('Enter');
+    check(`search: Enter cannot open a result from the previous query @${width} ${theme}`, await page.getByRole('dialog', { name: 'Search', exact: true }).isVisible());
+    release();
+    await context.close();
+  }
+
+  // A slower comparison must never replace the file selected most recently.
+  for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
+    const { context, page } = await open(width, theme);
+    const rows = ['AGENTS.md', 'CLAUDE.md'].map(path => ({ path, state: 'ready', mine_sha256: 'mine', app_sha256: 'app' }));
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    await page.route('**/api/app/instruction-updates', route => route.fulfill({ json: rows }));
+    await page.route('**/api/app/instruction-updates/compare?*', async route => {
+      const file = new URL(route.request().url()).searchParams.get('path');
+      if (file === 'AGENTS.md') await pending;
+      await route.fulfill({ json: { ...rows.find(row => row.path === file), mine: 'Fictional original', app: `Fictional new ${file}` } });
+    });
+    await page.goto(base + '/settings');
+    await settle(page);
+    const panel = page.locator('#instruction-updates');
+    const firstRequest = page.waitForRequest('**/api/app/instruction-updates/compare?path=AGENTS.md');
+    await panel.getByRole('button', { name: 'Compare', exact: true }).first().focus();
+    await page.keyboard.press('Enter');
+    await firstRequest;
+    await panel.getByRole('button', { name: 'Compare', exact: true }).last().focus();
+    await page.keyboard.press('Enter');
+    await panel.getByText('Fictional new CLAUDE.md', { exact: true }).waitFor();
+    const response = page.waitForResponse('**/api/app/instruction-updates/compare?path=AGENTS.md');
+    release();
+    await response;
+    await page.waitForTimeout(100);
+    check(`instructions: a late comparison cannot replace the latest selection @${width} ${theme}`, await panel.getByText('Fictional new CLAUDE.md', { exact: true }).isVisible());
+    await context.close();
+  }
+
   // ---- Behaviour on every page and width ----------------------------------
   if (!process.argv.includes('--language-only')) {
   for (const theme of ['light', 'dark']) {

@@ -419,7 +419,12 @@ export function readManifest(workspacePath: string): AppManifest | null {
   const manifestPath = path.join(workspacePath, MANIFEST_RELATIVE_PATH);
   if (!fs.existsSync(manifestPath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as AppManifest;
+    const value: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const manifest = value as AppManifest;
+    if (typeof manifest.appVersion !== 'string' || !Array.isArray(manifest.files)
+      || !manifest.files.every((file) => file && typeof file.path === 'string' && typeof file.sha256 === 'string')) return null;
+    return manifest;
   } catch {
     return null;
   }
@@ -633,8 +638,7 @@ export function detectAiTools(workspacePath: string): AiTool[] {
  * The app's current version of every file it ships to this workspace, rendered as an upgrade would render it now:
  * workspace-relative path, bytes and hash. What an upgrade compares against; never read from the manifest.
  */
-export function appFileVersions(workspacePath: string): Map<string, { content: Buffer; sha256: string }> {
-  const profile = readWorkspaceProfile(workspacePath);
+export function appFileVersions(workspacePath: string, profile = readWorkspaceProfile(workspacePath)): Map<string, { content: Buffer; sha256: string }> {
   const versions = new Map<string, { content: Buffer; sha256: string }>();
   for (const [srcPath, relPath] of collectAppFiles(detectAiTools(workspacePath))) {
     const content = renderTemplate(srcPath, profile);

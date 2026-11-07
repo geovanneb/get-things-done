@@ -314,9 +314,23 @@ try {
     && afterRequest.change_requests?.length === 1 && afterRequest.change_requests[0].status === 'open',
     `first=${requested.status} again=${requestedAgain.status} status=${afterRequest.status} n=${afterRequest.change_requests?.length}`);
 
+  // Damaged feedback is kept for repair rather than replaced by the next request.
+  const damagedReview = await (await send('POST', '/api/tasks', { title: 'Fictional damaged feedback', status: 'in_review' })).json();
+  const damagedFile = path.join(ws, 'tasks', 'active', damagedReview.id, 'task.md');
+  const damagedText = fs.readFileSync(damagedFile, 'utf8').replace(/^---\r?\n/, '---\nchange_requests: { feedback: Fictional earlier feedback }\n');
+  fs.writeFileSync(damagedFile, damagedText);
+  const damagedRequest = await send('POST', `/api/tasks/${damagedReview.id}/request-changes`, {
+    feedback: 'Fictional next feedback', seen_updated_at: damagedReview.updated_at, request_id: 'smoke-damaged-feedback',
+  });
+  check('Request changes refuses damaged feedback without losing it', damagedRequest.status === 409 && fs.readFileSync(damagedFile, 'utf8') === damagedText);
+  await send('DELETE', `/api/tasks/${damagedReview.id}`);
+
   // Waiting for (#82): set with its own action, kept through a save, resolved without changing the status.
   const waitingSet = await send('PUT', `/api/tasks/${createdTask.id}/waiting`, { waiting: { for: 'Fictional pricing sheet', party: { name: 'A supplier' }, follow_up: '2020-01-01', since: '2020-01-01' }, seen_updated_at: afterRequest.updated_at });
   const waitingTask = await waitingSet.json();
+  const staleWaiting = await send('PUT', `/api/tasks/${createdTask.id}/waiting`, { waiting: { for: 'Fictional stale replacement' }, seen_updated_at: afterRequest.updated_at });
+  check('waiting rejects a stale version without replacing its record', staleWaiting.status === 409
+    && (await (await fetch(`${base}/api/tasks/${createdTask.id}`)).json()).waiting?.for === 'Fictional pricing sheet');
   const situationNow = await (await fetch(`${base}/api/situation`)).json();
   const waitingResolved = await send('POST', `/api/tasks/${createdTask.id}/waiting/resolve`, { seen_updated_at: waitingTask.updated_at });
   const afterResolve = await waitingResolved.json();

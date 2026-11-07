@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
-import { ContextUpdateService } from './contextUpdateService';
+import { ContextUpdateService, type ContextUpdate } from './contextUpdateService';
 import { FileService } from './fileService';
 import { actionNotice, type ActionNotice } from './meetingActionNotice';
 import { heldMeetings, isMeetingId } from './meetingLibrary';
@@ -70,9 +70,8 @@ const order = (s: RelatedState) => RELATED_STATES.indexOf(s);
  * The original records (update/record) whose meeting is this one: how a task made from an action item is matched. An
  * update folder the list could not read is reported, since a task made from it would otherwise go unnoticed.
  */
-async function recordsOfMeeting(meetingId: string, skipped: RelatedWork['skipped']): Promise<Set<string>> {
+async function recordsOfMeeting(meetingId: string, skipped: RelatedWork['skipped'], updates: ContextUpdate[] | null): Promise<Set<string>> {
   const keys = new Set<string>();
-  const updates = await contextUpdates.list().catch(() => null);
   if (!updates) { skipped.push({ item: 'context-updates', reason: 'folder_unreadable' }); return keys; }
   for (const u of updates) {
     for (const m of heldMeetings(u)) if (m.id === meetingId && m.record) keys.add(`${u.id}/${m.record.id}`);
@@ -108,7 +107,7 @@ function actionFindings(notice: ActionNotice): RelatedFinding[] {
 }
 
 async function relatedTask(
-  meetingId: string, now: PinnedMeeting | null, records: Set<string>,
+  meetingId: string, now: PinnedMeeting | null, records: Set<string>, updates: ContextUpdate[],
   taskFile: string, data: Record<string, unknown>, body: string, archived: boolean,
 ): Promise<RelatedTask | 'selection_damaged' | null> {
   const id = String(data['id'] ?? path.basename(path.dirname(taskFile)));
@@ -151,7 +150,7 @@ async function relatedTask(
   }
   if (failedPin) findings.push({ code: 'pin_failed' });
   if (mention && !pinned && !failedPin && !damaged) findings.push({ code: 'unpinned' });
-  if (action) findings.push(...actionFindings(await actionNotice({ ...data, id })));
+  if (action) findings.push(...actionFindings(await actionNotice({ ...data, id }, updates)));
 
   const deliverables = (Array.isArray(data['deliverables']) ? data['deliverables'] : []).flatMap((d: unknown) => {
     const o = d && typeof d === 'object' ? d as Record<string, unknown> : null;
@@ -180,7 +179,9 @@ export async function relatedWork(meetingId: string): Promise<RelatedWork> {
   // Resolved once for every task. A meeting that cannot be read is said, never taken for deleted sources.
   const now = await resolveMeeting(meetingId).catch(() => null);
   const result: RelatedWork = { meeting: meetingId, meeting_readable: now !== null, tasks: [], scanned: 0, skipped: [] };
-  const records = await recordsOfMeeting(meetingId, result.skipped);
+  // Reuse this request's snapshot for every action comparison; never rescan all updates for each task.
+  const updates = await contextUpdates.list().catch(() => null);
+  const records = await recordsOfMeeting(meetingId, result.skipped, updates);
 
   for (const [folder, archived] of [['active', false], ['archive', true]] as const) {
     let dir: string;
@@ -213,7 +214,7 @@ export async function relatedWork(meetingId: string): Promise<RelatedWork> {
         continue;
       }
       try {
-        const row = await relatedTask(meetingId, now, records, taskFile, data, body, archived);
+        const row = await relatedTask(meetingId, now, records, updates ?? [], taskFile, data, body, archived);
         if (row === 'selection_damaged') result.skipped.push({ item: entry.name, reason: 'selection_damaged' });
         else if (row) result.tasks.push(row);
       } catch {

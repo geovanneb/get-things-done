@@ -60,7 +60,7 @@ function compare(before: MeetingActionItem, after: MeetingActionItem): ActionCha
  * In order: the original and its meeting, then the versions (a conflict or a broken chain is said first), then the
  * version the task was made from, then the item.
  */
-export async function actionNotice(task: Record<string, unknown>): Promise<ActionNotice> {
+export async function actionNotice(task: Record<string, unknown>, updates?: ContextUpdate[]): Promise<ActionNotice> {
   const result = (state: ActionNotice['state'], extra: Partial<ActionNotice> = {}): ActionNotice => ({ state, meeting: null, changes: [], current: null, legacy: false, ...extra });
   const identity = typeof task['meeting_action'] === 'string' ? IDENTITY.exec(task['meeting_action']) : null;
   if (!identity) return result('none');
@@ -72,7 +72,7 @@ export async function actionNotice(task: Record<string, unknown>): Promise<Actio
     && typeof raw.root_index === 'number' && Number.isInteger(raw.root_index) && raw.root_index >= 0 ? raw as MeetingActionSource : null;
 
   // The meeting is the original's own, as its update holds it; a correction's claim never decides it.
-  const all = await contextUpdates.list();
+  const all = updates ?? await contextUpdates.list();
   const rootUpdate = all.find((u) => u.id === rootUpdateId);
   const meeting = rootUpdate ? heldMeetings(rootUpdate).find((m) => m.record?.id === rootRecordId)?.id ?? null : null;
   if (!rootUpdate || !meeting) return result('gone', { legacy });
