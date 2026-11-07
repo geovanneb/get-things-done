@@ -17,7 +17,7 @@ function httpError(status: number, message: string): Error {
 
 /** How a note's label counts: none is `internal`; anything that is not a known label is `invalid` (never shareable). */
 export function effectiveSensitivity(value: unknown): Sensitivity | 'invalid' {
-  if (value === undefined || value === null) return 'internal';
+  if (value === undefined || value === null || value === '') return 'internal';
   return (SENSITIVITIES as readonly unknown[]).includes(value) ? (value as Sensitivity) : 'invalid';
 }
 
@@ -133,6 +133,8 @@ export class ContextService {
     const noteDir = this.getNoteDir(category, slug);
     const filePath = this.getNoteFile(category, slug);
 
+    // Never replace another note (and its sharing label) by creating one with the same title.
+    if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
     await fileService.ensureDir(noteDir);
 
     const note: ContextNote = {
@@ -194,7 +196,8 @@ export class ContextService {
     };
     if (sensitivity === null) delete updated.sensitivity;
     else if (sensitivity) updated.sensitivity = sensitivity;
-    else if (existing.sensitivity === undefined) delete updated.sensitivity;
+    // A label left empty in the file (`sensitivity:`) means none: never write it back as `null`.
+    else if (existing.sensitivity == null || existing.sensitivity === '') delete updated.sensitivity;
 
     const { content: _c, body: _b, path: _path, ...frontmatter } = updated;
     await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);

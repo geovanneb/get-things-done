@@ -1,3 +1,4 @@
+import { SENSITIVITY_OPTIONS, UNKNOWN_SENSITIVITY, sensitivityFormValue, sensitivityPatch, sensitivityState } from '@/utils/contextSensitivity';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
@@ -52,11 +53,9 @@ const RELEVANCE_BADGE: Record<Relevance, { bg: string; color: string }> = {
   optional:    { bg: 'var(--color-info-subtle)',     color: 'var(--color-info)'     },
 };
 
-const SENSITIVITY_OPTIONS = ['shareable', 'internal', 'personal'] as const;
-const sensitivityLabel = (value: string): string => ({
+const sensitivityLabel = (value: unknown): string => ({
   shareable: tr('context.sensitivityShareable'), internal: tr('context.sensitivityInternal'), personal: tr('context.sensitivityPersonal'),
-} as Record<string, string>)[value] ?? tr('context.sensitivityInvalid');
-const knownSensitivity = (value: string | undefined): boolean => (SENSITIVITY_OPTIONS as readonly string[]).includes(value ?? '');
+} as Record<string, string>)[String(value)] ?? tr('context.sensitivityInvalid');
 
 // ---------------------------------------------------------------------------
 // Note modal
@@ -76,7 +75,7 @@ function noteToForm(note: Partial<ContextNote>): NoteFormState {
     title: note.title ?? '',
     category: note.category ? note.category.charAt(0).toUpperCase() + note.category.slice(1) : 'Company',
     relevance: note.relevance ?? 'recommended',
-    sensitivity: knownSensitivity(note.sensitivity) ? note.sensitivity! : '',
+    sensitivity: sensitivityFormValue(note.sensitivity),
     body: note.body ?? '',
   };
 }
@@ -95,12 +94,14 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<ContextNote | null>(null);
+  // The label the form started from: a save sends the label only when the user changed it.
+  const [startSensitivity, setStartSensitivity] = useState(() => sensitivityFormValue(initial?.sensitivity));
 
   const effectiveMode = savedNote ? 'edit' : mode;
   const effectiveNote = savedNote ?? initial;
 
   useEffect(() => {
-    if (isOpen) { setForm(noteToForm(initial ?? {})); setError(null); setSavedNote(null); }
+    if (isOpen) { setForm(noteToForm(initial ?? {})); setStartSensitivity(sensitivityFormValue(initial?.sensitivity)); setError(null); setSavedNote(null); }
   }, [isOpen, initial]);
 
   const set = <K extends keyof NoteFormState>(key: K, value: NoteFormState[K]) => {
@@ -115,7 +116,7 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
       title: form.title.trim(),
       category: form.category,
       relevance: form.relevance,
-      sensitivity: form.sensitivity || null,
+      ...sensitivityPatch(startSensitivity, form.sensitivity),
       tags: [],
       body: form.body,
     };
@@ -127,6 +128,8 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
         saved = await apiPost<ContextNote>('/api/context', payload);
         setSavedNote(saved);
       }
+      setStartSensitivity(sensitivityFormValue(saved.sensitivity));
+      setForm((f) => ({ ...f, sensitivity: sensitivityFormValue(saved.sensitivity) }));
       onSaved(saved);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('context.couldNotSaveTheNote'));
@@ -147,8 +150,8 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
       }>
       <div className="gtd-stack" style={{ gap: 'var(--space-5)' }}>
         {error && form.title.trim() && <Notice tone="critical">{error}</Notice>}
-        {effectiveNote?.sensitivity != null && !knownSensitivity(effectiveNote.sensitivity) && (
-          <Notice tone="warning">{t('context.sensitivityInvalidNotice', { value: String(effectiveNote.sensitivity) })}</Notice>
+        {form.sensitivity === UNKNOWN_SENSITIVITY && (
+          <Notice tone="warning">{t('context.sensitivityInvalidNotice', { value: String(effectiveNote?.sensitivity) })}</Notice>
         )}
         <Input label={t('importUpdateModal.title')} required value={form.title} onChange={(v) => set('title', v)} placeholder={t('context.fy27OperatingPlan')} autoFocus
           error={error && !form.title.trim() ? t('context.giveTheNoteATitle') : undefined} />
@@ -160,7 +163,11 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
             options={RELEVANCE_OPTIONS.map((r) => ({ value: r, label: relevanceLabel(r) }))} />
           <Select label={t('context.sensitivity')} value={form.sensitivity} onChange={(v) => set('sensitivity', v)}
             hint={t('context.sensitivityHint')}
-            options={[{ value: '', label: t('context.sensitivityNone') }, ...SENSITIVITY_OPTIONS.map((v) => ({ value: v, label: sensitivityLabel(v) }))]} />
+            options={[
+              ...(form.sensitivity === UNKNOWN_SENSITIVITY ? [{ value: UNKNOWN_SENSITIVITY, label: `${t('context.sensitivityInvalid')} (${String(effectiveNote?.sensitivity)})`, disabled: true }] : []),
+              { value: '', label: t('context.sensitivityNone') },
+              ...SENSITIVITY_OPTIONS.map((v) => ({ value: v, label: sensitivityLabel(v) })),
+            ]} />
         </div>
         <Field label={t('context.content')} hint={t('context.markdownIsSupported')} htmlFor="context-note-body">
           <MarkdownEditor id="context-note-body" value={form.body} onChange={(v) => set('body', v)} rows={8}
@@ -215,11 +222,11 @@ function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
               {relevanceLabel(note.relevance)}
             </span>
           )}
-          {note.sensitivity != null && note.sensitivity !== '' && (
+          {sensitivityState(note.sensitivity) !== 'none' && (
             <span style={{
               ...chip,
-              background: note.sensitivity === 'shareable' ? 'var(--color-success-subtle)' : knownSensitivity(note.sensitivity) ? 'var(--color-surface-hover)' : 'var(--color-warning-subtle)',
-              color: note.sensitivity === 'shareable' ? 'var(--color-success)' : knownSensitivity(note.sensitivity) ? 'var(--color-text-secondary)' : 'var(--color-warning)',
+              background: note.sensitivity === 'shareable' ? 'var(--color-success-subtle)' : sensitivityState(note.sensitivity) === 'known' ? 'var(--color-surface-hover)' : 'var(--color-warning-subtle)',
+              color: note.sensitivity === 'shareable' ? 'var(--color-success)' : sensitivityState(note.sensitivity) === 'known' ? 'var(--color-text-secondary)' : 'var(--color-warning)',
             }} title={t('context.sensitivity')}>
               {sensitivityLabel(note.sensitivity)}
             </span>

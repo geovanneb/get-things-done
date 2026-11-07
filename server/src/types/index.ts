@@ -117,8 +117,8 @@ export interface ContextNote {
   slug: string;
   tags: string[];
   relevance?: string;
-  /** shareable | internal | personal; none counts as internal (#107). Kept as read, so an invalid value can be reported. */
-  sensitivity?: string | null;
+  /** shareable | internal | personal; none counts as internal (#107). Kept as read (YAML may hold anything), so an invalid value can be reported. */
+  sensitivity?: unknown;
   created_at: string;
   updated_at: string;
   expiry_date?: string;

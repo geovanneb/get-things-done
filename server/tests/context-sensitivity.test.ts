@@ -48,4 +48,26 @@ test('context notes keep a whole-note sensitivity label; none counts as internal
   const read = await service.getContextNote(plain.id);
   assert.equal(effectiveSensitivity(read.sensitivity), 'invalid');
   assert.equal((await service.updateContextNote(plain.id, { body: 'still\n' })).sensitivity, 'Public');
+
+  // Non-string labels are refused too.
+  for (const bad of [false, 1, ['shareable']]) {
+    await assert.rejects(service.updateContextNote(plain.id, { sensitivity: bad as unknown as string }), (e: { statusCode?: number }) => e.statusCode === 400);
+  }
+
+  // An empty label in the file means none, and is never written back as `null`.
+  await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace('sensitivity: Public', 'sensitivity:'));
+  assert.equal(effectiveSensitivity((await service.getContextNote(plain.id)).sensitivity), 'internal');
+  assert.equal(effectiveSensitivity(''), 'internal');
+  await service.updateContextNote(plain.id, { body: 'again\n' });
+  assert.doesNotMatch(await fsp.readFile(file, 'utf-8'), /sensitivity/);
+
+  // Moving a note to another category keeps its label.
+  const personal = await service.createContextNote({ category: 'risks', title: 'Private view', sensitivity: 'personal' });
+  const moved = await service.updateContextNote(personal.id, { category: 'strategy' });
+  assert.match(moved.path!, /strategy/);
+  assert.match(await fsp.readFile(moved.path!, 'utf-8'), /sensitivity: personal/);
+
+  // Creating a note with the title of an existing one is refused, so it never replaces it (or drops its label).
+  await assert.rejects(service.createContextNote({ category: 'strategy', title: 'Private view', body: 'other\n' }), (e: { statusCode?: number }) => e.statusCode === 409);
+  assert.match(await fsp.readFile(moved.path!, 'utf-8'), /sensitivity: personal/);
 });
