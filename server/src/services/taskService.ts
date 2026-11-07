@@ -13,6 +13,22 @@ import { StakeholderService } from './stakeholderService';
 const fileService = new FileService();
 
 /**
+ * A task's deliverables with any `file_path` inside its own active folder pointed at the same file in its archive
+ * folder. Paths anywhere else (shared files elsewhere in the workspace) are left as they are.
+ */
+function inArchive<T>(deliverables: T, id: string): T {
+  if (!Array.isArray(deliverables)) return deliverables;
+  const from = `tasks/active/${id}/`;
+  return deliverables.map((d: unknown) => {
+    if (!d || typeof d !== 'object') return d;
+    const filePath = (d as { file_path?: unknown }).file_path;
+    if (typeof filePath !== 'string') return d;
+    const normal = filePath.replace(/\\/g, '/');
+    return normal.startsWith(from) ? { ...d, file_path: `tasks/archive/${id}/${normal.slice(from.length)}` } : d;
+  }) as T;
+}
+
+/**
  * Optional fields from `.schemas/task.schema.json` that `createTask` used to omit: it builds the task
  * field by field, so a field not handled there or listed here is dropped on create (update keeps it).
  */
@@ -157,7 +173,7 @@ export class TaskService {
   }
 
   async listArchivedTasks(): Promise<Task[]> {
-    return this.readTaskFolders(this.getArchiveDir());
+    return (await this.readTaskFolders(this.getArchiveDir())).map((t) => ({ ...t, deliverables: inArchive(t.deliverables, t.id) }));
   }
 
   /**
@@ -274,7 +290,8 @@ export class TaskService {
         throw new Error(`Task not found: ${id}`);
       }
       const { data, content } = await fileService.readMarkdown<Task>(archiveFile);
-      return buildTask(data, content, archiveFile);
+      // Archived before archiving moved the paths too: shown where the files are now. Read-only, nothing is written.
+      return buildTask({ ...data, deliverables: inArchive(data.deliverables, id) } as Task, content, archiveFile);
     }
 
     const { data, content } = await fileService.readMarkdown<Task>(taskFile);
@@ -553,10 +570,11 @@ If the executive comes back with feedback on a task that is already \`in_review\
     await fileService.ensureDir(this.getArchiveDir());
     await fsp.rename(activeDir, archiveDir);
 
-    // Update status to archived
+    // Update status to archived; a deliverable's path inside the task's own folder moves with it, so its file still opens.
     const taskFile = path.join(archiveDir, 'task.md');
     const { data, content } = await fileService.readMarkdown<Task>(taskFile);
     data.status = 'archived';
+    if (Array.isArray(data.deliverables)) data.deliverables = inArchive(data.deliverables, id);
     data.updated_at = nextUpdatedAt(data.updated_at);
     await fileService.writeMarkdown(taskFile, data as unknown as Record<string, unknown>, content);
   }
