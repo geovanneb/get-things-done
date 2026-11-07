@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { ContextUpdateService, proposalTarget, updateId } from '../src/services/contextUpdateService';
+import { ContextUpdateService, FLAT_NOTE, LOOSER_LABEL, UNREADABLE_DRAFT, proposalTarget, updateId } from '../src/services/contextUpdateService';
+import { en } from '../src/i18n/en';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
 import { setAnalysisRunning } from '../src/services/runState';
 
@@ -899,4 +900,56 @@ test('a proposal never loosens a note\'s sharing label: shown as a problem, refu
   await service.saveDecisions(second, { 'P-01': { decision: 'accepted' } });
   await fsp.writeFile(path.join(ws, 'context', 'strategy', 'growth-plan', 'note.md'), note('personal'));
   await assert.rejects(service.approve(second), (e: { statusCode?: number }) => e.statusCode === 409);
+});
+
+test('the label guard also covers copies, large files, unreadable drafts and the untick; its texts are translated', async (t) => {
+  const ws = await workspace(t);
+  const note = (id: string, label: string, body = 'Plan\n') => `---\nid: ${id}\ntitle: Note\n${label ? `sensitivity: ${label}\n` : ''}---\n${body}`;
+  const planFile = path.join(ws, 'context', 'strategy', 'growth-plan', 'note.md');
+  await fsp.writeFile(planFile, note('CTX-growth-plan', 'personal'));
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'x' });
+  await analyze(ws, id, [
+    { id: 'P-01', action: 'create', target: 'context/strategy/growth-plan.md', title: 'Flat copy', rationale: 'x' },
+    { id: 'P-02', action: 'create', target: 'context/company/growth-plan/note.md', title: 'Same id elsewhere', rationale: 'x' },
+    { id: 'P-03', action: 'create', target: 'context/company/odd/note.md', title: 'Unreadable', rationale: 'x' },
+    { id: 'P-04', action: 'create', target: 'context/company/big/note.md', title: 'Large shareable draft', rationale: 'x' },
+    { id: 'P-05', action: 'create', target: 'context/company/fresh/note.md', title: 'Plain new note', rationale: 'x' },
+  ], {
+    'P-01.md': note('CTX-growth-plan', 'internal'),
+    'P-02.md': note('CTX-growth-plan', 'internal'),
+    'P-03.md': '---\nid: CTX-odd\nsensitivity: shareable\nsensitivity: shareable\n---\nx\n',
+    'P-04.md': note('CTX-big', 'shareable', 'x'.repeat(600 * 1024) + '\n'),
+    'P-05.md': note('CTX-fresh', ''),
+  });
+  const problems = (await service.get(id)).proposals.map((p) => p.problem);
+  assert.equal(problems[0], FLAT_NOTE);
+  assert.equal(problems[1], LOOSER_LABEL, 'a copy with the same id is as strict as the original');
+  assert.equal(problems[2], UNREADABLE_DRAFT);
+  assert.equal(problems[3], LOOSER_LABEL, 'a large draft is checked too');
+  assert.equal(problems[4], null);
+  for (const p of ['P-01', 'P-02', 'P-03', 'P-04']) {
+    await assert.rejects(service.saveDecisions(id, { [p]: { decision: 'accepted' } }), (e: { statusCode?: number }) => e.statusCode === 409, p);
+  }
+
+  // A large personal note is still personal.
+  await fsp.writeFile(planFile, note('CTX-growth-plan', 'personal', 'y'.repeat(600 * 1024) + '\n'));
+  const { id: big } = await service.create({ text: 'z' });
+  await analyze(ws, big, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md', title: 'x', rationale: 'x' }], { 'P-01.md': note('CTX-growth-plan', 'internal') });
+  assert.equal((await service.get(big)).proposals[0]!.problem, LOOSER_LABEL);
+
+  // Accepted, then the note became stricter: approving is refused, and the proposal can still be unticked.
+  await fsp.writeFile(planFile, note('CTX-growth-plan', ''));
+  const { id: later } = await service.create({ text: 'w' });
+  await analyze(ws, later, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md', title: 'x', rationale: 'x' }], { 'P-01.md': note('CTX-growth-plan', 'internal') });
+  await service.saveDecisions(later, { 'P-01': { decision: 'accepted' } });
+  await fsp.writeFile(planFile, note('CTX-growth-plan', 'personal'));
+  await assert.rejects(service.approve(later), (e: { statusCode?: number }) => e.statusCode === 409);
+  await service.saveDecisions(later, { 'P-01': { decision: null, reviewer_note: 'Keep it personal' } });
+  assert.equal((await service.get(later)).proposals[0]!.decision ?? null, null);
+
+  // The dashboard translates these by their exact English text.
+  assert.equal(en['server.looserLabel'], LOOSER_LABEL);
+  assert.equal(en['server.flatNote'], FLAT_NOTE);
+  assert.equal(en['server.unreadableDraft'], UNREADABLE_DRAFT);
 });

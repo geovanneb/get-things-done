@@ -521,9 +521,9 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
     <article style={{ ...card, padding: 0, borderLeft: `3px solid ${reviewing ? (accepted ? 'var(--color-success)' : 'var(--color-border-strong)') : decision.decision === 'accepted' ? 'var(--color-success)' : 'var(--color-border)'}` }}>
       <div style={{ display: 'flex', gap: 12, padding: '14px 16px', alignItems: 'flex-start' }}>
         {reviewing && (
-          <input id={checkboxId} type="checkbox" checked={accepted} disabled={blocked}
+          <input id={checkboxId} type="checkbox" checked={accepted} disabled={blocked && !accepted}
             onChange={(e) => onToggle(e.target.checked)}
-            style={{ width: 18, height: 18, marginTop: 2, flexShrink: 0, cursor: blocked ? 'not-allowed' : 'pointer', accentColor: 'var(--color-success)' }} />
+            style={{ width: 18, height: 18, marginTop: 2, flexShrink: 0, cursor: blocked && !accepted ? 'not-allowed' : 'pointer', accentColor: 'var(--color-success)' }} />
         )}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -761,7 +761,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
       if (success) notify('success', success);
       changed();
     } catch (err) {
-      notify('error', err instanceof Error ? err.message : t('updateDetail.somethingWentWrong'));
+      notify('error', err instanceof Error ? serverText(err.message) : t('updateDetail.somethingWentWrong'));
     } finally {
       setBusy(null);
     }
@@ -787,7 +787,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
         for (const [pid, ticket, previous] of tickets) if (previous && pendingDecisions.current.isLatest(pid, ticket)) next[pid] = previous;
         return next;
       });
-      notify('error', err instanceof Error ? err.message : t('updateDetail.couldNotSaveYourChoice'));
+      notify('error', err instanceof Error ? serverText(err.message) : t('updateDetail.couldNotSaveYourChoice'));
     } finally {
       for (const [pid, ticket] of tickets) pendingDecisions.current.finish(pid, ticket);
       updateSaving();
@@ -842,7 +842,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
       if (answer && pendingRecords.current.isLatest(rid, ticket)) setConfirmations((c) => ({ ...c, [rid]: answer.confirmation }));
     } catch (err) {
       if (pendingRecords.current.isLatest(rid, ticket)) setConfirmations((c) => ({ ...c, [rid]: previous }));
-      notify('error', err instanceof Error ? err.message : t('updateDetail.couldNotSaveYourChoice'));
+      notify('error', err instanceof Error ? serverText(err.message) : t('updateDetail.couldNotSaveYourChoice'));
       refetch();
     } finally {
       pendingRecords.current.finish(rid, ticket);

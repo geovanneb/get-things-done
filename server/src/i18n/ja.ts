@@ -2527,6 +2527,8 @@ export default {
   "format.today": "今日",
   "format.tomorrow": "明日",
   "format.yesterday": "昨日",
+  "server.flatNote": "新しいノートは context/<カテゴリ>/<slug>/note.md に置きます。",
+  "server.unreadableDraft": "提案されたノートのフロントマターを読み取れません。",
   "server.looserLabel": "この提案はノートの共有ラベルを緩めることになります。緩められるのはあなただけで、ノートの編集画面で行います。この提案を却下するか、ご自身でラベルを変更してください。",
   "server.mostAccurateSlow": "最も正確ですが低速です。",
   "server.mostAccurateTranscripts": "最も正確な文字起こし (短い発言も含む)",

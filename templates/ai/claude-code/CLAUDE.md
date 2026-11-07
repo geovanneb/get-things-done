@@ -192,10 +192,13 @@ Placeholder format: `[PLACEHOLDER: <description of what is needed> - responsible
 - Execution logs should reference what was created, not reproduce confidential content
 - Check the task's `confidentiality` field before handling or outputting any information
 - `confidential` and `restricted` tasks: do not include actual data in execution logs, only reference file paths
-- Sharing labels on context notes: a note's `sensitivity` is `shareable`, `internal` (also when it is missing or
-  unknown) or `personal`. In a deliverable meant for people outside the organization, use only `shareable` notes, and
-  say in your reply which facts you left out because their note is not shareable. Never quote or reveal a `personal`
-  note in any deliverable, and never treat an `internal` or `personal` note as shareable.
+- Sharing labels on context notes: a note's `sensitivity` is `shareable`, `internal` (also when it is missing
+  or not one of the three) or `personal`. A deliverable is outward-facing when the task's `confidentiality` is
+  `public`, or a stakeholder on the task has an `organization` other than the executive profile's (when unsure, treat
+  it as outward-facing). In an outward-facing deliverable use only facts from `shareable` notes, and say in your reply
+  which facts you left out because their note is not shareable. You may use `internal` and `personal` notes to inform
+  your work; never quote or reveal a `personal` note in a deliverable anyone but the executive will see, and never
+  treat an `internal` or `personal` note as shareable.
 
 ## Context updates
 

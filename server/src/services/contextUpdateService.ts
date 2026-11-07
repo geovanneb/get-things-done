@@ -103,14 +103,66 @@ const MAX_DIFF_BYTES = 512 * 1024;
  * or less private, in the note's editor. Order: personal, then internal (also none or unknown), then shareable.
  */
 export const LOOSER_LABEL = "This proposal would make the note's sharing label looser. Only you can do that, in the note's editor: reject this proposal, or change the label yourself.";
+export const FLAT_NOTE = 'New notes go in context/<category>/<slug>/note.md.';
+export const UNREADABLE_DRAFT = "The proposed note's frontmatter cannot be read.";
 const LABEL_RANK: Record<string, number> = { personal: 0, internal: 1, invalid: 1, shareable: 2 };
-function labelIn(text: string | null): unknown {
-  if (text == null) return undefined;
-  try { return (parseMarkdown(text).data as Record<string, unknown>)['sensitivity']; } catch { return undefined; }
+/** The problems that keep a proposal from being accepted or approved, whatever the dashboard shows. */
+const LABEL_PROBLEMS = new Set([LOOSER_LABEL, FLAT_NOTE, UNREADABLE_DRAFT]);
+/**
+ * A note's frontmatter (id and sharing label) from its first bytes, whatever its size, reached through no link.
+ * `ok: false` when the file has frontmatter that cannot be read; null when there is no such plain file.
+ */
+async function noteHead(ws: string, file: string): Promise<{ ok: boolean; id: unknown; label: unknown } | null> {
+  try {
+    await workspaceEntry(ws, file);
+    if (!(await fsp.lstat(file)).isFile()) return null;
+    const handle = await fsp.open(file, 'r');
+    let head: string;
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      head = buffer.subarray(0, bytesRead).toString('utf-8').replace(/\r\n?/g, '\n');
+    } finally {
+      await handle.close();
+    }
+    if (!/^---\n/.test(head)) return { ok: true, id: undefined, label: undefined };
+    const end = head.indexOf('\n---', 3);
+    if (end < 0) return { ok: false, id: undefined, label: undefined };
+    try {
+      const data = parseMarkdown(head.slice(0, end + 4) + '\n').data as Record<string, unknown>;
+      return { ok: true, id: data['id'], label: data['sensitivity'] };
+    } catch {
+      return { ok: false, id: undefined, label: undefined };
+    }
+  } catch {
+    return null;
+  }
 }
-/** True when the proposed note has a looser sharing label than the note has now (a new note counts as internal). */
-export function loosensLabel(current: string | null, proposed: string): boolean {
-  return LABEL_RANK[effectiveSensitivity(labelIn(proposed))]! > LABEL_RANK[effectiveSensitivity(labelIn(current))]!;
+
+/** The strictest label of the notes a proposal could replace or copy: its target, the target's other form, same id. */
+async function strictestLabel(ws: string, target: string, draftId: unknown): Promise<number> {
+  let rank = LABEL_RANK.internal!;
+  const consider = (label: unknown) => { rank = Math.min(rank, LABEL_RANK[effectiveSensitivity(label)]!); };
+  const parts = target.split('/');
+  const other = parts.length === 4 ? `${parts[0]}/${parts[1]}/${parts[2]}.md` : parts.length === 3 ? `${parts[0]}/${parts[1]}/${parts[2]!.replace(/\.md$/, '')}/note.md` : null;
+  for (const t of [target, other]) {
+    if (!t) continue;
+    const head = await noteHead(ws, path.join(ws, t));
+    if (head) consider(head.label);
+  }
+  if (typeof draftId === 'string' && draftId) {
+    const context = path.join(ws, 'context');
+    for (const category of await fsp.readdir(context).catch(() => [] as string[])) {
+      const dir = path.join(context, category);
+      for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        const file = entry.isDirectory() ? path.join(dir, entry.name, 'note.md') : entry.isFile() && entry.name.endsWith('.md') ? path.join(dir, entry.name) : null;
+        if (!file) continue;
+        const head = await noteHead(ws, file);
+        if (head?.id === draftId) consider(head.label);
+      }
+    }
+  }
+  return rank;
 }
 
 export interface UpdateMaterial {
@@ -1851,9 +1903,16 @@ export class ContextUpdateService {
         detail.problem = `The proposed content is missing (proposals/${p.id}.md).`;
       }
     }
-    // A sharing label made looser is the user's own edit, never a proposal's.
-    if (target.startsWith('context/') && detail.proposed != null && !detail.problem && loosensLabel(detail.current, detail.proposed)) {
-      detail.problem = LOOSER_LABEL;
+    // A sharing label made looser is the user's own edit, never a proposal's: compared with the strictest note the
+    // draft could replace or copy (its target, the target's other form, any note with the draft's id), whatever their
+    // size. A new note goes in its own folder; a draft whose frontmatter cannot be read is not accepted.
+    if (target.startsWith('context/') && update.status !== 'done') {
+      if (p.action === 'create' && !/^context\/[^/]+\/[^/]+\/note\.md$/.test(target)) detail.problem = FLAT_NOTE;
+      else {
+        const draft = await noteHead(ws, path.join(dir, 'proposals', `${p.id}.md`));
+        if (draft && !draft.ok) detail.problem = UNREADABLE_DRAFT;
+        else if (draft && LABEL_RANK[effectiveSensitivity(draft.label)]! > await strictestLabel(ws, target, draft.id)) detail.problem = LOOSER_LABEL;
+      }
     }
     // Once applying starts the targets change on purpose; "stale" only matters while reviewing.
     if (!['in_review', 'approved'].includes(update.status)) detail.stale = false;
@@ -2230,12 +2289,13 @@ export class ContextUpdateService {
       for (const key of Object.keys(decisions)) {
         if (!known.has(key)) throw httpError(400, `Invalid proposal id: ${key}`);
       }
-      // A proposal that would loosen a note's sharing label cannot be accepted (the review shows why).
+      // A proposal that would loosen a sharing label (or copy a note without its label check) cannot be accepted: the
+      // review shows why. Unticking one, or a note on it, is always allowed.
       for (const p of update.proposals) {
         const change = decisions[p.id] as Record<string, unknown> | undefined;
         if (!change || typeof change !== 'object' || change['decision'] !== 'accepted') continue;
-        const detail = await this.proposalDetail(this.updateDir(id), update, p, new Set());
-        if (detail.problem === LOOSER_LABEL) throw httpError(409, LOOSER_LABEL);
+        const problem = (await this.proposalDetail(this.updateDir(id), update, p, new Set())).problem;
+        if (problem && LABEL_PROBLEMS.has(problem)) throw httpError(409, problem);
       }
       const proposals = this.rawProposals(data).map((raw, i) => {
         const p = normalizeProposal(raw, i);
@@ -2397,15 +2457,19 @@ export class ContextUpdateService {
       const { update, data, file } = await this.read(id);
       this.requireStatus(update, ['in_review'], 'approve');
       await this.requireNoRun(id, 'approve');
+      // An accepted proposal that would now loosen a sharing label (the note became stricter since) stops the
+      // approval before anything is written. A correction refuses proposals itself, below.
+      if (update.kind !== CORRECTION_KIND) {
+        for (const p of update.proposals.filter((x) => x.decision === 'accepted')) {
+          const problem = (await this.proposalDetail(this.updateDir(id), update, p, new Set())).problem;
+          if (problem && LABEL_PROBLEMS.has(problem)) throw httpError(409, problem);
+        }
+      }
       let made: Record<string, unknown> = {};
       // A record changed after it was confirmed stops the finish before anything is written.
       if (update.kind === CORRECTION_KIND) { this.frozenRecords(update, data); made = await this.finishCorrection(update, data, file); }
       else await this.checkSpeakerEvidence(id, update, data);
       const records = this.frozenRecords(update, data);
-      // The label may have become stricter since a proposal was accepted: it must not be loosened now either.
-      for (const p of update.proposals.filter((x) => x.decision === 'accepted')) {
-        if ((await this.proposalDetail(this.updateDir(id), update, p, new Set())).problem === LOOSER_LABEL) throw httpError(409, LOOSER_LABEL);
-      }
       const confirmed = update.meeting_records.some((r) => r.confirmation === 'confirmed');
       if (!update.proposals.some((p) => p.decision === 'accepted') && !confirmed) {
         throw httpError(400, 'Invalid approval: select at least one proposal or confirm a meeting record, or close the update without changes');

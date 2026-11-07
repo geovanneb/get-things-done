@@ -2529,6 +2529,8 @@ export default {
   "format.today": "hoje",
   "format.tomorrow": "amanhã",
   "format.yesterday": "ontem",
+  "server.flatNote": "Notas novas ficam em context/<categoria>/<slug>/note.md.",
+  "server.unreadableDraft": "Não é possível ler o frontmatter da nota proposta.",
   "server.looserLabel": "Esta proposta deixaria o rótulo de compartilhamento da nota menos restrito. Só você pode fazer isso, no editor da nota: rejeite esta proposta ou mude o rótulo você mesmo.",
   "server.mostAccurateSlow": "O mais preciso. Lento.",
   "server.mostAccurateTranscripts": "As transcrições mais precisas, também de falas curtas",

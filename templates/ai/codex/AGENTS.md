@@ -83,10 +83,13 @@ Tasks with `meeting_action` were made from a meeting's action item; never change
   not reviewed. No sheet, or a meeting not in it: say so and ask the executive to open the task in the dashboard. Never
   read, list or search `meetings/` (private) or `context-updates/` for it.
 - Adapt tone, depth, and framing to the stakeholder audience.
-- Sharing labels on context notes: a note's `sensitivity` is `shareable`, `internal` (also when it is missing or
-  unknown) or `personal`. In a deliverable meant for people outside the organization, use only `shareable` notes, and
-  say in your reply which facts you left out because their note is not shareable. Never quote or reveal a `personal`
-  note in any deliverable, and never treat an `internal` or `personal` note as shareable.
+- Sharing labels on context notes: a note's `sensitivity` is `shareable`, `internal` (also when it is missing
+  or not one of the three) or `personal`. A deliverable is outward-facing when the task's `confidentiality` is
+  `public`, or a stakeholder on the task has an `organization` other than the executive profile's (when unsure, treat
+  it as outward-facing). In an outward-facing deliverable use only facts from `shareable` notes, and say in your reply
+  which facts you left out because their note is not shareable. You may use `internal` and `personal` notes to inform
+  your work; never quote or reveal a `personal` note in a deliverable anyone but the executive will see, and never
+  treat an `internal` or `personal` note as shareable.
 - Never fabricate numbers. Placeholder format: `[PLACEHOLDER: what is needed - by: date]`
 - The output template decides which sections exist; these standards decide how each one is written.
   Never add a top-level section the template does not define. If one seems missing, say so and let the
@@ -130,9 +133,10 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    note it would change. Prefer updating to creating, one proposal per file, minimal
    edits that keep structure and frontmatter. Make contradictions explicit and set
    `confidence` accordingly. Never copy personal remarks into stakeholder files.
-   Keep a note's `sensitivity`; for a note without one you may propose `internal` or
-   `personal` with a one-line reason, never `shareable`, and never a looser label (only
-   the executive does that, in the note editor).
+   Sharing labels: keep a note's `sensitivity` unless you make it stricter. You may propose `internal` or
+   `personal` for a note without one, or `personal` for an `internal` one, with a one-line reason; never
+   `shareable` and never a looser label (only the executive does that, in the note editor). When you move or
+   merge facts between notes, the receiving note gets the strictest label of the notes they came from.
 4. Write the full proposed file to `proposals/P-NN.md` (never to the target). Targets
    must be `context/<category>/<slug>/note.md` or `stakeholders/{people,groups,org-charts}/<ID>.md`.
 5. In `update.md` keep the body and existing fields, and set `status: in_review`,
@@ -245,10 +249,11 @@ change. One meeting usually justifies one or two edits, and none is a valid resu
    the dashboard, with no outcome): write `proposals/<id>.md` to the target
    as reviewed. If the target changed after `analyzed_at` (an app update can change an
    instruction file), merge instead of overwriting newer content. Follow `reviewer_note`
-   when set. Set `updated_at` on each file that has it. Never write a looser
-   `sensitivity` than the target note has now (personal, then internal or none, then
-   shareable): if its label became stricter, keep it and say so in `outcome_note`.
-   Record `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
+   when set. Set `updated_at` on each file that has it. Record
+   `outcome` (applied, merged, failed) and `outcome_note` on the proposal.
+   Never write a looser `sensitivity` than the target note has now (personal, then internal or none, then
+   shareable), never write `shareable` on a new note, and never loosen a label because `reviewer_note` asks: keep
+   it, apply the rest, and say in `outcome_note` that the executive changes labels in the note editor.
 3. Give rejected proposals `outcome: skipped`, set `status: done` and `applied_at`, then
    delete `proposals/`, and `materials/` unless `update.md` has `keep_materials: true` or
    `keep_meeting_text: true` (then the dashboard keeps the meeting text and removes the
