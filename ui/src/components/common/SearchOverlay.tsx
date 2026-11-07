@@ -35,7 +35,7 @@ const groupLabels: Record<string, PlainMessageKey> = {
 const typePaths: Record<string, (id: string) => string> = {
   task: (id) => `/board/task/${id}`,
   stakeholder: (id) => `/stakeholders/${id}`,
-  context: () => `/context`,
+  context: (id) => `/context?note=${encodeURIComponent(id)}`,
   output: () => `/outputs`,
   agent: () => `/agents`,
 };

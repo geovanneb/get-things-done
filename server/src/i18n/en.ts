@@ -2088,6 +2088,7 @@ export const en = {
   "context.deleteNote": "Delete note",
   "context.deleted": "Deleted \"{title}\".",
   "context.couldNotDeleteTheNote": "Could not delete the note. Try again.",
+  "context.noteNotFound": "That note no longer exists.",
   "context.loadingContextNotes": "Loading context notes…",
   "context.contextUpdates": "Context updates",
   "context.allNotes": "All notes",

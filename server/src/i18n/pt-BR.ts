@@ -2089,6 +2089,7 @@ export default {
   "context.deleteNote": "Excluir nota",
   "context.deleted": "\"{title}\" foi excluída.",
   "context.couldNotDeleteTheNote": "Não foi possível excluir a nota. Tente novamente.",
+  "context.noteNotFound": "Essa nota não existe mais.",
   "context.loadingContextNotes": "Carregando notas de contexto…",
   "context.contextUpdates": "Atualizações de contexto",
   "context.allNotes": "Todas as notas",

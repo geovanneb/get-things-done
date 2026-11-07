@@ -2087,6 +2087,7 @@ export default {
   "context.deleteNote": "ノートを削除",
   "context.deleted": "「{title}」を削除しました。",
   "context.couldNotDeleteTheNote": "ノートを削除できませんでした。もう一度お試しください。",
+  "context.noteNotFound": "そのノートはもう存在しません。",
   "context.loadingContextNotes": "コンテキストノートを読み込んでいます…",
   "context.contextUpdates": "コンテキスト更新",
   "context.allNotes": "すべてのノート",
