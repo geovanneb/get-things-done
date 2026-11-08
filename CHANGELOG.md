@@ -8,20 +8,128 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-08
+
+**Share what is ready, keep the rest in.** Context notes now carry a **sharing label**, and only
+notes labelled shareable can be **shared as one Markdown file** or feed a deliverable that leaves
+your organization. **Board > Share pack** puts the files you choose from your tasks into **one ZIP
+with a README**, a **names and terms check** catches a misspelled name or an unexplained
+abbreviation before a deliverable goes out, and your **iPhone can send meetings** to this computer
+over your local network.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.13.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.13.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.13.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.13.0`, or **Update and restart** in Settings from 0.11.0
+on. The context note schema gains the optional `sensitivity` field, and the agent instructions for
+Claude Code, Codex and Copilot learn to respect sharing labels. The dashboard brings these up to date
+when it opens a workspace, or run `gtd upgrade`. The instruction changes only add lines, so if you
+changed your instructions file, the new version in **Settings > Instruction updates** is pure
+additions to merge. A note without a label counts as internal, so existing notes need no work.
+
 ### Added
 
-- **Receive meetings from your iPhone.** Turn it on in Settings, scan a code with Meetlaud, and meetings arrive in the queue over your local network, encrypted, with no account and no cloud. It is off by default, and the dashboard stays on this computer only.
+#### Sharing
+
+- **Sharing labels on context notes.** The note editor has a **Sharing** field: shareable, internal
+  or personal, and note cards show the label. A note with no label counts as internal, and only you
+  make a note shareable. A label typed by hand that is not one of the three shows as unknown, is
+  kept, and never counts as shareable. (#327)
+- **Share context notes as one Markdown file.** **Share** on the Context page lists the notes
+  labelled shareable. Tick the ones you want, **Preview** the exact text, then **Download .md**. The
+  file holds each note's title and body, without frontmatter, HTML, images, link targets,
+  attachments, related notes or sources. If a note changes after the preview, the download is
+  refused until you preview again. A label cannot catch a private sentence inside a shareable note,
+  so the preview is where to check. (#329)
+- **Agents respect sharing labels.** In a deliverable that leaves your organization (a `public`
+  task, or a stakeholder from another organization), agents use only facts from shareable notes and
+  say what they left out. A personal note is never quoted in anything someone else will see. A
+  context update can make a label stricter but never looser: the review flags such a proposal, and
+  accepting or approving it is refused. (#330)
+- **Share pack.** **Board > Share pack** gathers deliverables and attached files from your tasks
+  into one ZIP for a colleague. Choose the files, put them in reading order, **Preview** the final
+  list, edit the README and **Download ZIP**. A task's own text, logs, sources, notes and backups
+  never go in, and confidentiality is shown as information, not as permission. If a file changes
+  after the preview, the download is refused until you preview again. The README starts in the
+  dashboard's language. (#320, #337)
+
+#### Before a deliverable goes out
+
+- **Check names and terms.** Under a task's Deliverables, **Check names and terms** reads a
+  Markdown, HTML or text deliverable and lists words close to a known stakeholder name ("Did you
+  mean …?") and abbreviations that are neither in the glossary nor defined in the text, each with
+  its line and a snippet. **Dismiss** what is fine, and the check remembers it for that deliverable.
+  It is advisory and local: it changes nothing, blocks nothing, and uses no AI and no network.
+  (#328)
+
+#### Meetings and people
+
+- **Receive meetings from your iPhone.** In **Settings > Devices**, choose **Connect an iPhone** and
+  scan the code with Meetlaud. While Meetlaud is open, new meetings arrive in the meeting queue over
+  your local network, encrypted, with no account and no cloud. It is off by default, the pairing
+  code works once for five minutes, and the dashboard itself stays on this computer only. How it works: [docs/device-inbox.md](docs/device-inbox.md).
+  (#331, #342)
+- **The latest meeting with a person.** A person's page shows the newest confirmed meeting record
+  that lists them as an attendee, with its date and a link. Meetings still in review, expected
+  participants and names in a transcript do not count, and it is not proof that you attended. (#319)
+
+### Changed
+
+- **A context note's title must be new across all categories.** Creating a note whose title exists
+  in the same category used to replace that note, and in another category it shared the other
+  note's id, so saving, relabelling or deleting one changed the other. Both are now refused with a
+  message that says where the existing note is. Workspaces that already have such a pair keep it;
+  rename one note's folder to separate them. (#327, #333)
+- **The Context folder download is now called "Download raw folder, unfiltered (.zip)"**, so it is
+  not mistaken for Share. (#329)
+- **A task's Files tab no longer lists hidden files** (names that start with a dot), as the folder
+  ZIP and the share pack already did. (#328)
 
 ### Fixed
 
-- **On macOS, a workspace path written as `/System/Volumes/Data/…` is no longer reported as not trusted.**
-  That spelling and the short one are the same folder, and Claude Code files trust under the short one, so the
-  dashboard refused every run of a trusted workspace and its advice to trust the folder could not help (#339).
-
-- **Runs work when `ESB_WORKSPACE_PATH` is a relative path.** Claude Code runs inside the workspace, so the
-  relative path the runner gave it for its settings file pointed inside the workspace a second time, and every
-  run stopped at once with "The analysis did not finish". The server now resolves the workspace path to an
-  absolute one, from the environment variable and from `~/.gtd/config.json` (#338).
+- **A save from an older version of a task no longer undoes Request changes.** A task page opened
+  before someone used **Request changes**, or before an agent updated the task, saved its draft
+  over the newer task and put it back in review with the feedback still open. The page now says the
+  task changed, keeps your draft and offers **Load latest version**. Other failed saves are shown
+  instead of being ignored. (#325)
+- **A board drag from an out-of-date card no longer undoes Request changes.** A card that still
+  showed In review could move a task you had just sent back to Done, with its feedback open. The
+  board now says the task changed and leaves it where it is. (#334)
+- **A task with an unquoted `updated_at` can be saved again.** Written without quotes, by hand or
+  by an agent, the date never matched, so every save, **Request changes** and **Waiting for** said
+  the task had changed. (#332)
+- **A busy task keeps your draft.** When another writer held the task for a moment, the page said
+  the task had changed and offered to drop your draft. It now says to save again in a moment.
+  (#336)
+- **An archived task opens read-only.** Opened from the board's Archive tab or a meeting's related
+  work, it looked editable and every action failed with "Task not found". It now shows a notice and
+  no editing controls, and its deliverables still open. (#336)
+- **An archived task's deliverable links work.** Archiving moved the task's folder but kept the old
+  path, so **Open** and the preview pointed at nothing. New archives update the path, and tasks
+  archived before this show the right one without being rewritten. (#323)
+- **Cleanup leaves a reopened task alone.** System cleanup could archive or delete a task that was
+  reopened, or got **Request changes**, between its check and its action. (#324)
+- **Search opens the context note you chose**, not just the Context page, also when the note was
+  created after the page loaded. A note that no longer exists says so. (#321, #335)
+- **A hand-written `__proto__` label no longer breaks the Context page.** It shows as an unknown
+  label. (#335)
+- **Dates and messages follow the dashboard's language.** The latest-meeting date and the
+  change-request times used the computer's locale, and messages from **Request changes**, **Waiting
+  for** and the share pack, like other server messages in error notices, were always in English.
+  (#322, #337)
+- **On macOS, a workspace path written as `/System/Volumes/Data/…` is no longer reported as not
+  trusted.** That spelling and the short one are the same folder, and Claude Code files trust under
+  the short one, so the dashboard refused every run of a trusted workspace and its advice to trust
+  the folder could not help. The same goes for a git worktree whose bookkeeping uses the other
+  spelling. (#339, #342)
+- **Runs work when `ESB_WORKSPACE_PATH` is a relative path.** Claude Code runs inside the
+  workspace, so the relative path the runner gave it for its settings file pointed inside the
+  workspace a second time, and every run stopped at once with "The analysis did not finish". The
+  server now resolves the workspace path to an absolute one, from the environment variable and from
+  `~/.gtd/config.json`. (#338)
 
 ## [0.12.0] - 2026-11-07
 
@@ -986,7 +1094,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/geovanneb/get-things-done/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/geovanneb/get-things-done/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/geovanneb/get-things-done/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/geovanneb/get-things-done/compare/v0.9.0...v0.10.0

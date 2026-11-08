@@ -51,7 +51,7 @@ Choose your AI tool during setup. The local dashboard opens in your browser. You
 
 The workspace and offline transcription need no Get Things Done account. AI analysis and task execution use the AI tool you bring; that tool may require its own account or subscription.
 
-> **New in 0.12.0:** the dashboard speaks Japanese, Portuguese and Spanish, a task in review takes feedback that stays on the task, and a task can say what it waits for and when to follow up. [See what changed](CHANGELOG.md).
+> **New in 0.13.0:** sharing labels on context notes, with only shareable notes going into a shared file or a deliverable for outside readers, a share pack that puts chosen task files into one ZIP, a names and terms check for deliverables, and meetings sent from your iPhone. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 
