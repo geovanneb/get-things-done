@@ -115,6 +115,27 @@ test('on macOS, a workspace spelled through /System/Volumes/Data is trusted unde
   await trustOnly(long);
   assert.equal(await workspaceTrusted(long, env), false, 'trust filed under the long spelling is not one Claude Code reads');
   assert.equal(await workspaceTrusted(short, env), false);
+
+  // Git may also store the data-volume spelling in a worktree's bookkeeping.
+  const repo = path.join(root, 'northwind-repo');
+  const worktree = path.join(root, 'northwind-review');
+  const admin = path.join(repo, '.git', 'worktrees', 'northwind-review');
+  await fsp.mkdir(admin, { recursive: true });
+  await fsp.mkdir(worktree);
+  await fsp.writeFile(path.join(worktree, '.git'), `gitdir: ${dataVolume + admin}\n`);
+  await fsp.writeFile(path.join(admin, 'commondir'), `${dataVolume + path.join(repo, '.git')}\n`);
+  await fsp.writeFile(path.join(admin, 'gitdir'), `${dataVolume + path.join(worktree, '.git')}\n`);
+  await trustOnly(repo);
+  assert.equal(await workspaceTrusted(dataVolume + worktree, env), true, 'worktree pointers use the same short identity');
+  assert.equal(await workspaceTrusted(worktree, env), true);
+  await fsp.writeFile(path.join(admin, 'commondir'), '../..\n');
+  await fsp.writeFile(path.join(admin, 'gitdir'), `${path.join(worktree, '.git')}\n`);
+  assert.equal(await workspaceTrusted(dataVolume + worktree, env), true, 'mixed short and long pointers agree too');
+  await fsp.writeFile(path.join(admin, 'gitdir'), `${path.join(repo, '.git')}\n`);
+  assert.equal(await workspaceTrusted(worktree, env), false, 'a pointer that does not lead back to this worktree never borrows trust');
+  await fsp.writeFile(path.join(admin, 'gitdir'), `${path.join(worktree, '.git')}\n`);
+  await trustOnly(dataVolume + repo);
+  assert.equal(await workspaceTrusted(worktree, env), false, 'a long-form main checkout key still does not count');
 });
 
 test('trust counts only where Claude Code files it: the workspace folder, or its repository\'s root, never a folder above', async (t) => {

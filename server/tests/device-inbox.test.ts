@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { deviceId, generateIdentity, open, proof, seal, sharedKey, type Identity } from '../src/services/deviceInbox/crypto';
 import { DeviceInbox } from '../src/services/deviceInbox';
-import { inboxPath, isLocalAddress } from '../src/services/deviceInbox/inboxServer';
+import { InboxServer, inboxPath, isLocalAddress } from '../src/services/deviceInbox/inboxServer';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
 
 /** A home and a workspace of their own, because the inbox keeps its keys under the home folder. */
@@ -149,6 +149,7 @@ test('an interrupted upload picks up where it stopped', async (t) => {
   await phone.call('/v1/offer', { items: [item] });
   await phone.chunk(item.id, 0, 0, audio.subarray(0, 1000));
 
+  assert.equal((await phone.call(`/v1/items/${item.id}/commit`, {})).status, 422, 'An early commit keeps the partial upload resumable');
   const again = await phone.call('/v1/offer', { items: [item] });
   assert.deepEqual(again.value.items[0].files, [1000], 'The computer says how much it holds');
   assert.equal((await phone.chunk(item.id, 0, 0, audio.subarray(0, 1000))).received, 1000, 'An old offset adds nothing');
@@ -266,3 +267,153 @@ test('the settings screen calls the API by its full path', async () => {
 function pairing(inbox: DeviceInbox) {
   return inbox.startPairing();
 }
+
+test('simultaneous retries append a chunk only once', async (t) => {
+  const { phone, inbox } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const audio = wav();
+  const item = meeting(audio);
+  await phone.call('/v1/offer', { items: [item] });
+  const piece = audio.subarray(0, 1000);
+  // Hold appends briefly so overlapping requests all observe the same starting size.
+  const fs = (await import('node:fs')).promises;
+  const append = fs.appendFile;
+  t.mock.method(fs, 'appendFile', async (...args: Parameters<typeof append>) => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return append(...args);
+  });
+  const replies = await Promise.all(Array.from({ length: 12 }, () => phone.chunk(item.id, 0, 0, piece)));
+  assert.ok(replies.every((r) => r.status === 200 && r.received === piece.length));
+  assert.deepEqual(await fsp.readFile(inboxPath(phone.id, item.id, 'recording.wav')), piece);
+});
+
+test('simultaneous commits deliver one meeting', async (t) => {
+  const { phone, inbox } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const audio = wav();
+  const item = meeting(audio);
+  await phone.call('/v1/offer', { items: [item] });
+  await phone.chunk(item.id, 0, 0, audio);
+  const replies = await Promise.all(Array.from({ length: 6 }, () => phone.call(`/v1/items/${item.id}/commit`, {})));
+  assert.ok(replies.every((r) => r.status === 200));
+  assert.equal(new Set(replies.map((r) => r.value.meeting_id)).size, 1);
+  assert.equal((await new MeetingDigestService().readQueue()).meetings.length, 1);
+});
+
+test('a damaged upload can be sent again after its checksum is refused', async (t) => {
+  const { phone, inbox } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const audio = wav();
+  const item = meeting(audio);
+  await phone.call('/v1/offer', { items: [item] });
+  await phone.chunk(item.id, 0, 0, Buffer.alloc(audio.length));
+  assert.equal((await phone.call(`/v1/items/${item.id}/commit`, {})).status, 422);
+  const retry = await phone.call('/v1/offer', { items: [item] });
+  assert.deepEqual(retry.value.items[0].files, [0]);
+  await phone.chunk(item.id, 0, 0, audio);
+  assert.equal((await phone.call(`/v1/items/${item.id}/commit`, {})).status, 200);
+});
+
+test('file names in one offer cannot alias the same file', async (t) => {
+  const { phone, inbox } = await running(t);
+  await phone.pair(await pairing(inbox));
+  for (const name of ['recording.wav', 'RECORDING.WAV']) {
+    const item = meeting(wav());
+    item.files.push({ ...item.files[0], name });
+    const response = await phone.call('/v1/offer', { items: [item] });
+    assert.deepEqual(response.value.items, []);
+    await assert.rejects(fsp.stat(inboxPath(phone.id, item.id)), { code: 'ENOENT' });
+  }
+});
+
+
+test('concurrent enable requests start only one listener', async (t) => {
+  await sandbox(t);
+  const servers: InboxServer[] = [];
+  const start = InboxServer.prototype.start;
+  t.mock.method(InboxServer.prototype, 'start', async function (this: InboxServer, port: number) {
+    servers.push(this);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    return start.call(this, port);
+  });
+  const inbox = new DeviceInbox(new MeetingDigestService(), 'Test computer');
+  t.after(async () => { await inbox.stop(); await Promise.all(servers.map((s) => s.stop())); });
+  await inbox.status();
+  await Promise.all(Array.from({ length: 4 }, () => inbox.setEnabled(true)));
+  assert.equal(servers.length, 1);
+  await inbox.setEnabled(false);
+  assert.equal((await inbox.status()).listening, false);
+});
+
+test('an upload never appends through a file symlink', async (t) => {
+  const { phone, inbox } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const audio = wav();
+  const item = meeting(audio);
+  await phone.call('/v1/offer', { items: [item] });
+  const outside = path.join(os.homedir(), 'outside.wav');
+  await fsp.writeFile(outside, 'keep');
+  await fsp.symlink(outside, inboxPath(phone.id, item.id, 'recording.wav'));
+  assert.equal((await phone.chunk(item.id, 0, 4, audio.subarray(4))).status, 400);
+  assert.equal(await fsp.readFile(outside, 'utf8'), 'keep');
+});
+
+test('cancelling a code also refuses a pairing request still sending its body', async (t) => {
+  const { inbox, phone } = await running(t);
+  const code = await pairing(inbox);
+  const body = JSON.stringify({ phone_public: phone.identity.publicKey.toString('base64'), proof: proof(Buffer.from(code.code, 'base64'), phone.identity.publicKey).toString('base64') });
+  const { request } = await import('node:http');
+  let send!: import('node:http').ClientRequest;
+  const answer = new Promise<number>((resolve, reject) => {
+    send = request(`${phone.base}/v1/pair`, { method: 'POST' }, (res) => { res.resume(); resolve(res.statusCode!); });
+    send.on('error', reject);
+    send.write(body.slice(0, 10));
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  inbox.cancelPairing();
+  send.end(body.slice(10));
+  assert.equal(await answer, 403);
+  assert.equal((await inbox.status()).devices.length, 0);
+});
+
+test('two phones cannot spend the same pairing code concurrently', async (t) => {
+  const { inbox, phone } = await running(t);
+  const code = await pairing(inbox);
+  const other = new Phone(phone.base);
+  const replies = await Promise.all([phone.pair(code), other.pair(code)]);
+  assert.deepEqual(replies.sort(), [200, 403]);
+  assert.equal((await inbox.status()).devices.length, 1);
+});
+
+test('forgetting a phone refuses its request still sending a sealed body', async (t) => {
+  const { inbox, phone } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const item = meeting(wav());
+  const sealed = seal(phone.key, Buffer.from(JSON.stringify({ items: [item] })), '/v1/offer');
+  const { request } = await import('node:http');
+  let send!: import('node:http').ClientRequest;
+  const answer = new Promise<number>((resolve, reject) => {
+    send = request(`${phone.base}/v1/offer`, { method: 'POST', headers: { 'X-Device': phone.id } }, (res) => { res.resume(); resolve(res.statusCode!); });
+    send.on('error', reject);
+    send.write(sealed.subarray(0, 10));
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await inbox.removeDevice(phone.id);
+  send.end(sealed.subarray(10));
+  assert.equal(await answer, 401);
+  await assert.rejects(fsp.stat(inboxPath(phone.id, item.id)), { code: 'ENOENT' });
+});
+
+test('a rejected recording leaves no draft meetings or upload files behind on retries', async (t) => {
+  const { inbox, phone } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const audio = Buffer.from('not a WAV recording');
+  const item = meeting(audio);
+  await phone.call('/v1/offer', { items: [item] });
+  await phone.chunk(item.id, 0, 0, audio);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    assert.equal((await phone.call(`/v1/items/${item.id}/commit`, {})).status, 400);
+    assert.equal((await new MeetingDigestService().readQueue()).meetings.length, 0);
+  }
+  assert.deepEqual(await fsp.readFile(inboxPath(phone.id, item.id, 'recording.wav')), audio);
+});

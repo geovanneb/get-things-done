@@ -369,11 +369,11 @@ export default function TaskDetailView() {
   const handleFieldChange = useCallback((field: string, value: unknown) => {
     setLocalTask((prev) => {
       // An archived task is shown as it was: nothing on it can be saved.
-      if (!prev || prev.status === 'archived') return prev;
+      if (!prev || task?.status === 'archived') return prev;
       editingRef.current = true;
       return { ...prev, [field]: value } as Task;
     });
-  }, []);
+  }, [task?.status]);
 
   const handleSave = useCallback(async () => {
     if (!localTask || !id) return;
@@ -445,7 +445,7 @@ export default function TaskDetailView() {
   const isDirty = JSON.stringify(task) !== JSON.stringify(localTask);
 
   // An archived task lives in tasks/archive/: shown read-only, and its files are reached through its deliverables.
-  const archived = localTask?.status === 'archived';
+  const archived = task?.status === 'archived';
   const tabs: { key: TaskTab; label: string }[] = [
     { key: 'work', label: t('groupWork') },
     ...(archived ? [] : [{ key: 'files' as TaskTab, label: t('newTaskModal.files') }]),

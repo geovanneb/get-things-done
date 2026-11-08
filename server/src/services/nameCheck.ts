@@ -331,11 +331,11 @@ export function checkText(original: string, prose: string, registry: Registry): 
 
 export function checkTextFull(original: string, prose: string, registry: Registry): CheckResult {
   const starts = lineStarts(original);
-  const found = new Map<string, Finding & { at: number }>();
+  const found = new Map<string, Omit<Finding, 'line' | 'snippet'> & { at: number; length: number }>();
   const add = (f: Omit<Finding, 'line' | 'snippet' | 'count'>, index: number, length: number) => {
     const prev = found.get(f.key);
     if (prev) { prev.count++; return; }
-    found.set(f.key, { ...f, at: index, line: lineOf(starts, index), snippet: snippetAt(original, index, length), count: 1 });
+    found.set(f.key, { ...f, at: index, length, count: 1 });
   };
 
   // Latin words: close to one part of a known name, with an anchor.
@@ -473,5 +473,8 @@ export function checkTextFull(original: string, prose: string, registry: Registr
   }
 
   const all = [...found.values()].sort((a, b) => a.at - b.at || a.found.localeCompare(b.found));
-  return { findings: all.slice(0, MAX_FINDINGS).map(({ at: _at, ...f }) => f), total: all.length };
+  // Only the displayed findings need snippets. Scanning a long line for every distinct finding was quadratic.
+  return { findings: all.slice(0, MAX_FINDINGS).map(({ at, length, ...f }) => ({
+    ...f, line: lineOf(starts, at), snippet: snippetAt(original, at, length),
+  })), total: all.length };
 }

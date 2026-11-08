@@ -141,15 +141,18 @@ async function noteHead(ws: string, file: string): Promise<{ ok: boolean; id: un
 
 /** The strictest label of the notes a proposal could replace or copy: its target, the target's other form, same id. */
 async function strictestLabel(ws: string, target: string, draftId: unknown): Promise<number> {
-  let rank = LABEL_RANK.internal!;
+  let rank = LABEL_RANK.shareable!;
+  let hasTarget = false;
   const consider = (label: unknown) => { rank = Math.min(rank, LABEL_RANK[effectiveSensitivity(label)]!); };
   const parts = target.split('/');
   const other = parts.length === 4 ? `${parts[0]}/${parts[1]}/${parts[2]}.md` : parts.length === 3 ? `${parts[0]}/${parts[1]}/${parts[2]!.replace(/\.md$/, '')}/note.md` : null;
   for (const t of [target, other]) {
     if (!t) continue;
     const head = await noteHead(ws, path.join(ws, t));
-    if (head) consider(head.label);
+    if (head) { hasTarget = true; consider(head.label); }
   }
+  // Only a new note starts at internal; an existing shareable note may keep its label.
+  if (!hasTarget) rank = LABEL_RANK.internal!;
   if (typeof draftId === 'string' && draftId) {
     const context = path.join(ws, 'context');
     for (const category of await fsp.readdir(context).catch(() => [] as string[])) {

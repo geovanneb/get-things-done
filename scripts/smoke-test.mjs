@@ -292,6 +292,9 @@ try {
       bad.status === 400 && created.sensitivity === 'shareable' && kept.sensitivity === 'shareable' && cleared.sensitivity === undefined,
       JSON.stringify({ bad: bad.status, created: created.sensitivity, kept: kept.sensitivity, cleared: cleared.sensitivity }));
     await fetch(`${base}/api/context/${created.id}`, { method: 'DELETE' });
+    const competing = await Promise.all(['Company', 'Risks'].map((category) => post({ title: 'Smoke concurrent note', category, body: 'Fictional note.' })));
+    check('concurrent context creation reserves one id across categories', JSON.stringify(competing.map((r) => r.status).sort()) === '[201,409]');
+    await fetch(`${base}/api/context/CTX-smoke-concurrent-note`, { method: 'DELETE' });
   }
 
   // Share context notes as one Markdown file (#107): only shareable notes, the download is the preview, a change refuses it.
@@ -1199,6 +1202,8 @@ try {
     const unpaired = await fetch(`${inbox}/v1/offer`, { method: 'POST', headers: { 'X-Device': 'f'.repeat(32) }, body: 'x' });
     const listening = await (await fetch(`${base}/api/devices`)).json();
     const cancel = await fetch(`${base}/api/devices/pairing`, { method: 'DELETE' });
+    const afterCancel = await fetch(`${inbox}/v1/pair`, { method: 'POST', body: '{}' });
+    check('the inbox refuses pairing after its code is cancelled', afterCancel.status === 403);
     const forget = await (await fetch(`${base}/api/devices/${'0'.repeat(32)}`, { method: 'DELETE' })).json();
     const off = await (await json('PUT', '/api/devices/enabled', { enabled: false })).json();
     const afterOff = await fetch(`${inbox}/v1/offer`, { method: 'POST', body: 'x' }).then((r) => r.status, () => 'closed');
