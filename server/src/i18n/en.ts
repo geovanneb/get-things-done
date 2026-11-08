@@ -2531,6 +2531,8 @@ export const en = {
   "taskDetail.theTaskAndItsFiles": "The task and its files are deleted. This cannot be undone.",
   "taskDetail.deleteTask": "Delete task",
   "taskDetail.couldNotSave": "Could not save the task. Try again.",
+  "taskDetail.archivedReadOnly": "This task is archived. It is shown as it was and cannot be changed here.",
+  "taskDetail.busyTryAgain": "The task is being saved elsewhere at this moment. Your edits are kept: try saving again in a moment.",
   "taskDetail.changedElsewhereTitle": "This task changed since you started editing",
   "taskDetail.changedElsewhereBody": "Your edits were not saved, so nothing that happened meanwhile (a change request, an agent's update) is undone. Copy what you need, load the latest version, then make your edits again.",
   "taskDetail.loadLatest": "Load latest version",

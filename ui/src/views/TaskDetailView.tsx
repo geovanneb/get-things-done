@@ -50,7 +50,7 @@ function SidebarField({ label, children }: { label: string; children: React.Reac
 /* ---- Inline-editable text ----------------------------------------- */
 // Edits go straight into the task draft, so the header's "Save changes" saves them
 // with everything else. "Done" only switches back to the rendered view.
-function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { label: string; content: string; onChange: (v: string) => void; closeSignal?: number; mentions?: boolean }) {
+function MarkdownSection({ label, content, onChange, closeSignal, mentions, readOnly }: { label: string; content: string; onChange: (v: string) => void; closeSignal?: number; mentions?: boolean; readOnly?: boolean }) {
   const { t } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [original, setOriginal] = useState(content);
@@ -73,7 +73,7 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions }: { 
               {t('taskDetail.discardChanges')}
             </Button>
           </>
-        ) : (
+        ) : readOnly ? null : (
           <Button size="sm" variant="ghost" onClick={() => { setOriginal(content); setEditing(true); }} aria-label={t('taskDetail.edit', { toLowerCase: label.toLowerCase() })}>
             {t('routines.edit')}
           </Button>
@@ -148,7 +148,7 @@ function nextDeliverableId(deliverables: Task['deliverables']): string {
   return `DEL-${String(next).padStart(2, '0')}`;
 }
 
-function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, onRequested }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number; pinError: string | null; onPinned: () => void; dirty: boolean; onRequested: () => void }) {
+function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, onRequested, readOnly = false }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number; pinError: string | null; onPinned: () => void; dirty: boolean; onRequested: () => void; readOnly?: boolean }) {
   const { t } = useLanguage();
   const { data: allStakeholders } = useApi<Stakeholder[]>('/api/stakeholders');
 
@@ -179,9 +179,9 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
     <div className="gtd-detail">
       <div className="gtd-detail__main">
         <ChangeRequests task={task} dirty={dirty} onRequested={onRequested} />
-        <TaskWaiting task={task} dirty={dirty} onChanged={onRequested} />
+        <TaskWaiting task={task} dirty={dirty} onChanged={onRequested} readOnly={readOnly} />
         {task.meeting_action && <TaskMeetingAction taskId={task.id} refreshKey={savedCount} />}
-        <MarkdownSection label={t('newTaskModal.objective')} content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions />
+        <MarkdownSection label={t('newTaskModal.objective')} content={task.body ?? ''} onChange={saveField('body')} closeSignal={savedCount} mentions readOnly={readOnly} />
         {/\]\(\/meetings\//.test(task.body ?? '') && <TaskMeetingSources taskId={task.id} refreshKey={savedCount} pinError={pinError} onPinned={onPinned} />}
         <div style={{ marginBottom: 'var(--space-6)' }}>
           <DeliverableList
@@ -189,26 +189,33 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
             onChange={updateDeliverable}
             onRemove={removeDeliverable}
             onAdd={addDeliverable}
+            readOnly={readOnly}
           />
         </div>
         <NameCheck task={task} dirty={dirty} />
       </div>
 
       <aside className="gtd-detail__aside" aria-label={t('newTaskModal.taskFields')}>
-        <Select label={t('newTaskModal.status')} size="sm" value={task.status} onChange={(v) => onFieldChange('status', v)}
+        <Select label={t('newTaskModal.status')} size="sm" value={task.status} onChange={(v) => onFieldChange('status', v)} disabled={readOnly}
           options={(['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'] as Task['status'][]).map((s) => ({ value: s, label: formatStatusLabel(s) }))} />
-        <Select label={t('newTaskModal.priority')} size="sm" value={task.priority} onChange={(v) => onFieldChange('priority', v)}
+        <Select label={t('newTaskModal.priority')} size="sm" value={task.priority} onChange={(v) => onFieldChange('priority', v)} disabled={readOnly}
           options={(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => ({ value: p, label: formatPriorityLabel(p) }))} />
-        <Input label={t('newTaskModal.dueDate')} type="date" size="sm" value={task.due_date ? task.due_date.slice(0, 10) : ''}
+        <Input label={t('newTaskModal.dueDate')} type="date" size="sm" disabled={readOnly} value={task.due_date ? task.due_date.slice(0, 10) : ''}
           onChange={(v) => onFieldChange('due_date', v || null)} />
         <SidebarField label={t('taskDetail.slashCommand')}>
           <SlashCommandField taskId={task.id} />
         </SidebarField>
-        <StakeholderPicker
-          selected={resolvedStakeholders}
-          onAdd={(s) => onFieldChange('stakeholders', [...(task.stakeholders ?? []), { ref: s.id, role: 'reviewer', key: false }])}
-          onRemove={(id) => onFieldChange('stakeholders', (task.stakeholders ?? []).filter((x) => x.ref !== id))}
-        />
+        {readOnly ? (
+          <SidebarField label={t('stakeholders')}>
+            <div style={{ fontSize: 'var(--text-sm)' }}>{resolvedStakeholders.map((p) => p.name).join(', ') || '—'}</div>
+          </SidebarField>
+        ) : (
+          <StakeholderPicker
+            selected={resolvedStakeholders}
+            onAdd={(s) => onFieldChange('stakeholders', [...(task.stakeholders ?? []), { ref: s.id, role: 'reviewer', key: false }])}
+            onRemove={(id) => onFieldChange('stakeholders', (task.stakeholders ?? []).filter((x) => x.ref !== id))}
+          />
+        )}
       </aside>
     </div>
   );
@@ -360,9 +367,10 @@ export default function TaskDetailView() {
   const panelRef = useDialogFocus(true, close, true);
 
   const handleFieldChange = useCallback((field: string, value: unknown) => {
-    editingRef.current = true;
     setLocalTask((prev) => {
-      if (!prev) return prev;
+      // An archived task is shown as it was: nothing on it can be saved.
+      if (!prev || prev.status === 'archived') return prev;
+      editingRef.current = true;
       return { ...prev, [field]: value } as Task;
     });
   }, []);
@@ -377,7 +385,13 @@ export default function TaskDetailView() {
         method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ ...sent, expected_updated_at: sent.updated_at }),
       });
-      if (res.status === 409) { setConflict(true); return; }
+      if (res.status === 409) {
+        // A busy task (saved elsewhere at this moment) is not a newer version: keep the draft and say to try again.
+        const body = await res.json().catch(() => null) as { details?: { code?: string } } | null;
+        if (body?.details?.code === 'task_busy') { notify.error(new Error(t('taskDetail.busyTryAgain')), t('taskDetail.couldNotSave')); return; }
+        setConflict(true);
+        return;
+      }
       if (!res.ok) throw new Error(errorMessage(await res.json().catch(() => null), t('taskDetail.couldNotSave')));
       const saved = await res.json() as Task & { meeting_sources_error?: string };
       setPinError(saved?.meeting_sources_error ?? null);
@@ -430,9 +444,11 @@ export default function TaskDetailView() {
 
   const isDirty = JSON.stringify(task) !== JSON.stringify(localTask);
 
+  // An archived task lives in tasks/archive/: shown read-only, and its files are reached through its deliverables.
+  const archived = localTask?.status === 'archived';
   const tabs: { key: TaskTab; label: string }[] = [
     { key: 'work', label: t('groupWork') },
-    { key: 'files', label: t('newTaskModal.files') },
+    ...(archived ? [] : [{ key: 'files' as TaskTab, label: t('newTaskModal.files') }]),
   ];
 
   const frame = (body: React.ReactNode, label = t('taskDetail.taskDetails')) => ReactDOM.createPortal(
@@ -470,14 +486,15 @@ export default function TaskDetailView() {
               {t('taskDetail.recordThisMeeting')}
             </Button>
           )}
-          {isDirty && <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>{t('orgChartDialogs.saveChanges')}</Button>}
-          <IconButton label={t('taskDetail.deleteTask')} icon={icons.trash} tone="danger" outline onClick={handleDelete} disabled={deleting} />
+          {isDirty && !archived && <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>{t('orgChartDialogs.saveChanges')}</Button>}
+          {!archived && <IconButton label={t('taskDetail.deleteTask')} icon={icons.trash} tone="danger" outline onClick={handleDelete} disabled={deleting} />}
           <IconButton label={t('taskDetail.closeTask')} icon={icons.close} onClick={close} />
         </div>
         <input
           type="text"
           aria-label={t('newTaskModal.taskTitle')}
           className="gtd-title-input"
+          readOnly={archived}
           value={localTask.title}
           onChange={(e) => handleFieldChange('title', e.target.value)}
         />
@@ -499,6 +516,11 @@ export default function TaskDetailView() {
 
       <div id="task-panel" role="tabpanel" aria-labelledby={`task-tab-${tab}`}
         style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)' }}>
+        {archived && (
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <Notice tone="info">{t('taskDetail.archivedReadOnly')}</Notice>
+          </div>
+        )}
         {conflict && (
           <div style={{ marginBottom: 'var(--space-4)' }}>
             <Notice tone="critical" title={t('taskDetail.changedElsewhereTitle')}
@@ -507,8 +529,8 @@ export default function TaskDetailView() {
             </Notice>
           </div>
         )}
-        {tab === 'work' && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} dirty={isDirty} onRequested={() => { refetch(); refetchTasks(); }} />}
-        {tab === 'files' && id && <FilesTab taskId={id} />}
+        {(tab === 'work' || archived) && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} dirty={isDirty} onRequested={() => { refetch(); refetchTasks(); }} readOnly={archived} />}
+        {tab === 'files' && !archived && id && <FilesTab taskId={id} />}
       </div>
     </>,
     localTask.title

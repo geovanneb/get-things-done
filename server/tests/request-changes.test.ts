@@ -160,3 +160,14 @@ test('a board move sent from a card older than a Request changes is refused, so 
   assert.equal(now.status, 'in_progress');
   assert.equal((now as unknown as { change_requests: { status: string }[] }).change_requests[0]!.status, 'open');
 });
+
+test('a task busy with another writer answers with its own code, so the page keeps the draft instead of calling it stale', async (t) => {
+  const dir = await workspace(t);
+  const task = await tasks.createTask({ title: 'Fictional busy task' });
+  // Another live process holds the task's lock (the parent of this test process stands in for it).
+  const locks = path.join(dir, '.situation-board', 'task-locks');
+  await fsp.mkdir(locks, { recursive: true });
+  await fsp.writeFile(path.join(locks, `${task.id}.lock`), JSON.stringify({ pid: process.ppid, token: 'other-dashboard' }));
+  await assert.rejects(tasks.updateTask(task.id, { priority: 'high', expected_updated_at: task.updated_at } as never),
+    (e: Error & { statusCode?: number; details?: { code?: string } }) => e.statusCode === 409 && e.details?.code === 'task_busy');
+});
