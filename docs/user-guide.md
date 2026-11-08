@@ -3,7 +3,7 @@
 [Back to the project overview](../README.md) · [HTTP API](api.md) · [Architecture](architecture.md)
 
 Detailed setup, task execution, meeting recording, memory review and workspace reference.
-This guide accompanies 0.12.0; see the [changelog](../CHANGELOG.md).
+This guide accompanies 0.13.0; see the [changelog](../CHANGELOG.md).
 
 ## Install
 
@@ -160,6 +160,15 @@ Agents scan the whole library, not just what a task lists. Put the strategy deck
 summary, the risk register, the org chart, the acronyms your company invented. This
 is the memory you stop having to repeat.
 
+**Sharing labels.** The **Sharing** field in the note editor says who may see the whole note:
+**Shareable**, **Internal** or **Personal**. A note with no label counts as internal, and only you
+make a note shareable. **Share** on the Context page offers only shareable notes: tick them,
+**Preview** the exact text and **Download .md** (titles and text only, no frontmatter, HTML, images,
+links, attachments or sources). Agents follow the labels too: a deliverable for readers outside
+your organization (a `public` task, or a stakeholder from another organization) uses only facts
+from shareable notes, and a context update can make a label stricter but never looser. A label
+cannot catch a private sentence inside a shareable note, so read the preview before you send it.
+
 Context goes stale as things change. Instead of editing notes by hand after every
 meeting, import the material and let an agent propose the updates for you to review.
 See [Keeping context up to date](#keeping-context-up-to-date).
@@ -194,6 +203,12 @@ final list (names, output types, confidentiality, sizes, missing files), edit th
 **Download ZIP**. Only what you choose goes in: never a task's own text, its logs or backups.
 Confidentiality is shown as information, not permission. If a file changes after the preview, the
 download is refused until you preview again.
+
+**Check names and terms.** Under a task's Deliverables, **Check names and terms** reads a Markdown,
+HTML or text deliverable and lists words close to a known stakeholder name ("Did you mean …?") and
+abbreviations that are neither in the glossary nor defined in the text, with the line and a
+snippet. **Dismiss** a finding that is fine and it stays dismissed for that deliverable. The check
+is advisory: it changes nothing, blocks nothing, and runs locally with no AI.
 
 **Request changes.** On a task in review, **Request changes** (Work tab) records what should
 change, with the date, in the task's `change_requests` and moves it back to `in_progress` in one
@@ -710,6 +725,13 @@ settings.
   same workspace never change it at the same time.
 - A meeting removed from the queue, and drafts left half-uploaded for a day, are
   deleted with their files.
+
+**From your iPhone.** Meetings recorded with Meetlaud can go straight into the queue. In
+**Settings > Devices**, choose **Connect an iPhone** and scan the code in Meetlaud (Tools,
+Connectors, Get Things Done). The code works once, for five minutes. While Meetlaud is open, new
+meetings arrive over your local network, encrypted, with no account and no cloud. It is off by
+default, only paired phones can send, and the dashboard itself stays on this computer only. Details
+are in [Device inbox](device-inbox.md).
 
 ### Offline transcription
 
