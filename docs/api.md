@@ -864,6 +864,20 @@ while `auto_check` is on, and sends nothing from the workspace. State is shared 
 | `POST` | `/api/app/update/dismiss` | Body: `{ "version": "<latest>" }`: "Later" for that version only. Any other version is refused (`400`) |
 | `POST` | `/api/app/update/install` | Body: `{ "version": "<latest>" }`: a global npm install only. Takes the update lock (`~/.gtd/update.lock`), starts a helper and stops this dashboard right after answering. Once the dashboard has stopped, the helper installs exactly that version with npm (no shell, fixed arguments, the user's npm config), runs `gtd upgrade` and `gtd start`, and writes how it went to `~/.gtd/update-result.json`; when npm fails, the version that was running starts again. `400` for any other version; `409` for another kind of install, a version not newer than the running or the installed one, an update already going, something important running, or where it can't update from here (`install_blocked`) |
 
+## Devices
+
+Phones paired on purpose can send meetings to this computer. The dashboard's API stays on `127.0.0.1`: these routes only manage the inbox.
+
+| Method | Path | What it does |
+|---|---|---|
+| `GET` | `/api/devices` | `enabled`, `listening`, and the paired phones. Keys are never returned |
+| `PUT` | `/api/devices/enabled` | Body: `enabled`. Starts or stops listening on the local network |
+| `POST` | `/api/devices/pairing` | A pairing code to show as a QR. Works once, for five minutes. Returns `201` |
+| `DELETE` | `/api/devices/pairing` | Cancel the code on screen. Returns `204` |
+| `DELETE` | `/api/devices/:id` | Forget a phone. It can no longer send anything |
+
+The inbox itself is a separate server, on a port of its own, described in [device-inbox.md](device-inbox.md).
+
 ## First-run setup
 
 The dashboard shows a setup screen instead of its pages until a workspace is open. These two

@@ -27,6 +27,7 @@ import UpdatesSettings from '@/components/settings/UpdatesSettings';
 import InstructionUpdates from '@/components/settings/InstructionUpdates';
 import RunNoticeSettings from '@/components/settings/RunNoticeSettings';
 import TranscriptionSettings from '@/components/settings/TranscriptionSettings';
+import DeviceSettings from '@/components/settings/DeviceSettings';
 import SidebarSettings from '@/components/settings/SidebarSettings';
 import { ACCENTS, accentSwatch, resolveTheme } from '@/utils/theme';
 import type { ThemeMode, TextSize } from '@/utils/theme';
@@ -830,6 +831,10 @@ export default function SettingsView() {
 
       <Card title={t('transcription')}>
         <TranscriptionSettings />
+      </Card>
+
+      <Card title={t('devices')}>
+        <DeviceSettings />
       </Card>
 
       <Card title={t('appearance')}>

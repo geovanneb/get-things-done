@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { registerRoutes } from './routes';
 import { localRequestGuard, allowedOrigins } from './middleware/localRequestGuard';
+import { deviceInbox } from './services/deviceInbox';
 import { errorHandler } from './middleware/errorHandler';
 import { watcherService } from './services/watcherService';
 import { routineScheduler } from './services/routineScheduler';
@@ -132,13 +133,14 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     const runnerStopped = AgentRunnerService.stopAll().catch(() => {});
     // A transcription worker is ended too, so nothing keeps running (or holding gigabytes) after the dashboard.
     const transcriptionStopped = TranscriptionEngine.stopAll().catch(() => {});
+    const inboxStopped = deviceInbox.stop().catch(() => {});
 
     const serverClosed = new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
       // Idle keep-alive connections would otherwise hold close() open.
       server.closeIdleConnections();
     });
-    return Promise.all([runnerStopped, transcriptionStopped, serverClosed]).then(() => undefined);
+    return Promise.all([runnerStopped, transcriptionStopped, inboxStopped, serverClosed]).then(() => undefined);
   };
 
   return new Promise((resolve, reject) => {
@@ -148,6 +150,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       const url = `http://${HOST}:${port}`;
       console.log(`Get Things Done server running at ${url}`);
       console.log(`Health check: ${url}/health`);
+      // Listens only if the person turned it on, and failing to must not stop the dashboard.
+      void deviceInbox.resume().catch((error: unknown) => console.warn('The device inbox did not start:', error));
 
       // Registered unconditionally so the watcher keeps broadcasting after a workspace switch.
       watcherService.on('change', broadcastEvent);
