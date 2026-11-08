@@ -8,6 +8,10 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Receive meetings from your iPhone.** Turn it on in Settings, scan a code with Meetlaud, and meetings arrive in the queue over your local network, encrypted, with no account and no cloud. It is off by default, and the dashboard stays on this computer only.
+
 ## [0.12.0] - 2026-11-07
 
 **In your language, with your feedback on the record.** The dashboard now speaks **Japanese,

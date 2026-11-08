@@ -21,6 +21,7 @@ import meetingsRouter from './meetings';
 import transcriptionRouter from './transcription';
 import voiceprintsRouter from './voiceprints';
 import setupRouter from './setup';
+import devicesRouter from './devices';
 import appRouter from './app';
 import sharePackRouter from './sharePack';
 
@@ -58,6 +59,7 @@ export function registerRoutes(app: Express): void {
   app.use('/api/profile', profileRouter);
   app.use('/api/workspace', workspaceRouter);
   app.use('/api/setup', setupRouter);
+  app.use('/api/devices', devicesRouter);
   app.use('/api/search', searchRouter);
   app.use('/api/situation', situationRouter);
   app.use('/api/insights', insightsRouter);
