@@ -2532,6 +2532,8 @@ export default {
   "taskDetail.theTaskAndItsFiles": "La tarea y sus archivos se eliminan. Esto no se puede deshacer.",
   "taskDetail.deleteTask": "Eliminar tarea",
   "taskDetail.couldNotSave": "No se pudo guardar la tarea. Inténtalo de nuevo.",
+  "taskDetail.archivedReadOnly": "Esta tarea está archivada. Se muestra como estaba y no se puede cambiar aquí.",
+  "taskDetail.busyTryAgain": "La tarea se está guardando en otro lugar en este momento. Tus cambios se conservan: vuelve a guardar en un momento.",
   "taskDetail.changedElsewhereTitle": "Esta tarea cambió desde que empezaste a editarla",
   "taskDetail.changedElsewhereBody": "Tus ediciones no se guardaron, así que no se deshace nada de lo ocurrido entretanto (una solicitud de cambio, la actualización de un agente). Copia lo que necesites, carga la versión más reciente y vuelve a hacer tus ediciones.",
   "taskDetail.loadLatest": "Cargar la versión más reciente",

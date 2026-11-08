@@ -12,6 +12,8 @@ interface DeliverableListProps {
   onAdd: () => void;
   label?: string;
   emptyText?: string;
+  /** Shown as it is: no adding (an archived task). */
+  readOnly?: boolean;
 }
 
 /**
@@ -25,6 +27,7 @@ export default function DeliverableList({
   onAdd,
   label = tr('deliverableList.deliverables'),
   emptyText = tr('deliverableList.noDeliverablesDefined'),
+  readOnly = false,
 }: DeliverableListProps) {
   const { data: templates } = useApi<OutputTemplate[]>('/api/outputs/templates');
 
@@ -32,7 +35,7 @@ export default function DeliverableList({
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <h3 style={{ margin: 0, ...sectionLabelStyle }}>{label}</h3>
-        <AddButton onClick={onAdd} />
+        {!readOnly && <AddButton onClick={onAdd} />}
       </div>
       {items.length === 0 ? (
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', fontStyle: 'italic', margin: 0 }}>

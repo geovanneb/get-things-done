@@ -2532,6 +2532,8 @@ export default {
   "taskDetail.theTaskAndItsFiles": "A tarefa e seus arquivos são excluídos. Isso não pode ser desfeito.",
   "taskDetail.deleteTask": "Excluir tarefa",
   "taskDetail.couldNotSave": "Não foi possível salvar a tarefa. Tente de novo.",
+  "taskDetail.archivedReadOnly": "Esta tarefa está arquivada. Ela aparece como estava e não pode ser alterada aqui.",
+  "taskDetail.busyTryAgain": "A tarefa está sendo salva em outro lugar neste momento. Suas edições foram mantidas: tente salvar de novo em instantes.",
   "taskDetail.changedElsewhereTitle": "Esta tarefa mudou desde que você começou a editar",
   "taskDetail.changedElsewhereBody": "Suas edições não foram salvas, então nada do que aconteceu nesse meio-tempo (um pedido de mudança, a atualização de um agente) é desfeito. Copie o que precisar, carregue a versão mais recente e refaça suas edições.",
   "taskDetail.loadLatest": "Carregar a versão mais recente",

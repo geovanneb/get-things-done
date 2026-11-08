@@ -26,7 +26,7 @@ function daysBetween(from: string, to: string): number {
  * What the task waits for (#82): one record, with whom and since when, and a follow-up date. Independent of the
  * status; resolving clears it and leaves the task as it is. Set and resolved here only, never by a task save.
  */
-export default function TaskWaiting({ task, dirty, onChanged }: { task: Task; dirty: boolean; onChanged: () => void }) {
+export default function TaskWaiting({ task, dirty, onChanged, readOnly = false }: { task: Task; dirty: boolean; onChanged: () => void; readOnly?: boolean }) {
   const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
@@ -100,13 +100,16 @@ export default function TaskWaiting({ task, dirty, onChanged }: { task: Task; di
   const waited = waiting ? Math.max(0, daysBetween(waiting.since, today())) : 0;
   const followDue = waiting?.follow_up ? waiting.follow_up <= today() : false;
 
+  // Read-only (an archived task): nothing to show when it waited for nothing.
+  if (readOnly && !waiting) return null;
+
   return (
     <section aria-labelledby={`waiting-${task.id}`} style={{ marginBottom: 'var(--space-6)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
         <h3 id={`waiting-${task.id}`} style={sectionLabelStyle}>{t('taskWaiting.title')}</h3>
         <span style={{ flex: 1 }} />
-        {waiting && <Button size="sm" variant="ghost" disabled={dirty} onClick={() => void resolve()}>{t('taskWaiting.resolve')}</Button>}
-        <Button size="sm" variant={waiting ? 'ghost' : 'secondary'} disabled={dirty} onClick={start}>{waiting ? t('taskWaiting.edit') : t('taskWaiting.set')}</Button>
+        {waiting && !readOnly && <Button size="sm" variant="ghost" disabled={dirty} onClick={() => void resolve()}>{t('taskWaiting.resolve')}</Button>}
+        {!readOnly && <Button size="sm" variant={waiting ? 'ghost' : 'secondary'} disabled={dirty} onClick={start}>{waiting ? t('taskWaiting.edit') : t('taskWaiting.set')}</Button>}
       </div>
       {dirty && <p style={{ margin: '0 0 var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('taskWaiting.saveFirst')}</p>}
       {waiting ? (

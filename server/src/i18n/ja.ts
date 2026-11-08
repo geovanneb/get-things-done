@@ -2530,6 +2530,8 @@ export default {
   "taskDetail.theTaskAndItsFiles": "タスクとファイルは削除されます。この操作は元に戻せません。",
   "taskDetail.deleteTask": "タスクを削除",
   "taskDetail.couldNotSave": "タスクを保存できませんでした。もう一度お試しください。",
+  "taskDetail.archivedReadOnly": "このタスクはアーカイブ済みです。当時のまま表示しており、ここでは変更できません。",
+  "taskDetail.busyTryAgain": "このタスクは今、別の場所で保存中です。編集内容は残っています。少し待ってからもう一度保存してください。",
   "taskDetail.changedElsewhereTitle": "編集を始めてからこのタスクが変更されました",
   "taskDetail.changedElsewhereBody": "編集内容は保存されていないため、その間の変更(変更依頼やエージェントの更新)は失われません。必要な部分をコピーし、最新版を読み込んでから、もう一度編集してください。",
   "taskDetail.loadLatest": "最新版を読み込む",

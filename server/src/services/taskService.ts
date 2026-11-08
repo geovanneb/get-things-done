@@ -431,7 +431,8 @@ If the executive comes back with feedback on a task that is already \`in_review\
     const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'task-locks'), true);
     await fileService.ensureDir(locks);
     const lockFile = await workspaceEntry(ws, path.join(locks, `${name}.lock`), true);
-    const held = await lock(lockFile, TASK_LOCK_WAIT_MS, () => httpError(409, 'The task is being saved elsewhere; try again in a moment.'));
+    // A busy lock is not a newer version: the dashboard tells it apart by its code and keeps the user's draft.
+    const held = await lock(lockFile, TASK_LOCK_WAIT_MS, () => Object.assign(httpError(409, 'The task is being saved elsewhere; try again in a moment.'), { details: { code: 'task_busy' } }));
     try {
       // Checked under the lock: a task archived or deleted a moment ago is never written back into tasks/active.
       await workspaceEntry(ws, path.join(this.getActiveDir(), name, 'task.md'), true);
