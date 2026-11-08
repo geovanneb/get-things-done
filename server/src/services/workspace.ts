@@ -64,14 +64,15 @@ export class WorkspaceService {
   getWorkspacePath(): string {
     const scoped = operationWorkspace.getStore();
     if (scoped) return scoped.path;
+    // Absolute, because Claude Code runs inside the workspace and would read a relative path from there (#338).
     const envPath = process.env['ESB_WORKSPACE_PATH'];
-    if (envPath) return envPath;
+    if (envPath) return path.resolve(envPath);
 
     for (const configFile of [ESB_CONFIG_FILE, LEGACY_CONFIG_FILE]) {
       if (!fs.existsSync(configFile)) continue;
       try {
         const config: EsbConfig = JSON.parse(fs.readFileSync(configFile, 'utf-8'));
-        if (config.workspace_path) return config.workspace_path;
+        if (config.workspace_path) return path.resolve(config.workspace_path);
       } catch {
         // Try the next candidate.
       }
