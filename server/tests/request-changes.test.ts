@@ -149,3 +149,14 @@ test('damaged feedback metadata is never discarded by Request changes', async (t
   await assert.rejects(tasks.requestChanges(task.id, { feedback: 'New feedback', seen_updated_at: task.updated_at, request_id: 'req-damaged-history' }), status(409));
   assert.equal(await fsp.readFile(file, 'utf8'), before);
 });
+
+test('a board move sent from a card older than a Request changes is refused, so it never closes open feedback', async (t) => {
+  await workspace(t);
+  const task = await inReview('Fictional board move');
+  const card = task.updated_at; // what the board shows
+  await tasks.requestChanges(task.id, { feedback: 'Add the baseline.', seen_updated_at: task.updated_at, request_id: 'req-00000009' });
+  await assert.rejects(tasks.updateTask(task.id, { status: 'done', board_column: null, expected_updated_at: card } as never), status(409));
+  const now = await tasks.getTask(task.id);
+  assert.equal(now.status, 'in_progress');
+  assert.equal((now as unknown as { change_requests: { status: string }[] }).change_requests[0]!.status, 'open');
+});

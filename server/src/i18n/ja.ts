@@ -2007,6 +2007,7 @@ export default {
   "board.addATaskTo": "{label} にタスクを追加",
   "board.dropTasksHere": "ここにタスクをドロップ",
   "board.type": "種類",
+  "board.taskChangedNotMoved": "ボードに表示された後でタスクが変更されたため、移動しませんでした。内容を確認してから、もう一度移動してください。",
   "board.couldNotMoveTheTask": "タスクを移動できませんでした。もう一度お試しください。",
   "board.boardViews": "ボードの表示",
   "board.kanban": "カンバン",

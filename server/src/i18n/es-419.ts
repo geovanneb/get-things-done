@@ -2009,6 +2009,7 @@ export default {
   "board.addATaskTo": "Agregar una tarea a {label}",
   "board.dropTasksHere": "Suelta tareas aquí",
   "board.type": "Tipo",
+  "board.taskChangedNotMoved": "La tarea cambió desde que el tablero la mostró, así que no se movió. Revísala y vuelve a moverla.",
   "board.couldNotMoveTheTask": "No se pudo mover la tarea. Inténtalo de nuevo.",
   "board.boardViews": "Vistas del tablero",
   "board.kanban": "Kanban",
