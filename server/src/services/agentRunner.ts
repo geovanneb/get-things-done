@@ -161,6 +161,19 @@ export function claudeProjectKey(folder: string, platform: NodeJS.Platform = pro
   return platform === 'win32' ? folder.replaceAll('\\', '/') : folder;
 }
 
+/**
+ * On macOS the data volume is reached both as /x and as /System/Volumes/Data/x (a firmlink). realpath keeps whichever
+ * spelling it is given, but Claude Code runs in the folder the system reports, the short one, and files trust there.
+ * The short form is used only when it is the same folder.
+ */
+async function shortDataVolumePath(folder: string): Promise<string> {
+  const prefix = '/System/Volumes/Data/';
+  if (process.platform !== 'darwin' || !folder.startsWith(prefix)) return folder;
+  const short = folder.slice(prefix.length - 1);
+  const [long, same] = await Promise.all([fsp.stat(folder).catch(() => null), fsp.stat(short).catch(() => null)]);
+  return long && same && long.dev === same.dev && long.ino === same.ino ? short : folder;
+}
+
 /** What a `.git` entry is, following a link: only a file or a folder marks a repository, as for Claude Code. */
 async function gitEntry(file: string): Promise<'file' | 'folder' | null> {
   const stat = await fsp.stat(file).catch(() => null);
@@ -225,7 +238,7 @@ export async function workspaceTrusted(workspace: string, env: NodeJS.ProcessEnv
   }
   // Claude Code keys trust on the real folder it runs in, in NFC form: links, letter case and aliases such as /tmp
   // resolved, accented names composed (macOS keeps them decomposed on disk). The path as given never counts.
-  const start = (await fsp.realpath(workspace).catch(() => path.resolve(workspace))).normalize('NFC');
+  const start = (await shortDataVolumePath(await fsp.realpath(workspace).catch(() => path.resolve(workspace)))).normalize('NFC');
   const key = claudeProjectKey((await trustFolder(start)).normalize('NFC'));
   return projects[key]?.hasTrustDialogAccepted === true;
 }

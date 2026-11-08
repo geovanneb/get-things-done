@@ -14,6 +14,10 @@ minor versions may include breaking changes.
 
 ### Fixed
 
+- **On macOS, a workspace path written as `/System/Volumes/Data/…` is no longer reported as not trusted.**
+  That spelling and the short one are the same folder, and Claude Code files trust under the short one, so the
+  dashboard refused every run of a trusted workspace and its advice to trust the folder could not help (#339).
+
 - **Runs work when `ESB_WORKSPACE_PATH` is a relative path.** Claude Code runs inside the workspace, so the
   relative path the runner gave it for its settings file pointed inside the workspace a second time, and every
   run stopped at once with "The analysis did not finish". The server now resolves the workspace path to an
