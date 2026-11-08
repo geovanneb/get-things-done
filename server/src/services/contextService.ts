@@ -135,6 +135,10 @@ export class ContextService {
 
     // Never replace another note (and its sharing label) by creating one with the same title.
     if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
+    // Ids are CTX-<slug> in every category: a second note with the same id would be edited, relabelled or deleted
+    // through the first one's id.
+    const sameId = await this.findContextFile(id);
+    if (sameId) throw httpError(409, `A context note named "${slug}" already exists in ${sameId.category}. Edit it, or choose another title.`);
     await fileService.ensureDir(noteDir);
 
     const note: ContextNote = {
@@ -172,6 +176,8 @@ export class ContextService {
     if (incomingCategory !== existing.category) {
       const slug = path.basename(path.dirname(existing.path!));
       const newNoteDir = this.getNoteDir(incomingCategory, slug);
+      // Never onto another note: its folder would be overwritten.
+      if (await fileService.exists(newNoteDir)) throw httpError(409, `A context note named "${slug}" already exists in ${incomingCategory}. Rename one of them first.`);
       const newFilePath = this.getNoteFile(incomingCategory, slug);
       await fileService.ensureDir(newNoteDir);
       // Move all files in the old dir to the new dir
