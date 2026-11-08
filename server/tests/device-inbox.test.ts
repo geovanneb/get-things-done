@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { deviceId, generateIdentity, open, proof, seal, sharedKey, type Identity } from '../src/services/deviceInbox/crypto';
 import { DeviceInbox } from '../src/services/deviceInbox';
-import { isLocalAddress } from '../src/services/deviceInbox/inboxServer';
+import { inboxPath, isLocalAddress } from '../src/services/deviceInbox/inboxServer';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
 
 /** A home and a workspace of their own, because the inbox keeps its keys under the home folder. */
@@ -222,6 +222,20 @@ test('nothing outside the local network is answered', () => {
   }
   for (const address of ['8.8.8.8', '172.32.0.1', '::ffff:1.1.1.1', '2001:4860::1', undefined]) {
     assert.equal(isLocalAddress(address), false, String(address));
+  }
+});
+
+test('a name from a phone never leads outside the inbox folder', async (t) => {
+  await sandbox(t);
+  const device = 'a'.repeat(32);
+  const item = randomUUID();
+  const inside = inboxPath(device, item, 'audio.m4a');
+  assert.equal(inside, path.join(os.homedir(), '.gtd', 'device-inbox', device, item, 'audio.m4a'));
+  for (const [d, i, name] of [
+    ['../../etc', item, 'a.txt'], ['A'.repeat(32), item, 'a.txt'], [device, '../x', 'a.txt'],
+    [device, item, '../a.txt'], [device, item, '..'], [device, item, '.hidden'], [device, item, 'a/b.txt'], [device, item, ''],
+  ]) {
+    assert.throws(() => inboxPath(d, i, name), /Bad path/, `${d} ${i} ${name}`);
   }
 });
 

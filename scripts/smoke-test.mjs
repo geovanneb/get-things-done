@@ -1169,6 +1169,30 @@ try {
       && fs.readFileSync(path.join(movedDir, 'STK-0001.json'), 'utf8') === '{"unfinished":');
     const forgetMoved = await fetch(`${base}/api/voiceprints/moved/${movedKey}`, { method: 'DELETE' });
     check('explicitly forgetting damaged moved voices still works', forgetMoved.status === 204 && !fs.existsSync(movedDir));
+    // Device inbox: off by default, keys never returned and kept owner-only outside the workspace, a pairing code
+    // turns it on, a wrong proof or an unpaired phone is refused, and turning it off stops listening.
+    const devices = await (await fetch(`${base}/api/devices`)).json();
+    const inboxState = path.join(home, '.gtd', 'device-inbox', 'state.json');
+    const badEnabled = await json('PUT', '/api/devices/enabled', { enabled: 'yes' });
+    const pairingResponse = await json('POST', '/api/devices/pairing');
+    const pairing = await pairingResponse.json();
+    const inbox = `http://127.0.0.1:${pairing.port}`;
+    const wrongProof = await fetch(`${inbox}/v1/pair`, { method: 'POST', body: JSON.stringify({ phone_public: Buffer.alloc(32, 7).toString('base64'), phone_name: 'Test phone', proof: Buffer.alloc(32).toString('base64') }) });
+    const unpaired = await fetch(`${inbox}/v1/offer`, { method: 'POST', headers: { 'X-Device': 'f'.repeat(32) }, body: 'x' });
+    const listening = await (await fetch(`${base}/api/devices`)).json();
+    const cancel = await fetch(`${base}/api/devices/pairing`, { method: 'DELETE' });
+    const forget = await (await fetch(`${base}/api/devices/${'0'.repeat(32)}`, { method: 'DELETE' })).json();
+    const off = await (await json('PUT', '/api/devices/enabled', { enabled: false })).json();
+    const afterOff = await fetch(`${inbox}/v1/offer`, { method: 'POST', body: 'x' }).then((r) => r.status, () => 'closed');
+    check('the device inbox is off by default, pairs only with the code, and stops listening when turned off',
+      devices.enabled === false && devices.listening === false && devices.devices.length === 0
+      && (process.platform === 'win32' || (fs.statSync(inboxState).mode & 0o777) === 0o600)
+      && !fs.existsSync(path.join(ws, '.gtd')) && !JSON.stringify([devices, listening, pairing]).includes('private')
+      && badEnabled.status === 400 && pairingResponse.status === 201 && pairing.port > 0
+      && Buffer.from(pairing.code, 'base64').length === 16 && Date.parse(pairing.expires_at) - Date.now() <= 5 * 60_000
+      && wrongProof.status === 403 && unpaired.status === 401 && listening.enabled === true && listening.listening === true
+      && cancel.status === 204 && forget.devices.length === 0 && off.enabled === false && off.listening === false && afterOff === 'closed',
+      `bad=${badEnabled.status} pairing=${pairingResponse.status} proof=${wrongProof.status} unpaired=${unpaired.status} cancel=${cancel.status} off=${afterOff}`);
     const contextIds = (await (await fetch(`${base}/api/context`)).json()).map((n) => n.id);
     check('context updates never appear as context notes', !contextIds.some((id) => String(id).startsWith('CU-')));
   }

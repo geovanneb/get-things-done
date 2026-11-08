@@ -14,6 +14,19 @@ const MAX_FILES = 10;
 const OVERHEAD_BYTES = 28;
 const ITEM_ID = /^[0-9a-f-]{36}$/;
 const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const DEVICE_ID = /^[0-9a-f]{32}$/;
+
+/**
+ * Every path the inbox reads or writes comes from here. The parts come from a phone, so each is checked again and the
+ * result must stay inside the inbox folder, whatever was validated earlier on the way in.
+ */
+export function inboxPath(device: string, item: string, name?: string): string {
+  if (!DEVICE_ID.test(device) || !ITEM_ID.test(item) || (name !== undefined && !FILE_NAME.test(name))) throw new Refused(400, 'Bad path');
+  const base = path.resolve(inboxDir());
+  const full = path.resolve(base, device, item, name ?? '');
+  if (!full.startsWith(base + path.sep)) throw new Refused(400, 'Bad path');
+  return full;
+}
 
 export interface OfferedFile { name: string; size: number; sha256: string }
 export interface OfferedItem { id: string; title: string; date: string; files: OfferedFile[] }
@@ -155,16 +168,11 @@ export class InboxServer {
     res.end(answer);
   }
 
-  private itemDir(device: string, item: string): string {
-    return path.join(inboxDir(), device, item);
-  }
-
   private async status(device: string, item: OfferedItem): Promise<{ id: string; complete: boolean; files: number[] }> {
     if (this.host.deliveredMeeting(item.id)) return { id: item.id, complete: true, files: [] };
     this.offers.set(`${device}/${item.id}`, item);
-    const dir = this.itemDir(device, item.id);
-    await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
-    const files = await Promise.all(item.files.map(async (file) => (await fsp.stat(path.join(dir, file.name)).catch(() => null))?.size ?? 0));
+    await fsp.mkdir(inboxPath(device, item.id), { recursive: true, mode: 0o700 });
+    const files = await Promise.all(item.files.map(async (file) => (await fsp.stat(inboxPath(device, item.id, file.name)).catch(() => null))?.size ?? 0));
     return { id: item.id, complete: false, files };
   }
 
@@ -173,7 +181,7 @@ export class InboxServer {
     const item = this.offers.get(`${device}/${itemId}`);
     const file = item?.files[index];
     if (!file) throw new Refused(404, 'Not offered');
-    const target = path.join(this.itemDir(device, itemId), file.name);
+    const target = inboxPath(device, itemId, file.name);
     const held = (await fsp.stat(target).catch(() => null))?.size ?? 0;
     if (offset !== held) return held;
     if (held + plain.length > file.size) throw new Refused(413, 'Past the offered size');
@@ -186,8 +194,8 @@ export class InboxServer {
     if (done) return done;
     const item = this.offers.get(`${device}/${itemId}`);
     if (!item) throw new Refused(404, 'Not offered');
-    const dir = this.itemDir(device, itemId);
-    const files = item.files.map((file) => ({ name: file.name, path: path.join(dir, file.name) }));
+    const dir = inboxPath(device, itemId);
+    const files = item.files.map((file) => ({ name: file.name, path: inboxPath(device, itemId, file.name) }));
     await Promise.all(item.files.map(async (file, index) => {
       const hash = createHash('sha256');
       for await (const part of fs.createReadStream(files[index].path)) hash.update(part as Buffer);
