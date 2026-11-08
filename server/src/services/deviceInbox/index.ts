@@ -4,7 +4,7 @@ import * as fsp from 'node:fs/promises';
 import * as os from 'node:os';
 import { MeetingDigestService } from '../meetingDigestService';
 import { announce } from './announce';
-import { deviceId, sharedKey } from './crypto';
+import { deviceId, sharedKey, sameBytes } from './crypto';
 import { InboxServer, type OfferedItem } from './inboxServer';
 import { readState, writeState, type InboxState, type PairedDevice } from './store';
 
@@ -24,6 +24,14 @@ function localAddresses(): string[] {
 /** Receives meetings from paired phones. Off until the person turns it on, and it listens only while on. */
 export class DeviceInbox {
   private state: InboxState | null = null;
+  private loading: Promise<InboxState> | null = null;
+  private lifecycle: Promise<unknown> = Promise.resolve();
+
+  private async change<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.lifecycle.catch(() => undefined).then(operation);
+    this.lifecycle = next;
+    return next;
+  }
   private server: InboxServer | null = null;
   private port = 0;
   private stopAnnouncing: () => void = () => {};
@@ -32,12 +40,13 @@ export class DeviceInbox {
   constructor(private readonly meetings = new MeetingDigestService(), private readonly name = os.hostname().replace(/\.local$/, '')) {}
 
   private async current(): Promise<InboxState> {
-    this.state ??= await readState();
+    this.loading ??= readState().catch((error) => { this.loading = null; throw error; });
+    this.state ??= await this.loading;
     return this.state;
   }
 
   async resume(): Promise<void> {
-    if ((await this.current()).enabled) await this.listen();
+    await this.change(async () => { if ((await this.current()).enabled) await this.listen(); });
   }
 
   async status(): Promise<InboxStatus> {
@@ -50,6 +59,10 @@ export class DeviceInbox {
   }
 
   async setEnabled(enabled: boolean): Promise<InboxStatus> {
+    return this.change(() => this.enable(enabled));
+  }
+
+  private async enable(enabled: boolean): Promise<InboxStatus> {
     const state = await this.current();
     state.enabled = enabled;
     await writeState(state);
@@ -59,8 +72,12 @@ export class DeviceInbox {
   }
 
   async startPairing(): Promise<PairingCode> {
+    return this.change(() => this.beginPairing());
+  }
+
+  private async beginPairing(): Promise<PairingCode> {
     const state = await this.current();
-    if (!state.enabled) await this.setEnabled(true);
+    if (!state.enabled) await this.enable(true);
     const code = randomBytes(16);
     const expires = Date.now() + PAIRING_MS;
     this.pairing = { code, expires, tries: 0 };
@@ -82,7 +99,7 @@ export class DeviceInbox {
   }
 
   async stop(): Promise<void> {
-    await this.close();
+    await this.change(() => this.close());
   }
 
   private async close(): Promise<void> {
@@ -106,7 +123,7 @@ export class DeviceInbox {
         return device ? sharedKey(privateKey, Buffer.from(device.public_key, 'base64')) : null;
       },
       pairingCode: () => this.activeCode(),
-      pair: (phoneKey, name) => this.addDevice(phoneKey, name),
+      pair: (phoneKey, name, code) => this.addDevice(phoneKey, name, code),
       deliveredMeeting: (item) => state.delivered.find((entry) => entry.id === item)?.meeting_id ?? null,
       deliver: (_device, item, files) => this.deliver(item, files),
       touched: (id) => {
@@ -134,23 +151,39 @@ export class DeviceInbox {
     return pairing.code;
   }
 
-  private async addDevice(phoneKey: Buffer, name: string): Promise<boolean> {
+  private async addDevice(phoneKey: Buffer, name: string, code: Buffer): Promise<boolean> {
+    const pairing = this.pairing;
+    if (!pairing || Date.now() > pairing.expires || !sameBytes(pairing.code, code)) return false;
+    // Spend the code before any await: simultaneous proofs must not pair two phones.
+    this.pairing = null;
     const state = await this.current();
     const publicKey = phoneKey.toString('base64');
     state.devices = state.devices.filter((device) => device.public_key !== publicKey);
     state.devices.push({ id: deviceId(phoneKey), name, public_key: publicKey, paired_at: new Date().toISOString(), last_seen_at: null });
     await writeState(state);
-    this.pairing = null;
     return true;
   }
 
   /** Through the same path as a file added by hand, so that the same limits and checks apply. */
   private async deliver(item: OfferedItem, files: { name: string; path: string }[]): Promise<string> {
     const meeting = await this.meetings.createMeeting({ title: item.title, meeting_date: item.date });
-    for (const file of files) {
-      const size = (await fsp.stat(file.path)).size;
-      const upload = await this.meetings.writeUpload(meeting.id, file.name, createReadStream(file.path), size);
-      await this.meetings.commitUpload(meeting.id, file.name, upload);
+    try {
+      for (const file of files) {
+        const size = (await fsp.stat(file.path)).size;
+        const source = createReadStream(file.path);
+        try {
+          const upload = await this.meetings.writeUpload(meeting.id, file.name, source, size);
+          try { await this.meetings.commitUpload(meeting.id, file.name, upload); }
+          finally { await fsp.rm(upload.path, { force: true }); }
+        } finally {
+          source.destroy();
+        }
+      }
+    } catch (error) {
+      // A validation or copy failure must not create another abandoned draft on every phone retry.
+      // The inbox files remain available; only the draft made by this attempt is removed.
+      await this.meetings.removeMeeting(meeting.id);
+      throw error;
     }
     await this.meetings.queue(meeting.id);
     const state = await this.current();

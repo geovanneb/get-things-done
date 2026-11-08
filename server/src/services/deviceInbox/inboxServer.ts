@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import * as path from 'node:path';
 import { open, proof, sameBytes, seal } from './crypto';
 import { inboxDir } from './store';
+import { workspaceEntry } from '../../utils/files';
 
 export const MAX_CHUNK_BYTES = 2 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 256 * 1024;
@@ -36,7 +37,7 @@ export interface InboxHost {
   privateKey: Buffer;
   publicKey: Buffer;
   deviceKey(id: string): Buffer | null;
-  pair(phoneKey: Buffer, name: string): Promise<boolean> | boolean;
+  pair(phoneKey: Buffer, name: string, code: Buffer): Promise<boolean> | boolean;
   pairingCode(): Buffer | null;
   deliveredMeeting(itemId: string): string | null;
   deliver(deviceId: string, item: OfferedItem, files: { name: string; path: string }[]): Promise<string>;
@@ -69,9 +70,10 @@ function validItem(value: unknown): value is OfferedItem {
   const item = value as OfferedItem;
   return !!item && typeof item.id === 'string' && ITEM_ID.test(item.id) && typeof item.title === 'string'
     && typeof item.date === 'string' && Array.isArray(item.files) && item.files.length > 0 && item.files.length <= MAX_FILES
-    && item.files.every((file) => typeof file.name === 'string' && FILE_NAME.test(file.name)
+    && item.files.every((file) => !!file && typeof file.name === 'string' && FILE_NAME.test(file.name)
       && Number.isSafeInteger(file.size) && file.size >= 0 && file.size <= MAX_FILE_BYTES
-      && typeof file.sha256 === 'string' && /^[0-9a-f]{64}$/.test(file.sha256));
+      && typeof file.sha256 === 'string' && /^[0-9a-f]{64}$/.test(file.sha256))
+    && new Set(item.files.map((file) => file.name.toLowerCase())).size === item.files.length;
 }
 
 /**
@@ -81,6 +83,16 @@ function validItem(value: unknown): value is OfferedItem {
 export class InboxServer {
   private server: http.Server | null = null;
   private offers = new Map<string, OfferedItem>();
+  private pending = new Map<string, Promise<unknown>>();
+
+  /** Serialize retries and commits for an item, including offers that could replace its manifest. */
+  private async withItem<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.pending.get(id) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(operation);
+    this.pending.set(id, next);
+    try { return await next; }
+    finally { if (this.pending.get(id) === next) this.pending.delete(id); }
+  }
 
   constructor(private readonly host: InboxHost) {}
 
@@ -121,27 +133,34 @@ export class InboxServer {
     const id = req.headers['x-device'];
     const key = typeof id === 'string' ? this.host.deviceKey(id) : null;
     if (typeof id !== 'string' || !key) throw new Refused(401, 'Not paired');
+    const authorized = <T>(operation: () => Promise<T>): Promise<T> => {
+      // A request may have waited for its body or another operation while the phone was forgotten.
+      const current = this.host.deviceKey(id);
+      if (!current || !sameBytes(current, key)) throw new Refused(401, 'Not paired');
+      return operation();
+    };
 
     const chunk = /^\/v1\/items\/([0-9a-f-]{36})\/files\/(\d+)$/.exec(route);
     if (req.method === 'PUT' && chunk) {
       const offset = Number(url.searchParams.get('offset'));
       const sealed = await body(req, MAX_CHUNK_BYTES + OVERHEAD_BYTES);
       const plain = open(key, sealed, `${route}?offset=${offset}`);
-      const received = await this.receive(id, chunk[1], Number(chunk[2]), offset, plain);
+      const received = await this.withItem(chunk[1], () => authorized(() => this.receive(id, chunk[1], Number(chunk[2]), offset, plain)));
       this.host.touched(id);
       return this.answer(res, key, route, { received });
     }
 
     const message = open(key, await body(req, MAX_MESSAGE_BYTES), route);
+    await authorized(() => Promise.resolve());
     this.host.touched(id);
     if (req.method === 'POST' && route === '/v1/offer') {
       const parsed = JSON.parse(message.toString()) as { items?: unknown };
       if (!Array.isArray(parsed.items)) throw new Refused(400, 'No items');
-      return this.answer(res, key, route, { items: await Promise.all(parsed.items.filter(validItem).map((item) => this.status(id, item))) });
+      return this.answer(res, key, route, { items: await Promise.all(parsed.items.filter(validItem).map((item) => this.withItem(item.id, () => authorized(() => this.status(id, item))))) });
     }
     const commit = /^\/v1\/items\/([0-9a-f-]{36})\/commit$/.exec(route);
     if (req.method === 'POST' && commit) {
-      return this.answer(res, key, route, { meeting_id: await this.commit(id, commit[1]) });
+      return this.answer(res, key, route, { meeting_id: await this.withItem(commit[1], () => authorized(() => this.commit(id, commit[1]))) });
     }
     throw new Refused(404, 'Unknown');
   }
@@ -153,15 +172,16 @@ export class InboxServer {
   }
 
   private async pair(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const bytes = await body(req, 4096);
     const code = this.host.pairingCode();
     if (!code) throw new Refused(403, 'Not pairing');
-    const parsed = JSON.parse((await body(req, 4096)).toString()) as { phone_public?: unknown; phone_name?: unknown; proof?: unknown };
+    const parsed = JSON.parse(bytes.toString()) as { phone_public?: unknown; phone_name?: unknown; proof?: unknown };
     if (typeof parsed.phone_public !== 'string' || typeof parsed.proof !== 'string') throw new Refused(400, 'Bad request');
     const phoneKey = Buffer.from(parsed.phone_public, 'base64');
     if (phoneKey.length !== 32) throw new Refused(400, 'Bad key');
     const name = typeof parsed.phone_name === 'string' ? parsed.phone_name.slice(0, 80) : 'iPhone';
     const accepted = sameBytes(proof(code, phoneKey), Buffer.from(parsed.proof, 'base64'))
-      && await this.host.pair(phoneKey, name);
+      && await this.host.pair(phoneKey, name, code);
     if (!accepted) throw new Refused(403, 'Wrong code');
     const answer = JSON.stringify({ proof: proof(code, this.host.publicKey, phoneKey).toString('base64') });
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -171,8 +191,17 @@ export class InboxServer {
   private async status(device: string, item: OfferedItem): Promise<{ id: string; complete: boolean; files: number[] }> {
     if (this.host.deliveredMeeting(item.id)) return { id: item.id, complete: true, files: [] };
     this.offers.set(`${device}/${item.id}`, item);
+    await workspaceEntry(inboxDir(), inboxPath(device, item.id), true);
     await fsp.mkdir(inboxPath(device, item.id), { recursive: true, mode: 0o700 });
-    const files = await Promise.all(item.files.map(async (file) => (await fsp.stat(inboxPath(device, item.id, file.name)).catch(() => null))?.size ?? 0));
+    const files = await Promise.all(item.files.map(async (file) => {
+      const target = await workspaceEntry(inboxDir(), inboxPath(device, item.id, file.name), true);
+      const stat = await fsp.lstat(target).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (stat && !stat.isFile()) throw new Refused(400, 'Not a plain file');
+      return stat?.size ?? 0;
+    }));
     return { id: item.id, complete: false, files };
   }
 
@@ -181,8 +210,13 @@ export class InboxServer {
     const item = this.offers.get(`${device}/${itemId}`);
     const file = item?.files[index];
     if (!file) throw new Refused(404, 'Not offered');
-    const target = inboxPath(device, itemId, file.name);
-    const held = (await fsp.stat(target).catch(() => null))?.size ?? 0;
+    const target = await workspaceEntry(inboxDir(), inboxPath(device, itemId, file.name), true);
+    const stat = await fsp.lstat(target).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (stat && !stat.isFile()) throw new Refused(400, 'Not a plain file');
+    const held = stat?.size ?? 0;
     if (offset !== held) return held;
     if (held + plain.length > file.size) throw new Refused(413, 'Past the offered size');
     await fsp.appendFile(target, plain, { mode: 0o600 });
@@ -196,11 +230,19 @@ export class InboxServer {
     if (!item) throw new Refused(404, 'Not offered');
     const dir = inboxPath(device, itemId);
     const files = item.files.map((file) => ({ name: file.name, path: inboxPath(device, itemId, file.name) }));
-    await Promise.all(item.files.map(async (file, index) => {
+    for (const [index, file] of item.files.entries()) {
+      await workspaceEntry(inboxDir(), files[index].path);
+      const stat = await fsp.lstat(files[index].path);
+      if (!stat.isFile()) throw new Refused(400, 'Not a plain file');
+      if (stat.size < file.size) throw new Refused(422, `${file.name} has not finished arriving`);
       const hash = createHash('sha256');
       for await (const part of fs.createReadStream(files[index].path)) hash.update(part as Buffer);
-      if (hash.digest('hex') !== file.sha256) throw new Refused(422, `${file.name} did not arrive intact`);
-    }));
+      if (stat.size !== file.size || hash.digest('hex') !== file.sha256) {
+        // A full but damaged file cannot resume: discard only that file so the next offer starts it again.
+        await fsp.unlink(files[index].path);
+        throw new Refused(422, `${file.name} did not arrive intact`);
+      }
+    }
     const meeting = await this.host.deliver(device, item, files);
     this.offers.delete(`${device}/${itemId}`);
     await fsp.rm(dir, { recursive: true, force: true });

@@ -3,7 +3,8 @@ import * as fsp from 'fs/promises';
 import { ContextNote, ContextCategory } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
+import { lock, unlock } from '../utils/fileLock';
+import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
 
@@ -133,30 +134,40 @@ export class ContextService {
     const noteDir = this.getNoteDir(category, slug);
     const filePath = this.getNoteFile(category, slug);
 
-    // Never replace another note (and its sharing label) by creating one with the same title.
-    if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
-    // Ids are CTX-<slug> in every category: a second note with the same id would be edited, relabelled or deleted
-    // through the first one's id.
-    const sameId = await this.findContextFile(id);
-    if (sameId) throw httpError(409, `A context note named "${slug}" already exists in ${sameId.category}. Edit it, or choose another title.`);
-    await fileService.ensureDir(noteDir);
+    // The id is shared across categories: check and create under one cross-process lock.
+    const ws = workspaceService.getWorkspacePath();
+    const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'context-locks'), true);
+    await fileService.ensureDir(locks);
+    const lockFile = await workspaceEntry(ws, path.join(locks, `${topLevelName(id)}.lock`), true);
+    const held = await lock(lockFile, 5000, () => httpError(409, 'This context note is being created elsewhere. Try again.'));
+    try {
+      // Never replace another note (and its sharing label) by creating one with the same title.
+      if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
+      // Ids are CTX-<slug> in every category: a second note with the same id would be edited, relabelled or deleted
+      // through the first one's id.
+      const sameId = await this.findContextFile(id);
+      if (sameId) throw httpError(409, `A context note named "${slug}" already exists in ${sameId.category}. Edit it, or choose another title.`);
+      await fileService.ensureDir(noteDir);
 
-    const note: ContextNote = {
-      id,
-      category,
-      title: data.title || 'Untitled',
-      slug,
-      tags: [],
-      relevance: data.relevance,
-      ...(sensitivity ? { sensitivity } : {}),
-      created_at: now,
-      updated_at: now,
-    };
+      const note: ContextNote = {
+        id,
+        category,
+        title: data.title || 'Untitled',
+        slug,
+        tags: [],
+        relevance: data.relevance,
+        ...(sensitivity ? { sensitivity } : {}),
+        created_at: now,
+        updated_at: now,
+      };
 
-    const { content: _c, body: _b, path: _path, ...frontmatter } = note;
-    const bodyContent = data.body || data.content || '';
-    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);
-    return { ...note, body: bodyContent, path: filePath };
+      const { content: _c, body: _b, path: _path, ...frontmatter } = note;
+      const bodyContent = data.body || data.content || '';
+      await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);
+      return { ...note, body: bodyContent, path: filePath };
+    } finally {
+      await unlock(held);
+    }
   }
 
   async updateContextNote(id: string, data: Partial<ContextNote>): Promise<ContextNote> {

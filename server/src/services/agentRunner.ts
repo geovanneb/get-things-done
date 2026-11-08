@@ -194,13 +194,17 @@ async function mainCheckout(root: string): Promise<string> {
   try {
     const pointer = (await fsp.readFile(path.join(root, '.git'), 'utf-8')).trim();
     if (!pointer.startsWith('gitdir:')) return root;
-    const admin = path.resolve(root, pointer.slice('gitdir:'.length).trim());
+    const admin = await shortDataVolumePath(path.resolve(root, pointer.slice('gitdir:'.length).trim()));
     const commondir = await bookkeeping(path.join(admin, 'commondir'));
     if (commondir === null) return root;
-    const common = path.resolve(admin, commondir);
+    const common = await shortDataVolumePath(path.resolve(admin, commondir));
     if (path.dirname(admin) !== path.join(common, 'worktrees')) return root;
     const gitdir = await bookkeeping(path.join(admin, 'gitdir'));
-    if (gitdir === null || await fsp.realpath(path.resolve(admin, gitdir)) !== path.join(await fsp.realpath(root), '.git')) return root;
+    if (gitdir === null) return root;
+    // Git bookkeeping can use either spelling of the data volume, independently of the workspace path.
+    const back = await shortDataVolumePath(await fsp.realpath(path.resolve(admin, gitdir)));
+    const here = await shortDataVolumePath(await fsp.realpath(root));
+    if (back !== path.join(here, '.git')) return root;
     if (path.basename(common) !== '.git') return (await gitEntry(path.join(common, '.git'))) ? root : common;
     return path.dirname(common);
   } catch {

@@ -23,6 +23,15 @@ test('a note with the same title in another category is refused, so one id never
   assert.equal(await fsp.readdir(path.join(dir, 'context', 'risks')).then((n) => n.length).catch(() => 0), 0, 'nothing is created');
   assert.match(await fsp.readFile(strategy.path!, 'utf-8'), /PERSONAL NOTE/);
 
+  // Concurrent creates must make the same decision as sequential ones.
+  for (const categories of [['strategy', 'risks'], ['strategy', 'strategy']] as const) {
+    const title = `Concurrent ${categories.join(' ')}`;
+    const results = await Promise.allSettled(categories.map((category) => new ContextService().createContextNote({ category, title, body: category })));
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    assert.equal(rejected.reason.statusCode, 409);
+  }
+
   // A move never lands on another note's folder.
   const other = await service.createContextNote({ category: 'risks', title: 'Budget risks', body: 'x\n' });
   await fsp.mkdir(path.join(dir, 'context', 'strategy', 'budget-risks'), { recursive: true });

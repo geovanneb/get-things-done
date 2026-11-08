@@ -953,3 +953,15 @@ test('the label guard also covers copies, large files, unreadable drafts and the
   assert.equal(en['server.flatNote'], FLAT_NOTE);
   assert.equal(en['server.unreadableDraft'], UNREADABLE_DRAFT);
 });
+
+test('an update can keep an existing shareable label without loosening it', async (t) => {
+  const ws = await workspace(t);
+  const note = '---\nid: CTX-growth-plan\ntitle: Growth plan\nsensitivity: shareable\n---\nPublic plan\n';
+  await fsp.writeFile(path.join(ws, 'context/strategy/growth-plan/note.md'), note);
+  const service = new ContextUpdateService();
+  const { id } = await service.create({ text: 'Public plan revision' });
+  await analyze(ws, id, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md', title: 'Revise plan', rationale: 'x' }], { 'P-01.md': note + 'More public facts.\n' });
+  assert.equal((await service.get(id)).proposals[0]!.problem, null);
+  await service.saveDecisions(id, { 'P-01': { decision: 'accepted' } });
+  await service.approve(id);
+});

@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
-import { createHash, randomUUID } from 'crypto';
+import { createHash } from 'crypto';
+import { atomicWrite } from '../utils/atomicWrite';
 import { constants as fsConstants } from 'fs';
 import { TaskService } from './taskService';
 import { WorkspaceService } from './workspace';
@@ -205,14 +206,7 @@ async function writeState(ws: string, taskDir: string, state: State): Promise<vo
   await workspaceEntry(ws, file, true);
   const existing = await fsp.lstat(file).catch(() => null);
   if (existing && !existing.isFile()) throw httpError(409, 'The check\'s record in the task folder is not a plain file.');
-  const temp = path.join(taskDir, `.name-check.${randomUUID()}.tmp`);
-  try {
-    await fsp.writeFile(temp, JSON.stringify(state, null, 2) + '\n', { encoding: 'utf-8', flag: 'wx' });
-    await fsp.rename(temp, file);
-  } catch (err) {
-    await fsp.rm(temp, { force: true }).catch(() => undefined);
-    throw err;
-  }
+  await atomicWrite(file, JSON.stringify(state, null, 2) + '\n');
 }
 
 /**

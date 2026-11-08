@@ -129,6 +129,23 @@ test('adversarial input of 2 MB never stalls: every step is linear', () => {
   }
 });
 
+test('many distinct findings on one line do not repeatedly scan the whole file for snippets', () => {
+  const text = Array.from({ length: 20000 }, (_, i) => Array.from({ length: 4 }, (_, j) => String.fromCharCode(65 + Math.floor(i / 26 ** j) % 26)).join('')).join(' and ');
+  const empty = buildRegistry({ names: [], terms: [] });
+  const time = (source: string) => {
+    const start = performance.now();
+    const result = checkTextFull(source, source, empty);
+    assert.equal(result.findings.length, MAX_FINDINGS);
+    assert.ok(result.total > MAX_FINDINGS);
+    return performance.now() - start;
+  };
+  const quarter = text.slice(0, Math.floor(text.length / 4));
+  time(quarter);
+  const small = time(quarter);
+  const large = time(text);
+  assert.ok(large < Math.max(10 * small, 250), `${large.toFixed(0)} ms vs ${small.toFixed(0)} ms for a quarter`);
+});
+
 test('the check reads only the deliverable file in its task folder, remembers dismissals and counts what was fixed', async (t) => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-name-check-'));
   const previous = process.env.ESB_WORKSPACE_PATH;
@@ -167,6 +184,7 @@ test('the check reads only the deliverable file in its task folder, remembers di
   // The name is corrected in the file: the next run counts it as fixed.
   await fsp.writeFile(deliverable, 'Notes from Maren Lindqvist on QRT and ZPX.\n');
   await runNameCheck('TASK-2026-0001', 'DEL-01');
+  if (process.platform !== 'win32') assert.equal((await fsp.stat(path.join(taskDir, '.name-check.json'))).mode & 0o077, 0, 'check records are private to the owner');
   const state = JSON.parse(await fsp.readFile(path.join(taskDir, '.name-check.json'), 'utf-8'));
   assert.deepEqual(state.history.map((h: { shown: number; dismissed: number; fixed: number }) => [h.shown, h.dismissed, h.fixed]), [[2, 0, 0], [1, 1, 0], [0, 1, 1]]);
 

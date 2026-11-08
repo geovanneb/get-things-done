@@ -150,6 +150,34 @@ try {
     await page.waitForTimeout(300);
   };
 
+  // Selecting Archived is still an unsaved edit; only a saved archived task is read-only.
+  for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
+    const { context, page } = await open(width, theme);
+    await page.goto(base + '/board/task/TASK-2026-0001');
+    await settle(page);
+    const status = page.getByRole('combobox', { name: 'Status', exact: true });
+    await status.selectOption('archived');
+    const editable = await status.isEnabled();
+    check(`a draft archived status can still be saved or changed @${width} ${theme}`,
+      editable && await page.getByRole('button', { name: 'Save changes', exact: true }).isVisible());
+    if (editable) {
+      await status.focus();
+      await page.keyboard.press('d');
+      await page.keyboard.press('Tab');
+      await page.waitForFunction(() => [...document.querySelectorAll('select')].some((field) => field.value === 'done'));
+      check(`a draft archived status can be changed with the keyboard @${width} ${theme}`, await status.inputValue() === 'done');
+    }
+    await page.route('**/api/tasks/TASK-2026-0001', async route => {
+      const response = await route.fetch();
+      await route.fulfill({ json: { ...await response.json(), status: 'archived' } });
+    });
+    await page.reload();
+    await settle(page);
+    check(`a saved archived task remains read-only @${width} ${theme}`,
+      await status.isDisabled() && await page.getByRole('button', { name: 'Save changes', exact: true }).count() === 0);
+    await context.close();
+  }
+
   // Release regressions: old results must not be actionable while a new query is pending.
   for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
     const { context, page } = await open(width, theme);

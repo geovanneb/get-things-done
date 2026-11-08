@@ -25,7 +25,9 @@ Each one carries `X-Device`, the phone's id. Bodies and answers are sealed, and 
 | `PUT` | `/v1/items/:id/files/:index?offset=N` | Up to 2 MB of the file. The additional data includes the offset | `received` |
 | `POST` | `/v1/items/:id/commit` | `{}` | `meeting_id` |
 
-An upload resumes from what the offer reports. A chunk at any other offset changes nothing and answers with what is held. Commit checks every SHA-256, then adds the files through the same path as an upload in the dashboard, and queues the meeting. Sending a delivered meeting again changes nothing.
+An upload resumes from what the offer reports. A chunk at any other offset changes nothing and answers with what is held. Commit checks every SHA-256, then adds the files through the same path as an upload in the dashboard, and queues the meeting. Sending a delivered meeting again changes nothing. Concurrent offers, chunks and commits for the same item are serialized within a listener, so overlapping retries do not append or deliver twice. A checksum failure discards the damaged file; offer again to obtain its new offset. Filenames must be unique without regard to case, and inbox paths cannot pass through symlinks. Failed file validation removes the draft created by that delivery attempt while retaining the inbox files.
+
+Pairing codes are consumed before saving a device. Cancelling a code or forgetting a phone also refuses requests still receiving their bodies. This does not roll back an operation already executing. The in-memory serialization is per listener, not a transaction across processes or a durable delivery journal: a process crash between queueing a meeting and saving its receipt can still require manual duplicate cleanup.
 
 ## Where things live
 
