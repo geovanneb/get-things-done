@@ -37,16 +37,20 @@ import { withDictation } from '@/utils/dictation';
 // Stored in each note's file: translate at display time, never here.
 const CATEGORIES = ['Company', 'Organization', 'Strategy', 'Programs', 'Decisions', 'Risks', 'Glossary', 'Situation'] as const;
 
-const categoryLabel = (category: string): string => ({
+/** A label from a fixed table; a hand-written value such as `__proto__` is never looked up on the object's prototype. */
+const lookup = (table: Record<string, string>, key: unknown): string | undefined =>
+  typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+
+const categoryLabel = (category: string): string => lookup({
   All: tr('all'), Company: tr('context.company'), Organization: tr('context.organization'), Strategy: tr('context.strategy'), Programs: tr('context.programs'),
   Decisions: tr('updateDetail.decisions'), Risks: tr('context.risks'), Glossary: tr('context.glossary'), Situation: tr('situation'),
-} as Record<string, string>)[category] ?? category;
+}, category) ?? String(category);
 
 type Category = (typeof CATEGORIES)[number] | 'All';
 
 const RELEVANCE_OPTIONS = ['required', 'recommended', 'optional'] as const;
 type Relevance = (typeof RELEVANCE_OPTIONS)[number];
-const relevanceLabel = (relevance: string): string => ({ required: tr('context.relevanceRequired'), recommended: tr('context.relevanceRecommended'), optional: tr('context.relevanceOptional') } as Record<string, string>)[relevance] ?? relevance;
+const relevanceLabel = (relevance: string): string => lookup({ required: tr('context.relevanceRequired'), recommended: tr('context.relevanceRecommended'), optional: tr('context.relevanceOptional') }, relevance) ?? String(relevance);
 
 const RELEVANCE_BADGE: Record<Relevance, { bg: string; color: string }> = {
   required:    { bg: 'var(--color-critical-subtle)', color: 'var(--color-critical)' },
@@ -54,9 +58,9 @@ const RELEVANCE_BADGE: Record<Relevance, { bg: string; color: string }> = {
   optional:    { bg: 'var(--color-info-subtle)',     color: 'var(--color-info)'     },
 };
 
-const sensitivityLabel = (value: unknown): string => ({
+const sensitivityLabel = (value: unknown): string => lookup({
   shareable: tr('context.sensitivityShareable'), internal: tr('context.sensitivityInternal'), personal: tr('context.sensitivityPersonal'),
-} as Record<string, string>)[String(value)] ?? tr('context.sensitivityInvalid');
+}, value) ?? tr('context.sensitivityInvalid');
 
 // ---------------------------------------------------------------------------
 // Note modal
@@ -197,7 +201,7 @@ interface NoteCardProps {
 
 function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
   const { t } = useLanguage();
-  const relevanceStyle = RELEVANCE_BADGE[note.relevance as Relevance] ?? RELEVANCE_BADGE.optional;
+  const relevanceStyle = (RELEVANCE_OPTIONS as readonly string[]).includes(note.relevance) ? RELEVANCE_BADGE[note.relevance as Relevance] : RELEVANCE_BADGE.optional;
   const preview = note.body ? note.body.slice(0, 160).trimEnd() + (note.body.length > 160 ? '…' : '') : null;
   const chip: React.CSSProperties = { padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-xs)', fontWeight: 500 };
 
@@ -421,9 +425,13 @@ export default function ContextView() {
   useEffect(() => {
     if (!wanted || loading) return;
     const note = notes.find((n) => n.id === wanted);
-    if (note) openEdit(note);
-    else if (!error) notify.error(null, t('context.noteNotFound'));
     setParams((p) => { p.delete('note'); return p; }, { replace: true });
+    if (note) { openEdit(note); return; }
+    if (error) return;
+    // Not in the list this page loaded: it may be newer (an agent or another tab made it). Ask before saying it is gone.
+    apiGet<ContextNote>(`/api/context/${encodeURIComponent(wanted)}`)
+      .then((fresh) => { setNotes((list) => list.some((n) => n.id === fresh.id) ? list : [fresh, ...list]); openEdit(fresh); })
+      .catch(() => notify.error(null, t('context.noteNotFound')));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when a note is asked for and the list is there
   }, [wanted, loading]);
 
