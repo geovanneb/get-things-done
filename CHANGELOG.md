@@ -12,6 +12,13 @@ minor versions may include breaking changes.
 
 - **Receive meetings from your iPhone.** Turn it on in Settings, scan a code with Meetlaud, and meetings arrive in the queue over your local network, encrypted, with no account and no cloud. It is off by default, and the dashboard stays on this computer only.
 
+### Fixed
+
+- **Runs work when `ESB_WORKSPACE_PATH` is a relative path.** Claude Code runs inside the workspace, so the
+  relative path the runner gave it for its settings file pointed inside the workspace a second time, and every
+  run stopped at once with "The analysis did not finish". The server now resolves the workspace path to an
+  absolute one, from the environment variable and from `~/.gtd/config.json` (#338).
+
 ## [0.12.0] - 2026-11-07
 
 **In your language, with your feedback on the record.** The dashboard now speaks **Japanese,
