@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
+import { existsSync, realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { AgentRunnerService, ClaudeCodeAdapter, childEnv, claudeProjectKey, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
@@ -91,6 +92,31 @@ test('runs inherit no API key or provider setting, and trust is read from Claude
 // Claude Code lets a session start under a trusted folder further up, but applies a project's allow rules only when
 // the trust is filed under the project's own key. The dashboard said "trusted" for such a workspace, and every run
 // then stopped on Claude Code's own warning within a second.
+// macOS reaches the data volume both as /x and as /System/Volumes/Data/x (a firmlink, which realpath keeps as given).
+// Claude Code runs in the folder the system reports, the short form, and files trust there (#339).
+const dataVolume = '/System/Volumes/Data';
+test('on macOS, a workspace spelled through /System/Volumes/Data is trusted under its short form', {
+  skip: process.platform !== 'darwin' || !existsSync(dataVolume + realpathSync(os.tmpdir())) ? 'macOS only' : false,
+}, async (t) => {
+  const root = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-trust-')));
+  t.after(() => fsp.rm(root, { recursive: true, force: true }));
+  const config = path.join(root, 'claude-config');
+  await fsp.mkdir(config);
+  const env = { CLAUDE_CONFIG_DIR: config };
+  const trustOnly = (dir: string) => fsp.writeFile(path.join(config, '.claude.json'),
+    JSON.stringify({ projects: { [claudeProjectKey(dir)]: { hasTrustDialogAccepted: true } } }));
+  const short = path.join(root, 'Northwind Workspace');
+  await fsp.mkdir(short);
+  const long = dataVolume + short;
+  assert.equal(await fsp.realpath(long), long, 'realpath keeps the long form, so the key has to be shortened on purpose');
+
+  await trustOnly(short);
+  assert.equal(await workspaceTrusted(long, env), true, 'the long spelling reads the trust Claude Code filed');
+  await trustOnly(long);
+  assert.equal(await workspaceTrusted(long, env), false, 'trust filed under the long spelling is not one Claude Code reads');
+  assert.equal(await workspaceTrusted(short, env), false);
+});
+
 test('trust counts only where Claude Code files it: the workspace folder, or its repository\'s root, never a folder above', async (t) => {
   const root = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-trust-')));
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
