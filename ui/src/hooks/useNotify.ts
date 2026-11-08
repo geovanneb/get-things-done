@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useAppDispatch } from '@/store';
+import { serverText } from '@/i18n/serverText';
 
 /**
  * Short-lived feedback after an action, shown as a toast. See docs/design-system.md, "States".
@@ -14,8 +15,8 @@ export function useNotify() {
       success: (message: string) => add('success', message),
       info: (message: string) => add('info', message),
       warning: (message: string) => add('warning', message),
-      /** Shows the error's own message when it has one, the fallback otherwise. */
-      error: (err: unknown, fallback: string) => add('error', err instanceof Error && err.message ? err.message : fallback),
+      /** Shows the error's own message when it has one (a fixed server text in the interface language), the fallback otherwise. */
+      error: (err: unknown, fallback: string) => add('error', err instanceof Error && err.message ? serverText(err.message) : fallback),
     };
   }, [dispatch]);
 }
