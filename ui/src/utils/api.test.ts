@@ -44,7 +44,12 @@ const sent: { url: string; header: string | null }[] = [];
   const plain = apiFor(undefined);
   await plain.get('/api/runner');
   check('without a workspace, plain requests and links', sent[0]?.header === null && plain.link('/x') === '/x');
-    if (failures > 0) {
+    // A failed request says its status, so a caller can tell a conflict from other failures (the board's moves).
+  (globalThis as { fetch: unknown }).fetch = async () => new Response(JSON.stringify({ error: 'Error', message: 'The task changed.' }), { status: 409, statusText: 'Conflict' });
+  const failed = await apiFor().put('/api/tasks/T', {}).then(() => null, (err: Error & { status?: number }) => err);
+  check('a failed request carries its status', failed?.status === 409 && failed.message === 'The task changed.', String(failed?.status));
+
+  if (failures > 0) {
     console.error(`\n${failures} check(s) failed.`);
     process.exit(1);
   }

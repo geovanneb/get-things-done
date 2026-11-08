@@ -2044,6 +2044,7 @@ export const en = {
   "board.addATaskTo": "Add a task to {label}",
   "board.dropTasksHere": "Drop tasks here",
   "board.type": "Type",
+  "board.taskChangedNotMoved": "The task changed since the board showed it, so it was not moved. Look at it again, then move it.",
   "board.couldNotMoveTheTask": "Could not move the task. Try again.",
   "board.boardViews": "Board views",
   "board.kanban": "Kanban",

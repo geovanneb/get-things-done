@@ -2045,6 +2045,7 @@ export default {
   "board.addATaskTo": "Adicionar uma tarefa a {label}",
   "board.dropTasksHere": "Solte tarefas aqui",
   "board.type": "Tipo",
+  "board.taskChangedNotMoved": "A tarefa mudou desde que o quadro a mostrou, então não foi movida. Veja-a de novo e depois mova.",
   "board.couldNotMoveTheTask": "Não foi possível mover a tarefa. Tente novamente.",
   "board.boardViews": "Visualizações do quadro",
   "board.kanban": "Kanban",

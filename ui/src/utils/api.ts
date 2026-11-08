@@ -26,7 +26,8 @@ async function handleResponse<T>(res: Response): Promise<T> {
     } catch {
       // ignore parse error
     }
-    throw new Error(message);
+    // The status rides along, so a caller can tell a conflict (409) from other failures.
+    throw Object.assign(new Error(message), { status: res.status });
   }
   if (res.status === 204) return undefined as T;
   return res.json();

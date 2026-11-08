@@ -480,15 +480,19 @@ export default function BoardView() {
   const placed = placeTasks(filtered, columns);
 
   const handleDrop = useCallback(async (taskId: string, column: BoardColumn) => {
+    // The version the card shows: a task that changed since (a Request changes, an agent's update) is not moved from
+    // an older card, so a drag can never undo what happened meanwhile.
+    const shown = (data ?? []).find((x) => x.id === taskId)?.updated_at;
     try {
-      await apiPut(`/api/tasks/${taskId}`, dropUpdate(column, columns));
+      await apiPut(`/api/tasks/${taskId}`, { ...dropUpdate(column, columns), ...(shown ? { expected_updated_at: shown } : {}) });
       dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     } catch (err) {
       // The card goes back to its column on the next refresh; say why it did not move.
-      notify.error(err, t('board.couldNotMoveTheTask'));
+      if ((err as { status?: number }).status === 409) notify.error(new Error(t('board.taskChangedNotMoved')), t('board.couldNotMoveTheTask'));
+      else notify.error(err, t('board.couldNotMoveTheTask'));
       dispatch({ type: 'DATA_CHANGED', payload: 'tasks' });
     }
-  }, [dispatch, notify, columns, t]);
+  }, [dispatch, notify, columns, t, data]);
 
   const priorities: PriorityFilter[] = ['all', 'critical', 'high', 'medium', 'low'];
 
