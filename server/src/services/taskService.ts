@@ -83,8 +83,36 @@ function httpError(status: number, message: string): Error {
 }
 
 /** A timestamp is also the optimistic version: rapid writes and a backwards clock must advance it. */
+/**
+ * A timestamp as the server writes it. YAML reads an unquoted `updated_at: 2026-11-08T09:30:00Z` (as an agent or a
+ * person may write it) as a date, not text: without this, every version check would compare text with a date and
+ * refuse the task forever.
+ */
+export function stampText(value: unknown): unknown {
+  return value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : value;
+}
+
+/** A date-only field (YYYY-MM-DD) as text, also when YAML read it as a date. */
+function dayText(value: unknown): unknown {
+  return value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString().slice(0, 10) : value;
+}
+
+/** The fields a task's version checks and screens rely on, as text whatever the YAML held. */
+function withTextDates<T>(data: T): T {
+  const raw = { ...(data as Record<string, unknown>) };
+  for (const key of ['created_at', 'updated_at', 'start_date', 'done_date']) if (key in raw) raw[key] = stampText(raw[key]);
+  const waiting = raw['waiting'];
+  if (waiting && typeof waiting === 'object' && !Array.isArray(waiting)) {
+    const w = { ...(waiting as Record<string, unknown>) };
+    for (const key of ['since', 'follow_up']) if (key in w) w[key] = dayText(w[key]);
+    raw['waiting'] = w;
+  }
+  return raw as T;
+}
+
 function nextUpdatedAt(previous: unknown): string {
-  const before = typeof previous === 'string' ? Date.parse(previous) : NaN;
+  const text = stampText(previous);
+  const before = typeof text === 'string' ? Date.parse(text) : NaN;
   return new Date(Math.max(Date.now(), Number.isFinite(before) ? before + 1 : 0)).toISOString();
 }
 
@@ -209,7 +237,8 @@ export class TaskService {
       if (!(await fileService.exists(taskFile))) continue;
 
       try {
-        const { data, content } = await fileService.readMarkdown<Task>(taskFile);
+        const { data: read, content } = await fileService.readMarkdown<Task>(taskFile);
+        const data = withTextDates(read);
         const rawData = data as Record<string, unknown>;
         const stakeholderObjs = Array.isArray(rawData['stakeholders'])
           ? (rawData['stakeholders'] as { ref?: string; role?: string; key?: boolean }[])
@@ -263,7 +292,8 @@ export class TaskService {
   async getTask(id: string): Promise<Task> {
     const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
 
-    const buildTask = (data: Task, content: string, filePath: string): Task => {
+    const buildTask = (read: Task, content: string, filePath: string): Task => {
+      const data = withTextDates(read);
       const raw = data as Record<string, unknown>;
       const stakeholderObjs = Array.isArray(raw['stakeholders'])
         ? (raw['stakeholders'] as { ref?: string; role?: string; key?: boolean }[])
@@ -436,7 +466,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
       const again = requests.find((r) => r && typeof r === 'object' && (r as ChangeRequest).request_id === requestId) as ChangeRequest | undefined;
       if (again) return { task: { ...(await this.getTask(id)) }, request: again, created: false };
       if (!IN_REVIEW.includes(existing.status)) throw httpError(409, 'Changes can be requested only on a task in review.');
-      if (existing.updated_at !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then request the changes.');
+      if (stampText(existing.updated_at) !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then request the changes.');
 
       const now = nextUpdatedAt(existing.updated_at);
       const numbers = requests.map((r) => Number(/^CR-(\d+)$/.exec(String((r as ChangeRequest | null)?.id ?? ''))?.[1] ?? 0));
@@ -501,7 +531,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     return this.withTaskLock(id, async () => {
       const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
       const { data, content } = await fileService.readMarkdown<Task>(taskFile);
-      if (data.updated_at !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then try again.');
+      if (stampText(data.updated_at) !== seen) throw httpError(409, 'The task changed since you opened it. Read it again, then try again.');
       const updated: Record<string, unknown> = { ...data, ...change, updated_at: nextUpdatedAt(data.updated_at) };
       for (const [key, value] of Object.entries(change)) if (value === undefined) delete updated[key];
       await fileService.writeMarkdown(taskFile, updated, content);
