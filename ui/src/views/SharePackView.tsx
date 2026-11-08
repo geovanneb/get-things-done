@@ -9,6 +9,8 @@ import { Select, Textarea } from '@/components/common/Input';
 import { useApi } from '@/hooks/useApi';
 import { useNotify } from '@/hooks/useNotify';
 import { apiPost, errorMessage } from '@/utils/api';
+import { serverText } from '@/i18n/serverText';
+import { tr } from '@/i18n/current';
 import type { Task } from '@/types';
 
 interface ShareItem { task: string; kind: 'deliverable' | 'attachment'; ref: string; label: string; taskTitle: string }
@@ -16,6 +18,16 @@ interface ShareRow {
   task: string; task_title: string; confidentiality: string | null; kind: string; ref: string; template: string | null;
   source_name: string; zip_name: string; size: number | null; problem: string | null;
 }
+/** The README the pack starts with, in the interface language: the reading order and where each file comes from. */
+function packReadme(rows: ShareRow[]): string {
+  const lines = [`# ${tr('sharePack.readmeTitle')}`, '', tr('sharePack.readmeOrder'), ''];
+  for (const r of rows) {
+    const from = [r.task_title || r.task, r.template].filter(Boolean).join(' · ');
+    lines.push(`- \`${r.zip_name}\`: ${from}${r.confidentiality ? ` (${tr('sharePack.readmeMarked', { value: r.confidentiality })})` : ''}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 interface Preview { rows: ShareRow[]; readme: string; total_bytes: number; token: string; ready: boolean }
 interface TaskFile { name: string }
 
@@ -61,7 +73,7 @@ export default function SharePackView() {
     try {
       const p = await apiPost<Preview>('/api/share-pack/preview', { items: items.map(({ task, kind, ref }) => ({ task, kind, ref })) });
       setPreview(p);
-      if (!readmeEdited) setReadme(p.readme);
+      if (!readmeEdited) setReadme(packReadme(p.rows));
     } catch (err) {
       notify.error(err, t('sharePack.couldNotPreview'));
     } finally {
@@ -136,7 +148,7 @@ export default function SharePackView() {
               <tbody>
                 {preview.rows.map((r) => (
                   <tr key={key(r)}>
-                    <td className="mono">{r.zip_name}{r.problem && <div style={{ color: 'var(--color-critical)', fontFamily: 'inherit' }}>{r.problem}</div>}</td>
+                    <td className="mono">{r.zip_name}{r.problem && <div style={{ color: 'var(--color-critical)', fontFamily: 'inherit' }}>{serverText(r.problem)}</div>}</td>
                     <td>{r.task_title || r.task}</td>
                     <td>{r.template ?? '–'}</td>
                     <td>{r.confidentiality ? <Badge size="sm" variant="warning">{r.confidentiality}</Badge> : '–'}</td>
