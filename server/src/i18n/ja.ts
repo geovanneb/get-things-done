@@ -508,6 +508,7 @@ export default {
   "analysisRun.applyWith": "{label} で適用",
   "analysisRun.checkingWhetherTheDashboardCan": "ダッシュボードでここを実行できるか確認しています…",
   "analysisRun.runsWithYourClaudePlan": "このワークスペースのルールの下で、Claude プランを使って {label} を実行します。このページを離れても構いません。準備ができると更新されます。",
+  "analysisRun.signedInAs": "{account} でサインインしています。",
   "analysisRun.theSameCommandYouWould": "自分で実行するのと同じコマンドをバックグラウンドで実行します。この実行ではフックと MCP サーバーはオフです。",
   "analysisRun.theSameCommandYouWould2": "自分で実行するのと同じコマンドをバックグラウンドで実行します。ワークスペースが確認を求める場面では、ダッシュボードが回答します。承認したファイルのみ「はい」、それ以外は「いいえ」です。",
   "analysisRun.orRunItYourself": "自分で実行する",

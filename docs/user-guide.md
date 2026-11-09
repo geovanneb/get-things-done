@@ -415,6 +415,13 @@ terminal in the workspace folder, run `claude` once and accept "trust this folde
 analysis runs at a time, the update is locked while it runs, and **Stop analysis** ends
 it with everything it started.
 
+Next to the button, **Signed in as** shows the Claude account the dashboard's runs use.
+A computer can have more than one Claude Code sign-in (for example a work and a personal
+account in different config folders), and the dashboard uses the one its own environment
+points to, which may not be the one your terminal uses. When Claude Code stops a run with
+an error of its own, such as "You've hit your weekly limit", the dashboard quotes it, and
+says when the account has reached its plan's usage limit.
+
 While it runs, the same box shows how long it has been going and the step it is on, for
 example "Step 7 · Reading `context/risks/…/note.md`". **Show details** lists one line per step
 (the last 50). A step says only which tool the agent used and which file or folder it

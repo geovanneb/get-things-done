@@ -153,6 +153,13 @@ export default forwardRef<AnalysisRunHandle, {
   };
 
   const problem = serverText(runner?.problems[0]?.message);
+  // Which sign-in the dashboard uses: with several Claude accounts on one computer it may not be the one a terminal uses.
+  const account = runner?.account;
+  // A personal plan's organization is often named after the email: then it is left out.
+  const organization = account?.organization && !(account.email && account.organization.includes(account.email)) ? account.organization : null;
+  const who = account?.email ?? organization ?? '';
+  const details = [who === organization ? null : organization, account?.plan].filter(Boolean).join(', ');
+  const accountText = who ? (details ? `${who} (${details})` : who) : '';
   const ended = run && !running ? run : null;
   const command = startable ? COMMAND_FOR[status] : undefined;
   const noun = (ended ?? run)?.command === 'apply' ? t('analysisRun.apply') : t('analysisRun.analysis');
@@ -181,6 +188,7 @@ export default forwardRef<AnalysisRunHandle, {
             <Button data-next-action="" variant="primary" loading={busy} onClick={() => void start()}>{label}</Button>
             <span style={{ flex: '1 1 240px', minWidth: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
               {rich(t, 'analysisRun.runsWithYourClaudePlan', { label: runner.label })}
+              {accountText && <> {t('analysisRun.signedInAs', { account: accountText })}</>}
             </span>
           </div>
           <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>

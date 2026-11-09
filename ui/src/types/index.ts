@@ -596,6 +596,8 @@ export interface RunnerStatus {
   /** Whether Claude Code trusts the workspace folder; null when that could not be verified. */
   trusted: boolean | null;
   problems: { code: string; message: string }[];
+  /** The Claude account runs use (the dashboard's own sign-in); null or missing when unknown. */
+  account?: { email: string | null; organization: string | null; plan: string | null } | null;
 }
 
 /** A run of a workspace command (analyze or apply) started from the dashboard. */
