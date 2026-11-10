@@ -72,7 +72,7 @@ function parseDate(value: unknown): Date | null {
  * task due today would read as "due in 2 days" and only go overdue at 09:00 the
  * following morning.
  */
-function endOfDay(value: string): Date | null {
+export function endOfDay(value: string): Date | null {
   if (value.includes('T')) return parseDate(value);
   const parts = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!parts) return parseDate(value);
@@ -94,7 +94,7 @@ function startOfDay(date: Date): Date {
  * tomorrow evening "2 days", because it is 1.4 days away. People count the
  * dates on a calendar, not the hours in between.
  */
-function calendarDaysUntil(due: Date, now: Date): number {
+export function calendarDaysUntil(due: Date, now: Date): number {
   return Math.round((startOfDay(due).getTime() - startOfDay(now).getTime()) / DAY_MS);
 }
 
