@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as http from 'http';
 import * as net from 'net';
+import * as os from 'os';
 import * as path from 'path';
 import { ESB_PID_FILE } from './paths';
 
@@ -50,15 +51,58 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
+/** Slack for clock adjustments when comparing the recorded start with the last boot. */
+const BOOT_MARGIN_MS = 60_000;
+
+/** The pid a GTD server on `port` reports on /health; null for one too old to report it; undefined if no GTD answer. */
+function healthPid(port: number, timeoutMs = 2000): Promise<number | null | undefined> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/health', timeout: timeoutMs }, (res) => {
+      let body = '';
+      res.setEncoding('utf-8');
+      res.on('data', (chunk) => (body += chunk));
+      res.on('error', () => resolve(undefined));
+      res.on('end', () => {
+        try {
+          const health = JSON.parse(body) as { status?: unknown; pid?: unknown } | null;
+          if (health?.status !== 'ok') return resolve(undefined);
+          resolve(typeof health.pid === 'number' ? health.pid : null);
+        } catch {
+          resolve(undefined);
+        }
+      });
+    });
+    req.on('error', () => resolve(undefined));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(undefined);
+    });
+  });
+}
+
+/**
+ * Whether the recorded process is our dashboard. A live PID is not enough: after a crash or a reboot a leftover
+ * PID file can name an unrelated process. 'stale' only when we know it is not ours (gone, started before the last
+ * boot, or the dashboard on its port is another process); 'unknown' when nothing answers, e.g. a hung dashboard.
+ */
+export async function checkRecordedDaemon(state: DaemonState): Promise<'ours' | 'stale' | 'unknown'> {
+  if (!isProcessAlive(state.pid)) return 'stale';
+  const startedAt = Date.parse(state.startedAt);
+  if (startedAt < Date.now() - os.uptime() * 1000 - BOOT_MARGIN_MS) return 'stale';
+  const pid = await healthPid(state.port);
+  if (pid === undefined) return 'unknown';
+  return pid === null || pid === state.pid ? 'ours' : 'stale';
+}
+
 /**
  * Returns the running daemon, clearing the PID file if the process is gone.
  * Guards against a recycled PID pointing at an unrelated process.
  */
-export function getRunningDaemon(): DaemonState | null {
+export async function getRunningDaemon(): Promise<DaemonState | null> {
   const state = readDaemonState();
   if (!state) return null;
 
-  if (!isProcessAlive(state.pid)) {
+  if ((await checkRecordedDaemon(state)) === 'stale') {
     clearDaemonState();
     return null;
   }

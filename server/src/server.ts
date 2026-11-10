@@ -238,7 +238,8 @@ function createApp(port: number, options: StartServerOptions, sseClients: Set<Re
   });
 
   app.get('/health', (req: Request, res: Response) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    // The pid lets `gtd` tell its dashboard from an unrelated process that got a recycled PID.
+    res.json({ status: 'ok', pid: process.pid, timestamp: new Date().toISOString() });
   });
 
   registerRoutes(app);
