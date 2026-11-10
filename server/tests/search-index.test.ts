@@ -52,3 +52,39 @@ test('the search index is a SQLite file built with node:sqlite, with prefix sear
   await search.invalidateEntity(carrier.id);
   assert.deepEqual(await search.search('zephyrlogistics'), []);
 });
+
+test('the SQLite index finds a Japanese word inside a title or text, as the in-memory scan does', { skip: !hasBuiltInSqlite && 'needs node:sqlite (Node 22.13+)' }, async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-search-ja-'));
+  const previous = process.env.ESB_WORKSPACE_PATH;
+  process.env.ESB_WORKSPACE_PATH = dir;
+  await fsp.mkdir(path.join(dir, 'tasks', 'active'), { recursive: true });
+
+  const { TaskService } = await import('../src/services/taskService');
+  const { SearchService } = await import('../src/services/searchService');
+  const search = new SearchService();
+  t.after(async () => {
+    search.reset();
+    if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
+    else process.env.ESB_WORKSPACE_PATH = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+
+  const tasks = new TaskService();
+  const strategy = await tasks.createTask({ title: 'ノースウィンド社の経営戦略', body: '毎週の定例会議の議事録をまとめる。' });
+  const carrier = await tasks.createTask({ title: 'Decision brief: second freight carrier', body: 'Compare Dual Lane and Northwind Freight.' });
+  await search.buildIndex();
+  assert.ok(fs.existsSync(path.join(dir, '.situation-board', 'cache', 'search.db')), 'the SQLite path, not the fallback');
+
+  // Inside a run of text (the index splits words only on spaces), in the title and in the body, one or more characters.
+  for (const q of ['経営戦略', '会議', '議事録', 'ノースウィンド', '毎週', '週']) {
+    assert.deepEqual((await search.search(q)).map((row) => row.id), [strategy.id], q);
+  }
+  const hit = (await search.search('経営戦略'))[0]!;
+  assert.ok(hit.relevance > (await search.search('議事録'))[0]!.relevance, 'a title hit outranks a body hit');
+  assert.deepEqual(await search.search('会議', ['stakeholder']), [], 'the type filter still applies');
+  assert.match((await search.search('議事録'))[0]!.excerpt, /議事録/);
+
+  // English still goes through the word index, by word prefix.
+  assert.deepEqual((await search.search('northw')).map((row) => row.id), [carrier.id]);
+  assert.deepEqual((await search.search('dual lane')).map((row) => row.id), [carrier.id]);
+});
