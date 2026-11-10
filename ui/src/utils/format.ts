@@ -2,7 +2,7 @@ import { es, ja, ptBR } from 'date-fns/locale';
 import type { Locale as DateFnsLocale } from 'date-fns';
 import type { Locale } from '../../../server/src/i18n/locale';
 import { currentLocale, tr } from '@/i18n/current';
-import { formatDistanceToNow, differenceInDays, isToday, isPast, isFuture, parseISO } from 'date-fns';
+import { formatDistanceToNow, differenceInCalendarDays, isToday, isPast, isFuture, parseISO } from 'date-fns';
 
 const DATE_LOCALES: Partial<Record<Locale, DateFnsLocale>> = { ja, 'pt-BR': ptBR, 'es-419': es };
 
@@ -22,7 +22,8 @@ export function formatDate(date: string | Date): string {
 export function formatRelativeDate(date: string | Date): string {
   try {
     const d = parseDate(date);
-    const diff = differenceInDays(d, new Date());
+    // Calendar days, as the labels say: 24-hour periods made last night "0 days ago" and tomorrow morning "0 days ago".
+    const diff = differenceInCalendarDays(d, new Date());
     if (isToday(d)) return tr('format.today');
     if (diff === 1) return tr('format.tomorrow');
     if (diff === -1) return tr('format.yesterday');
@@ -39,7 +40,7 @@ export function formatDueStatus(dueDate: string): 'overdue' | 'due-today' | 'due
     const d = parseISO(dueDate);
     if (isToday(d)) return 'due-today';
     if (isPast(d)) return 'overdue';
-    const diff = differenceInDays(d, new Date());
+    const diff = differenceInCalendarDays(d, new Date());
     if (diff <= 3) return 'due-soon';
     if (isFuture(d)) return 'upcoming';
     return 'none';
