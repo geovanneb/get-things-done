@@ -231,6 +231,13 @@ export class InboxServer {
     const dir = inboxPath(device, itemId);
     const files = item.files.map((file) => ({ name: file.name, path: inboxPath(device, itemId, file.name) }));
     for (const [index, file] of item.files.entries()) {
+      if (file.size === 0) {
+        // An empty file is complete as offered, so no chunk ever creates it. "wx" never follows a planted symlink.
+        await workspaceEntry(inboxDir(), files[index].path, true);
+        await fsp.writeFile(files[index].path, '', { flag: 'wx', mode: 0o600 }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'EEXIST') throw error;
+        });
+      }
       await workspaceEntry(inboxDir(), files[index].path);
       const stat = await fsp.lstat(files[index].path);
       if (!stat.isFile()) throw new Refused(400, 'Not a plain file');
