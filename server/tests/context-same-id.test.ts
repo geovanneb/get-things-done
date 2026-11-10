@@ -99,3 +99,34 @@ test('a title without ASCII letters gets its own ASCII id, and ASCII titles keep
   assert.equal((await service.createContextNote({ category: 'strategy', title: 'Plan 2026' })).id, 'CTX-plan-2026');
   assert.equal((await service.createContextNote({ category: 'strategy', title: '2027' })).id, 'CTX-2027');
 });
+
+test('a category outside the eight is refused, so no note is written where it can never be read again', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-category-'));
+  const previous = process.env.ESB_WORKSPACE_PATH;
+  process.env.ESB_WORKSPACE_PATH = dir;
+  await fsp.mkdir(path.join(dir, 'context'), { recursive: true });
+  t.after(async () => {
+    if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
+    else process.env.ESB_WORKSPACE_PATH = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+  const { ContextService } = await import('../src/services/contextService');
+  const service = new ContextService();
+  const refused = (e: { statusCode?: number; message: string }) => e.statusCode === 400 && /category must be one of company, organization/.test(e.message);
+
+  for (const category of ['Finance', 'situation/../finance', ' strategy', 7, ['strategy']] as unknown as string[]) {
+    await assert.rejects(service.createContextNote({ category, title: 'Vendor pricing 2027', body: 'Quotes.\n' }), refused);
+  }
+  assert.deepEqual(await fsp.readdir(path.join(dir, 'context')), [], 'no folder is made');
+
+  // Case still does not matter, and no category still means situation.
+  assert.equal((await service.createContextNote({ category: 'Strategy', title: 'Hiring plan', body: 'Five roles.\n' })).category, 'strategy');
+  assert.equal((await service.createContextNote({ title: 'Open questions', body: 'x\n' })).category, 'situation');
+
+  await assert.rejects(service.updateContextNote('CTX-hiring-plan', { category: 'Strategic' }), refused);
+  const note = await service.getContextNote('CTX-hiring-plan');
+  assert.equal(note.category, 'strategy');
+  assert.equal((await service.updateContextNote('CTX-hiring-plan', { category: 'RISKS' })).category, 'risks');
+  assert.equal((await service.getContextNote('CTX-hiring-plan')).category, 'risks');
+  await service.deleteContextNote('CTX-hiring-plan');
+});

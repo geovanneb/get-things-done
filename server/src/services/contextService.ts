@@ -32,6 +32,16 @@ function requestedSensitivity(value: unknown): Sensitivity | null | undefined {
 }
 const workspaceService = new WorkspaceService();
 
+/** The categories in .schemas/context.schema.json; a note anywhere else is never listed, read or deleted. */
+const CATEGORIES: readonly ContextCategory[] = ['company', 'organization', 'strategy', 'programs', 'decisions', 'risks', 'glossary', 'situation'];
+
+/** A category sent by the user, matched without case: anything outside the eight is refused before a folder is made. */
+function requestedCategory(value: unknown): ContextCategory {
+  const category = typeof value === 'string' ? value.toLowerCase() : value;
+  if ((CATEGORIES as readonly unknown[]).includes(category)) return category as ContextCategory;
+  throw httpError(400, `category must be one of ${CATEGORIES.join(', ')}.`);
+}
+
 // Per-note folder structure: context/category/slug/note.md
 // Old structure (backward compat): context/category/slug.md
 // Migration: old files are moved to new structure automatically
@@ -61,9 +71,7 @@ export class ContextService {
   }
 
   async listContextNotes(category?: ContextCategory): Promise<ContextNote[]> {
-    const categories: ContextCategory[] = category
-      ? [category]
-      : ['company', 'organization', 'strategy', 'programs', 'decisions', 'risks', 'glossary', 'situation'];
+    const categories: readonly ContextCategory[] = category ? [category] : CATEGORIES;
 
     const results: ContextNote[] = [];
 
@@ -128,7 +136,7 @@ export class ContextService {
 
   async createContextNote(data: Partial<ContextNote>): Promise<ContextNote> {
     const now = new Date().toISOString();
-    const category: ContextCategory = ((data.category || 'situation').toLowerCase() as ContextCategory);
+    const category = requestedCategory(data.category || 'situation');
     const slug = data.slug || titleSlug(data.title || 'untitled', 'note');
     const sensitivity = requestedSensitivity(data.sensitivity);
     const id = `CTX-${slug}`;
@@ -173,10 +181,9 @@ export class ContextService {
 
   async updateContextNote(id: string, data: Partial<ContextNote>): Promise<ContextNote> {
     const sensitivity = requestedSensitivity(data.sensitivity);
+    const requested = data.category ? requestedCategory(data.category) : undefined;
     const existing = await this.getContextNote(id);
-    const incomingCategory = data.category
-      ? (data.category.toLowerCase() as ContextCategory)
-      : existing.category;
+    const incomingCategory = requested ?? existing.category;
 
     const bodyContent = data.body !== undefined
       ? data.body
@@ -269,7 +276,7 @@ export class ContextService {
   }
 
   private async findContextFile(id: string): Promise<{ filePath: string; category: ContextCategory } | null> {
-    const categories: ContextCategory[] = ['company', 'organization', 'strategy', 'programs', 'decisions', 'risks', 'glossary', 'situation'];
+    const categories = CATEGORIES;
 
     for (const cat of categories) {
       const dir = this.getContextDir(cat);
