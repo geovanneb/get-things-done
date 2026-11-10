@@ -1293,6 +1293,7 @@ try {
     const plain = await (await json('POST', '/api/org-charts', { name: 'Plain chart', members: [{ ref: p1 }, { ref: p2, reports_to: p1 }] })).json();
     // Units: membership containers; reporting lines are untouched.
     const unitTemp = await (await json('POST', '/api/stakeholders', { name: 'Smoke Head', role: 'Head' })).json();
+    check('a deleted stakeholder\'s id is not given to the next new person', unitTemp.id !== temp.id, `${temp.id} -> ${unitTemp.id}`);
     const uChart = await (await json('POST', '/api/org-charts', {
       name: 'Unit chart',
       members: [{ ref: p1, unit: 'U-1' }, { ref: unitTemp.id, reports_to: p1, unit: 'U-2' }, { ref: p2, reports_to: unitTemp.id, unit: 'U-2' }, { ref: p3, reports_to: p1, unit: 'U-9' }],

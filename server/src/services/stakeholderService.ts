@@ -3,6 +3,7 @@ import * as fsp from 'fs/promises';
 import { Stakeholder, InfluenceLevel } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
+import { reserveIds, reservedSequence } from './idReservations';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -109,6 +110,8 @@ export class StakeholderService {
   async deleteStakeholder(id: string): Promise<void> {
     const filePath = await this.findStakeholderFile(id);
     if (!filePath) throw new Error(`Stakeholder not found: ${id}`);
+    // Keep the id taken: tasks and @mentions that name this person must not point at the next new one.
+    await reserveIds([id]);
     await fileService.deleteFile(filePath);
   }
 
@@ -146,6 +149,7 @@ export class StakeholderService {
         }
       } catch { /* skip */ }
     }
+    maxSeq = Math.max(maxSeq, await reservedSequence(prefix));
     const nextSeq = String(maxSeq + 1).padStart(4, '0');
     return `${prefix}-${nextSeq}`;
   }
