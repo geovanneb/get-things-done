@@ -4,6 +4,7 @@ import { OutputTemplate, OutputFormat } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
+import { titleSlug } from '../utils/slug';
 import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
@@ -72,7 +73,7 @@ export class OutputService {
 
   async createTemplate(data: Partial<OutputTemplate>): Promise<OutputTemplate> {
     const now = new Date().toISOString();
-    const slug = data.slug || this.slugify(data.name || 'untitled');
+    const slug = data.slug || titleSlug(data.name || 'untitled', 'template');
     const id = `OUT-${slug}`;
     const templateDir = path.join(this.getTemplatesDir(), topLevelName(slug));
     const filePath = path.join(templateDir, 'output.md');
@@ -186,13 +187,5 @@ export class OutputService {
       }
     }
     return null;
-  }
-
-  private slugify(text: string): string {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 64);
   }
 }

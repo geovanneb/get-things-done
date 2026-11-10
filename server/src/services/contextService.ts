@@ -4,6 +4,7 @@ import { ContextNote, ContextCategory } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
+import { titleSlug } from '../utils/slug';
 import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
@@ -128,7 +129,7 @@ export class ContextService {
   async createContextNote(data: Partial<ContextNote>): Promise<ContextNote> {
     const now = new Date().toISOString();
     const category: ContextCategory = ((data.category || 'situation').toLowerCase() as ContextCategory);
-    const slug = data.slug || this.slugify(data.title || 'untitled');
+    const slug = data.slug || titleSlug(data.title || 'untitled', 'note');
     const sensitivity = requestedSensitivity(data.sensitivity);
     const id = `CTX-${slug}`;
     const noteDir = this.getNoteDir(category, slug);
@@ -298,13 +299,5 @@ export class ContextService {
       }
     }
     return null;
-  }
-
-  private slugify(text: string): string {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 64);
   }
 }
