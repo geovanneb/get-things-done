@@ -3,7 +3,8 @@ import * as fsp from 'fs/promises';
 import { OutputTemplate, OutputFormat } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile } from '../utils/files';
+import { lock, unlock } from '../utils/fileLock';
+import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -14,6 +15,10 @@ const workspaceService = new WorkspaceService();
  */
 function normaliseFormat(format: unknown): OutputFormat {
   return (typeof format === 'string' && format.trim() ? format.trim().toLowerCase() : 'md') as OutputFormat;
+}
+
+function httpError(status: number, message: string): Error {
+  return Object.assign(new Error(message), { statusCode: status });
 }
 
 export class OutputService {
@@ -72,24 +77,36 @@ export class OutputService {
     const templateDir = path.join(this.getTemplatesDir(), topLevelName(slug));
     const filePath = path.join(templateDir, 'output.md');
 
-    await fileService.ensureDir(templateDir);
+    // Names that differ only in case or punctuation share a slug: check and create under one cross-process lock.
+    const ws = workspaceService.getWorkspacePath();
+    const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'template-locks'), true);
+    await fileService.ensureDir(locks);
+    const lockFile = await workspaceEntry(ws, path.join(locks, `${topLevelName(id)}.lock`), true);
+    const held = await lock(lockFile, 5000, () => httpError(409, 'This output template is being created elsewhere. Try again.'));
+    try {
+      // Never replace another template (and take over its uploaded files) by creating one with a similar name.
+      if (await fileService.exists(filePath)) throw httpError(409, `An output template named "${slug}" already exists. Edit it, or choose another name.`);
+      await fileService.ensureDir(templateDir);
 
-    const template: OutputTemplate = {
-      id,
-      slug,
-      name: data.name || 'Untitled Template',
-      format: data.format || 'md',
-      description: data.description,
-      required_sections: data.required_sections ?? [],
-      style_guide: data.style_guide,
-      tags: data.tags ?? [],
-      created_at: now,
-      updated_at: now,
-    };
+      const template: OutputTemplate = {
+        id,
+        slug,
+        name: data.name || 'Untitled Template',
+        format: data.format || 'md',
+        description: data.description,
+        required_sections: data.required_sections ?? [],
+        style_guide: data.style_guide,
+        tags: data.tags ?? [],
+        created_at: now,
+        updated_at: now,
+      };
 
-    const { path: _path, ...frontmatter } = template;
-    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, data.description || '');
-    return { ...template, path: filePath };
+      const { path: _path, ...frontmatter } = template;
+      await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, data.description || '');
+      return { ...template, path: filePath };
+    } finally {
+      await unlock(held);
+    }
   }
 
   async updateTemplate(id: string, data: Partial<OutputTemplate>): Promise<OutputTemplate> {

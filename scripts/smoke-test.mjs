@@ -585,6 +585,14 @@ try {
   {
     const templates = await (await fetch(`${base}/api/outputs/templates`)).json();
     const notes = await (await fetch(`${base}/api/context`)).json();
+    // "MEETING BRIEF" has the same slug as the shipped "Meeting brief": refused, never replacing it.
+    const brief = templates.find((t) => t.slug === 'meeting-brief');
+    const briefText = fs.readFileSync(brief.path, 'utf8');
+    const clash = await fetch(`${base}/api/outputs/templates`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'MEETING BRIEF', format: 'md' }),
+    });
+    check('a template named like an existing one in other case is refused and leaves it alone',
+      clash.status === 409 && fs.readFileSync(brief.path, 'utf8') === briefText, `status=${clash.status}`);
     for (const [label, files] of [['template', `/api/outputs/templates/${templates[0].id}/files`], ['context note', `/api/context/${notes[0].id}/files`]]) {
       const form = new FormData();
       form.append('file', new Blob(['hello from the smoke test'], { type: 'text/plain' }), 'smoke-note.txt');
