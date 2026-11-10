@@ -162,12 +162,19 @@ function StakeholderModal({ isOpen, onClose, editing, onSaved, type }: Stakehold
         name: form.name.trim(),
         role: form.role.trim(),
         organization: form.organization.trim(),
-        email: form.email.trim() || undefined,
+        email: form.email.trim(),
         what_matters: form.what_matters.trim(),
-        notes: form.notes.trim() || undefined,
+        notes: form.notes.trim(),
       };
       if (editing) {
-        await apiPut(`/api/stakeholders/${editing.id}`, payload);
+        // Email and notes go only when changed here: an agent may have written them to the file while the dialog was
+        // open. A cleared one is sent empty, which removes it; a missing one keeps what the file has.
+        const { email, notes, ...rest } = payload;
+        await apiPut(`/api/stakeholders/${editing.id}`, {
+          ...rest,
+          ...(email !== (editing.email ?? '').trim() ? { email } : {}),
+          ...(notes !== (editing.notes ?? '').trim() ? { notes } : {}),
+        });
       } else {
         await apiPost('/api/stakeholders', { ...payload, type });
       }

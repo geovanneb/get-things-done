@@ -1300,6 +1300,17 @@ try {
       removed.every((r) => r.ok) && nextPerson.id !== person.id && nextTeam.id !== team.id);
   }
 
+  // Clearing a stakeholder's email and notes in the edit form sends them empty, and that removes them.
+  {
+    const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const temp = await (await send('POST', '/api/stakeholders', { name: 'Smoke Clear', email: 'smoke.clear@example.test', notes: 'Smoke note.' })).json();
+    const cleared = await send('PUT', `/api/stakeholders/${temp.id}`, { name: 'Smoke Clear', email: '', notes: '' });
+    const after = await (await fetch(`${base}/api/stakeholders/${temp.id}`)).json();
+    check('clearing a stakeholder email and notes removes them',
+      cleared.ok && after.email === undefined && after.notes === undefined, JSON.stringify({ email: after.email, notes: after.notes }));
+    await fetch(`${base}/api/stakeholders/${temp.id}`, { method: 'DELETE' });
+  }
+
   // Org charts: titles survive every save, new unknown ids are rejected, 1.1 only when needed.
   {
     const json = (method, url, body) => fetch(`${base}${url}`, {

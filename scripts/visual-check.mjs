@@ -232,6 +232,42 @@ try {
     await context.close();
   }
 
+  // Clearing a stakeholder's email and notes in the edit form removes them, rather than keeping the old values;
+  // fields left as loaded are not sent.
+  {
+    const { context, page } = await open(1280);
+    const send = (method, url, body) => fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) });
+    const person = await (await send('POST', '/api/stakeholders', { name: 'Fictional Clearing', email: 'fictional.clearing@example.test', notes: 'Fictional note.' })).json();
+    await page.goto(`${base}/stakeholders`);
+    await settle(page);
+    await page.getByRole('button', { name: 'Edit Fictional Clearing', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    const email = dialog.getByRole('textbox', { name: 'Email', exact: true });
+    await page.waitForFunction(() => [...document.querySelectorAll('[role=dialog] input')].some((i) => i.value === 'fictional.clearing@example.test'));
+    await email.fill('');
+    await dialog.getByRole('textbox', { name: 'Notes', exact: true }).fill('');
+    await dialog.getByRole('button', { name: /save/i }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    const saved = await (await fetch(`${base}/api/stakeholders/${person.id}`)).json();
+    check('stakeholders: clearing email and notes in the form removes them', saved.email === undefined && saved.notes === undefined,
+      JSON.stringify({ email: saved.email, notes: saved.notes }));
+    // Fields left as loaded are not sent, so what an agent writes while the dialog is open is kept.
+    const puts = [];
+    page.on('request', (r) => { if (r.method() === 'PUT' && r.url().includes(`/api/stakeholders/${person.id}`)) puts.push(r.postDataJSON()); });
+    await page.getByRole('button', { name: 'Edit Fictional Clearing', exact: true }).click();
+    await dialog.getByRole('textbox', { name: 'Role', exact: true }).fill('Fictional role');
+    await send('PUT', `/api/stakeholders/${person.id}`, { email: 'fictional.agent@example.test', notes: 'Fictional agent note.' });
+    await dialog.getByRole('button', { name: /save/i }).click();
+    await dialog.waitFor({ state: 'hidden' });
+    const kept = await (await fetch(`${base}/api/stakeholders/${person.id}`)).json();
+    check('stakeholders: an unchanged empty email and notes are not sent, so other writes are kept',
+      puts.length === 1 && !('email' in puts[0]) && !('notes' in puts[0]) && kept.role === 'Fictional role'
+        && kept.email === 'fictional.agent@example.test' && kept.notes?.trim() === 'Fictional agent note.',
+      JSON.stringify({ sent: puts, email: kept.email, notes: kept.notes, role: kept.role }));
+    await send('DELETE', `/api/stakeholders/${person.id}`);
+    await context.close();
+  }
+
   // ---- Behaviour on every page and width ----------------------------------
   if (!process.argv.includes('--language-only')) {
   for (const theme of ['light', 'dark']) {
