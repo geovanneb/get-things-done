@@ -1018,6 +1018,15 @@ try {
     check('a Word document gets a readable text copy next to it',
       docUp.status === 201 && docSaved.transcript === 'sync.text.md' && docSaved.transcript_complete === true && docCopy.includes('  Fictional Speaker 0:03\n  Fictional words.'),
       `up=${docUp.status} copy=${docSaved.transcript}`);
+    // A trailing dot is not kept in a saved name (Windows drops it), so the file stays listed after the next upload.
+    const dotted = await (await json('POST', '/api/meeting-queue', { title: 'Fictional notes', meeting_date: '2026-10-28' })).json();
+    const dotUpload = (text, name) => { const form = new FormData(); form.append('file', new Blob([text]), name); return fetch(`${base}/api/meeting-queue/${dotted.id}/files`, { method: 'POST', body: form }); };
+    const dotUp = await dotUpload('Fictional agenda.\n', 'Standup notes.');
+    await dotUpload('Fictional slide.\n', 'slides.txt');
+    const dotListed = (await (await fetch(`${base}/api/meeting-queue`)).json()).meetings.find((m) => m.id === dotted.id)?.files.map((f) => f.name) ?? [];
+    check('an upload named with a trailing dot is saved without it and stays listed',
+      dotUp.status === 201 && JSON.stringify(dotListed) === '["Standup_notes","slides.txt"]', `up=${dotUp.status} files=${dotListed}`);
+    await fetch(`${base}/api/meeting-queue/${dotted.id}`, { method: 'DELETE' });
     // A fictional meeting through the queue into a digest.
     const queued = await (await json('POST', '/api/meeting-queue', { title: 'Fictional standup', meeting_date: '2026-10-28', participants: [{ name: 'Sofia Reyes', ref: 'STK-0001' }, { name: 'Kim Park' }] })).json();
     const queueForm = new FormData();
