@@ -60,6 +60,29 @@ test('a WebVTT original changes in its one cue, everything else as written, and 
   assert.deepEqual((await applyChanges([{ file: 'sync.transcript.md', turn: 1, before: 'Ask Dual Line', after: 'Ask Dual Lane' }], files(old))).problems, [null]);
 });
 
+test('new text with $$, $& or $\' is saved as written, in a recording\'s copy and in a WebVTT original and its copy', async () => {
+  // As replacement strings these would be read as patterns: "US$5", the old text followed by 5, the rest of the line.
+  for (const { before, after, recording } of [
+    { before: 'Monday', after: 'US$$5', recording: 'We call Dual Line on US$$5.' },
+    { before: 'Monday', after: '$&5', recording: 'We call Dual Line on $&5.' },
+    { before: 'call', after: "it$'s", recording: "We it$'s Dual Line on Monday." },
+  ]) {
+    const { files: out, problems } = await applyChanges([{ file: 'call.transcript.md', turn: 1, before, after }], files({ 'call.transcript.md': RECORDING }));
+    assert.deepEqual(problems, [null], after);
+    assert.equal(copyTurns(out.get('call.transcript.md')!)!.turns[0]!.lines[0], recording);
+  }
+  for (const { before, after, line } of [
+    { before: 'everyone', after: 'US$$5', line: 'Good morning, US$$5.' },
+    { before: 'everyone', after: '$&5', line: 'Good morning, $&5.' },
+    { before: 'morning', after: "it$'s", line: "Good it$'s, everyone." },
+  ]) {
+    const { files: out, problems } = await applyChanges([{ file: 'sync.transcript.md', turn: 1, before, after }], files({ 'sync.vtt': VTT, 'sync.transcript.md': copyOf(VTT) }));
+    assert.deepEqual(problems, [null], after);
+    assert.equal(out.get('sync.vtt'), VTT.replace('Good morning, everyone.', () => line));
+    assert.equal(copyTurns(out.get('sync.transcript.md')!)!.turns[0]!.lines[0], line);
+  }
+});
+
 test('a change that cannot be placed for certain is refused with its reason, never guessed', async () => {
   const map = files({ 'sync.vtt': VTT, 'sync.transcript.md': copyOf(VTT), 'call.transcript.md': RECORDING, 'notes.md': '# Notes\n\nDual Line.', 'deck.text.md': 'Text of a deck' });
   const one = async (change: Record<string, unknown>) => (await applyChanges([change], map)).problems[0];
