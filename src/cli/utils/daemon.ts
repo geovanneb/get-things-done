@@ -18,7 +18,9 @@ export function readDaemonState(): DaemonState | null {
   if (!raw) return null;
 
   try {
-    const parsed = JSON.parse(raw) as DaemonState;
+    const parsed = JSON.parse(raw) as DaemonState | number;
+    // A bare PID is valid JSON too, so it never reaches the catch below.
+    if (typeof parsed === 'number') return { pid: parsed, port: 3001, workspace: '', startedAt: '' };
     if (typeof parsed.pid === 'number') return parsed;
   } catch {
     // Older versions stored a bare PID.
