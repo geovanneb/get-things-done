@@ -68,6 +68,12 @@ function loadSqlite(): DatabaseCtor | null {
   return sqliteCtor;
 }
 
+/**
+ * Kanji and kana are written without spaces. The FTS index splits words only on spaces and punctuation and matches a
+ * word by its start, so a word inside an unspaced run (経営戦略 in ノースウィンド社の経営戦略) is never found by it.
+ */
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+
 export class SearchService {
   private db: SqliteDatabase | null = null;
   private memoryRows: IndexRow[] | null = null;
@@ -195,13 +201,16 @@ export class SearchService {
     if (!this.memoryRows) {
       this.memoryRows = await this.collectRows();
     }
+    return this.substringSearch(this.memoryRows, query, types);
+  }
 
+  private substringSearch(rows: IndexRow[], query: string, types?: string[]): SearchResult[] {
     const needle = query.toLowerCase().trim();
     if (!needle) return [];
 
     const scored: { row: IndexRow; score: number }[] = [];
 
-    for (const row of this.memoryRows) {
+    for (const row of rows) {
       if (types && types.length > 0 && !types.includes(row.type)) continue;
 
       const title = (row.title || '').toLowerCase();
@@ -232,6 +241,12 @@ export class SearchService {
   async search(query: string, types?: string[]): Promise<SearchResult[]> {
     const db = this.openDb();
     if (!db) return this.searchInMemory(query, types);
+
+    // Japanese or Chinese in the query: the same substring scan as the fallback, over the rows of the index.
+    if (UNSPACED_SCRIPT.test(query)) {
+      const rows = db.prepare('SELECT id, type, title, body, status, file_path AS path FROM entities_fts').all() as IndexRow[];
+      return this.substringSearch(rows, query, types);
+    }
 
     // Escape FTS5 special characters
     const escapedQuery = query.replace(/["]/g, '""');
