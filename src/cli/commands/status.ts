@@ -10,7 +10,7 @@ export const statusCommand = new Command('status')
     const chalk = (await import('chalk')).default;
 
     const workspacePath = getWorkspacePath();
-    const daemon = getRunningDaemon();
+    const daemon = await getRunningDaemon();
 
     console.log('');
     console.log(chalk.bold('Get Things Done'));

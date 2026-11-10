@@ -1,9 +1,11 @@
 import { Command } from 'commander';
 import {
+  checkRecordedDaemon,
   clearDaemonState,
   isProcessAlive,
   readDaemonState,
 } from '../utils/daemon';
+import { ESB_PID_FILE } from '../utils/paths';
 
 const GRACE_PERIOD_MS = 5000;
 const POLL_INTERVAL_MS = 200;
@@ -19,9 +21,16 @@ export const stopCommand = new Command('stop')
       return;
     }
 
-    if (!isProcessAlive(state.pid)) {
+    // Signal only our dashboard: a leftover PID file can name someone else's process.
+    const check = await checkRecordedDaemon(state);
+    if (check === 'stale') {
       clearDaemonState();
       console.log(chalk.yellow('Server was not running (stale PID file removed).'));
+      return;
+    }
+    if (check === 'unknown') {
+      console.log(chalk.yellow(`Process ${state.pid} could not be confirmed as the dashboard: nothing answers on port ${state.port}.`));
+      console.log(chalk.dim(`If it is the dashboard, stop that process yourself. If it is not, delete ${ESB_PID_FILE}.`));
       return;
     }
 

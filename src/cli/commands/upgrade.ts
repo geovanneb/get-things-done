@@ -26,7 +26,7 @@ export const upgradeCommand = new Command('upgrade')
       return;
     }
 
-    if (getRunningDaemon()) {
+    if (await getRunningDaemon()) {
       console.log(chalk.yellow('The dashboard is running.'));
       console.log(chalk.dim('Run `gtd stop` first so it picks up the refreshed files.'));
       console.log('');

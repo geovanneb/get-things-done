@@ -9,7 +9,7 @@ export const openCommand = new Command('open')
 
     // Prefer the port the server actually bound, which may differ from the
     // requested one if that port was busy.
-    const daemon = getRunningDaemon();
+    const daemon = await getRunningDaemon();
     const port = daemon?.port ?? getPort();
 
     if (!daemon) {

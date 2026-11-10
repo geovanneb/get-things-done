@@ -32,7 +32,7 @@ export const startCommand = new Command('start')
       process.exit(1);
     }
 
-    const existing = getRunningDaemon();
+    const existing = await getRunningDaemon();
     if (existing) {
       console.log(
         chalk.yellow('Server is already running') +
