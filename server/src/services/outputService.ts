@@ -122,8 +122,12 @@ export class OutputService {
       updated_at: new Date().toISOString(),
     };
 
+    // Agents read the body, the dashboard never shows it. A template created here starts with the description as
+    // its body: keep that copy in step, but never replace a body someone wrote.
+    const { content } = await fileService.readMarkdown(filePath);
+    const body = content === String(existing.description ?? '').trim() ? updated.description || '' : content;
     const { path: _path, ...frontmatter } = updated;
-    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, updated.description || '');
+    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, body);
     return { ...updated, path: filePath };
   }
 
