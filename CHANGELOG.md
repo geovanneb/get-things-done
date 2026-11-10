@@ -8,6 +8,84 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-10
+
+**Ids stay put, text stays as written.** A fix release with no new features. A deleted task or
+person never hands its id to the next new one, a context note keeps its subfolders when it moves,
+saving an output template no longer erases its body, Japanese words are found inside unspaced text,
+text with `$$` or `$&` is saved as typed, and `gtd stop` never signals a process that is not your
+dashboard.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.13.1-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.13.1.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.13.1-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.13.1`, or **Update and restart** in Settings. No schema
+or agent instruction changes, so your workspace needs no upgrade. If a dashboard from 0.13.0 or
+older is still running when you update with `npm`, the new `gtd stop` cannot confirm it is the
+dashboard and leaves it alone: quit it yourself once, or stop it before you update.
+
+### Fixed
+
+#### Ids that never come back
+
+- **A deleted task's id is never handed out again.** Deleting the newest task gave its id to the
+  next new task, so old mentions, routine receipts and run history pointed at the wrong one. (#368)
+- **A deleted person's id is never handed out again either**, so tasks and @mentions that named
+  them do not move to the next new stakeholder. (#369, #382)
+- **Two people added at the same moment get two ids.** Before, the second could silently replace
+  the first. (#370)
+- **Deleting several items at once keeps every id reserved.** Two deletions at the same time could
+  lose one of the reservations. (#382)
+
+#### Context notes and output templates
+
+- **A context note keeps its subfolders when it changes category.** Only the files at the top of
+  the note's folder moved, and its subfolders were deleted. (#367)
+- **A note title without Latin letters gets its own id.** A title in Japanese, for example, gave no
+  id at all, or only its digits, which an unrelated title could share. Such a title now gets a
+  short ASCII id of its own, and the same title always gets the same one. (#381)
+- **Saving an output template keeps the body of `output.md`.** Agents read that body, and every
+  save from the dashboard replaced it with the description. A body you wrote is now kept. (#372)
+- **A new output template cannot replace an existing one.** A name that differed only in case or
+  punctuation took over the other template and its files. It is now refused with a message that
+  says to edit the existing template or choose another name. (#371)
+
+#### Search and meetings
+
+- **Search finds Japanese words inside unspaced text.** With the SQLite index, a word inside a
+  longer run of kanji or kana, in a title or in the text, was never found. (#379, #382)
+- **Meeting search matches only what was said.** The header of a transcript copy could match a
+  search and show a result with nothing to point at. (#380)
+- **Transcript corrections with `$$`, `$&` or `$'` are saved as written.** They were read as
+  replacement patterns, so the saved text differed from what you reviewed. (#375)
+
+#### Dates
+
+- **An unquoted `due_date` reads as the day.** Written without quotes, by hand or by an agent, it
+  broke validation and was saved back as a timestamp. One already saved that way reads as its day
+  again. (#373)
+- **"Days ago" counts calendar days.** Something from last night said "0 days ago", and so did
+  tomorrow morning. (#374)
+
+#### The `gtd` command
+
+- **`gtd stop` never signals a process that is not your dashboard.** After a crash or a reboot, a
+  leftover `gtd.pid` could name an unrelated process that got the same PID. `gtd` now checks that
+  the dashboard on the recorded port reports that PID, and otherwise says so and leaves the process
+  alone. (#377, #382)
+- **A `gtd.pid` written by older versions is read again.** A file holding only a PID was not
+  recognized. (#378)
+- **`gtd init` keeps `$$` and `$&` in your name and organization**, and text that looks like a
+  placeholder inside them is kept as typed. (#376, #382)
+
+### Changed
+
+- **Dependency updates:** Electron 45.2.3, dugite 3.3.2 (the bundled git in the desktop app),
+  express-rate-limit 8.7.3, mdast-util-to-markdown and build tools. (#345, #346, #347, #348)
+
 ## [0.13.0] - 2026-11-08
 
 **Share what is ready, keep the rest in.** Context notes now carry a **sharing label**, and only
@@ -1094,7 +1172,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/geovanneb/get-things-done/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/geovanneb/get-things-done/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/geovanneb/get-things-done/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/geovanneb/get-things-done/compare/v0.10.0...v0.11.0
