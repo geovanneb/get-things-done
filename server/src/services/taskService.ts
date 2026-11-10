@@ -1,4 +1,4 @@
-import { saveAttachment, topLevelName, workspaceEntry, withOfficeCheck, FolderFile } from '../utils/files';
+import { deleteAttachment, saveAttachment, topLevelName, workspaceEntry, withOfficeCheck, FolderFile } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
@@ -721,7 +721,6 @@ If the executive comes back with feedback on a task that is already \`in_review\
   async deleteTaskFile(id: string, filename: string): Promise<void> {
     const safe = topLevelName(filename);
     if (safe.toLowerCase() === 'task.md') throw new Error('Invalid file name: cannot delete task.md');
-    const filePath = path.join(this.getActiveDir(), topLevelName(id), safe);
-    await fsp.unlink(filePath);
+    await deleteAttachment(path.join(this.getActiveDir(), topLevelName(id)), safe);
   }
 }

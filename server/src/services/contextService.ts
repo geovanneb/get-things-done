@@ -5,7 +5,7 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
 import { titleSlug } from '../utils/slug';
-import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
+import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
 
@@ -264,8 +264,7 @@ export class ContextService {
     if (!result) throw new Error(`Context note not found: ${id}`);
     const safe = topLevelName(filename);
     if (safe.toLowerCase() === 'note.md') throw new Error('Invalid file name: cannot delete note.md');
-    const noteDir = path.dirname(result.filePath);
-    await fsp.unlink(path.join(noteDir, safe));
+    await deleteAttachment(path.dirname(result.filePath), safe);
   }
 
   private async findContextFile(id: string): Promise<{ filePath: string; category: ContextCategory } | null> {

@@ -5,7 +5,7 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
 import { titleSlug } from '../utils/slug';
-import { saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
+import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -172,8 +172,7 @@ export class OutputService {
     if (!filePath) throw new Error(`Output template not found: ${id}`);
     const safe = topLevelName(filename);
     if (safe.toLowerCase() === 'output.md') throw new Error('Invalid file name: cannot delete output.md');
-    const templateDir = path.dirname(filePath);
-    await fsp.unlink(path.join(templateDir, safe));
+    await deleteAttachment(path.dirname(filePath), safe);
   }
 
   private async findTemplateFile(id: string): Promise<string | null> {
