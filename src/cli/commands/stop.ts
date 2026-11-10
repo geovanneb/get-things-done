@@ -29,7 +29,7 @@ export const stopCommand = new Command('stop')
       return;
     }
     if (check === 'unknown') {
-      console.log(chalk.yellow(`Process ${state.pid} could not be confirmed as the dashboard: nothing answers on port ${state.port}.`));
+      console.log(chalk.yellow(`Process ${state.pid} could not be confirmed as the dashboard: port ${state.port} did not confirm its process identity.`));
       console.log(chalk.dim(`If it is the dashboard, stop that process yourself. If it is not, delete ${ESB_PID_FILE}.`));
       return;
     }

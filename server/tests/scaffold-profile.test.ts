@@ -152,3 +152,12 @@ test('one writer at a time: a second refresh while the first holds the workspace
   assert.equal(outcome.status, 'skipped');
   assert.match(await fsp.readFile(path.join(dir, 'AGENTS.md'), 'utf8'), /Inc\.\./, 'not touched');
 });
+
+test('profile values containing other profile placeholders remain literal in agent setup', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-profile-literal-'));
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+  scaffoldWorkspace(dir, { profile: { name: 'Alex {{role}}', role: 'Head of {{organization}}', organization: 'Fictional Labs' }, aiTools: ['claude-code', 'codex', 'copilot'] });
+  const content = await fsp.readFile(path.join(dir, 'AGENTS.md'), 'utf8');
+  assert.ok(content.includes('Alex {{role}}'));
+  assert.ok(content.includes('Head of {{organization}}'));
+});

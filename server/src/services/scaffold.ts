@@ -249,10 +249,8 @@ export function ensureWorkspaceDirs(workspacePath: string): void {
  */
 function interpolate(content: string, vars: Record<string, string>): string {
   // Functions, not strings, so `$$` or `$&` in a value is written as typed, not read as a replacement pattern.
-  return content
-    .replace(/\{\{name\}\}/g, () => vars['name'] || '')
-    .replace(/\{\{role\}\}/g, () => vars['role'] || '')
-    .replace(/\{\{organization\}\}/g, () => vars['organization'] || '');
+  // One pass also keeps placeholder-looking text inside a profile value literal.
+  return content.replace(/\{\{(name|role|organization)\}\}/g, (_match, key: string) => vars[key] || '');
 }
 
 /** The exact bytes a template file produces for this workspace. */

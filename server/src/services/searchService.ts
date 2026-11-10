@@ -244,7 +244,9 @@ export class SearchService {
 
     // Japanese or Chinese in the query: the same substring scan as the fallback, over the rows of the index.
     if (UNSPACED_SCRIPT.test(query)) {
-      const rows = db.prepare('SELECT id, type, title, body, status, file_path AS path FROM entities_fts').all() as IndexRow[];
+      // Filter in SQLite before copying bodies into JavaScript: unrelated types can hold large documents.
+      const filter = types?.length ? ` WHERE type IN (${types.map(() => '?').join(',')})` : '';
+      const rows = db.prepare(`SELECT id, type, title, body, status, file_path AS path FROM entities_fts${filter}`).all(...(types ?? [])) as IndexRow[];
       return this.substringSearch(rows, query, types);
     }
 

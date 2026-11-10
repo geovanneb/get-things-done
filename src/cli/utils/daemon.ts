@@ -19,18 +19,24 @@ export function readDaemonState(): DaemonState | null {
   if (!raw) return null;
 
   try {
-    const parsed = JSON.parse(raw) as DaemonState | number;
-    // A bare PID is valid JSON too, so it never reaches the catch below.
-    if (typeof parsed === 'number') return { pid: parsed, port: 3001, workspace: '', startedAt: '' };
-    if (typeof parsed.pid === 'number') return parsed;
-  } catch {
-    // Older versions stored a bare PID.
-    const pid = parseInt(raw, 10);
-    if (!Number.isNaN(pid)) {
-      return { pid, port: 3001, workspace: '', startedAt: '' };
+    const parsed: unknown = JSON.parse(raw);
+    // Older versions wrote a bare positive PID, which is itself valid JSON.
+    if (validPid(parsed)) return { pid: parsed, port: 3001, workspace: '', startedAt: '' };
+    if (parsed && typeof parsed === 'object') {
+      const state = parsed as Partial<DaemonState>;
+      if (validPid(state.pid) && validPort(state.port)
+        && typeof state.workspace === 'string' && typeof state.startedAt === 'string') return state as DaemonState;
     }
-  }
+  } catch { /* malformed state is never a process identity */ }
   return null;
+}
+
+function validPid(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 0x7fffffff;
+}
+
+function validPort(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 65535;
 }
 
 export function writeDaemonState(state: DaemonState): void {
@@ -44,6 +50,7 @@ export function clearDaemonState(): void {
 
 /** Signal 0 tests for existence without delivering anything. */
 export function isProcessAlive(pid: number): boolean {
+  if (!validPid(pid)) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -56,29 +63,38 @@ export function isProcessAlive(pid: number): boolean {
 /** Slack for clock adjustments when comparing the recorded start with the last boot. */
 const BOOT_MARGIN_MS = 60_000;
 
-/** The pid a GTD server on `port` reports on /health; null for one too old to report it; undefined if no GTD answer. */
-function healthPid(port: number, timeoutMs = 2000): Promise<number | null | undefined> {
+/** The PID reported by a successful, bounded health response; undefined if identity cannot be confirmed. */
+function healthPid(port: number, timeoutMs = 2000): Promise<number | undefined> {
   return new Promise((resolve) => {
-    const req = http.get({ host: '127.0.0.1', port, path: '/health', timeout: timeoutMs }, (res) => {
+    let settled = false;
+    const finish = (pid?: number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      req.destroy();
+      resolve(pid);
+    };
+    const req = http.get({ host: '127.0.0.1', port, path: '/health' }, (res) => {
+      if (res.statusCode !== 200) { finish(); return; }
       let body = '';
       res.setEncoding('utf-8');
-      res.on('data', (chunk) => (body += chunk));
-      res.on('error', () => resolve(undefined));
+      res.on('data', (chunk: string) => {
+        body += chunk;
+        if (body.length > 16 * 1024) finish();
+      });
+      res.on('error', () => finish());
       res.on('end', () => {
         try {
           const health = JSON.parse(body) as { status?: unknown; pid?: unknown } | null;
-          if (health?.status !== 'ok') return resolve(undefined);
-          resolve(typeof health.pid === 'number' ? health.pid : null);
+          finish(health?.status === 'ok' && validPid(health.pid) ? health.pid : undefined);
         } catch {
-          resolve(undefined);
+          finish();
         }
       });
     });
-    req.on('error', () => resolve(undefined));
-    req.on('timeout', () => {
-      req.destroy();
-      resolve(undefined);
-    });
+    // A socket inactivity timeout alone never expires when an unrelated server keeps sending bytes.
+    const deadline = setTimeout(() => finish(), timeoutMs);
+    req.on('error', () => finish());
   });
 }
 
@@ -88,12 +104,13 @@ function healthPid(port: number, timeoutMs = 2000): Promise<number | null | unde
  * boot, or the dashboard on its port is another process); 'unknown' when nothing answers, e.g. a hung dashboard.
  */
 export async function checkRecordedDaemon(state: DaemonState): Promise<'ours' | 'stale' | 'unknown'> {
-  if (!isProcessAlive(state.pid)) return 'stale';
+  if (!validPid(state.pid) || !validPort(state.port) || !isProcessAlive(state.pid)) return 'stale';
   const startedAt = Date.parse(state.startedAt);
   if (startedAt < Date.now() - os.uptime() * 1000 - BOOT_MARGIN_MS) return 'stale';
   const pid = await healthPid(state.port);
-  if (pid === undefined) return 'unknown';
-  return pid === null || pid === state.pid ? 'ours' : 'stale';
+  // A legacy or unrelated service saying only 'ok' cannot prove which process owns the listener.
+  if (pid == null) return 'unknown';
+  return pid === state.pid ? 'ours' : 'stale';
 }
 
 /**
