@@ -190,16 +190,11 @@ export class ContextService {
       // Never onto another note: its folder would be overwritten.
       if (await fileService.exists(newNoteDir)) throw httpError(409, `A context note named "${slug}" already exists in ${incomingCategory}. Rename one of them first.`);
       const newFilePath = this.getNoteFile(incomingCategory, slug);
-      await fileService.ensureDir(newNoteDir);
-      // Move all files in the old dir to the new dir
-      const oldDir = path.dirname(existing.path!);
-      const entries = await fsp.readdir(oldDir, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        if (entry.isFile()) {
-          await fsp.rename(path.join(oldDir, entry.name), path.join(newNoteDir, entry.name));
-        }
-      }
-      await fsp.rm(oldDir, { recursive: true, force: true });
+      // Rename the folder itself so subfolders move too (moving files one by one and then
+      // removing the old folder deleted them). Only the parent is created: Windows will not
+      // rename onto an existing folder, even an empty one.
+      await fileService.ensureDir(this.getContextDir(incomingCategory));
+      await fsp.rename(path.dirname(existing.path!), newNoteDir);
       filePath = newFilePath;
     }
 
