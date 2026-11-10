@@ -37,3 +37,30 @@ test('a template whose name differs only in case or punctuation is refused, neve
   assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
   assert.equal((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason.statusCode, 409);
 });
+
+test('a template name without ASCII letters gets its own ASCII id, and ASCII names keep their slug', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-ja-template-'));
+  const previous = process.env.ESB_WORKSPACE_PATH;
+  process.env.ESB_WORKSPACE_PATH = dir;
+  await fsp.mkdir(path.join(dir, 'outputs', 'templates'), { recursive: true });
+  t.after(async () => {
+    if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
+    else process.env.ESB_WORKSPACE_PATH = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+  const { OutputService } = await import('../src/services/outputService');
+  const service = new OutputService();
+
+  const weekly = await service.createTemplate({ name: '週次レポート', format: 'md' });
+  assert.match(weekly.id, /^OUT-template-[0-9a-f]{8}$/);
+  assert.equal((await service.getTemplate(weekly.id)).name, '週次レポート', 'the name is kept as written');
+
+  // Both names reduce to "2026" in ASCII, but they are different templates.
+  const a = await service.createTemplate({ name: '週次レポート 2026', format: 'md' });
+  const b = await service.createTemplate({ name: '月次レポート 2026', format: 'md' });
+  assert.match(a.id, /^OUT-template-2026-[0-9a-f]{8}$/);
+  assert.match(b.id, /^OUT-template-2026-[0-9a-f]{8}$/);
+  assert.notEqual(a.id, b.id);
+
+  assert.equal((await service.createTemplate({ name: 'Board memo 2026' })).id, 'OUT-board-memo-2026');
+});

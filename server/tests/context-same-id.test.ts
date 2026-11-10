@@ -69,3 +69,33 @@ test('changing a note category moves its whole folder, subfolders included', asy
   assert.equal(await fsp.access(oldDir).then(() => true, () => false), false, 'the old folder is gone');
   assert.deepEqual((await service.listContextFiles(note.id)).map((f) => f.name).sort(), ['sources/price-list.csv', 'summary.txt']);
 });
+
+test('a title without ASCII letters gets its own ASCII id, and ASCII titles keep their slug', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-ja-title-'));
+  const previous = process.env.ESB_WORKSPACE_PATH;
+  process.env.ESB_WORKSPACE_PATH = dir;
+  await fsp.mkdir(path.join(dir, 'context'), { recursive: true });
+  t.after(async () => {
+    if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
+    else process.env.ESB_WORKSPACE_PATH = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+  const { ContextService } = await import('../src/services/contextService');
+  const service = new ContextService();
+
+  const overview = await service.createContextNote({ category: 'company', title: 'ノースウィンド社の概要', body: '概要\n' });
+  assert.match(overview.id, /^CTX-note-[0-9a-f]{8}$/);
+  assert.equal((await service.getContextNote(overview.id)).title, 'ノースウィンド社の概要', 'the title is kept as written');
+
+  // Both titles reduce to "2026" in ASCII, but they are different notes.
+  const strategy = await service.createContextNote({ category: 'strategy', title: 'ノースウィンド 2026', body: '戦略\n' });
+  const hiring = await service.createContextNote({ category: 'organization', title: '採用計画 2026', body: '採用\n' });
+  assert.match(strategy.id, /^CTX-note-2026-[0-9a-f]{8}$/);
+  assert.match(hiring.id, /^CTX-note-2026-[0-9a-f]{8}$/);
+  assert.notEqual(strategy.id, hiring.id);
+  // The same title twice is still the same note.
+  await assert.rejects(service.createContextNote({ category: 'risks', title: '採用計画 2026' }), (e: { statusCode?: number }) => e.statusCode === 409);
+
+  assert.equal((await service.createContextNote({ category: 'strategy', title: 'Plan 2026' })).id, 'CTX-plan-2026');
+  assert.equal((await service.createContextNote({ category: 'strategy', title: '2027' })).id, 'CTX-2027');
+});
