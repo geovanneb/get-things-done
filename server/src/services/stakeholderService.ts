@@ -67,8 +67,6 @@ export class StakeholderService {
     const id = await this.generateId(isGroup);
     const now = new Date().toISOString();
     const dir = isGroup ? this.getGroupsDir() : this.getPeopleDir();
-    const slug = id.toLowerCase();
-    const filePath = path.join(dir, `${slug}.md`);
 
     const stk: Stakeholder = {
       id,
@@ -86,7 +84,16 @@ export class StakeholderService {
     };
 
     const { path: _path, notes, ...frontmatter } = stk;
-    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, notes || '');
+    // Two creates at the same moment can pick the same number, and a plain write would silently replace the
+    // other person. The exclusive create lets only one have it; the other takes the next number.
+    let filePath = path.join(dir, `${stk.id.toLowerCase()}.md`);
+    for (;;) {
+      try { await fileService.createMarkdown(filePath, frontmatter as Record<string, unknown>, notes || ''); break; } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        stk.id = frontmatter.id = stk.id.replace(/\d+$/, (n) => String(Number(n) + 1).padStart(4, '0'));
+        filePath = path.join(dir, `${stk.id.toLowerCase()}.md`);
+      }
+    }
     return { ...stk, path: filePath };
   }
 
