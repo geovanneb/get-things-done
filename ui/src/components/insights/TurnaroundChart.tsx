@@ -16,7 +16,9 @@ export default function TurnaroundChart({
 }: {
   data: InsightsData['turnaround_buckets'];
 }) {
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
+  // The plural formats the total for the locale; the part is formatted the same way, so "1,000 of 1,200" never mixes styles.
+  const number = new Intl.NumberFormat(locale);
   const buckets = data ?? [];
   const total = buckets.reduce((sum, b) => sum + b.count, 0);
 
@@ -45,7 +47,7 @@ export default function TurnaroundChart({
               justifyContent: 'flex-end',
               height: '100%',
             }}
-            title={t('turnaroundChart.ofTasks', { label: bucket.label, amount: bucket.count, total })}
+            title={t('turnaroundChart.ofTasks', { label: bucket.label, amount: number.format(bucket.count), count: total })}
           >
             <span
               style={{

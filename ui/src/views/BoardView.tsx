@@ -311,7 +311,7 @@ function KanbanCol({
         flexShrink: 0,
       }}>
         <h2 title={columnLabel(column)} style={{ fontWeight: 600, fontSize: 'var(--text-sm)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{columnLabel(column)}</h2>
-        <CountBadge count={tasks.length} label={t('board.tasks', { length: tasks.length })} />
+        <CountBadge count={tasks.length} label={t('board.tasks2', { count: tasks.length })} />
         <div style={{ flex: 1 }} />
         <IconButton label={t('board.addATaskTo', { label: columnLabel(column) })} icon={icons.plus} onClick={() => onAddTask(column)} />
       </div>

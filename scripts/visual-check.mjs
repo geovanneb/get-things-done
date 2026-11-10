@@ -274,6 +274,9 @@ try {
           check(`nested cards keep their own padding @${width} ${theme}`, nested);
         }
         if (route === '/board') {
+          // The demo has one task in progress: its column count is a plural message, never "1 tasks".
+          check(`board: a column with one task says "1 task" @${width} ${theme}`,
+            await page.locator('[aria-label="1 task"]').count() > 0 && await page.locator('[aria-label="1 tasks"]').count() === 0);
           const edit = page.getByRole('button', { name: 'Edit columns…' });
           await edit.focus();
           await page.keyboard.press('Enter');
