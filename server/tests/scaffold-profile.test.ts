@@ -15,6 +15,17 @@ test('an organization name ending in a full stop is not followed by a second one
   assert.doesNotMatch(agents, /Inc\.\./);
 });
 
+test('a name or organization with $$ or $& is written as typed', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-scaffold-'));
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+  scaffoldWorkspace(dir, { profile: { name: 'Ana $& Lima', role: 'COO', organization: 'Fish $$ Chips' }, aiTools: ['codex', 'copilot'] });
+  const agents = await fsp.readFile(path.join(dir, 'AGENTS.md'), 'utf8');
+  assert.match(agents, /^# Codex Agent Instructions — Fish \$\$ Chips Executive Workspace$/m);
+  assert.ok(agents.includes('**Ana $& Lima** — COO at Fish $$ Chips'), 'AGENTS.md profile line');
+  assert.match(await fsp.readFile(path.join(dir, 'README.md'), 'utf8'), /^# Fish \$\$ Chips Executive Workspace$/m);
+  assert.ok((await fsp.readFile(path.join(dir, '.github/copilot-instructions.md'), 'utf8')).includes('Fish $$ Chips'), 'copilot instructions');
+});
+
 /** A workspace whose AGENTS.md still has the old profile line ("… at Northwind Labs Inc.."), recorded as app-written. */
 async function oldWorkspace(t: { after: (fn: () => Promise<void>) => void }, userEdit = '') {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-upgrade-'));
