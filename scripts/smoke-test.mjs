@@ -645,6 +645,21 @@ try {
     fs.rmSync(path.join(tplDir, 'logo.txt'), { force: true });
   }
 
+  // Saving a template from the dashboard (only the name changed) keeps the body agents read.
+  {
+    const brief = (await (await fetch(`${base}/api/outputs/templates`)).json()).find((t) => t.slug === 'meeting-brief');
+    fs.appendFileSync(brief.path, '\nSmoke note: list the attendees in seating order.\n');
+    const bodyOf = () => fs.readFileSync(brief.path, 'utf8').split(/^---$/m).slice(2).join('---').trim();
+    const before = bodyOf();
+    const put = (name) => fetch(`${base}/api/outputs/templates/${brief.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, format: brief.format, description: brief.description, style_guide: brief.style_guide }),
+    });
+    const saved = await put(`${brief.name} (v2)`);
+    check('saving a template keeps the body of output.md', saved.ok && bodyOf() === before, `status=${saved.status}`);
+    await put(brief.name);
+  }
+
   // Context updates: import material, simulate the analysis command, review, close.
   {
     check('gtd init writes the context update commands',
