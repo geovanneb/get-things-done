@@ -32,6 +32,13 @@ export class FileService {
     await atomicWrite(filePath, body);
   }
 
+  /** Writes a new Markdown file and fails with EEXIST when the name is taken, so two writers can never share it. */
+  async createMarkdown(filePath: string, frontmatter: Record<string, unknown>, content: string): Promise<void> {
+    await this.ensureDir(path.dirname(filePath));
+    const clean = Object.fromEntries(Object.entries(frontmatter).filter(([, v]) => v !== undefined));
+    await fsp.writeFile(filePath, stringifyMarkdown(content, clean), { flag: 'wx', mode: 0o600 });
+  }
+
   async deleteFile(filePath: string): Promise<void> {
     if (!(await this.exists(filePath))) return;
 
