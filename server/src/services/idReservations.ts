@@ -2,6 +2,8 @@ import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { WorkspaceService } from './workspace';
 import { atomicWrite } from '../utils/atomicWrite';
+import { lock, unlock } from '../utils/fileLock';
+import { workspaceEntry } from '../utils/files';
 
 const workspaceService = new WorkspaceService();
 
@@ -17,9 +19,9 @@ function file(): string {
   return path.join(workspaceService.getWorkspacePath(), '.situation-board', 'reserved-ids.json');
 }
 
-async function readAll(): Promise<Record<string, number>> {
+async function readAll(target = file()): Promise<Record<string, number>> {
   try {
-    const parsed = JSON.parse(await fsp.readFile(file(), 'utf-8')) as unknown;
+    const parsed = JSON.parse(await fsp.readFile(target, 'utf-8')) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
       || Object.entries(parsed).some(([key, value]) => !/^(?:(?:TASK|CU|MQ)-\d{4}|STK|GRP)$/.test(key)
         || typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)) {
@@ -39,15 +41,23 @@ export async function reservedSequence(prefix: string): Promise<number> {
 
 /** Reserves ids like TASK-2026-0050, CU-2026-0003, MQ-2026-0007 (a queued meeting), STK-0012 or GRP-0002. Other shapes are ignored. */
 export async function reserveIds(ids: string[]): Promise<void> {
-  const all = await readAll();
-  let changed = false;
-  for (const id of ids) {
-    const m = id.match(/^((?:TASK|CU|MQ)-\d{4})-(\d{4})$/) ?? id.match(/^(STK|GRP)-(\d+)$/);
-    if (!m) continue;
-    const seq = Number(m[2]);
-    if ((all[m[1]!] ?? 0) < seq) { all[m[1]!] = seq; changed = true; }
+  const ws = workspaceService.getWorkspacePath();
+  const target = await workspaceEntry(ws, file(), true);
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  const lockFile = await workspaceEntry(ws, `${target}.lock`, true);
+  // Every prefix shares one file. Atomic replacement alone loses another deletion's reservation.
+  const held = await lock(lockFile, 5000, () => Object.assign(new Error('ID reservations are busy. Try again.'), { statusCode: 409 }));
+  try {
+    const all = await readAll(target);
+    let changed = false;
+    for (const id of ids) {
+      const m = id.match(/^((?:TASK|CU|MQ)-\d{4})-(\d{4})$/) ?? id.match(/^(STK|GRP)-(\d+)$/);
+      if (!m) continue;
+      const seq = Number(m[2]);
+      if ((all[m[1]!] ?? 0) < seq) { all[m[1]!] = seq; changed = true; }
+    }
+    if (changed) await atomicWrite(target, JSON.stringify(all, null, 2));
+  } finally {
+    await unlock(held);
   }
-  if (!changed) return;
-  await fsp.mkdir(path.dirname(file()), { recursive: true });
-  await atomicWrite(file(), JSON.stringify(all, null, 2));
 }

@@ -82,6 +82,9 @@ test('the SQLite index finds a Japanese word inside a title or text, as the in-m
   const hit = (await search.search('経営戦略'))[0]!;
   assert.ok(hit.relevance > (await search.search('議事録'))[0]!.relevance, 'a title hit outranks a body hit');
   assert.deepEqual(await search.search('会議', ['stakeholder']), [], 'the type filter still applies');
+  assert.deepEqual((await search.search('会議', ['task', 'context'])).map((row) => row.id), [strategy.id]);
+  assert.deepEqual((await search.search('会議', [])).map((row) => row.id), [strategy.id], 'an empty type filter searches all types');
+  assert.deepEqual(await search.search('会議', ["task') OR 1=1 --"]), [], 'type filters remain bound values');
   assert.match((await search.search('議事録'))[0]!.excerpt, /議事録/);
 
   // English still goes through the word index, by word prefix.

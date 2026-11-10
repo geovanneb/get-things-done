@@ -229,9 +229,18 @@ try {
   const sawChange = (async () => {
     const until = Date.now() + 8000;
     while (Date.now() < until && !streamed.includes('event: file_change')) {
-      const { value, done } = await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r({}), 500))]);
-      if (done) break;
-      if (value) streamed += new TextDecoder().decode(value);
+      // Keep one read pending: polling with abandoned reads can consume and lose the change event.
+      let timer;
+      try {
+        const { value, done } = await Promise.race([
+          reader.read(),
+          new Promise((r) => { timer = setTimeout(() => r({ done: true }), Math.max(0, until - Date.now())); }),
+        ]);
+        if (done) break;
+        if (value) streamed += new TextDecoder().decode(value);
+      } finally {
+        clearTimeout(timer);
+      }
     }
     return streamed.includes('event: file_change');
   })();
@@ -1276,6 +1285,20 @@ try {
   const resolve = async (href) => (await (await fetch(`${base}/api/mentions/resolve?href=${encodeURIComponent(href)}`)).json()).exists;
   check('mention chips can tell an existing file from a deleted one',
     (await resolve(stk.href)) === true && (await resolve('/context/company/does-not-exist/note.md')) === false);
+
+  // Deletions of different entity types share the reservation file and must preserve both entries.
+  {
+    const create = async (type, name) => (await (await fetch(`${base}/api/stakeholders`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, name }),
+    })).json());
+    const person = await create('people', 'Smoke reservation person');
+    const team = await create('groups', 'Smoke reservation team');
+    const removed = await Promise.all([person, team].map((item) => fetch(`${base}/api/stakeholders/${item.id}`, { method: 'DELETE' })));
+    const nextPerson = await create('people', 'Smoke next person');
+    const nextTeam = await create('groups', 'Smoke next team');
+    check('concurrent deletions preserve both stakeholder ID reservations',
+      removed.every((r) => r.ok) && nextPerson.id !== person.id && nextTeam.id !== team.id);
+  }
 
   // Org charts: titles survive every save, new unknown ids are rejected, 1.1 only when needed.
   {
