@@ -7,6 +7,7 @@ import { MeetingHistoryService } from '../src/services/meetingHistoryService';
 import { MeetingDigestService } from '../src/services/meetingDigestService';
 import { fold, queryWords, searchMeeting, textUnits } from '../src/services/meetingSearch';
 import { stringifyMarkdown } from '../src/utils/markdown';
+import { parseWebVtt, sha256, transcriptMarkdown } from '../src/utils/transcript';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -92,6 +93,23 @@ test('full-width and half-width forms, Japanese, a long turn cut around the word
   const bySpeaker = searchMeeting('m', [{ file: 'a.vtt', text: turns(['00:00:09', 'Kim Park', 'Agreed.']) }], ['kim'])!;
   assert.deepEqual([bySpeaker.snippets[0]!.speaker, bySpeaker.snippets[0]!.text], ['Kim Park', 'Agreed.']);
   assert.deepEqual(textUnits('one\n\n two \n').map((u) => u.text), ['one', 'two'], 'notes are read line by line');
+});
+
+test('the header the dashboard writes above a transcript copy is not searched, only what was said', async (t) => {
+  const vtt = 'WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n<v Jane Doe>The warehouse lease ends in March.</v>\n';
+  const copy = transcriptMarkdown('call.vtt', sha256(vtt), parseWebVtt(vtt)!);
+  assert.match(copy, /made by the dashboard/, 'the real header, not a bare "# Transcript"');
+  for (const q of ['dashboard', 'complete', 'stakeholders', 'original', 'call.vtt', 'lease dashboard']) {
+    assert.equal(searchMeeting('m', [{ file: 'call.vtt', text: copy }], queryWords(q)), null, q);
+  }
+  assert.equal(searchMeeting('m', [{ file: 'call.vtt', text: copy }], queryWords('lease'))!.places, 1);
+  // Through the service too: a queued meeting's .vtt is read as its readable copy, header included.
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const m = await queue.createMeeting({ title: 'Weekly sync', meeting_date: '2026-10-28' });
+  await queue.addFile(m.id, 'call.vtt', Buffer.from(vtt));
+  assert.deepEqual((await history.search('dashboard')).results, []);
+  assert.deepEqual((await history.search('lease')).results.map((r) => r.id), [m.id]);
 });
 
 test('search reads each meeting\'s own transcripts and notes, never audio, photos or the digest\'s other files', async (t) => {

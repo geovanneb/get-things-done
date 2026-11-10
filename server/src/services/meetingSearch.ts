@@ -81,16 +81,19 @@ function around(text: string, words: string[]): string {
  */
 export function searchMeeting(id: string, texts: { file: string; text: string }[], words: string[]): SearchHit | null {
   if (!words.length) return null;
-  const all = fold(texts.map((t) => t.text).join('\n'));
-  if (!words.every((w) => all.includes(w))) return null;
+  // Matched on the units the snippets come from, not the whole text: the header of a transcript copy ("made by the
+  // dashboard", "Complete.") was never said, and a hit on it alone had no place to show.
+  const seen = new Set<string>();
   const places: { file: string; unit: Unit; found: number; order: number }[] = [];
   for (const { file, text } of texts) {
     for (const unit of textUnits(text)) {
       const body = fold(`${unit.speaker ?? ''} ${unit.text}`);
-      const found = words.filter((w) => body.includes(w)).length;
-      if (found) places.push({ file, unit, found, order: places.length });
+      const inUnit = words.filter((w) => body.includes(w));
+      for (const w of inUnit) seen.add(w);
+      if (inUnit.length) places.push({ file, unit, found: inUnit.length, order: places.length });
     }
   }
+  if (seen.size < words.length) return null;
   const best = [...places].sort((a, b) => b.found - a.found || a.order - b.order).slice(0, MAX_SNIPPETS);
   return {
     id,
