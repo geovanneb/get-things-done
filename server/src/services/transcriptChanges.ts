@@ -61,6 +61,9 @@ function copyKind(copy: string): { kind: 'webvtt'; source: string } | { kind: 'r
   return null;
 }
 
+// Every `.replace(change.before, () => change.after)` below passes the new text through a function: as a plain string
+// replacement, `$$`, `$&` and `$'` in it would be read as patterns, and the saved text would differ from the review.
+
 /** A recording's copy: the one line changed in place, and checked to be the only difference. */
 function changeRecordingCopy(copy: string, change: TranscriptChange): string {
   const read = copyTurns(copy);
@@ -73,11 +76,11 @@ function changeRecordingCopy(copy: string, change: TranscriptChange): string {
   let index = turn.at;
   for (let seen = -1; seen < at;) { index++; if (read.lines[index]!.startsWith('  ')) seen++; }
   const lines = [...read.lines];
-  lines[index] = `  ${turn.lines[at]!.replace(change.before, change.after)}`;
+  lines[index] = `  ${turn.lines[at]!.replace(change.before, () => change.after)}`;
   const next = lines.join('\n');
   const again = copyTurns(next);
   const same = again && again.turns.length === read.turns.length && again.turns.every((t, i) => (
-    t.heading === read.turns[i]!.heading && t.lines.join('\n') === (i === change.turn - 1 ? turn.lines.map((l, j) => (j === at ? l.replace(change.before, change.after) : l)) : read.turns[i]!.lines).join('\n')
+    t.heading === read.turns[i]!.heading && t.lines.join('\n') === (i === change.turn - 1 ? turn.lines.map((l, j) => (j === at ? l.replace(change.before, () => change.after) : l)) : read.turns[i]!.lines).join('\n')
   ));
   if (!same) throw problem('the change would alter more than that line');
   return next;
@@ -141,9 +144,9 @@ function changeWebVtt(vtt: string, copy: string, source: string, change: Transcr
   if (!target) throw problem(`the cue of turn ${change.turn} cannot be found in ${source}`);
   const raw = parts.slice(target.from, target.to + 1).join('');
   if (count(raw, change.before) !== 1) throw problem(`"${change.before}" cannot be placed once in the cue of ${source} (it is written differently there)`);
-  const next = [...parts.slice(0, target.from), raw.replace(change.before, change.after), ...parts.slice(target.to + 1)].join('');
+  const next = [...parts.slice(0, target.from), raw.replace(change.before, () => change.after), ...parts.slice(target.to + 1)].join('');
   const again = parseWebVtt(next);
-  const expected = parsed.cues.map((c, i) => (i === cue ? { ...c, text: c.text.replace(change.before, change.after) } : c));
+  const expected = parsed.cues.map((c, i) => (i === cue ? { ...c, text: c.text.replace(change.before, () => change.after) } : c));
   if (!again || !sameCues(again, { ...parsed, cues: expected })) throw problem(`the change would alter more of ${source} than that cue`);
   return { vtt: next, copy: transcriptMarkdown(source, sha256(Buffer.from(next, 'utf-8')), again) };
 }
