@@ -101,6 +101,9 @@ function dayText(value: unknown): unknown {
 function withTextDates<T>(data: T): T {
   const raw = { ...(data as Record<string, unknown>) };
   for (const key of ['created_at', 'updated_at', 'start_date', 'done_date']) if (key in raw) raw[key] = stampText(raw[key]);
+  // An unquoted `due_date: 2026-11-20` is a YAML date (UTC midnight): as a date it broke validation and was saved back
+  // as a timestamp. One an earlier save already wrote as `2026-11-20T00:00:00.000Z` reads as its day again too.
+  if ('due_date' in raw) raw['due_date'] = dayText(raw['due_date']);
   const waiting = raw['waiting'];
   if (waiting && typeof waiting === 'object' && !Array.isArray(waiting)) {
     const w = { ...(waiting as Record<string, unknown>) };
