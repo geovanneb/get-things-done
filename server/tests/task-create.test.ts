@@ -81,3 +81,12 @@ test('task objectives saved as Markdown remain searchable', async (t) => {
   await search.buildIndex();
   assert.deepEqual((await search.search('zephyrbrief')).map((row) => row.id), [task.id]);
 });
+
+test('deleting the newest task keeps its id taken, so the next task gets a new one', async (t) => {
+  await workspace(t);
+  const service = new TaskService();
+  const first = await service.createTask({ title: 'Weekly ops review' });
+  await service.deleteTask(first.id);
+  const next = await service.createTask({ title: 'Vendor contract renewal' });
+  assert.notEqual(next.id, first.id, 'routine receipts and old mentions of the deleted id must not point at the new task');
+});

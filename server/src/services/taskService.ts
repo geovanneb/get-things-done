@@ -6,7 +6,7 @@ import { DONE_STATUSES } from './taskStatus';
 import { BOARD_COLUMN_ID } from './boardColumns';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
-import { reservedSequence } from './idReservations';
+import { reserveIds, reservedSequence } from './idReservations';
 import { lock, unlock } from '../utils/fileLock';
 import { StakeholderService } from './stakeholderService';
 
@@ -589,6 +589,8 @@ If the executive comes back with feedback on a task that is already \`in_review\
       if (!(await fileService.exists(taskDir))) {
         throw new Error(`Task not found: ${id}`);
       }
+      // The id stays taken, so a new task never inherits mentions, routine receipts or run history that named this one.
+      await reserveIds([id]);
       await fsp.rm(taskDir, { recursive: true, force: true });
     }, false);
   }
@@ -669,7 +671,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
       }
     }
 
-    // Ids of tasks the cleanup job removed stay taken, so old links never point at a new task.
+    // Ids of deleted tasks and of tasks the cleanup job removed stay taken, so old links never point at a new task.
     maxSeq = Math.max(maxSeq, await reservedSequence(prefix));
 
     // mkdir without recursive is an exclusive reservation shared by CLI and server writers.
