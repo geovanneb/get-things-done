@@ -23,7 +23,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "dugite": "3.2.3",
+    "dugite": "3.3.2",
     "electron-updater": "6.8.11"
   },
   "build": {
