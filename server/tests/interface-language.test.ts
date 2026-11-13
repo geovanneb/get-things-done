@@ -47,6 +47,23 @@ test('plural forms use locale rules, including Japanese and Portuguese zero', ()
   assert.equal(plural('ja', 1, forms), '1 items');
 });
 
+test('counts in the board, meeting records and turnaround chart are plural messages', async () => {
+  const en1 = translator(en, 'en');
+  assert.equal(en1('board.tasks2', { count: 1 }), '1 task');
+  assert.equal(en1('updateDetail.ofMeetingsConfirmed', { confirmedCount: 0, count: 1 }), '0 of 1 meeting confirmed');
+  assert.equal(en1('updateDetail.ofMeetingsConfirmed', { confirmedCount: 1, count: 2 }), '1 of 2 meetings confirmed');
+  assert.equal(en1('turnaroundChart.ofTasks', { label: '<1d', amount: 1, count: 1 }), '<1d: 1 of 1 task');
+  assert.equal(en1('turnaroundChart.ofTasks', { label: '<1d', amount: 1, count: 1200 }), '<1d: 1 of 1,200 tasks');
+  const pt = translator(await loadCatalog('pt-BR'), 'pt-BR');
+  assert.equal(pt('updateDetail.ofMeetingsConfirmed', { confirmedCount: 1, count: 1 }), '1 de 1 reunião confirmada');
+  assert.equal(pt('turnaroundChart.ofTasks', { label: '<1d', amount: 2, count: 3 }), '<1d: 2 de 3 tarefas');
+  const es = translator(await loadCatalog('es-419'), 'es-419');
+  assert.equal(es('updateDetail.ofMeetingsConfirmed', { confirmedCount: 0, count: 1 }), '0 de 1 reunión confirmada');
+  assert.equal(es('turnaroundChart.ofTasks', { label: '<1d', amount: 1, count: 1 }), '<1d: 1 de 1 tarea');
+  const ja = translator(await loadCatalog('ja'), 'ja');
+  assert.equal(ja('turnaroundChart.ofTasks', { label: '<1d', amount: 1, count: 1 }), '<1d: 1 件中 1 件のタスク');
+});
+
 test('concurrent personal config updates preserve unknown fields and each writer', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gtd-language-'));
   const file = path.join(dir, 'config.json');

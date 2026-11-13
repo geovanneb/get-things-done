@@ -629,7 +629,7 @@ export default function UpdateDetail({ id, onBack, workspace }: { id: string; on
 }
 
 function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   const confirm = useConfirm();
   const navigate = useNavigate();
   const version = useDataVersion('context-updates');
@@ -1170,7 +1170,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
               <Button variant="ghost" size="sm" onClick={() => void selectAll(false)}>{t('updateDetail.clear')}</Button>
             </>
           )}
-          {records.length > 0 && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'updateDetail.ofMeetingsConfirmed', { confirmedCount: confirmedCount, length: records.length })}</span>}
+          {records.length > 0 && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'updateDetail.ofMeetingsConfirmed', { confirmedCount: new Intl.NumberFormat(locale).format(confirmedCount), count: records.length })}</span>}
           {canApprove && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{approveHint}</span>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button variant="secondary" loading={busy === 'close'} disabled={saving > 0} onClick={close}
