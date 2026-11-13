@@ -91,3 +91,42 @@ test('the SQLite index finds a Japanese word inside a title or text, as the in-m
   assert.deepEqual((await search.search('northw')).map((row) => row.id), [carrier.id]);
   assert.deepEqual((await search.search('dual lane')).map((row) => row.id), [carrier.id]);
 });
+
+test('a Japanese query of several words finds each word, whatever space separates them', { skip: !hasBuiltInSqlite && 'needs node:sqlite (Node 22.13+)' }, async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-search-words-'));
+  const previous = process.env.ESB_WORKSPACE_PATH;
+  process.env.ESB_WORKSPACE_PATH = dir;
+  await fsp.mkdir(path.join(dir, 'tasks', 'active'), { recursive: true });
+
+  const { TaskService } = await import('../src/services/taskService');
+  const { SearchService } = await import('../src/services/searchService');
+  const search = new SearchService();
+  t.after(async () => {
+    search.reset();
+    if (previous === undefined) delete process.env.ESB_WORKSPACE_PATH;
+    else process.env.ESB_WORKSPACE_PATH = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  });
+
+  const tasks = new TaskService();
+  const meeting = await tasks.createTask({ title: 'ノースウィンド 経営会議の準備', body: '定例。' });
+  const minutes = await tasks.createTask({ title: 'Weekly prep', body: 'Northwind\n経営会議の議事録をまとめる。' });
+  const pack = await tasks.createTask({ title: 'Aa board pack', body: 'ノースウィンドの経営資料。' });
+  await search.buildIndex();
+  const ids = async (q: string) => (await search.search(q)).map((row) => row.id);
+
+  // U+3000 is what a Japanese IME types between words; the words of the last query sit on two lines of the body.
+  assert.deepEqual(await ids('ノースウィンド　経営'), [meeting.id, pack.id], 'ideographic space, all words in the title first');
+  assert.deepEqual(await ids('ノースウィンド  経営'), [meeting.id, pack.id], 'two spaces');
+  assert.deepEqual(await ids('northwind 経営'), [minutes.id], 'words on different lines of the body');
+  assert.deepEqual(await ids(' 経営　ノースウィンド '), [meeting.id, pack.id], 'any order, outer spaces ignored');
+  assert.deepEqual(await ids('ノースウィンド 予算'), [], 'every word must appear');
+  assert.deepEqual(await ids('議事録 議事録'), [minutes.id], 'a repeated word counts once');
+  assert.deepEqual(await search.search('northwind 経営', ['stakeholder']), [], 'the type filter still applies');
+  assert.match((await search.search('northwind 議事録'))[0]!.excerpt, /議事録/, 'the excerpt shows a word of the query');
+
+  // One word and English behave as before.
+  assert.deepEqual(await ids('議事録'), [minutes.id]);
+  assert.deepEqual(await ids('経営会議'), [meeting.id, minutes.id]);
+  assert.deepEqual(await ids('weekly prep'), [minutes.id]);
+});

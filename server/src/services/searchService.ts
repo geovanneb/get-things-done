@@ -207,6 +207,14 @@ export class SearchService {
   private substringSearch(rows: IndexRow[], query: string, types?: string[]): SearchResult[] {
     const needle = query.toLowerCase().trim();
     if (!needle) return [];
+    // Japanese is written without spaces, so there is no phrase to anchor: a Japanese query must have every word,
+    // in any order and anywhere in the title or text. That is broader than the FTS phrase match English gets,
+    // deliberately: an IME types U+3000 between words (\s covers it), and words can sit on different lines.
+    // Any other query (the fallback without node:sqlite) is still one substring, as before.
+    const words = UNSPACED_SCRIPT.test(needle) ? [...new Set(needle.split(/\s+/))] : [needle];
+    const phrase = words.join(' ');
+    // Longest first: it is the likeliest to be missing, so a row that fails is usually dropped after one scan.
+    words.sort((a, b) => b.length - a.length);
 
     const scored: { row: IndexRow; score: number }[] = [];
 
@@ -216,26 +224,32 @@ export class SearchService {
       const title = (row.title || '').toLowerCase();
       const body = (row.body || '').toLowerCase();
 
-      // Title hits outrank body hits; an exact title match outranks both.
+      // Title hits outrank body hits; an exact title match outranks both. With several words, "title" means all of them.
+      const exact = words.length > 1 ? title.replace(/\s+/g, ' ').trim() === phrase : title === needle;
       let score = 0;
-      if (title === needle) score = 3;
-      else if (title.includes(needle)) score = 2;
-      else if (body.includes(needle)) score = 1;
+      if (exact) score = 3;
+      else if (words.every((w) => title.includes(w))) score = 2;
+      else if (words.every((w) => title.includes(w) || body.includes(w))) score = 1;
 
       if (score > 0) scored.push({ row, score });
     }
 
     scored.sort((a, b) => b.score - a.score || a.row.title.localeCompare(b.row.title));
 
-    return scored.slice(0, 50).map(({ row, score }) => ({
-      id: row.id,
-      type: row.type,
-      title: row.title,
-      excerpt: this.makeExcerpt(row.body, query),
-      status: row.status || undefined,
-      path: row.path || undefined,
-      relevance: score,
-    }));
+    return scored.slice(0, 50).map(({ row, score }) => {
+      // With several words the query as typed is rarely in the text: centre the excerpt on a word it holds.
+      const body = words.length > 1 ? (row.body || '').toLowerCase() : '';
+      const focus = words.length > 1 ? (words.find((w) => body.includes(w)) ?? query) : query;
+      return {
+        id: row.id,
+        type: row.type,
+        title: row.title,
+        excerpt: this.makeExcerpt(row.body, focus),
+        status: row.status || undefined,
+        path: row.path || undefined,
+        relevance: score,
+      };
+    });
   }
 
   async search(query: string, types?: string[]): Promise<SearchResult[]> {
