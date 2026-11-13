@@ -8,6 +8,12 @@ import { reserveIds, reservedSequence } from './idReservations';
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
 
+/** The address to store, or undefined for an empty one: the schema has no empty email, so it is left out. */
+function presentEmail(email: unknown): string | undefined {
+  if (email === null || (typeof email === 'string' && !email.trim())) return undefined;
+  return email as string | undefined;
+}
+
 export class StakeholderService {
   private getPeopleDir(): string {
     return path.join(workspaceService.getWorkspacePath(), 'stakeholders', 'people');
@@ -73,7 +79,7 @@ export class StakeholderService {
       name: data.name || 'Unknown',
       role: data.role,
       organization: data.organization,
-      email: data.email,
+      email: presentEmail(data.email),
       tags: data.tags || [],
       influence: data.influence || 'informed',
       what_matters: data.what_matters,
@@ -108,6 +114,8 @@ export class StakeholderService {
       id,
       updated_at: new Date().toISOString(),
     };
+    // A cleared email is sent empty: it removes the address rather than keeping the old one or writing an empty one.
+    if ('email' in data) updated.email = presentEmail(data.email);
 
     const { path: _path, notes, ...frontmatter } = updated;
     await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, data.notes !== undefined ? data.notes || '' : content);
