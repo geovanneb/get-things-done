@@ -316,11 +316,28 @@ function FilesTab({ taskId }: { taskId: string }) {
 
 
 /* ---- Main view ----------------------------------------------------- */
-export default function TaskDetailView() {
+/**
+ * One view per task: following a link or a search result to another task starts that task fresh, so it never shows,
+ * or saves, the previous task's draft, tab or open editors. The dialog's focus handling lives here, outside the key,
+ * so closing still returns focus to what opened the first task.
+ */
+export default function TaskDetailRoute() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const close = useCallback(() => navigate('/board'), [navigate]);
+  const panelRef = useDialogFocus(true, close, true);
+  // The panel of the new task replaces the old one: focus moves into it, as when the dialog first opened.
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (panel && !panel.contains(document.activeElement)) panel.focus();
+  }, [id, panelRef]);
+  return <TaskDetailView key={id} id={id} close={close} panelRef={panelRef} />;
+}
+
+function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close: () => void; panelRef: React.RefObject<HTMLDivElement> }) {
   const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
-  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { refetchTasks } = useOutletContext<{ refetchTasks: () => void }>();
   const [tab, setTab] = useState<TaskTab>('work');
@@ -331,8 +348,6 @@ export default function TaskDetailView() {
   const [pinError, setPinError] = useState<string | null>(null);
   // The task changed since editing began, so the save was refused: the draft stays until the user loads the latest.
   const [conflict, setConflict] = useState(false);
-  // Another task: its own diagnostics only.
-  useEffect(() => { setPinError(null); setConflict(false); }, [id]);
 
   // Re-read the task when it changes on disk (agent updating status, deliverables)
   const tasksVersion = useDataVersion('tasks');
@@ -356,15 +371,12 @@ export default function TaskDetailView() {
     });
   }, [task]);
 
-  const close = useCallback(() => navigate('/board'), [navigate]);
   const { openRecordDialogFor } = useRecordLauncher();
   const recorder = useRecorder();
   // Loaded with the page, so the button never opens the dialog late, or without the people it should name. The version
   // in the address sets `loading` during a refresh, so the button waits for the current list.
   const stakeholdersVersion = useDataVersion('stakeholders');
   const { data: people, loading: peopleLoading, error: peopleError } = useApi<Stakeholder[]>(`/api/stakeholders?v=${stakeholdersVersion}`);
-
-  const panelRef = useDialogFocus(true, close, true);
 
   const handleFieldChange = useCallback((field: string, value: unknown) => {
     setLocalTask((prev) => {

@@ -178,6 +178,34 @@ try {
     await context.close();
   }
 
+  // Following a link to another task opens that task, never the previous task's unsaved draft.
+  {
+    const { context, page } = await open(1280);
+    await page.route('**/api/tasks/TASK-2026-0001', async route => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const task = await (await route.fetch()).json();
+      await route.fulfill({ json: { ...task, body: `${task.body}\n\nSee [@TASK-2026-0002](/tasks/active/TASK-2026-0002/task.md).` } });
+    });
+    const puts = [];
+    page.on('request', r => { if (r.method() === 'PUT' && r.url().includes('/api/tasks/')) puts.push(r.url()); });
+    const second = await (await fetch(`${base}/api/tasks/TASK-2026-0002`)).json();
+    await page.goto(base + '/board/task/TASK-2026-0001');
+    await settle(page);
+    const title = page.getByRole('textbox', { name: 'Task title', exact: true });
+    await title.fill('Fictional unsaved title');
+    await page.locator('.gtd-modal__panel a[href="/board/task/TASK-2026-0002"]').first().click();
+    await page.waitForURL(/TASK-2026-0002$/);
+    await page.waitForFunction((t) => document.querySelector('.gtd-title-input')?.value === t, second.title, { timeout: 8000 }).catch(() => {});
+    check('task switch: the next task shows its own title, not the unsaved draft', await title.inputValue() === second.title, await title.inputValue());
+    check('task switch: the next task has nothing to save', await page.getByRole('button', { name: 'Save changes', exact: true }).count() === 0);
+    check('task switch: focus moves into the next task', await page.evaluate(() => Boolean(document.activeElement?.closest('.gtd-modal__panel'))));
+    await page.keyboard.press('Escape');
+    await page.waitForURL(/\/board$/);
+    const after = await (await fetch(`${base}/api/tasks/TASK-2026-0002`)).json();
+    check('task switch: no save was sent and the next task is unchanged', puts.length === 0 && after.title === second.title, puts.join(' '));
+    await context.close();
+  }
+
   // Release regressions: old results must not be actionable while a new query is pending.
   for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
     const { context, page } = await open(width, theme);
