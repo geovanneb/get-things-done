@@ -493,7 +493,9 @@ export function parseSettings(input: unknown, base: DigestSettings = defaultSett
 
 /** A file name as it is saved: the characters saveAttachment keeps, never hidden or the manifest. */
 function safeName(name: string): string {
-  const safe = safeFileName(name, 120).replace(/^\.+/, '') || 'file';
+  // No trailing dot either: Windows drops it, so topLevelName refuses it and readMeeting would hide the file. It goes
+  // before the length cut too, so a long `call.wav.` keeps its extension.
+  const safe = safeFileName(name.replace(/\.+$/, ''), 120).replace(/^\.+/, '').replace(/\.+$/, '') || 'file';
   return safe.toLowerCase() === MANIFEST ? `_${safe}` : safe;
 }
 
@@ -1027,7 +1029,8 @@ export class MeetingDigestService {
   async writeUpload(id: string, originalName: string, source: Readable, expected = 0): Promise<Upload> {
     const meeting = await this.readMeeting(id);
     if (meeting.status !== 'draft') throw httpError(409, 'Files can only be added before the meeting is queued');
-    const kind = recordingKind(originalName);
+    // Judged by the name it is saved under, so `call.wav.` is the recording `call.wav` it becomes.
+    const kind = recordingKind(safeName(originalName));
     if (kind.recording && !kind.supported) throw httpError(415, kind.reason);
     const limit = kind.recording ? MAX_RECORDING_BYTES : MAX_FILE_BYTES;
     if (expected > limit + 1024 * 1024) throw httpError(413, kind.recording ? 'The recording is larger than 4 GB' : 'The file is larger than 50 MB');
@@ -1085,7 +1088,8 @@ export class MeetingDigestService {
       if (meeting.status !== 'draft') throw httpError(409, 'Files can only be added before the meeting is queued');
       // A recording in progress has its place in the meeting already, so finishing it never fails for lack of room.
       if (meeting.files.length + (meeting.live ? 1 : 0) >= MAX_FILES_PER_MEETING) throw httpError(409, `A meeting holds at most ${MAX_FILES_PER_MEETING} files`);
-      const kind = recordingKind(originalName);
+      const base = safeName(originalName);
+      const kind = recordingKind(base);
       if (kind.recording && !kind.supported) throw httpError(415, kind.reason);
       const others = meeting.files.filter((f) => !f.recording).reduce((sum, f) => sum + f.size, 0);
       const recordings = meeting.files.filter((f) => f.recording).reduce((sum, f) => sum + f.size, 0);
@@ -1096,10 +1100,9 @@ export class MeetingDigestService {
       if (!kind.recording && others + upload.size > MAX_MEETING_BYTES) throw httpError(413, 'A meeting holds at most 100 MB of files');
       if (meeting.files.some((f) => f.sha256 === upload.sha256)) throw httpError(409, 'This file is already in the meeting');
       // A WAV recording is read by the transcription as it is, so it must be one it can read.
-      if (kind.recording && WAV.has(path.extname(originalName).toLowerCase())) {
+      if (kind.recording && WAV.has(path.extname(base).toLowerCase())) {
         await readWavFormat(upload.path).catch((err: Error) => { throw httpError(415, err instanceof WavError ? `${err.message} Export the recording as PCM WAV.` : err.message); });
       }
-      const base = safeName(originalName);
       const ext = path.extname(base);
       const stem = base.slice(0, base.length - ext.length) || 'file';
       const dir = await this.inWorkspace(this.meetingDir(id));

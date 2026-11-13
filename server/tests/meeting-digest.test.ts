@@ -713,3 +713,41 @@ test('uploads: a file the manifest never recorded is removed, a live upload keep
   await assert.rejects(service.writeUpload(other.id, 'long.wav', filling), /disk is nearly full/);
   assert.deepEqual((await fsp.readdir(otherDir)).filter((n) => n.startsWith('.upload-')), [], 'nothing of it is kept');
 });
+
+test('uploads: a name ending in a dot is saved without it, so the file stays listed after the next upload', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const meeting = await service.createMeeting({ title: 'Board prep', meeting_date: '2026-11-07' });
+  await service.addFile(meeting.id, 'Board notes.', Buffer.from('Agenda: budget, hiring.'));
+  await service.addFile(meeting.id, 'meeting.md.', Buffer.from('Not the manifest.'));
+  await service.addFile(meeting.id, '...', Buffer.from('Only dots.'));
+  await service.addFile(meeting.id, 'Board notes', Buffer.from('Second copy.'));
+  const after = await service.addFile(meeting.id, 'slides.txt', Buffer.from('Slide 1'));
+  const names = ['Board_notes', '_meeting.md', 'file', 'Board_notes-2', 'slides.txt'];
+  assert.deepEqual(after.files.map((f) => f.name), names);
+  const dir = path.join(ws, 'context-updates', 'meeting-queue', meeting.id);
+  assert.deepEqual((await fsp.readdir(dir)).filter((n) => names.includes(n)).sort(), [...names].sort());
+  assert.equal(await fsp.readFile(path.join(dir, 'meeting.md'), 'utf8').then((s) => s.includes('Not the manifest.')), false);
+});
+
+test('uploads: a recording is judged by the name it is saved under, so a trailing dot changes nothing', async (t) => {
+  await workspace(t);
+  const service = new MeetingDigestService();
+  const meeting = await service.createMeeting({ title: 'Design review', meeting_date: '2026-11-07' });
+  const status = (code: number, pattern: RegExp) => (err: Error & { statusCode?: number }) => err.statusCode === code && pattern.test(err.message);
+  // Saved as call.wav, so it is checked as one: bytes that are not a WAV are refused, with or without the dot.
+  for (const name of ['call.wav', 'call.wav.', 'call.wav...']) {
+    await assert.rejects(service.addFile(meeting.id, name, Buffer.from('Not audio.')), status(415, /PCM WAV/), name);
+  }
+  for (const name of ['clip.ogg', 'clip.ogg.']) {
+    await assert.rejects(service.addFile(meeting.id, name, Buffer.from('x')), status(415, /cannot be transcribed yet/), name);
+  }
+  // A real WAV named with a dot is a recording, as is one whose long name is cut to fit.
+  const long = `${'Quarterly design review '.repeat(8)}.wav.`;
+  const after = await service.addFile(meeting.id, 'call.wav.', silentWav());
+  const both = await service.addFile(meeting.id, long, silentWav(2));
+  assert.deepEqual(after.files.map((f) => [f.name, f.recording?.status]), [['call.wav', 'pending']]);
+  assert.equal(both.files.length, 2);
+  assert.match(both.files[1].name, /\.wav$/);
+  assert.equal(both.files[1].recording?.status, 'pending');
+});
