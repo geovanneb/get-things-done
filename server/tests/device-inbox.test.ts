@@ -417,3 +417,42 @@ test('a rejected recording leaves no draft meetings or upload files behind on re
   }
   assert.deepEqual(await fsp.readFile(inboxPath(phone.id, item.id, 'recording.wav')), audio);
 });
+
+const withEmptyNotes = (audio: Buffer) => {
+  const item = meeting(audio);
+  item.files.push({ name: 'notes.txt', size: 0, sha256: createHash('sha256').update(Buffer.alloc(0)).digest('hex') });
+  return item;
+};
+
+test('an offered empty file needs no chunk, and the meeting still arrives', async (t) => {
+  const { phone, inbox } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const audio = wav();
+  const item = withEmptyNotes(audio);
+  const offer = await phone.call('/v1/offer', { items: [item] });
+  assert.deepEqual(offer.value.items[0].files, [0, 0], 'The empty file is already as long as offered');
+  await phone.chunk(item.id, 0, 0, audio);
+  const done = await phone.call(`/v1/items/${item.id}/commit`, {});
+  assert.equal(done.status, 200);
+  const queued = (await new MeetingDigestService().readQueue()).meetings.find((entry) => entry.id === done.value.meeting_id);
+  assert.deepEqual(queued?.files.map((file) => [file.name, file.size]).sort(), [['notes.txt', 0], ['recording.wav', audio.length]]);
+  await assert.rejects(fsp.stat(inboxPath(phone.id, item.id)), { code: 'ENOENT' });
+});
+
+test('an empty file is still checked: held bytes or a symlink in its place are refused', async (t) => {
+  const { phone, inbox } = await running(t);
+  await phone.pair(await pairing(inbox));
+  const audio = wav();
+  const item = withEmptyNotes(audio);
+  await phone.call('/v1/offer', { items: [item] });
+  await phone.chunk(item.id, 0, 0, audio);
+  await fsp.writeFile(inboxPath(phone.id, item.id, 'notes.txt'), 'stale');
+  assert.equal((await phone.call(`/v1/items/${item.id}/commit`, {})).status, 422);
+
+  const outside = path.join(os.homedir(), 'outside.txt');
+  await fsp.writeFile(outside, 'keep');
+  await fsp.symlink(outside, inboxPath(phone.id, item.id, 'notes.txt'));
+  assert.equal((await phone.call(`/v1/items/${item.id}/commit`, {})).status, 400);
+  assert.equal(await fsp.readFile(outside, 'utf8'), 'keep');
+  assert.equal((await new MeetingDigestService().readQueue()).meetings.length, 0);
+});
