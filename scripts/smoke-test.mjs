@@ -1070,6 +1070,17 @@ try {
     check('a stakeholder\'s latest meeting comes from confirmed records only, not from who was expected',
       lastMeeting.last === null && lastMeeting.undated === false && badLast.status === 400,
       `${JSON.stringify(lastMeeting)} bad=${badLast.status}`);
+    // What is waiting on a stakeholder (#108): derived from the tasks' waiting records that name them.
+    const waitTask = await (await json('POST', '/api/tasks', { title: 'Fictional pricing follow-up' })).json();
+    const waitSet = await json('PUT', `/api/tasks/${waitTask.id}/waiting`, { waiting: { for: 'Fictional signed quote', party: { ref: 'STK-0001' }, since: '2020-01-01', follow_up: '2020-01-02' }, seen_updated_at: waitTask.updated_at });
+    const waitingOnThem = await (await fetch(`${base}/api/stakeholders/STK-0001/waiting-on`)).json();
+    const badWaitingOn = await fetch(`${base}/api/stakeholders/..%2Fx/waiting-on`);
+    await fetch(`${base}/api/tasks/${waitTask.id}`, { method: 'DELETE' });
+    check('a stakeholder\'s page lists the open tasks waiting on them, with a due follow-up marked',
+      waitSet.status === 200 && Array.isArray(waitingOnThem)
+      && waitingOnThem.some((w) => w.task_id === waitTask.id && w.for === 'Fictional signed quote' && w.follow_up_due === true)
+      && badWaitingOn.status === 400,
+      `set=${waitSet.status} list=${JSON.stringify(waitingOnThem)} bad=${badWaitingOn.status}`);
     // A task made from that meeting: the picker offers it, saving pins what the agent may read, and the package holds it.
     const meetingPick = await (await fetch(`${base}/api/mentions?q=standup&limit=20`)).json();
     const fromMeeting = await (await json('POST', '/api/tasks', { title: 'Fictional standup summary', body: `Summarize [@Fictional standup](/meetings/${queued.id}).` })).json();

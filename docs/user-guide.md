@@ -151,6 +151,10 @@ A person's page also shows the **latest meeting involving them**: the newest con
 record that lists them as an attendee, with its date and a link. Expected participants, a name
 in a transcript or a meeting still in review never count, and it is not proof that you attended.
 
+When open tasks wait on the person (**Set waiting** naming them as a stakeholder), their page also
+lists them under **Waiting on them**: the task, what it waits for, since when and the follow-up
+date, with a due follow-up first and marked. A name typed as "someone else" is not matched to a person.
+
 ### 3. Context — `context/`
 
 Your background knowledge library, filed by category: `company/`, `organization/`,
@@ -220,8 +224,8 @@ The requests stay listed on the task, so the feedback is not lost in a chat.
 for, from whom (a stakeholder or anyone else) and since when, with an optional follow-up date. It
 does not change the status, so other work on the task can go on. The board card shows **Waiting**;
 once the follow-up date comes, the task appears under **Needs attention** on Situation with what it
-waits for. **Resolve** clears it and leaves the task as it is. The follow-up date is separate from
-the due date.
+waits for, and the person's page lists it under **Waiting on them**. **Resolve** clears it and leaves
+the task as it is. The follow-up date is separate from the due date.
 
 **Dictate instead of typing.** **Dictate** under a task's Objective records your voice; press
 **Stop** and the words are added to the field. The same button is under a context note's

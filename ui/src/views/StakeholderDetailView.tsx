@@ -20,6 +20,7 @@ import { meetingPrepDraft } from '@/utils/meetingPrep';
 import type { ClaudeAgent, OrgPersonSummary, OrgPosition, OutputTemplate, Stakeholder, Task } from '@/types';
 import { StakeholderVoice, StakeholderVoiceCard } from '@/components/stakeholders/VoiceTag';
 import StakeholderLastMeeting from '@/components/stakeholders/LastMeeting';
+import StakeholderWaitingOn from '@/components/stakeholders/WaitingOn';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -493,6 +494,9 @@ export default function StakeholderDetailView({ stakeholderId, embedded = false,
 
       {/* Voice: see and manage what is remembered of it (Recognize known voices) */}
       <StakeholderVoiceCard id={stakeholder.id} name={stakeholder.name} headingLevel={embedded ? 3 : 2} />
+
+      {/* Open tasks waiting on them (#108) */}
+      <StakeholderWaitingOn id={stakeholder.id} headingLevel={embedded ? 3 : 2} />
 
       {/* Related tasks */}
       <Card headingLevel={embedded ? 3 : 2}

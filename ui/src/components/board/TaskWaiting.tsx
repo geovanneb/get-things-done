@@ -12,13 +12,13 @@ import type { Stakeholder, Task, TaskWaiting as Waiting } from '@/types';
 
 const OTHER = '__other__';
 
-function today(): string {
+export function today(): string {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
 }
 
 /** Whole days from one calendar day to another, in local time. */
-function daysBetween(from: string, to: string): number {
+export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00`) - Date.parse(`${from}T00:00:00`)) / 86_400_000);
 }
 
