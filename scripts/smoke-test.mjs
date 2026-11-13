@@ -1434,6 +1434,10 @@ try {
   check('git commit works', (await post('/api/workspace/git/commit', { message: 'Smoke test commit' })).ok);
   const log = await (await fetch(`${base}/api/workspace/git/log`)).json();
   check('git log shows the commit', log[0]?.message === 'Smoke test commit', `log=${JSON.stringify(log[0] ?? null)}`);
+  fs.appendFileSync(path.join(ws, 'README.md'), 'One more fictional line.\n');
+  const diff = await (await fetch(`${base}/api/workspace/git/diff?file=README.md`)).json();
+  check('git diff names the file and counts its lines', JSON.stringify(diff.files) === '["README.md"]'
+    && JSON.stringify(diff.stats) === '{"insertions":1,"deletions":0,"files_changed":1}', JSON.stringify({ files: diff.files, stats: diff.stats }));
 } catch (err) {
   check('smoke test ran to the end', false, `${err}${err?.cause ? ` (cause: ${err.cause.code ?? ''} ${err.cause.message ?? err.cause})` : ''}`);
 } finally {

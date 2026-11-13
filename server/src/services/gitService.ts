@@ -152,28 +152,37 @@ export class GitService {
   async getDiff(filePath?: string): Promise<GitDiff> {
     const git = await this.requireGit();
 
-    let diffOutput: string;
-    if (filePath) {
-      diffOutput = await git.diff(['--', filePath]);
-    } else {
-      diffOutput = await git.diff();
+    const pathspec = filePath ? ['--', filePath] : [];
+    const diffOutput = await git.diff(pathspec);
+    const numstat = await git.diff(['--numstat', '-z', ...pathspec]);
+
+    // Counted by git, not from the patch text, whose headers and hunk lines also hold + and -.
+    // -z: "added<TAB>deleted<TAB>path" per file, NUL-terminated and never quoted. A rename leaves the path empty and
+    // is followed by its old and new paths. Binary files count "-" lines.
+    const files: string[] = [];
+    let insertions = 0;
+    let deletions = 0;
+    const fields = numstat.split('\0');
+    for (let i = 0; i < fields.length; i++) {
+      const entry = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(fields[i]!);
+      if (!entry) continue;
+      let name = entry[3]!;
+      if (!name) {
+        i += 2;
+        name = fields[i] ?? '';
+      }
+      files.push(name);
+      if (entry[1] !== '-') insertions += Number(entry[1]);
+      if (entry[2] !== '-') deletions += Number(entry[2]);
     }
 
-    // Parse stats from diff
-    const insertions = (diffOutput.match(/\+{1}(?!\+)/g) || []).length;
-    const deletions = (diffOutput.match(/-{1}(?!-)/g) || []).length;
-    const fileMatches = diffOutput.match(/^diff --git/gm) || [];
-
     return {
-      files: fileMatches.map((_, i) => {
-        const match = diffOutput.match(new RegExp(`diff --git a/(\\S+)`));
-        return match ? match[1] : `file_${i}`;
-      }),
+      files,
       diff: diffOutput,
       stats: {
         insertions,
         deletions,
-        files_changed: fileMatches.length,
+        files_changed: files.length,
       },
     };
   }
