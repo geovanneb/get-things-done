@@ -513,9 +513,14 @@ export class InsightsService {
     const span = windowDays ?? this.spanDays(facts, now);
     const weekCount = Math.max(2, Math.min(26, Math.ceil(span / 7)));
 
+    // Step back by calendar days, not 7 * 24 hours: a week with a daylight
+    // saving change is an hour short or long, so in the first hour after the
+    // spring change a week would be skipped and its tasks left uncounted.
     const weeks: string[] = [];
     for (let i = weekCount - 1; i >= 0; i--) {
-      weeks.push(weekKey(new Date(now.getTime() - i * 7 * DAY_MS)));
+      const day = new Date(now);
+      day.setDate(day.getDate() - i * 7);
+      weeks.push(weekKey(day));
     }
 
     const rows = new Map(weeks.map((w) => [w, { week: w, created: 0, completed: 0 }]));
