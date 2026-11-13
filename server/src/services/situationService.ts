@@ -3,6 +3,7 @@ import * as path from 'path';
 import { parseMarkdown } from '../utils/markdown';
 import { SituationData, AttentionItem, Task, Priority, TaskStatus } from '../types';
 import { TaskService } from './taskService';
+import { calendarDaysUntil, endOfDay } from './insightsService';
 import { WorkspaceService } from './workspace';
 
 const taskService = new TaskService();
@@ -14,11 +15,22 @@ const CLOSED_STATUSES = new Set<TaskStatus>(['done', 'approved', 'archived']);
 
 const isOpen = (t: Task) => !CLOSED_STATUSES.has(t.status);
 
+/**
+ * The end of the due day, the same way Insights reads it (#1): a task due today is
+ * not overdue until the day is over. `new Date('2026-11-10')` is UTC midnight, which
+ * made it overdue from 09:00 in Tokyo and from the evening before in New York.
+ */
+const dueAt = (t: Task): Date | null => (typeof t.due_date === 'string' ? endOfDay(t.due_date) : null);
+
+/** Due within `days` calendar days and not overdue; today counts as 0. */
+const dueWithin = (t: Task, now: Date, days: number): boolean => {
+  const due = dueAt(t);
+  return due !== null && due >= now && calendarDaysUntil(due, now) <= days;
+};
+
 export class SituationService {
   async getSituationData(): Promise<SituationData> {
     const now = new Date();
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
 
     let tasks: Task[] = [];
     try {
@@ -32,16 +44,11 @@ export class SituationService {
 
     // Compute metrics
     const overdueTasks = openTasks.filter((t) => {
-      if (!t.due_date) return false;
-      return new Date(t.due_date) < now;
+      const due = dueAt(t);
+      return due !== null && due < now;
     });
 
-    const dueSoonTasks = openTasks.filter((t) => {
-      if (!t.due_date) return false;
-      const due = new Date(t.due_date);
-      const diff = due.getTime() - now.getTime();
-      return diff >= 0 && diff <= sevenDaysMs;
-    });
+    const dueSoonTasks = openTasks.filter((t) => dueWithin(t, now, 7));
 
     const blockedTasks = activeTasks.filter((t) => t.status === 'blocked');
     const inProgressTasks = activeTasks.filter((t) => t.status === 'in_progress');
@@ -102,9 +109,11 @@ export class SituationService {
     // Current focus (in_progress, max 3)
     const currentFocus = inProgressTasks
       .sort((a, b) => {
-        if (a.due_date && b.due_date) return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
-        if (a.due_date) return -1;
-        if (b.due_date) return 1;
+        const aDue = dueAt(a);
+        const bDue = dueAt(b);
+        if (aDue && bDue) return aDue.getTime() - bDue.getTime();
+        if (aDue) return -1;
+        if (bDue) return 1;
         return 0;
       })
       .slice(0, 3)
@@ -124,13 +133,8 @@ export class SituationService {
 
     // Upcoming commitments (next 14 days)
     const upcomingCommitments = openTasks
-      .filter((t) => {
-        if (!t.due_date) return false;
-        const due = new Date(t.due_date);
-        const diff = due.getTime() - now.getTime();
-        return diff >= 0 && diff <= fourteenDaysMs;
-      })
-      .sort((a, b) => new Date(a.due_date!).getTime() - new Date(b.due_date!).getTime())
+      .filter((t) => dueWithin(t, now, 14))
+      .sort((a, b) => dueAt(a)!.getTime() - dueAt(b)!.getTime())
       .map((t) => ({
         id: t.id,
         title: t.title,
