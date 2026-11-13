@@ -202,6 +202,18 @@ export function safeFileName(name: string, maxBytes = 200): string {
   return stem + keepExt;
 }
 
+/**
+ * Remove one attachment. A file that is already gone (removed in another tab, or by an agent) is a
+ * "File not found" (404) like every other missing file, not a server error.
+ */
+export async function deleteAttachment(dir: string, name: string): Promise<void> {
+  await fsp.unlink(path.join(dir, name)).catch((err: NodeJS.ErrnoException) => {
+    // ENOTDIR: the owner's "folder" is a file, so it has no attachments either.
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') throw new Error(`File not found: ${name}`);
+    throw err;
+  });
+}
+
 /** Save attachments without following an existing file symlink or replacing entity metadata. */
 export async function saveAttachment(dir: string, originalName: string, buffer: Buffer, reserved: string): Promise<FolderFile> {
   const name = topLevelName(safeFileName(originalName));
