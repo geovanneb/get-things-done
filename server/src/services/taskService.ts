@@ -56,7 +56,7 @@ const MAX_WAITING_TEXT = 500;
 const MAX_PARTY_NAME = 200;
 const STAKEHOLDER_REF = /^(STK|GRP)-\d{4}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const isDay = (v: unknown): v is string => typeof v === 'string' && DAY.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
+export const isDay = (v: unknown): v is string => typeof v === 'string' && DAY.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
 const localToday = (): string => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
 
 /**
