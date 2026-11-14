@@ -74,4 +74,8 @@ test('waiting-on refuses a bad id and an unknown stakeholder, and reads odd hand
   await fsp.writeFile(file, text.replace(/^---\n/, `---\nwaiting:\n  for: Quote\n  party:\n    ref: ${person.id}\n  since: soon\n  follow_up: later\n`));
   const [item] = await waitingOn(person.id);
   assert.deepEqual([item?.for, item?.since, item?.follow_up, item?.follow_up_due], ['Quote', '', null, false]);
+  // Shaped like a day but not one: never NaN days, never a due badge.
+  await fsp.writeFile(file, text.replace(/^---\n/, `---\nwaiting:\n  for: Quote\n  party:\n    ref: ${person.id}\n  since: '2026-13-01'\n  follow_up: '2026-00-01'\n`));
+  const [odd] = await waitingOn(person.id);
+  assert.deepEqual([odd?.since, odd?.follow_up, odd?.follow_up_due], ['', null, false]);
 });

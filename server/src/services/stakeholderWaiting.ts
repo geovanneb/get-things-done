@@ -1,4 +1,4 @@
-import { TaskService } from './taskService';
+import { TaskService, isDay } from './taskService';
 import { StakeholderService } from './stakeholderService';
 import { isOpen } from './taskStatus';
 
@@ -20,7 +20,6 @@ export interface WaitingOnItem {
 }
 
 const REF = /^(STK|GRP)-\d{4}$/;
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 function today(): string {
   const n = new Date();
@@ -39,13 +38,14 @@ export async function waitingOn(ref: string): Promise<WaitingOnItem[]> {
     if (!w || typeof w.for !== 'string' || !w.for.trim()) continue;
     const party = w.party as { ref?: unknown } | null | undefined;
     if (!party || typeof party !== 'object' || party.ref !== ref) continue;
-    const followUp = typeof w.follow_up === 'string' && DAY.test(w.follow_up) ? w.follow_up : null;
+    // A real calendar day, checked as when the record is set: a hand-written 2026-13-01 counts as not given.
+    const followUp = isDay(w.follow_up) ? w.follow_up : null;
     items.push({
       task_id: task.id,
       title: task.title,
       status: task.status,
       for: w.for,
-      since: typeof w.since === 'string' && DAY.test(w.since) ? w.since : '',
+      since: isDay(w.since) ? w.since : '',
       follow_up: followUp,
       follow_up_due: followUp !== null && followUp <= now,
     });
