@@ -304,6 +304,9 @@ try {
     const competing = await Promise.all(['Company', 'Risks'].map((category) => post({ title: 'Smoke concurrent note', category, body: 'Fictional note.' })));
     check('concurrent context creation reserves one id across categories', JSON.stringify(competing.map((r) => r.status).sort()) === '[201,409]');
     await fetch(`${base}/api/context/CTX-smoke-concurrent-note`, { method: 'DELETE' });
+    const unknown = await post({ title: 'Smoke unknown category', category: 'Finance', body: 'Fictional note.' });
+    check('a context note in an unknown category is refused, not saved where it cannot be read',
+      unknown.status === 400 && (await fetch(`${base}/api/context/CTX-smoke-unknown-category`)).status === 404, `status=${unknown.status}`);
   }
 
   // Share context notes as one Markdown file (#107): only shareable notes, the download is the preview, a change refuses it.
