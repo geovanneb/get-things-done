@@ -82,6 +82,8 @@ test('a PID file naming an unrelated process is stale, and gtd stop does not sig
   await stopCommand.parseAsync([], { from: 'user' });
   assert.equal(await stillRunning(), true, 'an unconfirmed process is not signalled');
   assert.equal(fs.existsSync(pidFile), true, 'and its file is kept');
+  assert.equal(process.exitCode, 1, 'and gtd stop does not report success');
+  process.exitCode = undefined;
 
   writePidFile(other.pid!, port);
   await stopCommand.parseAsync([], { from: 'user' });

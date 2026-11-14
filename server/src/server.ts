@@ -27,6 +27,9 @@ import { isKaizenNote, scheduleKaizenIntake } from './services/kaizenIntake';
 
 export const HOST = '127.0.0.1';
 
+/** How long a stopping server may take to close before it exits anyway. `gtd stop` waits longer than this (src/cli/commands/stop.ts). */
+export const SHUTDOWN_TIMEOUT_MS = 10_000;
+
 export interface StartServerOptions {
   /** Port on 127.0.0.1. The request guard only trusts this port, so it must be known before listening. */
   port: number;

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getWorkspacePath } from '../utils/config';
-import { getRunningDaemon } from '../utils/daemon';
+import { findRecordedDaemon, unconfirmedDaemonAdvice } from '../utils/daemon';
 import { isExistingWorkspace, refreshWorkspace } from '../utils/workspace';
 
 export const upgradeCommand = new Command('upgrade')
@@ -26,10 +26,21 @@ export const upgradeCommand = new Command('upgrade')
       return;
     }
 
-    if (await getRunningDaemon()) {
-      console.log(chalk.yellow('The dashboard is running.'));
-      console.log(chalk.dim('Run `gtd stop` first so it picks up the refreshed files.'));
-      console.log('');
+    // A running dashboard keeps the code it started with: refreshing its files underneath it leaves the two out of step.
+    const running = await findRecordedDaemon();
+    if (running?.check === 'ours') {
+      console.error(chalk.yellow(`The dashboard is running (pid ${running.state.pid}). Nothing was changed.`));
+      console.error(chalk.dim('Run `gtd stop`, then `gtd upgrade` again, then `gtd start`.'));
+      process.exit(1);
+      return;
+    }
+    if (running) {
+      const [headline, ...advice] = unconfirmedDaemonAdvice(running.state);
+      console.error(chalk.yellow(`${headline} Nothing was changed.`));
+      for (const line of advice) console.error(chalk.dim(line));
+      console.error(chalk.dim('Then run `gtd upgrade` again.'));
+      process.exit(1);
+      return;
     }
 
     const spinner = ora('Refreshing app-provided files...').start();
