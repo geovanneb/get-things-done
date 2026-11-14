@@ -26,6 +26,7 @@ import { effectiveChanges, effectiveProblems, suggestionProblem, transcriptBase,
 import { readFolder } from './meetingFolder';
 import { writeCorrectedVersion } from './meetingVersions';
 import { effectiveSensitivity } from './contextService';
+import { orgChartService } from './orgChartService';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -1460,9 +1461,14 @@ export class ContextUpdateService {
         const isNoteFolder = parts[0] === 'context' && parts.length === 4 && parts[3] === 'note.md';
         const what = isNoteFolder ? path.dirname(full) : full;
         if (isNoteFolder && (await fsp.lstat(what)).isSymbolicLink()) throw new Error('traversal');
-        const moved = await moveToTrash(ws, what);
+        // An org chart goes under its lock, like a delete from the dashboard: a save of it that is running finishes
+        // first, and one that comes after finds it gone instead of writing it back.
+        const isChart = parts[0] === 'stakeholders' && parts[1] === 'org-charts' && parts.length === 3;
+        const moved = isChart ? await orgChartService.withChartFileLock(full, () => moveToTrash(ws, what)) : await moveToTrash(ws, what);
         results.set(p.id, { outcome: 'applied', outcome_note: `Moved to ${moved}` });
       } catch (err) {
+        // A chart being saved right now: left pending, so the next time the update is opened tries again.
+        if ((err as { details?: { code?: string } }).details?.code === 'org_chart_busy') continue;
         const gone = (err as NodeJS.ErrnoException).code === 'ENOENT' || /not found|not a file/i.test((err as Error).message ?? '');
         results.set(p.id, gone
           ? { outcome: 'applied', outcome_note: 'The file was already gone.' }
