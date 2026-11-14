@@ -602,6 +602,33 @@ try {
     fs.rmSync(note, { recursive: true, force: true });
   }
 
+  // System cleanup, accepted tasks (#80): with the switch on, the memory review gathers what the user accepted.
+  {
+    const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+    const on = await (await send('PUT', '/api/routines/system-cleanup', { memory_review: { accepted_tasks: true } })).json();
+    const made = await (await send('POST', '/api/tasks', { title: 'Smoke accepted task' })).json();
+    const secret = await (await send('POST', '/api/tasks', { title: 'Smoke secret task', confidentiality: 'confidential' })).json();
+    fs.mkdirSync(path.join(ws, 'tasks', 'active', made.id, 'deliverables'), { recursive: true });
+    fs.writeFileSync(path.join(ws, 'tasks', 'active', made.id, 'deliverables', 'smoke-report.md'), '# Fictional smoke report\n');
+    await send('PUT', `/api/tasks/${made.id}`, { status: 'done', deliverables: [{ id: 'DEL-01', template_ref: 'memo', status: 'complete', file_path: `tasks/active/${made.id}/deliverables/smoke-report.md` }] });
+    await send('PUT', `/api/tasks/${secret.id}`, { status: 'done' });
+    const gathered = await (await send('POST', '/api/routines/system-cleanup/run')).json();
+    const review = gathered.context_update ? await (await fetch(`${base}/api/context-updates/${gathered.context_update}`)).json() : {};
+    const listFile = path.join(ws, 'context-updates', String(gathered.context_update), 'materials', 'accepted-tasks.md');
+    const list = fs.existsSync(listFile) ? fs.readFileSync(listFile, 'utf8') : '';
+    check('with accepted tasks on, the memory review copies the accepted task and only counts the confidential one',
+      on.settings?.memory_review?.accepted_tasks === true && review.kind === 'memory-review'
+        && review.material_files?.some((f) => f.name === `${made.id}-smoke-report.md`)
+        && list.includes(made.id) && !list.includes(secret.id) && !list.includes('Smoke secret task') && /1 accepted task was left out/.test(list),
+      `${gathered.message} ${list.slice(0, 300)}`);
+    await fetch(`${base}/api/context-updates/${gathered.context_update}`, { method: 'DELETE' });
+    const again = await (await send('POST', '/api/routines/system-cleanup/run')).json();
+    check('an accepted task is gathered only once',
+      Boolean(again.context_update) && !fs.existsSync(path.join(ws, 'context-updates', String(again.context_update), 'materials', 'accepted-tasks.md')), again.message);
+    if (again.context_update) await fetch(`${base}/api/context-updates/${again.context_update}`, { method: 'DELETE' });
+    await send('PUT', '/api/routines/system-cleanup', { memory_review: { accepted_tasks: false } });
+  }
+
   const group = await fetch(`${base}/api/stakeholders`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Smoke group', type: 'groups' }),
   });
