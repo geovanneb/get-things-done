@@ -11,8 +11,8 @@ async function walk(dir) {
     if (entry.isDirectory()) await walk(full);
     else if (entry.name.endsWith('.ts')) {
       const source = await readFile(full, 'utf8');
-      if (source.includes('gray-matter') && full !== path.join(root, 'utils', 'markdown.ts')) {
-        throw new Error(`${path.relative(root, full)}: use utils/markdown instead of importing gray-matter directly`);
+      if ((source.includes('gray-matter') || /['"`]js-yaml['"`/]/.test(source)) && full !== path.join(root, 'utils', 'markdown.ts')) {
+        throw new Error(`${path.relative(root, full)}: use utils/markdown instead of importing gray-matter or js-yaml directly`);
       }
     }
   }

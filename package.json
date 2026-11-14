@@ -71,6 +71,7 @@
     "express-rate-limit": "^8.7.1",
     "gray-matter": "^4.0.3",
     "helmet": "^8.3.0",
+    "js-yaml": "^3.15.2",
     "mdast-util-from-markdown": "^2.0.2",
     "mdast-util-gfm": "^3.1.0",
     "mdast-util-to-markdown": "^2.1.2",

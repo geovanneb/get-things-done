@@ -63,6 +63,15 @@ function lockName(id: string): string {
 // Old structure (backward compat): context/category/slug.md
 // Migration: old files are moved to new structure automatically
 
+/**
+ * When a note was last edited, for sorting newest first. YAML reads an unquoted `updated_at: 2026-11-08T09:30:00Z` as a
+ * Date, and people write other offsets than the server's UTC: compare the moments, not the text. Unreadable goes last.
+ */
+function editedAt(value: unknown): number {
+  const time = value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN;
+  return Number.isNaN(time) ? -Infinity : time;
+}
+
 export class ContextService {
   private getContextDir(category?: ContextCategory): string {
     const base = path.join(workspaceService.getWorkspacePath(), 'context');
@@ -132,7 +141,7 @@ export class ContextService {
       }
     }
 
-    return results.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return results.sort((a, b) => editedAt(b.updated_at) - editedAt(a.updated_at) || 0);
   }
 
   async getContextNote(id: string): Promise<ContextNote> {
