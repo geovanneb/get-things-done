@@ -1943,7 +1943,7 @@ export class ContextUpdateService {
    */
   async create(
     input: { title?: unknown; source_date?: unknown; notes?: unknown; text?: unknown },
-    system?: { origin: string; kind: string; textName: string; fields?: Record<string, string> },
+    system?: { origin: string; kind: string; textName: string; fields?: Record<string, string>; files?: { name: string; data: Buffer }[] },
   ): Promise<ContextUpdate> {
     const title = typeof input.title === 'string' ? input.title.trim().slice(0, 200) : '';
     const sourceDate = typeof input.source_date === 'string' && input.source_date ? input.source_date : new Date().toISOString().slice(0, 10);
@@ -1978,6 +1978,11 @@ export class ContextUpdateService {
       const saved = await saveAttachment(path.join(dir, 'materials'), name, buffer, 'update.md');
       if (prepared && 'content' in prepared) transcripts.push(await this.saveTranscript(path.join(dir, 'materials'), saved.name, buffer, prepared));
       if (prepared && 'problem' in prepared) problems.push({ source: saved.name, reason: prepared.problem });
+    }
+    // Files the dashboard gathered itself (System cleanup's accepted tasks), saved under the names it chose and listed.
+    for (const file of system?.files ?? []) {
+      const saved = await saveAttachment(path.join(dir, 'materials'), file.name, file.data, 'update.md');
+      if (saved.name !== file.name) throw new Error(`The file name ${file.name} cannot be used`);
     }
 
     const now = new Date().toISOString();
