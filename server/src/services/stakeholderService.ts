@@ -1,12 +1,33 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
+import { createHash } from 'crypto';
 import { Stakeholder, InfluenceLevel } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { reserveIds, reservedSequence } from './idReservations';
 import { requireText, requireList, textList, textOf } from '../utils/loose';
+import { lock, unlock } from '../utils/fileLock';
+import { topLevelName, workspaceEntry } from '../utils/files';
 
 const TEXT_FIELDS = ['name', 'role', 'organization', 'email', 'what_matters', 'notes', 'avatar_initials', 'influence'] as const;
+
+/**
+ * The fields an edit may change: the stakeholder schema's own fields plus the initials the app keeps. Anything else in
+ * a request (the id, the dates the app sets, `path`, or a token such as `version` or `expected_version`) is never
+ * written into the file. Keys already in the file are kept as they are.
+ */
+const EDITABLE_FIELDS = ['name', 'role', 'organization', 'email', 'phone', 'influence', 'decision_role', 'what_matters', 'communication_preferences', 'tags', 'avatar_initials'] as const;
+
+/** How long a save waits for another save or delete of the same stakeholder before it answers 409. */
+const STAKEHOLDER_LOCK_WAIT_MS = 5000;
+
+/** The lock file's name: the id, or a hash of it when a hand-written id is not a valid file name. */
+function lockName(id: string): string {
+  try {
+    if (Buffer.byteLength(id) <= 200) return topLevelName(id);
+  } catch { /* not a file name */ }
+  return `id-${createHash('sha256').update(id).digest('hex').slice(0, 32)}`;
+}
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -61,6 +82,11 @@ export class StakeholderService {
     if (!filePath) throw new Error(`Stakeholder not found: ${id}`);
 
     const { data, content } = await fileService.readMarkdown<Stakeholder>(filePath);
+    return this.view(id, data, content, filePath);
+  }
+
+  /** The stakeholder as the API shows it, from the file's front matter and body. */
+  private view(id: string, data: Partial<Stakeholder>, content: string, filePath: string): Stakeholder {
     return {
       ...data,
       id,
@@ -115,30 +141,75 @@ export class StakeholderService {
   async updateStakeholder(id: string, data: Partial<Stakeholder>): Promise<Stakeholder> {
     requireText(data, TEXT_FIELDS);
     requireList(data, ['tags']);
-    const existing = await this.getStakeholder(id);
-    const filePath = existing.path!;
-    const { content } = await fileService.readMarkdown<Stakeholder>(filePath);
+    return this.withStakeholderLock(id, async () => {
+      // Found and read under the lock: a save never writes back a person deleted a moment ago, and never builds on a
+      // copy another save has just replaced.
+      const filePath = await this.findStakeholderFile(id);
+      if (!filePath) throw new Error(`Stakeholder not found: ${id}`);
+      const { data: file, content } = await fileService.readMarkdown<Record<string, unknown>>(filePath);
+      const current = this.view(id, file as Partial<Stakeholder>, content, filePath);
 
-    const updated: Stakeholder = {
-      ...existing,
-      ...data,
-      id,
-      updated_at: new Date().toISOString(),
-    };
-    // A cleared email is sent empty: it removes the address rather than keeping the old one or writing an empty one.
-    if ('email' in data) updated.email = presentEmail(data.email);
+      // Built from the file, so keys an agent added stay; only the editable fields of the request are applied.
+      const frontmatter: Record<string, unknown> = {
+        ...file,
+        id,
+        name: current.name,
+        tags: current.tags,
+        influence: current.influence,
+        created_at: current.created_at,
+      };
+      for (const key of EDITABLE_FIELDS) {
+        if (key in data) frontmatter[key] = data[key as keyof Stakeholder];
+      }
+      // A cleared email is sent empty: it removes the address rather than keeping the old one or writing an empty one.
+      if ('email' in data) {
+        const email = presentEmail(data.email);
+        if (email === undefined) delete frontmatter.email;
+        else frontmatter.email = email;
+      }
+      frontmatter.updated_at = new Date().toISOString();
+      // The notes are the body. Notes an older file kept in its front matter move to the body instead of being lost.
+      const body = data.notes !== undefined ? data.notes || '' : (current.notes ?? '');
+      delete frontmatter.notes;
 
-    const { path: _path, notes, ...frontmatter } = updated;
-    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, data.notes !== undefined ? data.notes || '' : content);
-    return { ...updated, path: filePath };
+      await fileService.writeMarkdown(filePath, frontmatter, body);
+      return this.view(id, frontmatter as Partial<Stakeholder>, body, filePath);
+    });
   }
 
   async deleteStakeholder(id: string): Promise<void> {
-    const filePath = await this.findStakeholderFile(id);
-    if (!filePath) throw new Error(`Stakeholder not found: ${id}`);
-    // Keep the id taken: tasks and @mentions that name this person must not point at the next new one.
-    await reserveIds([id]);
-    await fileService.deleteFile(filePath);
+    await this.withStakeholderLock(id, async () => {
+      const filePath = await this.findStakeholderFile(id);
+      if (!filePath) throw new Error(`Stakeholder not found: ${id}`);
+      // Keep the id taken: tasks and @mentions that name this person must not point at the next new one.
+      // Lock order: this stakeholder's lock, then the id reservations lock inside reserveIds. Nothing takes them the
+      // other way round: reserveIds holds only its own lock and calls nothing that locks a stakeholder.
+      await reserveIds([id]);
+      await fileService.deleteFile(filePath);
+    });
+  }
+
+  /**
+   * One writer at a time per stakeholder, across dashboards: `.situation-board/stakeholder-locks/<id>.lock`. Update and
+   * delete take it, so a save never writes back a person deleted a moment ago and two saves never build on the same
+   * old copy. It does not refuse a save made from an older view (that needs a version check), and agents that edit
+   * the file directly do not take it.
+   */
+  private async withStakeholderLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const ws = workspaceService.getWorkspacePath();
+    const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'stakeholder-locks'), true);
+    await fileService.ensureDir(locks);
+    const lockFile = await workspaceEntry(ws, path.join(locks, `${lockName(id)}.lock`), true);
+    // A busy lock is not a newer version: its own code lets the dashboard keep the user's draft and try again.
+    const held = await lock(lockFile, STAKEHOLDER_LOCK_WAIT_MS, () => Object.assign(
+      new Error('This stakeholder is being saved elsewhere; try again in a moment.'),
+      { statusCode: 409, details: { code: 'stakeholder_busy' } },
+    ));
+    try {
+      return await operation();
+    } finally {
+      await unlock(held);
+    }
   }
 
   private async findStakeholderFile(id: string): Promise<string | null> {

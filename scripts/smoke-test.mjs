@@ -1342,6 +1342,26 @@ try {
       removed.every((r) => r.ok) && nextPerson.id !== person.id && nextTeam.id !== team.id);
   }
 
+  // A stakeholder save writes only stakeholder fields: request-only fields never reach the file or the response,
+  // and a key an agent added to the file stays.
+  {
+    const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const temp = await (await send('POST', '/api/stakeholders', { name: 'Smoke Fields', role: 'Analyst' })).json();
+    const file = path.join(ws, 'stakeholders', 'people', `${temp.id.toLowerCase()}.md`);
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/^---\n/, '---\nsource_note: added by an agent\n'));
+    const res = await send('PUT', `/api/stakeholders/${temp.id}`, {
+      role: 'Lead analyst', version: 'a'.repeat(64), expected_version: 'b'.repeat(64), expected_updated_at: '2026-01-01T00:00:00.000Z',
+    });
+    const body = await res.json();
+    const text = fs.readFileSync(file, 'utf8');
+    const requestOnly = ['version', 'expected_version', 'expected_updated_at'];
+    check('a stakeholder save writes only stakeholder fields and keeps keys already in the file',
+      res.ok && body.role === 'Lead analyst' && requestOnly.every((k) => !(k in body) && !new RegExp(`^${k}:`, 'm').test(text))
+        && /^source_note: added by an agent$/m.test(text),
+      JSON.stringify({ status: res.status, keys: Object.keys(body) }));
+    await fetch(`${base}/api/stakeholders/${temp.id}`, { method: 'DELETE' });
+  }
+
   // Clearing a stakeholder's email and notes in the edit form sends them empty, and that removes them.
   {
     const send = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
