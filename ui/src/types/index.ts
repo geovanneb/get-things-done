@@ -605,7 +605,8 @@ export interface AgentRun {
   update_id: string;
   command: 'analyze' | 'apply';
   runner: string;
-  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  /** `queued`: waiting for the run going now (#344); kept in the dashboard's memory only, lost on a restart. */
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   started_at: string;
   ended_at: string | null;
   message: string;
@@ -615,6 +616,10 @@ export interface AgentRun {
   /** While a run started from the dashboard is going: its last steps and how many there were (#246). */
   steps?: RunStep[];
   step_count?: number;
+  /** While queued: its place in line, 1 for next. */
+  position?: number;
+  /** A queued run removed or dropped before it started; `message` says why. */
+  not_started?: boolean;
 }
 
 /** One step of a run: the kind of tool call and the workspace path it touched, never contents. */

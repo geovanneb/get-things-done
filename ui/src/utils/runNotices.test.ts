@@ -1,7 +1,7 @@
 /**
  * Unit tests for the run-finished notices (#246). Run with `npm run test:run-notices --workspace=ui`.
  */
-import { anotherTabInFront, claimNotice, cleanTitle, finishedRun, markFront, noticeFor, noticeKey, noticeWords, type RunRecord } from './runNotices';
+import { anotherTabInFront, claimNotice, cleanTitle, finishedRun, markFront, noticeFor, noticeKey, noticeWords, waitingOutcome, type RunRecord } from './runNotices';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -31,6 +31,15 @@ check('the update not read: never said as "no changes"', words(noticeFor('CU-202
 check('an apply: applied', words(noticeFor('CU-2026-0001', '/w', run('apply', 'succeeded'), sync))?.title === 'CU-2026-0001 is applied');
 check('a failure says to open it', words(noticeFor('CU-2026-0001', '/w', run('analyze', 'failed'), sync))?.title === 'The analysis of CU-2026-0001 did not finish');
 check('a run the user stopped, or still going, says nothing', noticeFor('CU-2026-0001', '/w', run('apply', 'cancelled'), sync) === null && noticeFor('CU-2026-0001', '/w', run('apply', 'running'), sync) === null);
+check('a run waiting in line says nothing (#344)', noticeFor('CU-2026-0001', '/w', run('analyze', 'queued'), sync) === null);
+{
+  const since = '2026-11-04T09:00:00.000Z';
+  const seen = (status: RunRecord['status'], started_at = since) => waitingOutcome(since, { status, started_at });
+  check('a run seen waiting: still waiting, or started', seen('queued') === 'waiting' && seen('running', '2026-11-04T09:03:00.000Z') === 'going');
+  check('a run seen waiting and then removed from the line, here or in another tab, is known, never a restart',
+    seen('cancelled') === 'known' && seen('failed', '2026-11-04T09:03:00.000Z') === 'known');
+  check('a run seen waiting that the server no longer knows is lost', waitingOutcome(since, null) === 'lost' && seen('succeeded', '2026-11-03T09:00:00.000Z') === 'lost');
+}
 
 check('a title is one line, without control or direction characters', cleanTitle('Weekly\nsync‮⁦ x') === 'Weekly sync x');
 check('a long title is shortened, never dropped', cleanTitle('y'.repeat(300)).length === 80);

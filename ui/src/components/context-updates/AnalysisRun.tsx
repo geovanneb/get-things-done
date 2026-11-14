@@ -6,6 +6,7 @@ import Button from '@/components/common/Button';
 import { usePageApi } from '@/hooks/usePageApi';
 import { formatRelativeDate } from '@/utils/format';
 import type { AgentRun, RunnerStatus } from '@/types';
+import { waitingOutcome } from '@/utils/runNotices';
 import RunProgress from './RunProgress';
 import { HelpBox } from './shared';
 
@@ -21,6 +22,10 @@ const COMMAND_FOR: Record<string, 'analyze' | 'apply'> = { ready: 'analyze', app
  *
  * While a run is going the page checks on it one request at a time. A failed check keeps the last known state
  * (and Stop) and tries again; an answer for another update, or an older one, is ignored.
+ *
+ * An analysis asked for while another run goes waits in line (#344): the panel says so, with Cancel, and keeps
+ * checking until it starts. The line is kept in the dashboard's memory only, so a restart forgets it; when the
+ * server no longer knows a run this page saw waiting, the panel says it did not start, without guessing why.
  */
 /** What the page can ask of the panel: start the run, as its own button would (the sticky bar repeats it). */
 export interface AnalysisRunHandle { start(): void }
@@ -64,6 +69,11 @@ export default forwardRef<AnalysisRunHandle, {
   const [lostContact, setLostContact] = useState(false);
   // False until the first check of this update's run has answered: until then a run may be going unseen.
   const [known, setKnown] = useState(false);
+  // When this update's run was seen waiting in line: if the server no longer knows it, the line was lost.
+  const waitingSince = useRef<string | null>(null);
+  const [lostWait, setLostWait] = useState(false);
+  // A run this page took out of the line itself: its "did not start" note is not repeated back.
+  const removedHere = useRef<string | null>(null);
   // Bumped when the update changes or the panel goes away, so late answers are dropped.
   const generation = useRef(0);
 
@@ -72,6 +82,13 @@ export default forwardRef<AnalysisRunHandle, {
     try {
       const latest = await api.get<AgentRun | null>(`/api/context-updates/${updateId}/run`);
       if (mine !== generation.current) return { ok: false, run: null };
+      if (latest?.status === 'queued') {
+        waitingSince.current = latest.started_at;
+        setLostWait(false);
+      } else if (waitingSince.current) {
+        if (waitingOutcome(waitingSince.current, latest) === 'lost') setLostWait(true);
+        waitingSince.current = null;
+      }
       setRun(latest);
       setKnown(true);
       setLostContact(false);
@@ -88,6 +105,8 @@ export default forwardRef<AnalysisRunHandle, {
     setRun(null);
     setKnown(false);
     setError('');
+    waitingSince.current = null;
+    setLostWait(false);
     void load();
     void checkRunner(mine);
     return () => { generation.current += 1; };
@@ -102,33 +121,38 @@ export default forwardRef<AnalysisRunHandle, {
   }
 
   const running = run?.status === 'running';
-  useEffect(() => { onRunning?.(running); }, [running, onRunning]);
+  const queued = run?.status === 'queued';
+  // Waiting in line counts as going for the page: it does not ask the user to run the command too.
+  const going = running || queued;
+  useEffect(() => { onRunning?.(going); }, [going, onRunning]);
   useEffect(() => () => onRunning?.(false), [onRunning]);
 
-  // One check at a time while a run is going, or until the first check has answered; a failed check is
+  // One check at a time while a run is going or waiting, or until the first check has answered; a failed check is
   // retried and the last known state stays.
   useEffect(() => {
-    if (!running && known) return;
+    if (!going && known) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       const { ok, run: latest } = await load();
       if (stopped) return;
-      if (ok && latest?.status !== 'running') { if (running) onChange(); return; }
+      if (ok && latest?.status !== 'running' && latest?.status !== 'queued') { if (going) onChange(); return; }
       timer = setTimeout(() => void tick(), POLL_MS);
     };
     timer = setTimeout(() => void tick(), POLL_MS);
     return () => { stopped = true; clearTimeout(timer); };
-  }, [running, known, load, onChange]);
+  }, [going, known, load, onChange]);
 
   // Every answer is checked against the update on screen: one for an update the user has left is dropped.
   const start = async () => {
     const mine = generation.current;
     setBusy(true);
     setError('');
+    setLostWait(false);
     try {
       const started = await api.post<AgentRun>(`/api/context-updates/${updateId}/run`, { command });
       if (mine !== generation.current) return;
+      waitingSince.current = started.status === 'queued' ? started.started_at : null;
       setRun(started);
       onChange();
     } catch (err) {
@@ -145,6 +169,9 @@ export default forwardRef<AnalysisRunHandle, {
     try {
       await api.post(`/api/context-updates/${updateId}/run/cancel`);
       if (mine !== generation.current) return;
+      // Taken out of the line here: what comes back next is not a lost wait, and its note is not repeated back.
+      if (waitingSince.current) removedHere.current = waitingSince.current;
+      waitingSince.current = null;
       await load();
       onChange();
     } catch (err) {
@@ -160,11 +187,11 @@ export default forwardRef<AnalysisRunHandle, {
   const who = account?.email ?? organization ?? '';
   const details = [who === organization ? null : organization, account?.plan].filter(Boolean).join(', ');
   const accountText = who ? (details ? `${who} (${details})` : who) : '';
-  const ended = run && !running ? run : null;
+  const ended = run && !going ? run : null;
   const command = startable ? COMMAND_FOR[status] : undefined;
   const noun = (ended ?? run)?.command === 'apply' ? t('analysisRun.apply') : t('analysisRun.analysis');
   // The dashboard runs it: one primary button, the command one click away. Otherwise copying it is the main action.
-  const action: NextAction = running ? 'running'
+  const action: NextAction = going ? 'running'
     : !command ? 'none'
       : !known || runnerCheck === 'checking' ? 'checking'
         : runnerCheck === 'ok' && runner && !problem ? (busy ? 'starting' : 'run')
@@ -179,6 +206,17 @@ export default forwardRef<AnalysisRunHandle, {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {running ? (
         <RunProgress run={run} runnerLabel={runner?.label ?? 'Claude Code'} stopping={busy} onStop={() => void stop()} />
+      ) : queued ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span role="status" style={{ flex: '1 1 240px', minWidth: 0, fontSize: 'var(--text-sm)' }}>
+              <strong>{t('analysisRun.waitingStartsWhenTheCurrent')}</strong>
+              {(run.position ?? 1) > 1 && <span style={{ color: 'var(--color-text-muted)' }}> · {t('analysisRun.placeInLine', { position: run.position ?? 1 })}</span>}
+            </span>
+            <Button variant="secondary" size="sm" loading={busy} onClick={() => void stop()}>{t('analysisRun.cancelWaitingRun')}</Button>
+          </div>
+          <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('analysisRun.oneRunAtATime')}</p>
+        </>
       ) : action === 'checking' ? (
         <p role="status" style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{t('analysisRun.checkingWhetherTheDashboardCan')}</p>
       ) : runnable && runner ? (
@@ -216,16 +254,17 @@ export default forwardRef<AnalysisRunHandle, {
           {manual && (!startable || action === 'copy') && manual(true)}
         </>
       )}
-      {(running || !known) && lostContact && (
-        <HelpBox tone="warning">{running ? t('analysisRun.lostContactWithTheDashboard') : t('analysisRun.couldNotCheckWhetherSomething')}</HelpBox>
+      {(going || !known) && lostContact && (
+        <HelpBox tone="warning">{going ? t('analysisRun.lostContactWithTheDashboard') : t('analysisRun.couldNotCheckWhetherSomething')}</HelpBox>
       )}
+      {lostWait && !going && <HelpBox tone="warning">{t('analysisRun.waitingRunWasForgotten')}</HelpBox>}
       {command && !running && runner && !problem && runner.trusted === null && (
         <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           {rich(t, 'analysisRun.couldNotVerifyThatTrusts', { label: runner.label })}
         </p>
       )}
-      {ended && ended.status !== 'succeeded' && (
-        <HelpBox tone={ended.status === 'cancelled' ? 'warning' : 'critical'} title={ended.status === 'cancelled' ? t('analysisRun.stopped', { noun }) : t('analysisRun.theDidNotFinishCleanly', { toLowerCase: noun.toLowerCase() })}>
+      {ended && ended.status !== 'succeeded' && !(ended.not_started && ended.started_at === removedHere.current) && (
+        <HelpBox tone={ended.status === 'cancelled' ? 'warning' : 'critical'} title={ended.not_started ? t('analysisRun.didNotStart', { noun }) : ended.status === 'cancelled' ? t('analysisRun.stopped', { noun }) : t('analysisRun.theDidNotFinishCleanly', { toLowerCase: noun.toLowerCase() })}>
           {ended.message}
         </HelpBox>
       )}

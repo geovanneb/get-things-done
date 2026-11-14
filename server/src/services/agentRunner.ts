@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
-import { WorkspaceService } from './workspace';
+import { WorkspaceService, selectedWorkspacePath, withWorkspacePath } from './workspace';
 import { findCommand } from './aiToolDetection';
 import { ContextUpdateService, proposalTarget, updateId } from './contextUpdateService';
 import { GATE_TOOL, readGateLog, removeApprovalGate, writeApprovalGate, type ApprovalGate } from './approvalGate';
@@ -36,15 +36,20 @@ import { atomicWrite } from '../utils/atomicWrite';
  *
  * One run at a time, pinned to the workspace it started in, with its own process group so Stop ends everything
  * it started. A small record per update in `.situation-board/runs/` says how the last run ended.
+ *
+ * An analysis asked for while another run is going waits in line (#344), in memory only, and starts when that run
+ * ends however it ends. An apply never waits: it is refused while another run is going, so the user starts it
+ * knowingly, with the accepted changes as they are then.
  */
 
-export type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
+/** `queued`: waiting in line for the run going now; never saved, lost when the dashboard restarts. */
+export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 /** The workspace commands the dashboard can run: analyze a ready update, apply an approved one. */
 export type RunCommand = 'analyze' | 'apply';
 
 /** How a run started from the dashboard ended: what the page needs to say so, never more. */
-export interface RunFinished { workspace: string; update_id: string; command: RunCommand; status: Exclude<RunStatus, 'running'> }
+export interface RunFinished { workspace: string; update_id: string; command: RunCommand; status: Exclude<RunStatus, 'queued' | 'running'> }
 
 /** Says when a run started from the dashboard ends, after its record is saved ('finished', RunFinished). */
 export const runEvents = new EventEmitter();
@@ -71,6 +76,10 @@ export interface AgentRun {
    */
   steps?: RunStep[];
   step_count?: number;
+  /** While queued: its place in line, 1 for next. */
+  position?: number;
+  /** A queued run that was removed or dropped before it started: `message` says why. In memory only. */
+  not_started?: boolean;
 }
 
 export type { RunStep };
@@ -577,6 +586,22 @@ interface Active {
 }
 
 let active: Active | null = null;
+
+/** An analysis waiting for the run going now. `service` is the runner it was asked of (its adapter starts it). */
+interface Queued { workspace: string; run: AgentRun; service: AgentRunnerService }
+/** First in, first out. In memory only: a restart of the dashboard forgets it. */
+const queue: Queued[] = [];
+const QUEUED_MESSAGE = 'Waiting: starts when the current run ends.';
+/** While the dashboard stops: nothing in line starts. */
+let closing = false;
+
+/** Starts the first queued run when nothing is going. Synchronous up to the slot being taken, so it never starts two. */
+function startNext(): void {
+  if (active || closing) return;
+  const next = queue.shift();
+  if (next) void next.service.startQueued(next);
+}
+
 /** The steps shown while a run goes: the last ones, so a long run stays small. */
 const KEEP_STEPS = 50;
 /** How each update's last run ended, also when its record could not be saved. Keyed by workspace and update. */
@@ -646,6 +671,16 @@ export class AgentRunnerService {
     return active !== null;
   }
 
+  /** For tests: the updates waiting in line, in order. */
+  static queued(): string[] {
+    return queue.map((q) => q.run.update_id);
+  }
+
+  private queuedView(workspace: string, uid: string): AgentRun | null {
+    const index = queue.findIndex((q) => q.workspace === workspace && q.run.update_id === uid);
+    return index < 0 ? null : { ...queue[index]!.run, position: index + 1 };
+  }
+
   /** The current or last run for an update in this workspace, or null when there was none. */
   async get(id: string): Promise<AgentRun | null> {
     const uid = updateId(id);
@@ -653,6 +688,8 @@ export class AgentRunnerService {
     if (active && active.workspace === workspace && active.run.update_id === uid) {
       return active.run.status === 'running' ? { ...active.run, steps: [...active.steps], step_count: active.stepCount } : active.run;
     }
+    const waiting = this.queuedView(workspace, uid);
+    if (waiting) return waiting;
     // The saved record, unless it could not be saved or is older than what this dashboard last saw.
     const saved = await this.readRecord(workspace, uid);
     const remembered = recent.get(recentKey(workspace, uid)) ?? null;
@@ -712,20 +749,83 @@ export class AgentRunnerService {
     });
   }
 
-  /** Starts `/gtd-context-analyze <id>` for an update that is ready. One run at a time. */
-  startAnalysis(id: string): Promise<AgentRun> {
-    return this.start(id, 'analyze');
+  /**
+   * Starts `/gtd-context-analyze <id>` for an update that is ready. One run at a time: while another goes it waits in
+   * line, unless `queue` is false (the meeting digest tries again on its next check instead).
+   */
+  startAnalysis(id: string, options: { queue?: boolean } = {}): Promise<AgentRun> {
+    return this.start(id, 'analyze', options);
   }
 
   /**
    * Starts `/gtd-context-analyze <id>` for a ready update, or `/gtd-context-apply <id>` for an approved one. An apply
-   * runs with the approval gate: it may write only the accepted files and the update's own folder. One run at a time.
+   * runs with the approval gate: it may write only the accepted files and the update's own folder. One run at a time:
+   * an analysis asked for while another run goes is queued (status "queued"); an apply is refused.
    */
-  async start(id: string, command: RunCommand): Promise<AgentRun> {
+  async start(id: string, command: RunCommand, options: { queue?: boolean } = {}): Promise<AgentRun> {
     if (command !== 'analyze' && command !== 'apply') throw httpError(400, 'Invalid command: use analyze or apply');
     refuseWhileUpdating();
     const uid = updateId(id);
     const workspace = workspaceService.getWorkspacePath();
+    const waiting = this.queuedView(workspace, uid);
+    if (waiting && command === 'analyze') return waiting;
+    if (active) {
+      const same = active.workspace === workspace && active.run.update_id === uid;
+      if (same || command === 'apply' || options.queue === false) throw httpError(409, `Another run is going (${active.run.update_id}). Wait for it, or stop it first.`);
+      return this.enqueue(workspace, uid);
+    }
+    return this.begin(workspace, uid, command);
+  }
+
+  /**
+   * Puts an analysis in line behind the run going now. The update is checked now, so a request that could not start
+   * is refused at once; it is checked again when its turn comes.
+   */
+  private async enqueue(workspace: string, uid: string): Promise<AgentRun> {
+    const status = await this.updateStatus(workspace, uid);
+    if (status === null) throw httpError(404, `Context update not found: ${uid}`);
+    if (status !== 'ready') throw httpError(409, `Cannot analyze while the update is "${status}"`);
+    // Things moved during the check: the run may have ended, or the same request came twice.
+    const waiting = this.queuedView(workspace, uid);
+    if (waiting) return waiting;
+    if (!active) return this.begin(workspace, uid, 'analyze');
+    if (active.workspace === workspace && active.run.update_id === uid) throw httpError(409, `Another run is going (${uid}). Wait for it, or stop it first.`);
+    queue.push({
+      workspace, service: this,
+      run: {
+        update_id: uid, command: 'analyze', runner: this.adapter.id, status: 'queued', started_at: new Date().toISOString(), ended_at: null,
+        message: QUEUED_MESSAGE, refused: 0, turns: null, usage_usd: null, pid: null,
+      },
+    });
+    return this.queuedView(workspace, uid)!;
+  }
+
+  /**
+   * Starts a queued analysis whose turn came. One that can no longer start (the update changed, was deleted, the
+   * dashboard shows another workspace, the runner has a problem) is dropped with the reason, and the next one goes.
+   */
+  async startQueued(entry: Queued): Promise<void> {
+    try {
+      // The turn comes from the end of the run before, which still carries the workspace pinned by the request that
+      // started that run: the workspace open now is read outside it, and the start is pinned to the queued one's own.
+      let selected: string | null = null;
+      try { selected = selectedWorkspacePath(); } catch { /* none configured */ }
+      if (selected !== entry.workspace) throw new Error('The dashboard now shows another workspace.');
+      await withWorkspacePath(entry.workspace, () => this.begin(entry.workspace, entry.run.update_id, 'analyze', true));
+    } catch (err) {
+      const reason = (err as Error).message.trim();
+      const dropped: AgentRun = {
+        ...entry.run, status: 'cancelled', not_started: true, ended_at: new Date().toISOString(),
+        message: `It waited for another run, then did not start: ${reason}${/[.!?]$/.test(reason) ? '' : '.'}`,
+      };
+      // Only when nothing newer was asked for this update meanwhile.
+      if (!(active?.workspace === entry.workspace && active.run.update_id === entry.run.update_id)) recent.set(recentKey(entry.workspace, entry.run.update_id), dropped);
+      startNext();
+    }
+  }
+
+  /** Takes the one-run slot and starts the run, after checking the update and the runner. */
+  private async begin(workspace: string, uid: string, command: RunCommand, queued = false): Promise<AgentRun> {
     // An apply that stopped half way (status "applying") can continue: the apply command resumes and skips what is done.
     const allowedStatus = command === 'analyze' ? ['ready'] : ['approved', 'applying'];
     if (active) throw httpError(409, `Another run is going (${active.run.update_id}). Wait for it, or stop it first.`);
@@ -745,8 +845,11 @@ export class AgentRunnerService {
       if (active === current) active = null;
       setAnalysisRunning(workspace, uid, false);
       resolveDone();
+      startNext();
     };
     try {
+      // A queued run comes here on its own: an app update may have begun while it waited.
+      if (queued) refuseWhileUpdating();
       // Changes to this update already under way finish first; new ones see the run and wait for it.
       await new ContextUpdateService().settled(uid);
       const orphan = await this.orphan(workspace);
@@ -807,7 +910,7 @@ export class AgentRunnerService {
       current.run = { ...current.run, ...explainOutcome(outcome, status, current.run.command, apply), ended_at: new Date().toISOString() };
       recent.set(recentKey(current.workspace, current.run.update_id), current.run);
       await this.record(current);
-      if (current.run.status !== 'running') {
+      if (current.run.status !== 'running' && current.run.status !== 'queued') {
         const finished: RunFinished = { workspace: current.workspace, update_id: current.run.update_id, command: current.run.command, status: current.run.status };
         runEvents.emit('finished', finished);
       }
@@ -818,11 +921,22 @@ export class AgentRunnerService {
       if (active === current) active = null;
       setAnalysisRunning(current.workspace, current.run.update_id, false);
       current.resolveDone();
+      // However it ended (done, failed, stopped, timed out), the next one in line goes.
+      startNext();
     }
   }
 
   async cancel(id: string): Promise<AgentRun> {
     const workspace = workspaceService.getWorkspacePath();
+    // A queued run leaves the line; it never started, so nothing else changes.
+    const index = queue.findIndex((q) => q.workspace === workspace && q.run.update_id === updateId(id));
+    if (index >= 0) {
+      const [entry] = queue.splice(index, 1);
+      // Kept like a dropped run (in memory only), so another page that saw it waiting can say what became of it.
+      const removed: AgentRun = { ...entry!.run, status: 'cancelled', not_started: true, ended_at: new Date().toISOString(), message: 'Removed from the queue; it did not start.' };
+      recent.set(recentKey(workspace, removed.update_id), removed);
+      return removed;
+    }
     if (!active || active.workspace !== workspace || active.run.update_id !== updateId(id)) throw httpError(409, 'Nothing is running for this update');
     const current = active;
     current.stopRequested ??= 'cancelled';
@@ -834,10 +948,18 @@ export class AgentRunnerService {
 
   /** Ends a running analysis when the server shuts down, and waits (bounded) for it and its record. */
   static async stopAll(): Promise<void> {
-    const current = active;
-    if (!current) return;
-    current.stopRequested ??= 'shutdown';
-    await current.handle?.stop('shutdown');
-    await Promise.race([current.done, new Promise((r) => setTimeout(r, KILL_GRACE_MS * 2.5))]);
+    // Nothing waiting starts while the dashboard stops; the queue is in memory only anyway.
+    closing = true;
+    queue.length = 0;
+    try {
+      const current = active;
+      if (!current) return;
+      current.stopRequested ??= 'shutdown';
+      await current.handle?.stop('shutdown');
+      await Promise.race([current.done, new Promise((r) => setTimeout(r, KILL_GRACE_MS * 2.5))]);
+    } finally {
+      queue.length = 0;
+      closing = false;
+    }
   }
 }
