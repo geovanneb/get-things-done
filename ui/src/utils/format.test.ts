@@ -1,10 +1,11 @@
 /**
  * Unit tests for relative dates (#361). Run with `npm run test:format --workspace=ui`.
  */
-// Far from UTC, so a count made in UTC days or 24-hour periods would land on the wrong day.
-process.env.TZ = 'Asia/Tokyo';
+// Far from UTC, so a count made in UTC days or 24-hour periods would land on the wrong day. Run with another TZ
+// (for example TZ=America/New_York) to check a zone west of UTC; every case below holds in any zone.
+process.env.TZ ||= 'Asia/Tokyo';
 
-import { formatDueStatus, formatRelativeDate } from './format';
+import { dueHighlight, formatDueStatus, formatRelativeDate } from './format';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -45,6 +46,24 @@ says('2026-11-09T00:30:00', 'yesterday');
 at('2026-11-10T09:00:00');
 check('due in 3 calendar days is due soon', formatDueStatus('2026-11-13') === 'due-soon');
 check('due in 4 calendar days is upcoming', formatDueStatus('2026-11-14') === 'upcoming');
+
+// The stakeholder page's task list: a task due today is due soon all day, never overdue, in any zone.
+const marks = (value: string | undefined, expected: string) => {
+  const actual = dueHighlight(value);
+  check(`${new Date().toString()}: due ${value} is marked ${expected}`, actual === expected, actual === expected ? '' : `got "${actual}"`);
+};
+for (const time of ['00:30', '09:30', '12:00', '23:30']) {
+  at(`2026-11-10T${time}:00`);
+  marks('2026-11-10', 'soon');
+  marks('2026-11-09', 'overdue');
+  marks('2026-11-13', 'soon');
+  marks('2026-11-14', 'none');
+}
+at('2026-11-09T20:00:00');
+marks('2026-11-10', 'soon');
+marks(undefined, 'none');
+marks('', 'none');
+marks('next week', 'none');
 
 globalThis.Date = RealDate;
 if (failures) {

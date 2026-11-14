@@ -184,7 +184,9 @@ export class SituationService {
     if (task.status === 'in_progress') {
       if (!task.start_date || !task.due_date) return 50;
       const start = new Date(task.start_date).getTime();
-      const due = new Date(task.due_date).getTime();
+      // The whole due day counts: a bare date read as UTC midnight put Tokyo past the deadline at 09:00 that day.
+      const due = endOfDay(task.due_date)?.getTime() ?? NaN;
+      if (!Number.isFinite(start) || !Number.isFinite(due)) return 50;
       const now = Date.now();
       const progress = Math.round(((now - start) / (due - start)) * 100);
       return Math.max(5, Math.min(95, progress));

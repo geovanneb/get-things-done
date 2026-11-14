@@ -102,3 +102,20 @@ test('Situation: current focus lists the earliest due day first, then tasks with
     t.mock.timers.reset();
   }
 });
+
+test('Situation: progress counts the whole due day, in any time zone', async (t) => {
+  const ws = await workspace(t);
+  for (const zone of ZONES) {
+    process.env.TZ = zone;
+    // Started at local midnight the day before, due today: at noon, 36 of the 48 hours have passed.
+    const id = await writeTask(ws, 1, { start_date: new Date(2026, 9, 27).toISOString(), due_date: '2026-10-28' });
+    t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 28, 12) });
+    try {
+      const s = await new SituationService().getSituationData();
+      const focus = s.current_focus.find((f) => f.id === id);
+      assert.equal(focus?.progress, 75, `${zone}: noon on the due day is 75%, not past the deadline`);
+    } finally {
+      t.mock.timers.reset();
+    }
+  }
+});
