@@ -88,6 +88,8 @@ export default function RunFinishedNotifier() {
     const run = await apiGet<RunRecord | null>(`/api/context-updates/${id}/run`).catch(() => null);
     if (!current() || !run) return;
     if (run.status === 'running') { watched.current.set(id, { workspace: where, started_at: run.started_at }); return; }
+    // Waiting in line (#344): not started, so nothing to watch yet; the server announces it when it ends.
+    if (run.status === 'queued') return;
     watched.current.delete(id);
     // A run that ended before this page knew of it is history, not news.
     if (announcedIn === null && seen?.started_at !== run.started_at) return;

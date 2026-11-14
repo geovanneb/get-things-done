@@ -960,8 +960,12 @@ try {
     const claudeConfig = path.join(tmp, 'claude-config');
     fs.mkdirSync(standInDir);
     fs.mkdirSync(claudeConfig);
-    fs.writeFileSync(path.join(standInDir, 'claude.cjs'), "if (process.argv.slice(2).join(' ') !== 'auth status --json') process.exit(1);\n"
-      + "console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }));\n");
+    // A run (anything but the sign-in probe) fails at once, or with a `hold` file next to it, does nothing until stopped
+    // (ending by itself within a minute): a run that stays going for the queue check, still without any AI work.
+    fs.writeFileSync(path.join(standInDir, 'claude.cjs'), "if (process.argv.slice(2).join(' ') !== 'auth status --json') {\n"
+      + "  if (require('fs').existsSync(require('path').join(__dirname, 'hold'))) setTimeout(() => process.exit(1), 60000);\n"
+      + "  else process.exit(1);\n"
+      + "} else console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai' }));\n");
     // No paths inside the stand-in: cmd.exe reads a batch file in the OEM code page, and sh would expand $ or `.
     if (process.platform === 'win32') {
       fs.writeFileSync(path.join(standInDir, 'claude.cmd'), '@"%GTD_SMOKE_NODE%" "%~dp0claude.cjs" %*\r\n');
@@ -1019,6 +1023,26 @@ try {
           && refused.status === 409 && /has not trusted this workspace folder/.test(refusedBody.message ?? '')
           && exact.trusted === true && exact.problems?.length === 0,
           `parent=${parentOnly.trusted}/${parentOnly.problems?.map((p) => p.code)} run=${refused.status} exact=${exact.trusted}/${exact.problems?.map((p) => p.code)}`);
+        // One run at a time: a second analysis waits in line instead of being refused, and Cancel takes it out (#344).
+        // The stand-in holds the first run without doing anything; it is stopped right after.
+        fs.writeFileSync(path.join(standInDir, 'hold'), '');
+        const trustPost = (url, data = {}) => fetch(`${trustBase}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const other = await (await trustPost('/api/context-updates', { title: 'Fictional planning review', source_date: '2026-11-06', text: 'Notes of a fictional review' })).json();
+        const firstRun = await trustPost(`/api/context-updates/${ready.id}/run`, { command: 'analyze' });
+        const firstRunBody = await firstRun.json();
+        const queuedRun = await trustPost(`/api/context-updates/${other.id}/run`, { command: 'analyze' });
+        const queuedBody = await queuedRun.json();
+        const waitingRun = await (await fetch(`${trustBase}/api/context-updates/${other.id}/run`)).json();
+        const leftLine = await (await trustPost(`/api/context-updates/${other.id}/run/cancel`)).json();
+        const afterLeaving = await (await fetch(`${trustBase}/api/context-updates/${other.id}/run`)).json();
+        await trustPost(`/api/context-updates/${ready.id}/run/cancel`);
+        fs.rmSync(path.join(standInDir, 'hold'));
+        check('a second analysis waits in line instead of being refused, and Cancel takes it out of the line (#344)',
+          firstRun.status === 202 && firstRunBody.status === 'running'
+          && queuedRun.status === 202 && queuedBody.status === 'queued' && queuedBody.position === 1
+          && waitingRun?.status === 'queued' && leftLine.status === 'cancelled' && leftLine.not_started === true
+          && afterLeaving?.status === 'cancelled' && afterLeaving?.not_started === true && afterLeaving?.started_at === queuedBody.started_at,
+          `first=${firstRun.status}/${firstRunBody.status ?? firstRunBody.message} second=${queuedRun.status}/${queuedBody.status ?? queuedBody.message} waiting=${waitingRun?.status} cancel=${leftLine.status} after=${afterLeaving?.status ?? null}`);
       }
     } finally {
       trustServer.kill();

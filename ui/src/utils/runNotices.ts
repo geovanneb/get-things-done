@@ -23,7 +23,7 @@ export function finishedRun(value: unknown): { update_id: string; workspace: str
 }
 
 /** A run of an update as `GET /api/context-updates/:id/run` returns it (the parts used here). */
-export interface RunRecord { command: 'analyze' | 'apply'; status: 'running' | 'succeeded' | 'failed' | 'cancelled'; started_at: string; ended_at: string | null }
+export interface RunRecord { command: 'analyze' | 'apply'; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'; started_at: string; ended_at: string | null }
 
 /** What a notice says, as data: the desktop app writes the same words from it. */
 export interface RunNotice {
@@ -36,9 +36,22 @@ export interface RunNotice {
   proposals: number | null;
 }
 
-/** A finished run as a notice, or null when nothing is said (still running, or stopped by the user, who knows). */
+/**
+ * What became of a run this page saw waiting in line (#344), from the next answer about the update's run (`null`: none):
+ * - `waiting`: still in line; `going`: it started; `known`: it ended in a way the server still knows (finished,
+ *   removed from the line, also from another tab, or dropped with its reason);
+ * - `lost`: the server no longer knows it (none, or an older run): the line is kept in memory only, so the dashboard
+ *   restarted or another workspace is open now.
+ */
+export function waitingOutcome(waitingSince: string, latest: Pick<RunRecord, 'status' | 'started_at'> | null): 'waiting' | 'going' | 'known' | 'lost' {
+  if (latest?.status === 'queued') return 'waiting';
+  if (latest?.status === 'running') return 'going';
+  return latest && latest.started_at >= waitingSince ? 'known' : 'lost';
+}
+
+/** A finished run as a notice, or null when nothing is said (waiting, still running, or stopped by the user, who knows). */
 export function noticeFor(update_id: string, workspace: string, run: RunRecord, update: { title: string; proposals: number } | null): RunNotice | null {
-  if (run.status === 'running' || run.status === 'cancelled') return null;
+  if (run.status === 'queued' || run.status === 'running' || run.status === 'cancelled') return null;
   const outcome = run.status === 'failed' ? (run.command === 'analyze' ? 'analyze-failed' : 'apply-failed') : run.command === 'analyze' ? 'review' : 'applied';
   return { update_id, workspace, started_at: run.started_at, outcome, title: cleanTitle(update?.title), proposals: update ? update.proposals : null };
 }

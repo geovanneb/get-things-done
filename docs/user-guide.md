@@ -432,7 +432,12 @@ repository, the repository's root). Trusting another folder further up is not en
 Claude Code would then ignore the workspace's permission rules. The first time, open a
 terminal in the workspace folder, run `claude` once and accept "trust this folder". One
 analysis runs at a time, the update is locked while it runs, and **Stop analysis** ends
-it with everything it started.
+it with everything it started. Run analysis on another update while one is going and it
+waits in line ("Waiting: starts when the current run ends", with **Cancel this run**): it
+starts by itself when the run before it ends, however that run ends. A waiting analysis
+whose update changed meanwhile (no longer ready, or deleted) does not start, and its page
+says why. The line is kept only while the dashboard runs: after a restart, run it again.
+An apply never waits in line; start it once nothing else is running.
 
 Next to the button, **Signed in as** shows the Claude account the dashboard's runs use.
 A computer can have more than one Claude Code sign-in (for example a work and a personal
