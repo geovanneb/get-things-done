@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fsp from 'fs/promises';
+import { createHash } from 'crypto';
 import { ContextNote, ContextCategory } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
@@ -45,6 +46,17 @@ function requestedCategory(value: unknown): ContextCategory {
   const category = typeof value === 'string' ? value.toLowerCase() : value;
   if ((CATEGORIES as readonly unknown[]).includes(category)) return category as ContextCategory;
   throw httpError(400, `category must be one of ${CATEGORIES.join(', ')}.`);
+}
+
+/**
+ * The lock file's name for a note id: the id itself, as create has always used. A hand-written id that is not a valid
+ * file name (a colon, a trailing dot, too long) can never come from create, so it gets a hashed name instead of a 400.
+ */
+function lockName(id: string): string {
+  try {
+    if (Buffer.byteLength(id) <= 200) return topLevelName(id);
+  } catch { /* not a file name */ }
+  return `id-${createHash('sha256').update(id).digest('hex').slice(0, 32)}`;
 }
 
 // Per-note folder structure: context/category/slug/note.md
@@ -142,6 +154,19 @@ export class ContextService {
     };
   }
 
+  /**
+   * The note's cross-process lock, `.situation-board/context-locks/<id>.lock`. Create, update (and so a move to another
+   * category) and delete all take it, so one waits for the other instead of finding the folder gone halfway. The path
+   * stays the same as older versions used for create, so an older dashboard on the same workspace meets the same lock.
+   */
+  private async lockNote(id: string, busyMessage: string) {
+    const ws = workspaceService.getWorkspacePath();
+    const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'context-locks'), true);
+    await fileService.ensureDir(locks);
+    const lockFile = await workspaceEntry(ws, path.join(locks, `${lockName(id)}.lock`), true);
+    return lock(lockFile, 5000, () => httpError(409, busyMessage));
+  }
+
   async createContextNote(data: Partial<ContextNote>): Promise<ContextNote> {
     requireText(data, TEXT_FIELDS);
     const now = new Date().toISOString();
@@ -153,11 +178,7 @@ export class ContextService {
     const filePath = this.getNoteFile(category, slug);
 
     // The id is shared across categories: check and create under one cross-process lock.
-    const ws = workspaceService.getWorkspacePath();
-    const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'context-locks'), true);
-    await fileService.ensureDir(locks);
-    const lockFile = await workspaceEntry(ws, path.join(locks, `${topLevelName(id)}.lock`), true);
-    const held = await lock(lockFile, 5000, () => httpError(409, 'This context note is being created elsewhere. Try again.'));
+    const held = await this.lockNote(id, 'This context note is being created elsewhere. Try again.');
     try {
       // Never replace another note (and its sharing label) by creating one with the same title.
       if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
@@ -192,6 +213,16 @@ export class ContextService {
     requireText(data, TEXT_FIELDS);
     const sensitivity = requestedSensitivity(data.sensitivity);
     const requested = data.category ? requestedCategory(data.category) : undefined;
+    const held = await this.lockNote(id, 'This context note is being changed elsewhere. Try again.');
+    try {
+      return await this.updateLocked(id, data, sensitivity, requested);
+    } finally {
+      await unlock(held);
+    }
+  }
+
+  /** The update itself, under the note's lock: the note is read here, so a move or edit that finished first is seen. */
+  private async updateLocked(id: string, data: Partial<ContextNote>, sensitivity: Sensitivity | null | undefined, requested: ContextCategory | undefined): Promise<ContextNote> {
     const existing = await this.getContextNote(id);
     const incomingCategory = requested ?? existing.category;
 
@@ -211,7 +242,11 @@ export class ContextService {
       // removing the old folder deleted them). Only the parent is created: Windows will not
       // rename onto an existing folder, even an empty one.
       await fileService.ensureDir(this.getContextDir(incomingCategory));
-      await fsp.rename(path.dirname(existing.path!), newNoteDir);
+      await fsp.rename(path.dirname(existing.path!), newNoteDir).catch((err: NodeJS.ErrnoException) => {
+        // Removed by something that does not take the lock (an agent or the file manager): the note is gone, not broken.
+        if (err.code === 'ENOENT') throw new Error(`Context note not found: ${id}`);
+        throw err;
+      });
       filePath = newFilePath;
     }
 
@@ -234,6 +269,15 @@ export class ContextService {
   }
 
   async deleteContextNote(id: string): Promise<void> {
+    const held = await this.lockNote(id, 'This context note is being changed elsewhere. Try again.');
+    try {
+      await this.deleteLocked(id);
+    } finally {
+      await unlock(held);
+    }
+  }
+
+  private async deleteLocked(id: string): Promise<void> {
     const result = await this.findContextFile(id);
     if (!result) throw new Error(`Context note not found: ${id}`);
     // Delete the entire note directory (new structure) if possible, else just the file
