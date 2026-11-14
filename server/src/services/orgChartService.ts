@@ -192,7 +192,8 @@ export class OrgChartService {
     };
   }
 
-  private async writeChart(chart: OrgChart, filePath: string): Promise<OrgChart> {
+  /** `create`: write a new file only, failing with EEXIST when the name is taken. */
+  private async writeChart(chart: OrgChart, filePath: string, create = false): Promise<OrgChart> {
     const frontmatter = {
       schema_version: schemaVersion(chart),
       id: chart.id,
@@ -205,7 +206,8 @@ export class OrgChartService {
       created_at: chart.created_at,
       updated_at: chart.updated_at,
     };
-    await fileService.writeMarkdown(filePath, frontmatter, chart.notes || '');
+    if (create) await fileService.createMarkdown(filePath, frontmatter, chart.notes || '');
+    else await fileService.writeMarkdown(filePath, frontmatter, chart.notes || '');
     return { ...chart, path: filePath };
   }
 
@@ -234,11 +236,10 @@ export class OrgChartService {
     requireText(data, CHART_TEXT_FIELDS);
     const name = typeof data.name === 'string' ? data.name.trim() : '';
     if (!name) throw new OrgChartError('Chart name is required');
-    const id = await this.generateId();
     const now = new Date().toISOString();
     const { members, units } = reconcileUnits(await this.checkNewRefs(normalizeMembers(data.members), []), normalizeUnits(data.units));
     const chart: OrgChart = {
-      id,
+      id: '',
       name,
       organization: data.organization?.trim() || undefined,
       description: data.description?.trim() || undefined,
@@ -248,7 +249,18 @@ export class OrgChartService {
       created_at: now,
       updated_at: now,
     };
-    return this.writeChart(chart, path.join(this.getDir(), `${id.toLowerCase()}.md`));
+    // Two creates at the same moment can pick the same number, and a plain write would silently replace the
+    // other chart. The exclusive create lets only one have it; the other takes the next number.
+    let seq = await this.highestNumber();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      chart.id = `ORG-${String(++seq).padStart(4, '0')}`;
+      try {
+        return await this.writeChart(chart, path.join(this.getDir(), `${chart.id.toLowerCase()}.md`), true);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+    }
+    throw Object.assign(new OrgChartError('Could not reserve a new org chart id; try again'), { statusCode: 409 });
   }
 
   async updateChart(id: string, data: Partial<OrgChart>): Promise<OrgChart> {
@@ -359,13 +371,13 @@ export class OrgChartService {
     return members;
   }
 
-  private async generateId(): Promise<string> {
+  private async highestNumber(): Promise<number> {
     let max = 0;
     for (const chart of await this.listCharts()) {
       const match = chart.id.match(/^ORG-(\d+)$/);
       if (match) max = Math.max(max, parseInt(match[1], 10));
     }
-    return `ORG-${String(max + 1).padStart(4, '0')}`;
+    return max;
   }
 }
 
