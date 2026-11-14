@@ -206,6 +206,110 @@ try {
     await context.close();
   }
 
+  // The draft is compared with the version it started from: a change made elsewhere while editing keeps the draft, and
+  // undoing the edits then leaves nothing to save. A save whose response arrives after the task was archived keeps it
+  // archived. A task deleted or archived elsewhere keeps the edits, says so, and stays usable with the keyboard.
+  for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
+    const id = 'TASK-2026-0001';
+    const at = `@${width} ${theme}`;
+    const { context, page } = await open(width, theme);
+    const before = await (await fetch(`${base}/api/tasks/${id}`)).json();
+    const put = (body) => fetch(`${base}/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const nextRead = () => page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === `/api/tasks/${id}`, { timeout: 10000 }).catch(() => null);
+    const changeElsewhere = async (body) => {
+      const read = nextRead();
+      await put(body);
+      const seen = Boolean(await read);
+      await page.waitForTimeout(300);
+      return seen;
+    };
+    const until = async (fn) => { for (let i = 0; i < 50 && !(await fn()); i++) await page.waitForTimeout(100); return fn(); };
+    await page.goto(`${base}/board/task/${id}`);
+    await settle(page);
+    const title = page.getByRole('textbox', { name: 'Task title', exact: true });
+    const priority = page.getByRole('combobox', { name: 'Priority', exact: true });
+    const save = page.getByRole('button', { name: 'Save changes', exact: true });
+    const readOnlyNotice = page.getByText('This task is archived.', { exact: false });
+    const changed = before.priority === 'low' ? 'medium' : 'low';
+
+    await title.fill('Fictional unsaved title');
+    check(`draft baseline: the panel re-reads a task changed elsewhere ${at}`, await changeElsewhere({ priority: changed }));
+    check(`draft baseline: a change elsewhere keeps the draft and Save ${at}`,
+      await title.inputValue() === 'Fictional unsaved title' && await priority.inputValue() === before.priority && await save.isVisible());
+    await title.fill(before.title);
+    check(`draft baseline: undoing the edits shows the newer version ${at}`, await until(async () => await priority.inputValue() === changed), await priority.inputValue());
+    check(`draft baseline: undoing the edits leaves nothing to save ${at}`, await save.count() === 0);
+
+    // A real save held in flight: it is written, the task is then seen archived (a newer copy), and only then does the
+    // save's response arrive. The late response must not bring back an editable task.
+    await title.fill('Fictional saved title');
+    let release, archivedServed = false;
+    const released = new Promise((resolve) => { release = resolve; });
+    await page.route(`**/api/tasks/${id}`, async route => {
+      if (route.request().method() === 'PUT') {
+        const response = await route.fetch();
+        await released;
+        return route.fulfill({ response });
+      }
+      // Later reads fail, so only the order of the two responses decides what the panel shows.
+      if (archivedServed) return route.abort();
+      archivedServed = true;
+      const task = await (await route.fetch()).json();
+      await route.fulfill({ json: { ...task, status: 'archived', updated_at: new Date(Date.parse(task.updated_at) + 60_000).toISOString() } });
+    });
+    const archivedRead = nextRead();
+    await save.click();
+    const sawArchive = Boolean(await archivedRead);
+    await page.waitForTimeout(300);
+    release();
+    await page.waitForTimeout(500);
+    check(`draft baseline: archived while a save is in flight stays archived after its response ${at}`,
+      sawArchive && await readOnlyNotice.isVisible() && await save.count() === 0 && await title.getAttribute('readonly') !== null);
+    await page.unroute(`**/api/tasks/${id}`);
+    await put({ title: before.title, priority: before.priority });
+
+    // Deleted, then archived, elsewhere while editing.
+    await page.goto(`${base}/board/task/${id}`);
+    await settle(page);
+    await title.fill('Fictional unsaved title');
+    await page.route(`**/api/tasks/${id}`, route => route.request().method() === 'GET'
+      ? route.fulfill({ status: 404, json: { error: 'Not Found', message: `Task not found: ${id}` } }) : route.continue());
+    await changeElsewhere({ priority: before.priority });
+    const deletedNotice = page.getByText('This task was deleted elsewhere', { exact: false });
+    check(`draft baseline: deleted elsewhere says so ${at}`, await until(() => deletedNotice.isVisible()));
+    check(`draft baseline: deleted elsewhere keeps the draft, with nothing to save ${at}`,
+      await title.inputValue() === 'Fictional unsaved title' && await save.count() === 0);
+
+    await page.unroute(`**/api/tasks/${id}`);
+    await page.route(`**/api/tasks/${id}`, async route => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      await route.fulfill({ json: { ...await response.json(), status: 'archived' } });
+    });
+    await changeElsewhere({ priority: before.priority });
+    const archivedNotice = page.getByRole('alert').filter({ hasText: 'This task was archived elsewhere' });
+    check(`draft baseline: archived elsewhere keeps the edits visible and announces they are not saved ${at}`,
+      await until(() => archivedNotice.isVisible()) && await title.inputValue() === 'Fictional unsaved title' && await save.count() === 0);
+    check(`draft baseline: archived elsewhere shows the read-only notice too ${at}`, await readOnlyNotice.isVisible());
+    // Keyboard only: Tab stays inside the panel and reaches Close, and Enter on it closes the task.
+    await title.focus();
+    let reachedClose = false, staysInPanel = true;
+    for (let i = 0; i < 40 && !reachedClose; i++) {
+      await page.keyboard.press('Tab');
+      const where = await page.evaluate(() => ({ inPanel: Boolean(document.activeElement?.closest('.gtd-modal__panel')), label: document.activeElement?.getAttribute('aria-label') }));
+      staysInPanel &&= where.inPanel;
+      reachedClose = where.label === 'Close task';
+    }
+    check(`draft baseline: with the notices, Tab stays in the panel and reaches Close ${at}`, reachedClose && staysInPanel);
+    if (reachedClose) {
+      await page.keyboard.press('Enter');
+      check(`draft baseline: Enter on Close closes the task ${at}`, await page.waitForURL(/\/board$/, { timeout: 5000 }).then(() => true, () => false));
+    }
+    await context.close();
+    const after = await (await fetch(`${base}/api/tasks/${id}`)).json();
+    check(`draft baseline: the demo task is as it was ${at}`, after.priority === before.priority && after.title === before.title && after.status === before.status);
+  }
+
   // Release regressions: old results must not be actionable while a new query is pending.
   for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
     const { context, page } = await open(width, theme);
