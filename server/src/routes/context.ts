@@ -4,7 +4,6 @@ import multer from 'multer';
 import { ContextService } from '../services/contextService';
 import { downloadContextShare, previewContextShare } from '../services/contextShare';
 import { sendFile, sendZip } from '../utils/files';
-import { ContextCategory } from '../types';
 import { utf8FileNames } from '../utils/uploadNames';
 
 const router = Router();
@@ -13,7 +12,7 @@ const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limit
 
 // GET /api/context
 router.get('/', async (req: Request, res: Response) => {
-  const category = req.query['category'] as ContextCategory | undefined;
+  const category = req.query['category'];
   const notes = await contextService.listContextNotes(category);
   res.json(notes);
 });

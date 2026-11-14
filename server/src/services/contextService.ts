@@ -70,8 +70,9 @@ export class ContextService {
     return noteFile;
   }
 
-  async listContextNotes(category?: ContextCategory): Promise<ContextNote[]> {
-    const categories: readonly ContextCategory[] = category ? [category] : CATEGORIES;
+  async listContextNotes(category?: unknown): Promise<ContextNote[]> {
+    // A filter outside the eight is refused like on create, so a read never makes a folder or echoes another case.
+    const categories: readonly ContextCategory[] = category ? [requestedCategory(category)] : CATEGORIES;
 
     const results: ContextNote[] = [];
 
