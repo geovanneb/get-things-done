@@ -695,7 +695,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
 
     // mkdir without recursive is an exclusive reservation shared by CLI and server writers.
     // A scan alone lets simultaneous manual and scheduled tasks overwrite the same task.md.
-    for (;;) {
+    for (let attempt = 0; attempt < 20; attempt++) {
       const id = `${prefix}${String(++maxSeq).padStart(4, '0')}`;
       try {
         await fsp.mkdir(path.join(activeDir, id));
@@ -704,6 +704,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       }
     }
+    throw Object.assign(new Error('Could not reserve a new task id; try again'), { statusCode: 409 });
   }
 
   async listTaskFiles(id: string): Promise<FolderFile[]> {
