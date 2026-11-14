@@ -46,7 +46,7 @@
     "test:format": "tsx src/utils/format.test.ts"
   },
   "dependencies": {
-    "date-fns": "^3.6.0",
+    "date-fns": "^4.4.0",
     "qrcode-generator": "^2.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
