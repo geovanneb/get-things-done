@@ -4,6 +4,7 @@ import { StakeholderService } from '../services/stakeholderService';
 import { orgChartService } from '../services/orgChartService';
 import { VoiceprintService } from '../services/voiceprints/service';
 import { lastMeetingInvolving } from '../services/stakeholderMeetings';
+import { waitingOn } from '../services/stakeholderWaiting';
 
 const router = Router();
 const stakeholderService = new StakeholderService();
@@ -31,6 +32,11 @@ router.get('/:id', async (req: Request, res: Response) => {
 // GET /api/stakeholders/:id/last-meeting  the latest confirmed meeting involving them (#111, derived, never stored)
 router.get('/:id/last-meeting', async (req: Request, res: Response) => {
   res.json(await lastMeetingInvolving(param(req, 'id')));
+});
+
+// GET /api/stakeholders/:id/waiting-on  open tasks waiting on them (#108, derived from #82's waiting records, never stored)
+router.get('/:id/waiting-on', async (req: Request, res: Response) => {
+  res.json(await waitingOn(param(req, 'id')));
 });
 
 // PUT /api/stakeholders/:id
