@@ -1,5 +1,8 @@
 import { requireText } from '../utils/loose';
 import * as path from 'path';
+import { createHash } from 'crypto';
+import { lock, tryLock, unlock } from '../utils/fileLock';
+import { topLevelName, workspaceEntry } from '../utils/files';
 import { OrgChart, OrgChartMember, OrgUnit, Stakeholder } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
@@ -171,14 +174,45 @@ export function findLoop(members: OrgChartMember[]): string[] | null {
 
 const CHART_TEXT_FIELDS = ['name', 'organization', 'description', 'notes'] as const;
 
+/** The front-matter keys the app writes itself; any other key in a chart file is kept as it is on every save. */
+const KNOWN_KEYS = new Set(['schema_version', 'id', 'type', 'name', 'organization', 'description', 'members', 'units', 'created_at', 'updated_at']);
+
+/** How long a save waits for another save of the same chart before it is refused, as for tasks and context notes. */
+const CHART_LOCK_WAIT_MS = 5000;
+
+/** The lock file's name for a chart id; a hand-written id that is not a valid file name gets a hashed name. */
+function lockName(id: string): string {
+  try {
+    if (Buffer.byteLength(id) <= 200) return topLevelName(id);
+  } catch { /* not a file name */ }
+  return `id-${createHash('sha256').update(id).digest('hex').slice(0, 32)}`;
+}
+
+/**
+ * Told when a chart write has to wait for another one on the same chart. Tests use it to know the second write is
+ * queued behind the lock, instead of guessing from elapsed time.
+ */
+export const chartLockWaits: { onWait: ((id: string) => void) | null } = { onWait: null };
+
+/** A chart as read from its file, with the front-matter keys the app does not know. */
+interface ChartFile {
+  chart: OrgChart;
+  extra: Record<string, unknown>;
+}
+
 export class OrgChartService {
   private getDir(): string {
     return path.join(workspaceService.getWorkspacePath(), 'stakeholders', 'org-charts');
   }
 
   private async readChart(filePath: string): Promise<OrgChart> {
-    const { data, content } = await fileService.readMarkdown<Partial<OrgChart>>(filePath);
-    return {
+    return (await this.readChartFile(filePath)).chart;
+  }
+
+  private async readChartFile(filePath: string): Promise<ChartFile> {
+    const { data, content } = await fileService.readMarkdown<Partial<OrgChart> & Record<string, unknown>>(filePath);
+    const extra = Object.fromEntries(Object.entries(data ?? {}).filter(([key]) => !KNOWN_KEYS.has(key)));
+    const chart: OrgChart = {
       id: data.id || path.basename(filePath, '.md').toUpperCase(),
       name: data.name || 'Untitled chart',
       organization: data.organization || undefined,
@@ -190,11 +224,16 @@ export class OrgChartService {
       updated_at: data.updated_at || new Date().toISOString(),
       path: filePath,
     };
+    return { chart, extra };
   }
 
-  /** `create`: write a new file only, failing with EEXIST when the name is taken. */
-  private async writeChart(chart: OrgChart, filePath: string, create = false): Promise<OrgChart> {
+  /**
+   * `create`: write a new file only, failing with EEXIST when the name is taken. `extra`: the file's own keys the app
+   * does not know (an agent's `source_note`, say), written back unchanged so a save from the dashboard never drops them.
+   */
+  private async writeChart(chart: OrgChart, filePath: string, create = false, extra: Record<string, unknown> = {}): Promise<OrgChart> {
     const frontmatter = {
+      ...extra,
       schema_version: schemaVersion(chart),
       id: chart.id,
       type: 'org_chart',
@@ -206,6 +245,7 @@ export class OrgChartService {
       created_at: chart.created_at,
       updated_at: chart.updated_at,
     };
+    // Known keys are always written by the app (an emptied field is left out), never taken from `extra`.
     if (create) await fileService.createMarkdown(filePath, frontmatter, chart.notes || '');
     else await fileService.writeMarkdown(filePath, frontmatter, chart.notes || '');
     return { ...chart, path: filePath };
@@ -230,6 +270,58 @@ export class OrgChartService {
     const chart = (await this.listCharts()).find((c) => c.id === id);
     if (!chart) throw new Error(`Org chart not found: ${id}`);
     return chart;
+  }
+
+  /** The chart as its file is now, read again for a write; null when it is gone. */
+  private async findChart(id: string): Promise<ChartFile | null> {
+    const dir = this.getDir();
+    await fileService.ensureDir(dir);
+    let found: ChartFile | null = null;
+    for (const filePath of await fileService.listFiles(dir, '*.md')) {
+      try {
+        const file = await this.readChartFile(filePath);
+        // The first by name, as listCharts sorts, when two files carry the same id.
+        if (file.chart.id === id && (!found || file.chart.name.localeCompare(found.chart.name) < 0)) found = file;
+      } catch {
+        // Skip malformed files; workspace validation reports them.
+      }
+    }
+    return found;
+  }
+
+  /**
+   * One writer at a time per chart, across dashboards: `.situation-board/org-chart-locks/<id>.lock`. Update, delete,
+   * taking a deleted stakeholder out and an accepted removal in a context update all take it and read the chart again
+   * inside it, so none of them writes from a copy another has changed or deleted meanwhile. A writer holds one chart
+   * lock at a time and never waits for another chart's lock while holding one. Waits 5 s, then 409 `org_chart_busy`.
+   */
+  async withChartLock<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const ws = workspaceService.getWorkspacePath();
+    const locks = await workspaceEntry(ws, path.join(ws, '.situation-board', 'org-chart-locks'), true);
+    await fileService.ensureDir(locks);
+    const lockFile = await workspaceEntry(ws, path.join(locks, `${lockName(id)}.lock`), true);
+    let held = await tryLock(lockFile);
+    if (typeof held === 'string') {
+      chartLockWaits.onWait?.(id);
+      held = await lock(lockFile, CHART_LOCK_WAIT_MS, () => Object.assign(
+        new OrgChartError('The org chart is being saved elsewhere; try again in a moment.'),
+        { statusCode: 409, details: { code: 'org_chart_busy' } },
+      ));
+    }
+    try {
+      return await operation();
+    } finally {
+      await unlock(held);
+    }
+  }
+
+  /** Runs `operation` under the lock of the chart stored in this file (by its id, as listCharts reads it). */
+  async withChartFileLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+    let id = path.basename(filePath, '.md').toUpperCase();
+    try {
+      id = (await this.readChart(filePath)).id;
+    } catch { /* unreadable or gone: the file name is the id listCharts would give it */ }
+    return this.withChartLock(id, operation);
   }
 
   async createChart(data: Partial<OrgChart>): Promise<OrgChart> {
@@ -265,7 +357,14 @@ export class OrgChartService {
 
   async updateChart(id: string, data: Partial<OrgChart>): Promise<OrgChart> {
     requireText(data, CHART_TEXT_FIELDS);
-    const existing = await this.getChart(id);
+    return this.withChartLock(id, () => this.updateLocked(id, data));
+  }
+
+  private async updateLocked(id: string, data: Partial<OrgChart>): Promise<OrgChart> {
+    // Read inside the lock, and new people checked against it: a person removed a moment ago is not written back.
+    const file = await this.findChart(id);
+    if (!file) throw new Error(`Org chart not found: ${id}`);
+    const existing = file.chart;
     const name = data.name !== undefined ? String(data.name).trim() : existing.name;
     if (!name) throw new OrgChartError('Chart name is required');
     const { members, units } = reconcileUnits(
@@ -283,35 +382,60 @@ export class OrgChartService {
       id,
       updated_at: new Date().toISOString(),
     };
-    return this.writeChart(updated, existing.path!);
+    return this.writeChart(updated, existing.path!, false, file.extra);
   }
 
   async deleteChart(id: string): Promise<void> {
-    const existing = await this.getChart(id);
-    await fileService.deleteFile(existing.path!);
+    await this.withChartLock(id, async () => {
+      const file = await this.findChart(id);
+      if (!file) throw new Error(`Org chart not found: ${id}`);
+      await fileService.deleteFile(file.chart.path!);
+    });
   }
 
-  /** Takes a deleted stakeholder out of every chart; their direct reports move up to their manager. */
+  /**
+   * Takes a deleted stakeholder out of every chart; their direct reports move up to their manager. Every chart is
+   * visited under its own lock, one at a time in id order, and whether the person is in it is decided from a fresh
+   * read inside the lock: a chart whose save is adding them right now is checked after that save, a chart deleted
+   * meanwhile is not recreated, and a member edit saved meanwhile is kept without putting the person back. A chart
+   * that stays busy is left for the others to finish, then reported (409); a dangling member is tolerated when charts
+   * are read and edited.
+   */
   async removeStakeholder(ref: string): Promise<void> {
-    for (const chart of await this.listCharts()) {
-      const member = chart.members.find((m) => m.ref === ref);
-      if (!member) continue;
-      const members = chart.members
-        .filter((m) => m.ref !== ref)
-        .map((m) => {
-          if (m.reports_to !== ref) return m;
-          // Keep every other field (title…); only the manager changes.
-          const { reports_to: _old, ...rest } = m;
-          return member.reports_to ? { ...rest, reports_to: member.reports_to } : rest;
-        });
-      // A unit they led keeps its people but no longer has a head.
-      const units = chart.units?.map((u) => {
-        if (u.head !== ref) return u;
-        const { head: _gone, ...rest } = u;
-        return rest;
-      });
-      await this.writeChart({ ...chart, members, units, updated_at: new Date().toISOString() }, chart.path!);
+    // All charts, not only those listing the person now: an unlocked read cannot see a save that is about to add them.
+    const ids = [...new Set((await this.listCharts()).map((c) => c.id))].sort();
+    let failure: unknown = null;
+    for (const id of ids) {
+      try {
+        await this.withChartLock(id, () => this.removeFromChart(id, ref));
+      } catch (err) {
+        failure ??= err;
+      }
     }
+    if (failure) throw failure;
+  }
+
+  private async removeFromChart(id: string, ref: string): Promise<void> {
+    const file = await this.findChart(id);
+    if (!file) return;
+    const chart = file.chart;
+    const member = chart.members.find((m) => m.ref === ref);
+    if (!member) return;
+    const members = chart.members
+      .filter((m) => m.ref !== ref)
+      .map((m) => {
+        if (m.reports_to !== ref) return m;
+        // Keep every other field (title…); only the manager changes.
+        const { reports_to: _old, ...rest } = m;
+        return member.reports_to ? { ...rest, reports_to: member.reports_to } : rest;
+      });
+    // A unit they led keeps its people but no longer has a head.
+    const units = chart.units?.map((u) => {
+      if (u.head !== ref) return u;
+      const { head: _gone, ...rest } = u;
+      return rest;
+    });
+    await this.writeChart({ ...chart, members, units, updated_at: new Date().toISOString() }, chart.path!, false, file.extra);
   }
 
   async getPositions(ref: string): Promise<OrgPosition[]> {

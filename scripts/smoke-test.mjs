@@ -1389,6 +1389,11 @@ try {
     const stale = await (await fetch(`${base}/api/org-charts/${smokeChart.id}`)).json();
     const staleSave = await json('PUT', `/api/org-charts/${smokeChart.id}`, { members: stale.members.map((m) => (m.ref === p3 ? { ...m, title: 'Senior Analyst' } : m)) });
     check('a chart that already lists a missing stakeholder can still be edited', staleSave.status === 200, `status=${staleSave.status}`);
+    fs.writeFileSync(path.join(ws, 'stakeholders', 'org-charts', `${smokeChart.id.toLowerCase()}.md`),
+      chartFile().replace(/^---\n/, '---\nsource_note: context/organization/smoke/note.md\n'));
+    const keptKey = await json('PUT', `/api/org-charts/${smokeChart.id}`, { description: 'Smoke chart, edited' });
+    check('saving a chart keeps a front-matter key the app does not know',
+      keptKey.status === 200 && /source_note: context\/organization\/smoke\/note\.md/.test(chartFile()), `status=${keptKey.status}`);
     const plain = await (await json('POST', '/api/org-charts', { name: 'Plain chart', members: [{ ref: p1 }, { ref: p2, reports_to: p1 }] })).json();
     // Units: membership containers; reporting lines are untouched.
     const unitTemp = await (await json('POST', '/api/stakeholders', { name: 'Smoke Head', role: 'Head' })).json();

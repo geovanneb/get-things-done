@@ -48,9 +48,13 @@ router.put('/:id', async (req: Request, res: Response) => {
 // DELETE /api/stakeholders/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   await stakeholderService.deleteStakeholder(param(req, 'id'));
-  await orgChartService.removeStakeholder(param(req, 'id'));
-  // Their remembered voice goes with them (a stakeholder deleted by editing files is caught before any comparison).
-  await voiceprints.stakeholderDeleted(param(req, 'id'));
+  try {
+    // A chart still busy after the wait answers 409 here; the person is already deleted, so their voice still goes.
+    await orgChartService.removeStakeholder(param(req, 'id'));
+  } finally {
+    // Their remembered voice goes with them (a stakeholder deleted by editing files is caught before any comparison).
+    await voiceprints.stakeholderDeleted(param(req, 'id'));
+  }
   res.status(204).send();
 });
 
