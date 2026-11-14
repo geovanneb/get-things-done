@@ -14,7 +14,7 @@ import EmptyState from '@/components/common/EmptyState';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
 import { apiGet } from '@/utils/api';
-import { formatDate, formatRelativeDate } from '@/utils/format';
+import { dueHighlight, formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppDispatch } from '@/store';
 import { meetingPrepDraft } from '@/utils/meetingPrep';
 import type { ClaudeAgent, OrgPersonSummary, OrgPosition, OutputTemplate, Stakeholder, Task } from '@/types';
@@ -108,17 +108,6 @@ function priorityDotColor(priority: Task['priority']): string {
   }
 }
 
-function isOverdue(due: string | undefined): boolean {
-  if (!due) return false;
-  return new Date(due).getTime() < Date.now();
-}
-
-function isDueSoon(due: string | undefined): boolean {
-  if (!due) return false;
-  const diff = (new Date(due).getTime() - Date.now()) / 86400000;
-  return diff >= 0 && diff <= 3;
-}
-
 // ---------------------------------------------------------------------------
 // Icon components
 // ---------------------------------------------------------------------------
@@ -148,12 +137,11 @@ interface TaskItemProps {
 
 function TaskItem({ task, isLast }: TaskItemProps) {
   const { t } = useLanguage();
-  const overdue = isOverdue(task.due_date);
-  const dueSoon = isDueSoon(task.due_date);
+  const due = dueHighlight(task.due_date);
 
   let dueDateColor = 'var(--color-text-muted)';
-  if (overdue) dueDateColor = 'var(--color-critical)';
-  else if (dueSoon) dueDateColor = 'var(--color-warning)';
+  if (due === 'overdue') dueDateColor = 'var(--color-critical)';
+  else if (due === 'soon') dueDateColor = 'var(--color-warning)';
 
   return (
     <div
@@ -213,7 +201,7 @@ function TaskItem({ task, isLast }: TaskItemProps) {
             flexShrink: 0,
           }}
         >
-          {overdue ? t('attentionList.overdue') : formatRelativeDate(task.due_date)}
+          {due === 'overdue' ? t('attentionList.overdue') : formatRelativeDate(task.due_date)}
         </span>
       )}
     </div>

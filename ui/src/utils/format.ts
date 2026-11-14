@@ -49,6 +49,17 @@ export function formatDueStatus(dueDate: string): 'overdue' | 'due-today' | 'due
   }
 }
 
+/**
+ * How a task list marks a due date: overdue once its day has passed, due soon from today through the next three
+ * calendar days. Calendar days in local time, like formatDueStatus: a task due today is never overdue.
+ */
+export function dueHighlight(dueDate: string | undefined): 'overdue' | 'soon' | 'none' {
+  const status = formatDueStatus(dueDate ?? '');
+  if (status === 'overdue') return 'overdue';
+  if (status === 'due-today' || status === 'due-soon') return 'soon';
+  return 'none';
+}
+
 export function formatPriorityLabel(p: string): string {
   const labels: Record<string, string> = {
     critical: tr('attentionQueue.critical'),
