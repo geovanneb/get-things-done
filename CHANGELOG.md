@@ -8,32 +8,108 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-14
+
+**See who you are waiting on, and why a run stopped.** A stakeholder's page now lists the open
+tasks **waiting on them**. When the dashboard runs Claude Code, it shows **which Claude account**
+the runs use, and when Claude Code stops a run, for example at a usage limit, the dashboard
+**quotes what it said**. The rest is fixes: a file written by hand or by an agent can no longer
+blank a screen, a task due today is no longer overdue, Japanese search with several words works
+again, and the dashboard keeps running on a folder it cannot read.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.14.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.14.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.14.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.14.0`, or **Update and restart** in Settings. No schema
+or agent instruction changes, so your workspace needs no upgrade. If you run the dashboard from
+source with `npm run dev`, nothing changes for you; an installed dashboard now accepts calls from
+its own address only (see Security).
+
+### Added
+
+- **Waiting on them.** A stakeholder's page lists the open tasks whose waiting record names them:
+  the task, what it waits for, since when, and the follow-up date, with due follow-ups first. It is
+  read from the tasks each time, so **Set waiting** and **Resolve** on a task are the only places
+  to change it. (#410)
+- **Signed in as.** Next to the button that runs Claude Code on a context update, the dashboard
+  shows the Claude account its runs use. A computer can have more than one Claude Code sign-in, and the dashboard's may not be
+  the one your terminal uses. (#409)
+
+### Changed
+
+- **A run that Claude Code stops says why.** When Claude Code ends a run with an error of its own,
+  such as "You've hit your weekly limit", the dashboard quotes it, and says plainly when the account
+  has reached its plan's usage limit. Before, the run only said it had failed. (#409)
+
 ### Fixed
 
-- **One file written by hand no longer takes a screen down.** A stakeholder or output template without a
-  name, a context note with an unquoted date, or a task whose `tags`, `stakeholders` or `deliverables` were
-  written as plain text made the Stakeholders, Output templates, Context, Situation or Insights screen fail
-  for everything, and could leave the Board as a blank window. These files are now read as what they mean
-  (`tags: urgent` is one tag, `stakeholders: [STK-0001]` names a person) and listed.
-- **A page that cannot be drawn says so.** The dashboard used to go completely blank, sidebar included.
-  Now the page shows a message with a reload button and the rest of the dashboard keeps working.
-- **Clearing a due date removes it.** The task page wrote `due_date: null`, which the workspace check then
-  reported as an error on that task.
-- **A task cannot be saved with a status or priority the board does not know**, and text fields sent with
-  another type are refused with a clear message instead of a server error.
-- **Asking for the notes of a category that does not exist no longer creates a folder** in `context/`.
-- **Search shows a task's description once** when it is also the task's text.
-- **`gtd use` refuses a file**, and `gtd start --port` refuses a value that is not a port (`3001abc`, `0`,
-  `70000`) with a message that says what to use.
-- Staging, committing, the log and the diff in a workspace that is not a git repository answer plainly
-  instead of with a server error.
+#### A file written by hand no longer takes a screen down
+
+- **Hand-written files are read as what they mean.** A stakeholder or output template without a
+  name, a context note with an unquoted date, or a task whose `tags`, `stakeholders` or
+  `deliverables` were written as plain text made the Stakeholders, Output templates, Context,
+  Situation or Insights screen fail for everything, and could leave the Board as a blank window.
+  Now `tags: urgent` is one tag, `stakeholders: [STK-0001]` names a person, and a person without a
+  name is listed under their id. (#412)
+- **A page that cannot be drawn says so.** The dashboard used to go completely blank, sidebar
+  included. Now the page shows a message with a reload button, and the rest of the dashboard keeps
+  working. (#412)
+- **Clearing a due date removes it.** The task page wrote `due_date: null`, which **Validate
+  workspace** then reported as an error on that task. (#412)
+- **A task cannot be saved with a status or priority the board does not know**, and text fields
+  sent with another type are refused with a clear message instead of a server error. (#412)
+
+#### Board, Situation and Insights
+
+- **A task due today is not overdue.** Situation counted it as overdue from midnight UTC on its due
+  day (from the evening before in New York) and left it out of Due soon. It now waits until the end
+  of the day, as Insights already did. (#399)
+- **The weekly chart on Insights keeps every week** across a daylight saving change. A week could
+  go missing, and its tasks with it. (#400)
+- **Opening another task while editing one opens it fresh.** Following an @-mention or a search
+  result kept the first task's unsaved edits on the second task, and Save tried to send them
+  there. (#401)
+- **A count of one reads in the singular:** "1 task", not "1 tasks", on the board column badge, on
+  meeting records and in the Insights turnaround tooltip. (#403)
+
+#### Search, people, notes and files
+
+- **Japanese search with several words finds results again.** 0.13.1 looked for the whole query as
+  one exact piece of text, so `ノースウィンド　経営` found nothing. Each word is now looked for on its
+  own, anywhere in the title or text. (#396)
+- **Search shows a task's description once** when it is also the task's text. (#412)
+- **Emptying a stakeholder's email or notes clears them.** The dialog closed as if it saved, but
+  the old values stayed. (#402)
+- **A context note cannot be saved in a category that does not exist.** A typo made a folder the
+  dashboard never showed, and the note disappeared from Context. Asking for the notes of such a
+  category no longer makes a folder either. (#406, #412)
+- **Deleting an attachment that is already gone** (removed in another tab, by an agent or in
+  Finder) says it is not found instead of showing a server error. (#398)
+
+#### Meetings, git and the server
+
+- **The dashboard keeps running on a folder it cannot read or a symlink loop** in the workspace.
+  The server exited, again on every restart and on switching to that workspace. (#397)
+- **A meeting from your iPhone that holds an empty file is delivered.** It was refused on every
+  retry, so it never reached the queue. (#404)
+- **An upload to the meeting queue whose name ends in a dot is kept.** It was saved under a name
+  the queue hides, and the next upload deleted it. (#405)
+- **The changes view names each changed file and counts its lines as git does.** It gave every file
+  the first file's name and counted header lines as changes. (#407) Staging, committing, the log
+  and the diff in a workspace that is not a git repository answer plainly instead of with a server
+  error. (#412)
+- **`gtd use` refuses a file**, and `gtd start --port` refuses a value that is not a port
+  (`3001abc`, `0`, `70000`) with a message that says what to use. (#412)
 
 ### Security
 
-- **An installed dashboard trusts only its own address.** Pages served on `localhost:3000`, `:5173` and
-  `:4173` (the development ports) were also allowed to call the API, so another program serving a page
-  there could read and change the workspace from the browser. Those ports are now trusted only when the
-  server runs from source (`npm run dev`).
+- **An installed dashboard trusts only its own address.** Pages served on `localhost:3000`, `:5173`
+  and `:4173` (the development ports) were also allowed to call the API, so another program serving
+  a page there could read and change the workspace from the browser. Those ports are now trusted
+  only when the server runs from source (`npm run dev`). (#412)
 
 ## [0.13.1] - 2026-11-10
 
@@ -1199,7 +1275,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/geovanneb/get-things-done/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/geovanneb/get-things-done/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/geovanneb/get-things-done/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/geovanneb/get-things-done/compare/v0.11.0...v0.12.0
