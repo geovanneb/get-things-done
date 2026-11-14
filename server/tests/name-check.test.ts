@@ -122,8 +122,14 @@ test('adversarial input of 2 MB never stalls: every step is linear', () => {
   for (const [name, text, kind] of cases) {
     const quarter = text.slice(0, Math.floor(text.length / 4));
     time(quarter, kind); // warm up
-    const small = time(quarter, kind);
-    const full = time(text, kind);
+    let small = time(quarter, kind);
+    let full = time(text, kind);
+    // One sample can catch a garbage collection or a busy runner. A quadratic step stays slow on every try, so only
+    // a failing comparison is measured again, keeping the fastest time of each size.
+    for (let retry = 0; retry < 2 && full >= Math.max(10 * small, 250); retry++) {
+      small = Math.min(small, time(quarter, kind));
+      full = Math.min(full, time(text, kind));
+    }
     assert.ok(full < Math.max(10 * small, 250), `${name}: ${full.toFixed(0)} ms at 2 MB vs ${small.toFixed(0)} ms at 512 KB`);
     assert.ok(full < 10_000, `${name}: ${full.toFixed(0)} ms`);
   }
@@ -141,8 +147,12 @@ test('many distinct findings on one line do not repeatedly scan the whole file f
   };
   const quarter = text.slice(0, Math.floor(text.length / 4));
   time(quarter);
-  const small = time(quarter);
-  const large = time(text);
+  let small = time(quarter);
+  let large = time(text);
+  for (let retry = 0; retry < 2 && large >= Math.max(10 * small, 250); retry++) {
+    small = Math.min(small, time(quarter));
+    large = Math.min(large, time(text));
+  }
   assert.ok(large < Math.max(10 * small, 250), `${large.toFixed(0)} ms vs ${small.toFixed(0)} ms for a quarter`);
 });
 
