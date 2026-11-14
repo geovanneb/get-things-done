@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="diagram-title diagram-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Hiragino Sans', 'Noto Sans JP', sans-serif">
+  <title id="diagram-title">Como o Get Things Done funciona</title>
+  <desc id="diagram-desc">Reuniões são gravadas ou importadas e transcritas no seu computador. Um agente de IA propõe mudanças e você aceita ou rejeita cada uma antes que algo entre na sua memória de trabalho, uma pasta local de arquivos Markdown que são seus. A memória guarda sua voz, formatos de saída, pessoas, contexto e histórico de tarefas. Claude Code, Codex ou GitHub Copilot roda sobre essa memória e a lê para escrever rascunhos que soam como você. Seu feedback volta para a revisão como uma lição Kaizen e melhora o próximo rascunho.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1 L7 4 L1 7" fill="none" stroke="#4f46e5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="1199" height="639" rx="24" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="40" y="58" font-size="26" font-weight="600" fill="#111827">Como o Get Things Done funciona</text>
+
+  <g id="meetings">
+    <rect x="40" y="255" width="170" height="151" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="60" y="288" font-size="22" font-weight="600" fill="#111827">Reuniões</text>
+    <g font-size="17" fill="#4b5563">
+      <text x="60" y="322">Grave ou importe.</text>
+      <text x="60" y="348">Transcrição no</text>
+      <text x="60" y="374">seu computador.</text>
+    </g>
+    <path d="M210 330 H244" fill="none" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+
+  <g id="review">
+    <rect x="245" y="235" width="200" height="195" rx="14" fill="#ffffff" stroke="#4f46e5" stroke-width="2"/>
+    <text x="265" y="270" font-size="22" font-weight="600" fill="#111827">Você revisa</text>
+    <g font-size="17" fill="#4b5563">
+      <text x="265" y="303">O agente propõe</text>
+      <text x="265" y="328">mudanças. Você</text>
+      <text x="265" y="353">aceita ou rejeita.</text>
+    </g>
+    <line x1="265" y1="375" x2="425" y2="375" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="265" y="401" font-size="15" font-weight="600" fill="#4f46e5">Só o que você aceitar</text>
+    <path d="M445 330 H479" fill="none" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+
+  <g id="memory">
+    <rect x="480" y="211" width="440" height="255" rx="14" fill="#eef2ff" stroke="#4f46e5" stroke-width="2"/>
+    <text x="504" y="246" font-size="22" font-weight="600" fill="#111827">Sua memória de trabalho</text>
+    <text x="504" y="273" font-size="17" fill="#4b5563">Pasta local. Arquivos Markdown que são seus.</text>
+    <path d="M504 289 H896 M504 323 H896 M504 356 H896 M504 389 H896 M504 422 H896" fill="none" stroke="#d1d5db" stroke-width="1.5"/>
+    <g font-size="18" font-weight="600" fill="#111827">
+      <text x="504" y="312">Sua voz</text>
+      <text x="504" y="345">Formatos</text>
+      <text x="504" y="378">Pessoas</text>
+      <text x="504" y="411">Contexto</text>
+      <text x="504" y="444">Histórico</text>
+    </g>
+    <g font-size="16" fill="#4b5563">
+      <text x="660" y="312">tom, idioma, estilo</text>
+      <text x="660" y="345">relatórios e apresentações</text>
+      <text x="660" y="378">quem são, o que importa</text>
+      <text x="660" y="411">projetos, decisões, glossário</text>
+      <text x="660" y="444">fontes e lições</text>
+    </g>
+  </g>
+
+  <g id="agents" text-anchor="middle">
+    <rect x="480" y="126" width="440" height="85" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="700" y="149" font-size="18" font-weight="600" fill="#111827">Camada de agentes de IA</text>
+    <text x="700" y="175" font-size="20" font-weight="500" fill="#111827">Claude Code · Codex · Copilot</text>
+    <text x="700" y="198" font-size="15" fill="#4b5563">lê a memória via CLAUDE.md / AGENTS.md</text>
+    <path d="M920 168 H1044 Q1060 168 1060 184 V254" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+    <text x="990" y="156" font-size="15" fill="#4f46e5">escreve</text>
+  </g>
+
+  <g id="deliverables">
+    <rect x="960" y="255" width="200" height="151" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="980" y="288" font-size="22" font-weight="600" fill="#111827">Entregas</text>
+    <g font-size="17" fill="#4b5563">
+      <text x="980" y="322">Textos que soam</text>
+      <text x="980" y="348">como você, não IA.</text>
+    </g>
+  </g>
+
+  <g id="feedback">
+    <path d="M1060 406 V504 Q1060 520 1044 520 H361 Q345 520 345 504 V431" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+    <text x="700" y="551" text-anchor="middle" font-size="18" fill="#4f46e5">Seu feedback vira uma lição (nota Kaizen)</text>
+  </g>
+
+  <g id="caption">
+    <text x="600" y="605" text-anchor="middle" font-size="19" fill="#4b5563">Cada reunião e cada correção melhoram o próximo rascunho.</text>
+  </g>
+</svg>

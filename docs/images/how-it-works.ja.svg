@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="diagram-title diagram-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Hiragino Sans', 'Noto Sans JP', sans-serif">
+  <title id="diagram-title">Get Things Doneのしくみ</title>
+  <desc id="diagram-desc">会議を録音または取り込み、手元のPCで文字起こしします。AIエージェントが更新を提案し、あなたが一つずつ承認・却下してから、仕事の記憶（あなたが所有するMarkdownファイルのローカルフォルダー）に反映されます。記憶には、あなたの文体、出力形式、関係者、背景情報、タスク履歴が入っています。Claude Code、Codex、GitHub Copilotはこの記憶を読み、あなたらしい下書きを作成します。フィードバックはKaizenの教訓として確認に戻り、次の下書きを良くします。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1 L7 4 L1 7" fill="none" stroke="#4f46e5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="1199" height="639" rx="24" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="40" y="58" font-size="26" font-weight="600" fill="#111827">Get Things Doneのしくみ</text>
+
+  <g id="meetings">
+    <rect x="40" y="255" width="170" height="151" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="60" y="288" font-size="22" font-weight="600" fill="#111827">会議</text>
+    <g font-size="17" fill="#4b5563">
+      <text x="60" y="322">録音・取り込み。</text>
+      <text x="60" y="348">文字起こしは</text>
+      <text x="60" y="374">手元のPCで。</text>
+    </g>
+    <path d="M210 330 H244" fill="none" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+
+  <g id="review">
+    <rect x="245" y="235" width="200" height="195" rx="14" fill="#ffffff" stroke="#4f46e5" stroke-width="2"/>
+    <text x="265" y="270" font-size="22" font-weight="600" fill="#111827">あなたが確認</text>
+    <g font-size="17" fill="#4b5563">
+      <text x="265" y="303">エージェントが</text>
+      <text x="265" y="328">更新を提案し、</text>
+      <text x="265" y="353">一つずつ承認・却下。</text>
+    </g>
+    <line x1="265" y1="375" x2="425" y2="375" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="265" y="401" font-size="15" font-weight="600" fill="#4f46e5">承認したものだけが入る</text>
+    <path d="M445 330 H479" fill="none" stroke="#4f46e5" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+
+  <g id="memory">
+    <rect x="480" y="211" width="440" height="255" rx="14" fill="#eef2ff" stroke="#4f46e5" stroke-width="2"/>
+    <text x="504" y="246" font-size="22" font-weight="600" fill="#111827">あなたの仕事の記憶</text>
+    <text x="504" y="273" font-size="17" fill="#4b5563">ローカルに置く、あなたのMarkdownファイル。</text>
+    <path d="M504 289 H896 M504 323 H896 M504 356 H896 M504 389 H896 M504 422 H896" fill="none" stroke="#d1d5db" stroke-width="1.5"/>
+    <g font-size="18" font-weight="600" fill="#111827">
+      <text x="504" y="312">あなたの文体</text>
+      <text x="504" y="345">出力形式</text>
+      <text x="504" y="378">関係者</text>
+      <text x="504" y="411">背景情報</text>
+      <text x="504" y="444">タスク履歴</text>
+    </g>
+    <g font-size="16" fill="#4b5563">
+      <text x="660" y="312">トーン、言語、スタイル</text>
+      <text x="660" y="345">報告、ブリーフ、資料</text>
+      <text x="660" y="378">人物像と関心事</text>
+      <text x="660" y="411">プロジェクト、決定、用語集</text>
+      <text x="660" y="444">情報源と教訓</text>
+    </g>
+  </g>
+
+  <g id="agents" text-anchor="middle">
+    <rect x="480" y="126" width="440" height="85" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="700" y="149" font-size="18" font-weight="600" fill="#111827">AIエージェント層</text>
+    <text x="700" y="175" font-size="20" font-weight="500" fill="#111827">Claude Code · Codex · Copilot</text>
+    <text x="700" y="198" font-size="15" fill="#4b5563">CLAUDE.md / AGENTS.md 経由で記憶を読む</text>
+    <path d="M920 168 H1044 Q1060 168 1060 184 V254" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+    <text x="990" y="156" font-size="15" fill="#4f46e5">作成</text>
+  </g>
+
+  <g id="deliverables">
+    <rect x="960" y="255" width="200" height="151" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="1.5"/>
+    <text x="980" y="288" font-size="22" font-weight="600" fill="#111827">成果物</text>
+    <g font-size="17" fill="#4b5563">
+      <text x="980" y="322">AIっぽくない、</text>
+      <text x="980" y="348">あなたらしい下書き。</text>
+    </g>
+  </g>
+
+  <g id="feedback">
+    <path d="M1060 406 V504 Q1060 520 1044 520 H361 Q345 520 345 504 V431" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+    <text x="700" y="551" text-anchor="middle" font-size="18" fill="#4f46e5">フィードバックが教訓（Kaizenノート）になる</text>
+  </g>
+
+  <g id="caption">
+    <text x="600" y="605" text-anchor="middle" font-size="19" fill="#4b5563">会議と修正を重ねるほど、次の下書きが良くなる。</text>
+  </g>
+</svg>

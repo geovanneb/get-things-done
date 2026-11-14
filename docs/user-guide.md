@@ -114,6 +114,13 @@ gtd init --yes \
 Five things make up the system. Get these right and the AI output gets dramatically
 better.
 
+<img src="images/how-it-works.svg" alt="Diagram: meetings go through your review into the work memory (your voice, output formats, stakeholders, context and task history). Claude Code, Codex or Copilot runs on top of the memory and writes deliverables. Your feedback on a deliverable becomes a lesson that goes back through your review." width="900">
+
+The first four are the memory your agent reads; tasks are where it uses them. Two things keep
+the memory growing, and both go through your review: meetings, which the agent turns into
+[proposed context updates](#keeping-context-up-to-date), and your corrections to a deliverable,
+which the agent turns into a [Kaizen note](#kaizen-notes-learning-from-corrections).
+
 ### 1. Your profile — `profile/executive-profile.md`
 
 Who you are and how you communicate. Every agent reads this before writing anything.
@@ -219,6 +226,14 @@ change, with the date, in the task's `change_requests` and moves it back to `in_
 step. It starts no agent and keeps the body and start date. The next agent run on the task reads
 every open request, addresses it and marks it addressed when it sets the task back to review.
 The requests stay listed on the task, so the feedback is not lost in a chat.
+
+#### Kaizen notes: learning from corrections
+
+Whenever an agent reworks a deliverable, from **Request changes** or from feedback in the chat,
+it also writes a Kaizen note in `kaizen/`: what went wrong, the root cause and the change that
+would prevent it. Each note opens a Kaizen context update under **Context > Updates**. Analyze it
+like any other update, review each proposed change to the instructions, templates or context, and
+apply what you accept. The agent never applies the lesson by itself.
 
 **Waiting for.** When a task needs someone's input, **Set waiting** (Work tab) records what it waits
 for, from whom (a stakeholder or anyone else) and since when, with an optional follow-up date. It
@@ -846,7 +861,7 @@ model is downloaded; the Meetings page shows each one's progress.
 
 ---
 
-## Meeting history and sources in 0.9.0
+## Meeting history and sources
 
 The Meetings page includes queued and reviewed meetings. Search titles, people or words in transcripts and notes, then open a meeting to read its transcript, record, action items or files. A record still under review is shown as provisional; confirmed records remain available even when retention has removed their transcripts.
 

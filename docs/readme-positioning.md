@@ -29,14 +29,18 @@ Ten screenshots were captured from the actual current dashboard at 1440×900, al
 
 The review proposal uses the existing seed fixture, which represents the state after analysis. The customer-update task is created through the API and does not pretend a deliverable has been generated. The source commit is `1791fb8`; the screenshots were made on macOS/Chromium.
 
-Static images were chosen over a GIF: readers can inspect the transcript and review controls, and there is no looping motion or multi-megabyte animation. The earlier 40-second video remains linked and is identified as an earlier dashboard. Replace that video with a genuine 0.9.0 walkthrough when available.
+Static images were first chosen over a GIF so readers could inspect the transcript and review controls. The 0.13.1 documentation review keeps those images further down and adds a short GIF at the top: one still per step of the loop (meeting, proposed update accepted, profile, context, people, task, board), cross-faded, about 2.6 MB at 960 px. Each still is a real dashboard state of the same fictional demo; the step captions are drawn on the page for the animation and the README says so. The earlier 40-second video remains linked.
+
+The **How it works** diagram (`docs/images/how-it-works.svg`, with `.ja`, `.pt-BR` and `.es` copies) shows the memory loop in one picture: meetings and corrections go through your review into the memory, and the agent layer reads the memory and writes the deliverables. It is hand-written SVG on a white card, so it reads on GitHub's light and dark themes; the translated copies change only the text. Edit the English file first, then the three copies.
 
 ```bash
 npm run build
 npm install --no-save playwright
 npx playwright install chromium
-node scripts/readme-screenshots.mjs
+node scripts/readme-screenshots.mjs --gif   # --gif needs ffmpeg
 ```
+
+`CAPTURE_BROWSER_CHANNEL=chrome` runs the capture in an installed Chrome when Playwright's Chromium is not available.
 
 The capture script starts its own temporary HOME, workspace and loopback server. It cannot target an existing workspace. It removes the demo after capturing. Use the optional Playwright dependency only for capture; do not commit lockfile changes from installing it.
 

@@ -12,19 +12,29 @@ Record meetings. Review what changed. Give your AI the context to deliver.
 [![CI](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml/badge.svg)](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Get started](#get-started) · [How it works](#from-meetings-to-memory-to-finished-work) · [User guide](docs/user-guide.md) · [40-second demo](https://youtu.be/v0GaoY16CU0)
+[Get started](#get-started) · [How it works](#how-it-works-in-a-nutshell) · [User guide](docs/user-guide.md) · [40-second demo](https://youtu.be/v0GaoY16CU0)
+
+<img src="docs/images/memory-loop.gif" alt="Animated walkthrough: a meeting transcript, the agent's proposed memory update being accepted, the profile, context notes and people the agent reads, then a task and the board" width="900">
+
+<sub>Real dashboard screens with fictional demo data. The step captions are added for this animation.</sub>
 
 </div>
 
-Get Things Done is an open-source, local-first work memory and task workspace for **Claude Code, Codex and GitHub Copilot**. It keeps your projects, decisions, stakeholders and preferred output formats in files your agent can read.
+Get Things Done is an open-source, local-first **work memory** for **Claude Code, Codex and GitHub Copilot**. It keeps how you write, the formats you deliver, the people you work with and what your projects have decided in plain Markdown files. Your AI agent reads them before it writes anything.
 
-**Meetings feed the memory.** Record a conversation, transcribe it on your computer, and collect it into a digest. An AI agent proposes updates to your context and stakeholder notes. You review the changes before they become the background for your next task.
+**The memory feeds itself.** Every meeting you record adds what changed. Every correction you make to a draft becomes a lesson. You approve each change, so the memory gets better without getting messy, and the next draft needs less explaining and less fixing.
 
-Less time explaining your work from scratch. More context for the first draft.
+## How it works in a nutshell
 
-<img src="docs/screenshots/meeting-transcript.png" alt="A meeting transcript in Get Things Done, with named speakers, timestamps and the steps from meeting to reviewed context" width="900">
+<img src="docs/images/how-it-works.svg" alt="Diagram: meetings go through your review into the work memory (your voice, output formats, stakeholders, context and task history). Claude Code, Codex or Copilot runs on top of the memory and writes deliverables. Your feedback on a deliverable becomes a lesson that goes back through your review." width="900">
 
-*Current dashboard, using fictional demo data. The transcript shown is an imported example, not a live recording. The [video](https://youtu.be/v0GaoY16CU0) shows an earlier dashboard.*
+1. **Meetings bring new knowledge in.** Record or import a meeting. It is transcribed on your computer.
+2. **You decide what the memory learns.** An agent compares the meeting with what the workspace already knows and proposes a few changes: a new decision, a moved deadline, a new term for the glossary, what a colleague expects. Nothing goes in until you accept it.
+3. **The memory is the brain your agent runs on.** Your voice and preferences, output templates, stakeholders, context notes and past tasks are files in one folder. Claude Code, Codex or Copilot reads them through its own instruction file (`CLAUDE.md`, `AGENTS.md` or `.github/copilot-instructions.md`).
+4. **Drafts sound like you, not like AI.** The agent writes in your tone and your formats, for what each reader cares about. You review the result and decide when it is done.
+5. **Corrections close the loop.** When you send a draft back, the agent records why the first version missed (a Kaizen note). That turns into a proposed fix to the instructions or memory, which you review like any other change.
+
+Less time explaining your work from scratch. More of your context in every first draft.
 
 ## Get started
 
@@ -51,7 +61,9 @@ Choose your AI tool during setup. The local dashboard opens in your browser. You
 
 The workspace and offline transcription need no Get Things Done account. AI analysis and task execution use the AI tool you bring; that tool may require its own account or subscription.
 
-> **New in 0.13.0:** sharing labels on context notes, with only shareable notes going into a shared file or a deliverable for outside readers, a share pack that puts chosen task files into one ZIP, a names and terms check for deliverables, and meetings sent from your iPhone. [See what changed](CHANGELOG.md).
+The dashboard is available in English, Japanese, Portuguese (Brazil) and Spanish. It follows your system language; change it in **Settings → Appearance → Language**.
+
+> **New in 0.13:** sharing labels on context notes, with only shareable notes going into a shared file or a deliverable for outside readers, a share pack that puts chosen task files into one ZIP, a names and terms check for deliverables, and meetings sent from your iPhone. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 
@@ -66,7 +78,9 @@ Record a meeting from the dashboard or desktop menu. Follow a live transcript wi
 
 Tell everyone before recording; the app asks you to confirm each time. Desktop system audio is supported on Windows and macOS 14.2+.
 
-<img src="docs/screenshots/meetings.png" alt="Meetings dashboard with the recording entry point, a queue of fictional meetings and the Make digest now action" width="900">
+<img src="docs/screenshots/meeting-transcript.png" alt="A meeting transcript in Get Things Done, with named speakers, timestamps and the steps from meeting to reviewed context" width="900">
+
+*The transcript shown is an imported fictional example, not a live recording.*
 
 ### 2. Review what should become memory
 
@@ -96,18 +110,20 @@ Mention one or several meetings in a task to pin its sources and record the evid
 
 The agent writes the deliverable and an execution log, then hands it back for review. **You decide when it is done.** Better context helps the first draft; it does not guarantee an accurate or complete result in one attempt.
 
+Not quite right? Use **Request changes** on the task, or tell the agent in plain words. It reworks the draft and writes a Kaizen note on why the first version missed. The note opens a context update, so the fix lands in the instructions or the memory after your review, and the same mistake is less likely next time.
+
 <img src="docs/screenshots/task-detail.png" alt="A task linking its objective, stakeholders, deliverables and output templates, ready to run with an AI agent" width="900">
 
 ## What your AI can remember
 
 | Memory | Why it helps |
 | --- | --- |
-| **Your working style** | Tone, language, responsibilities and recurring expectations |
+| **Your voice and working style** | Tone, language, how you decide, responsibilities and recurring expectations |
 | **People and relationships** | Who is involved, what matters to them and how to communicate with them |
-| **Projects and decisions** | Current plans, risks, agreements and the reasons behind them |
+| **Projects and decisions** | Current plans, risks, agreements, the reasons behind them and a glossary of your terms |
 | **Meeting context** | Searchable transcripts, confirmed records and reviewed corrections, with retention you control |
 | **Output templates** | The structure and style of updates, briefs, documents and decks you deliver repeatedly |
-| **Task history** | Deliverables, sources, assumptions and feedback from earlier work |
+| **Task history and lessons** | Deliverables, sources, assumptions, your feedback and the Kaizen lessons drawn from it |
 
 Useful for developers coordinating projects, consultants working with clients, founders, project leads and anyone whose work depends on remembering what people agreed to.
 
@@ -136,7 +152,9 @@ work-memory/
 The app does not require an MCP server or proprietary memory API. You can inspect the files, edit them, back them up and change agents. The dashboard adds a task board, meeting workflow, search, review and insights over the same workspace.
 
 <details>
-<summary>See the task board, stakeholders and progress views</summary>
+<summary>See the meetings, task board, stakeholders and progress views</summary>
+
+<img src="docs/screenshots/meetings.png" alt="Meetings dashboard with the recording entry point, a queue of fictional meetings and the Make digest now action" width="900">
 
 <img src="docs/screenshots/board.png" alt="Task board in light mode, with Backlog, In Progress, Needs Review and Done columns" width="900">
 
@@ -176,6 +194,6 @@ See the [user guide](docs/user-guide.md#version-control-and-privacy) and [securi
 
 Contributions to agent integrations, meeting workflows, documentation and accessibility are welcome. Use fictional data in issues and examples. Report security issues privately through [SECURITY.md](SECURITY.md).
 
-**If this fits how you want to work with AI, star the repository to find it again.** Try a small workspace and tell us what helped—or what context was still missing.
+**If this fits how you want to work with AI, star the repository to find it again.** Try a small workspace and tell us what helped, or what context was still missing.
 
 MIT licensed. See [LICENSE](LICENSE).
