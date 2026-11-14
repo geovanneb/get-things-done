@@ -8,6 +8,7 @@ import { AppProvider, useAppDispatch } from './store';
 import { ConfirmProvider } from './components/common/ConfirmDialog';
 import AppLayout from './components/layout/AppLayout';
 import LoadingSpinner from './components/common/LoadingSpinner';
+import PageErrorBoundary from './components/common/PageErrorBoundary';
 import { useLoadSidebar } from './hooks/useSidebar';
 import { useLiveEvents } from './hooks/useLiveEvents';
 import { apiGet } from './utils/api';
@@ -126,10 +127,13 @@ export default function App() {
     <AppProvider>
       <BrowserRouter>
         <ConfirmProvider>
-          <RecordingProvider>
-            <AppRoutes />
-            <RecordingBanner />
-          </RecordingProvider>
+          {/* The last resort, for a failure outside a page (the sidebar, the header): a message instead of a blank window. */}
+          <PageErrorBoundary resetKey="app">
+            <RecordingProvider>
+              <AppRoutes />
+              <RecordingBanner />
+            </RecordingProvider>
+          </PageErrorBoundary>
         </ConfirmProvider>
       </BrowserRouter>
     </AppProvider>

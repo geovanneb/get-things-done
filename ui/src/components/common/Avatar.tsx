@@ -30,11 +30,13 @@ const sizeMap: Record<AvatarSize, { size: number; fontSize: string }> = {
   xl: { size: 64, fontSize: 'var(--text-xl)' },
 };
 
-export default function Avatar({ name, size = 'md', color, initials: explicitInitials, role }: AvatarProps) {
+export default function Avatar({ name: given, size = 'md', color, initials: explicitInitials, role }: AvatarProps) {
+  // A name can be missing in a file written by hand; an avatar must never be what takes a page down.
+  const name = typeof given === 'string' ? given : '';
   const { size: px, fontSize } = sizeMap[size];
   const bg = color ?? hashColor(name);
-  const initials = explicitInitials?.trim() || getInitials(name);
-  const label = role?.trim() ? `${name} · ${role.trim()}` : name;
+  const initials = (typeof explicitInitials === 'string' && explicitInitials.trim()) || getInitials(name);
+  const label = typeof role === 'string' && role.trim() ? `${name} · ${role.trim()}` : name;
 
   return (
     <span

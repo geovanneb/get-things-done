@@ -117,6 +117,11 @@ export class GitService {
     return this.getGit();
   }
 
+  /** Staging or committing in a workspace that is not a repository is the caller's mistake (409), not a server error. */
+  private requireRepository(): void {
+    if (!this.hasRepository()) throw Object.assign(new Error('This workspace is not a git repository.'), { statusCode: 409 });
+  }
+
   async getStatus(): Promise<GitStatus> {
     const installed = await this.isInstalled();
     try {
@@ -150,6 +155,8 @@ export class GitService {
   }
 
   async getDiff(filePath?: string): Promise<GitDiff> {
+    if (filePath !== undefined && typeof filePath !== 'string') throw Object.assign(new Error('Invalid file: name one file'), { statusCode: 400 });
+    if (!this.hasRepository()) return { files: [], diff: '', stats: { insertions: 0, deletions: 0, files_changed: 0 } };
     const git = await this.requireGit();
 
     const pathspec = filePath ? ['--', filePath] : [];
@@ -188,8 +195,9 @@ export class GitService {
   }
 
   async getLog(limit = 20): Promise<{ hash: string; author: string; date: string; message: string }[]> {
+    if (!this.hasRepository()) return [];
     const git = await this.requireGit();
-    const log = await git.log({ maxCount: limit });
+    const log = await git.log({ maxCount: Number.isInteger(limit) && limit > 0 ? Math.min(limit, 500) : 20 });
 
     return (log.all || []).map((entry) => ({
       hash: entry.hash,
@@ -200,15 +208,18 @@ export class GitService {
   }
 
   async stageFile(filePath: string): Promise<void> {
+    if (typeof filePath !== 'string' || !filePath) throw Object.assign(new Error('Invalid file: name one file to stage'), { statusCode: 400 });
+    this.requireRepository();
     const git = await this.requireGit();
     // `--` so a file name is never read as an option.
     await waitingForIndex(() => git.raw(['add', '--', filePath]));
   }
 
   async commit(message: string): Promise<void> {
-    if (!message || message.trim().length === 0) {
-      throw new Error('Commit message is required');
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      throw Object.assign(new Error('Commit message is required'), { statusCode: 400 });
     }
+    this.requireRepository();
     const git = await this.requireGit();
     // NEVER auto-push
     await waitingForIndex(() => git.commit(message));

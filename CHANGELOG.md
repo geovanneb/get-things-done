@@ -8,6 +8,33 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **One file written by hand no longer takes a screen down.** A stakeholder or output template without a
+  name, a context note with an unquoted date, or a task whose `tags`, `stakeholders` or `deliverables` were
+  written as plain text made the Stakeholders, Output templates, Context, Situation or Insights screen fail
+  for everything, and could leave the Board as a blank window. These files are now read as what they mean
+  (`tags: urgent` is one tag, `stakeholders: [STK-0001]` names a person) and listed.
+- **A page that cannot be drawn says so.** The dashboard used to go completely blank, sidebar included.
+  Now the page shows a message with a reload button and the rest of the dashboard keeps working.
+- **Clearing a due date removes it.** The task page wrote `due_date: null`, which the workspace check then
+  reported as an error on that task.
+- **A task cannot be saved with a status or priority the board does not know**, and text fields sent with
+  another type are refused with a clear message instead of a server error.
+- **Asking for the notes of a category that does not exist no longer creates a folder** in `context/`.
+- **Search shows a task's description once** when it is also the task's text.
+- **`gtd use` refuses a file**, and `gtd start --port` refuses a value that is not a port (`3001abc`, `0`,
+  `70000`) with a message that says what to use.
+- Staging, committing, the log and the diff in a workspace that is not a git repository answer plainly
+  instead of with a server error.
+
+### Security
+
+- **An installed dashboard trusts only its own address.** Pages served on `localhost:3000`, `:5173` and
+  `:4173` (the development ports) were also allowed to call the API, so another program serving a page
+  there could read and change the workspace from the browser. Those ports are now trusted only when the
+  server runs from source (`npm run dev`).
+
 ## [0.13.1] - 2026-11-10
 
 **Ids stay put, text stays as written.** A fix release with no new features. A deleted task or

@@ -130,7 +130,7 @@ export class ExecutionPackageService {
 
     // Add stakeholders
     if (options.includeStakeholders) {
-      const refs = options.selectedStakeholderRefs || task.stakeholder_refs || [];
+      const refs = Array.isArray(options.selectedStakeholderRefs) ? options.selectedStakeholderRefs : task.stakeholder_refs || [];
       for (const ref of refs) {
         try {
           const stk = await stakeholderService.getStakeholder(ref);

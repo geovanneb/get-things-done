@@ -71,6 +71,11 @@ try {
 
   const forbidden = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { Origin: 'https://untrusted.example' } });
   check('untrusted origins are rejected before routes run', forbidden.status === 403);
+  // An installed dashboard (NODE_ENV=production, as `gtd start` sets it) trusts its own origin only, not the dev ports.
+  const devOrigin = await fetch(`${base}/api/tasks`, { headers: { Origin: 'http://localhost:5173' } });
+  const ownOrigin = await fetch(`${base}/api/tasks`, { headers: { Origin: base } });
+  check('a page on a development port cannot call an installed dashboard', devOrigin.status === 403 && ownOrigin.status === 200,
+    `dev=${devOrigin.status} own=${ownOrigin.status}`);
   // Chrome's headers for a link to the dashboard clicked on another site (and for reloading that tab). Sent with
   // node:http, because fetch always replaces Sec-Fetch-Mode with "cors".
   const { request } = await import('node:http');
@@ -1441,6 +1446,25 @@ try {
   const post = (url, body) => fetch(`${base}${url}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
+  // Files written by hand or by an agent, and wrongly typed requests, never take a list down (0.14 review).
+  {
+    const json = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const loose = path.join(ws, 'stakeholders', 'people', 'stk-0990.md');
+    fs.writeFileSync(loose, '---\nid: STK-0990\nrole: Advisor\ntags: finance\n---\n');
+    const people = await fetch(`${base}/api/stakeholders`);
+    const listed = people.ok ? (await people.json()).find((s) => s.id === 'STK-0990') : null;
+    check('a stakeholder file without a name is listed under its id', listed?.name === 'STK-0990' && listed.tags[0] === 'finance', `status=${people.status}`);
+    fs.rmSync(loose);
+    const unknownCategory = await fetch(`${base}/api/context?category=made-by-a-read`);
+    check('an unknown context category is refused and makes no folder', unknownCategory.status === 400 && !fs.existsSync(path.join(ws, 'context', 'made-by-a-read')), `status=${unknownCategory.status}`);
+    const made = await (await json('POST', '/api/tasks', { title: 'Loose input check', due_date: '2026-11-20' })).json();
+    const cleared = await json('PUT', `/api/tasks/${made.id}`, { due_date: null });
+    check('clearing a due date removes it from task.md', cleared.ok && !/due_date/.test(fs.readFileSync(path.join(ws, 'tasks', 'active', made.id, 'task.md'), 'utf8')), `status=${cleared.status}`);
+    const badStatus = await json('PUT', `/api/tasks/${made.id}`, { status: 'flying' });
+    const badNotes = await json('PUT', `/api/tasks/${made.id}`, { title: 42 });
+    check('a status the board does not know and a title that is not text are refused', badStatus.status === 400 && badNotes.status === 400, `status=${badStatus.status} title=${badNotes.status}`);
+    await json('DELETE', `/api/tasks/${made.id}`);
+  }
   const status = await (await fetch(`${base}/api/workspace/git/status`)).json();
   check('git status sees the workspace files', status.is_repo === true && status.untracked.length > 0,
     `is_repo=${status.is_repo} untracked=${status.untracked?.length}`);

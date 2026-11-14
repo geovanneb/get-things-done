@@ -1,3 +1,4 @@
+import { requireText } from '../utils/loose';
 import * as path from 'path';
 import { OrgChart, OrgChartMember, OrgUnit, Stakeholder } from '../types';
 import { FileService } from './fileService';
@@ -168,6 +169,8 @@ export function findLoop(members: OrgChartMember[]): string[] | null {
   return null;
 }
 
+const CHART_TEXT_FIELDS = ['name', 'organization', 'description', 'notes'] as const;
+
 export class OrgChartService {
   private getDir(): string {
     return path.join(workspaceService.getWorkspacePath(), 'stakeholders', 'org-charts');
@@ -228,6 +231,7 @@ export class OrgChartService {
   }
 
   async createChart(data: Partial<OrgChart>): Promise<OrgChart> {
+    requireText(data, CHART_TEXT_FIELDS);
     const name = typeof data.name === 'string' ? data.name.trim() : '';
     if (!name) throw new OrgChartError('Chart name is required');
     const id = await this.generateId();
@@ -248,6 +252,7 @@ export class OrgChartService {
   }
 
   async updateChart(id: string, data: Partial<OrgChart>): Promise<OrgChart> {
+    requireText(data, CHART_TEXT_FIELDS);
     const existing = await this.getChart(id);
     const name = data.name !== undefined ? String(data.name).trim() : existing.name;
     if (!name) throw new OrgChartError('Chart name is required');
@@ -258,11 +263,11 @@ export class OrgChartService {
     const updated: OrgChart = {
       ...existing,
       name,
-      organization: data.organization !== undefined ? data.organization.trim() || undefined : existing.organization,
-      description: data.description !== undefined ? data.description.trim() || undefined : existing.description,
+      organization: data.organization !== undefined ? (data.organization ?? '').trim() || undefined : existing.organization,
+      description: data.description !== undefined ? (data.description ?? '').trim() || undefined : existing.description,
       members,
       units: units.length ? units : undefined,
-      notes: data.notes !== undefined ? data.notes.trim() || undefined : existing.notes,
+      notes: data.notes !== undefined ? (data.notes ?? '').trim() || undefined : existing.notes,
       id,
       updated_at: new Date().toISOString(),
     };

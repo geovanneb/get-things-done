@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import PageErrorBoundary from '../common/PageErrorBoundary';
 import NavRail from './NavRail';
 import Header from './Header';
 import UpdateBanner from './UpdateBanner';
@@ -13,6 +14,7 @@ export default function AppLayout() {
   const { isSearchOpen, newTaskModal } = useAppState();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -36,7 +38,9 @@ export default function AppLayout() {
           id="main-content"
           style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}
         >
-          <Outlet />
+          <PageErrorBoundary resetKey={pathname}>
+            <Outlet />
+          </PageErrorBoundary>
         </main>
       </div>
       <SearchOverlay

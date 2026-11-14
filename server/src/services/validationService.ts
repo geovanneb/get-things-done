@@ -78,12 +78,12 @@ export class ValidationService {
     }
 
     // Required fields check
-    if (!task.title || task.title.trim().length === 0) {
+    if (typeof task.title !== 'string' || task.title.trim().length === 0) {
       results.push({ level: 'error', rule: 'required_fields', message: 'Task title is required', path: 'title' });
     }
 
     // Date logic checks
-    if (task.due_date && task.start_date) {
+    if (typeof task.due_date === 'string' && typeof task.start_date === 'string') {
       // Compare calendar days: due_date is a date, start_date is usually a timestamp, and a task
       // started on its due day is not late.
       if (task.due_date.slice(0, 10) < task.start_date.slice(0, 10)) {
@@ -100,7 +100,7 @@ export class ValidationService {
     }
 
     // Overdue check
-    if (task.due_date && isOpen(task.status)) {
+    if (typeof task.due_date === 'string' && isOpen(task.status)) {
       // Compare calendar days in local time: `new Date('2026-10-21')` is midnight UTC, which made every
       // task "overdue" on its own due date.
       const now = new Date();
@@ -128,7 +128,7 @@ export class ValidationService {
       }
     }
 
-    if (!stk.name || stk.name.trim().length === 0) {
+    if (typeof stk.name !== 'string' || stk.name.trim().length === 0) {
       results.push({ level: 'error', rule: 'required_fields', message: 'Stakeholder name is required', path: 'name' });
     }
 
