@@ -4,10 +4,15 @@ import {
   clearDaemonState,
   isProcessAlive,
   readDaemonState,
+  unconfirmedDaemonAdvice,
 } from '../utils/daemon';
-import { ESB_PID_FILE } from '../utils/paths';
 
-const GRACE_PERIOD_MS = 5000;
+/**
+ * How long to wait after SIGTERM before SIGKILL. The server gives itself 10 s to close cleanly
+ * (SHUTDOWN_TIMEOUT_MS in server/src/server.ts) and then exits on its own; waiting longer than that keeps
+ * a slow but healthy shutdown from being cut off. A test checks the two stay in this order.
+ */
+export const GRACE_PERIOD_MS = 12_000;
 const POLL_INTERVAL_MS = 200;
 
 export const stopCommand = new Command('stop')
@@ -29,8 +34,10 @@ export const stopCommand = new Command('stop')
       return;
     }
     if (check === 'unknown') {
-      console.log(chalk.yellow(`Process ${state.pid} could not be confirmed as the dashboard: port ${state.port} did not confirm its process identity.`));
-      console.log(chalk.dim(`If it is the dashboard, stop that process yourself. If it is not, delete ${ESB_PID_FILE}.`));
+      const [headline, ...advice] = unconfirmedDaemonAdvice(state);
+      console.log(chalk.yellow(`${headline} It was not stopped.`));
+      for (const line of advice) console.log(chalk.dim(line));
+      process.exitCode = 1;
       return;
     }
 

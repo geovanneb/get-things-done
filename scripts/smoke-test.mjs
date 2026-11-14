@@ -6,8 +6,9 @@
  * fills it with the demo data and checks the main API surfaces. Everything runs
  * in a temp directory with its own HOME, so it never touches your config.
  */
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +50,76 @@ execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'init', '-y', '-d
   { env, stdio: 'pipe' });
 check('gtd init creates a workspace', fs.existsSync(path.join(ws, 'workspace.yaml')));
 check('gtd init writes the Claude Code setup', fs.existsSync(path.join(ws, 'CLAUDE.md')));
+
+// `gtd upgrade` used to say "run gtd stop first" and then refresh the files under a running dashboard anyway.
+{
+  const { createHash } = await import('node:crypto');
+  const pidFile = path.join(home, '.gtd', 'gtd.pid');
+  const manifest = path.join(ws, '.situation-board', 'app-manifest.json');
+  // Leave the workspace behind the app, so that an upgrade that runs has something to change: one app-owned file
+  // is an older app version the user never edited (the manifest lists its hash), and another one is missing.
+  const outdated = path.join(ws, '.schemas', 'context.schema.json');
+  const missing = path.join(ws, '.schemas', 'task.schema.json');
+  const oldContent = '{ "title": "an older app version" }\n';
+  fs.writeFileSync(outdated, oldContent);
+  const listed = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  listed.files.find((f) => f.path === '.schemas/context.schema.json').sha256 = createHash('sha256').update(oldContent).digest('hex');
+  fs.writeFileSync(manifest, JSON.stringify(listed, null, 2));
+  fs.rmSync(missing);
+  const snapshot = () => JSON.stringify([fs.readFileSync(manifest, 'utf8'), fs.readFileSync(outdated, 'utf8'), fs.existsSync(missing)]);
+  const before = snapshot();
+
+  const upgrade = () => {
+    const r = spawnSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'upgrade', '-d', ws], { env, encoding: 'utf8', timeout: 60_000 });
+    return { status: r.status, out: `${r.stdout}${r.stderr}` };
+  };
+  const record = (pid, recordPort) => {
+    fs.mkdirSync(path.dirname(pidFile), { recursive: true });
+    fs.writeFileSync(pidFile, JSON.stringify({ pid, port: recordPort, workspace: ws, startedAt: new Date().toISOString() }));
+  };
+  const fake = spawn(process.execPath, ['-e', `
+    const server = require('http').createServer((req, res) => res.end(JSON.stringify({ status: 'ok', pid: process.pid })));
+    server.listen(0, '127.0.0.1', () => console.log(server.address().port));
+    setTimeout(() => process.exit(), 60000);
+  `], { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    const fakePort = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('fake dashboard did not start')), 10_000);
+      fake.stdout.once('data', (d) => { clearTimeout(timer); resolve(Number(String(d).trim())); });
+    });
+
+    record(fake.pid, fakePort);
+    const running = upgrade();
+    const refused = running.status === 1 && /dashboard is running.*Nothing was changed/.test(running.out)
+      && !/Workspace up to date/.test(running.out) && snapshot() === before;
+    check('gtd upgrade does not refresh files under a running dashboard', refused, refused ? '' : `status=${running.status} ${running.out}`);
+
+    // Nothing answers on the recorded port: it may be a hung or older dashboard, or another program.
+    const silent = await new Promise((resolve) => {
+      const probe = net.createServer().listen(0, '127.0.0.1', () => { const p = probe.address().port; probe.close(() => resolve(p)); });
+    });
+    record(fake.pid, silent);
+    const unknown = upgrade();
+    const explained = unknown.status === 1 && /could not be confirmed as the dashboard.*Nothing was changed/.test(unknown.out)
+      && unknown.out.includes(`delete ${pidFile}`) && !/--force|Workspace up to date/.test(unknown.out)
+      && snapshot() === before && fs.existsSync(pidFile);
+    check('gtd upgrade explains a process it cannot confirm and changes nothing', explained,
+      explained ? '' : `status=${unknown.status} ${unknown.out}`);
+  } finally {
+    fake.kill();
+  }
+
+  // The old dashboard has exited (as after `gtd stop`, or the update helper waiting for it): its PID file is stale.
+  const gone = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  await new Promise((resolve) => gone.once('exit', resolve));
+  record(gone.pid, port);
+  const stale = upgrade();
+  const ran = stale.status === 0 && /Workspace up to date/.test(stale.out) && !fs.existsSync(pidFile)
+    && fs.readFileSync(outdated, 'utf8') !== oldContent && fs.existsSync(missing);
+  check('gtd upgrade runs once the recorded dashboard is gone, and refreshes the files', ran,
+    ran ? '' : `status=${stale.status} ${stale.out}`);
+  fs.rmSync(pidFile, { force: true });
+}
 
 const server = spawn(process.execPath, [path.join(root, 'dist/server/index.js')], {
   env: { ...env, ESB_WORKSPACE_PATH: ws, ESB_UI_PATH: path.join(root, 'dist/ui'), PORT: String(port), NODE_ENV: 'production', GTD_DISABLE_UPDATES: '1' },
