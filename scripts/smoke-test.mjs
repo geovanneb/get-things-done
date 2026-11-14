@@ -289,6 +289,20 @@ try {
   check('completing a task again replaces a stale done_date', Boolean(recompleted.done_date) && recompleted.done_date !== stale,
     `done_date=${recompleted.done_date}`);
 
+  // Front-matter days: an unquoted review_date written by hand stays a day after a save through the API.
+  {
+    const dated = await (await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Fictional review reminder' }) })).json();
+    const datedFile = path.join(ws, 'tasks', 'active', dated.id, 'task.md');
+    fs.writeFileSync(datedFile, fs.readFileSync(datedFile, 'utf8').replace(/^title: /m, 'review_date: 2026-11-20\ntitle: '));
+    const savedDated = await (await fetch(`${base}/api/tasks/${dated.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ priority: 'high' }),
+    })).json();
+    const datedLine = fs.readFileSync(datedFile, 'utf8').match(/^review_date: .*$/m)?.[0];
+    check('an unquoted review_date stays a day after a save', savedDated.review_date === '2026-11-20' && datedLine === "review_date: '2026-11-20'",
+      `review_date=${savedDated.review_date} line=${datedLine}`);
+  }
+
   // Sharing labels on context notes (#107): only known labels, kept by an edit that does not mention them, removed by ''.
   {
     const post = (body) => fetch(`${base}/api/context`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
