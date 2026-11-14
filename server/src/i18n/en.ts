@@ -509,6 +509,7 @@ export const en = {
   "analysisRun.applyWith": "Apply with {label}",
   "analysisRun.checkingWhetherTheDashboardCan": "Checking whether the dashboard can run this here…",
   "analysisRun.runsWithYourClaudePlan": "Runs {label} with your Claude plan, under this workspace's rules. You can leave this page; it updates when it is ready.",
+  "analysisRun.signedInAs": "Signed in as {account}.",
   "analysisRun.theSameCommandYouWould": "The same command you would run yourself, in the background. Hooks and MCP servers are off for this run.",
   "analysisRun.theSameCommandYouWould2": "The same command you would run yourself, in the background. Where the workspace would ask you, the dashboard answers: yes only for the files you accepted, no for anything else.",
   "analysisRun.orRunItYourself": "Or run it yourself",

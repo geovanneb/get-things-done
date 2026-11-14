@@ -510,6 +510,7 @@ export default {
   "analysisRun.applyWith": "Aplicar con {label}",
   "analysisRun.checkingWhetherTheDashboardCan": "Comprobando si el panel puede ejecutar esto aquí…",
   "analysisRun.runsWithYourClaudePlan": "Ejecuta {label} con tu plan de Claude, bajo las reglas de este espacio de trabajo. Puedes salir de esta página; se actualiza cuando esté listo.",
+  "analysisRun.signedInAs": "Sesión iniciada como {account}.",
   "analysisRun.theSameCommandYouWould": "El mismo comando que ejecutarías tú, en segundo plano. Los hooks y servidores MCP están desactivados en esta ejecución.",
   "analysisRun.theSameCommandYouWould2": "El mismo comando que ejecutarías tú, en segundo plano. Donde el espacio de trabajo te preguntaría, responde el panel: sí solo para los archivos aceptados, no para todo lo demás.",
   "analysisRun.orRunItYourself": "O ejecútalo tú",

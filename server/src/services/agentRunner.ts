@@ -86,6 +86,25 @@ export interface RunnerStatus {
   /** Whether Claude Code trusts the workspace folder; null when that could not be verified. */
   trusted: boolean | null;
   problems: { code: ProblemCode; message: string }[];
+  /**
+   * Which Claude account runs use, as `claude auth status` reports it: a computer can have more than one sign-in
+   * (another config folder), and the dashboard uses the one its own environment points to. Null when not signed in.
+   */
+  account?: RunnerAccount | null;
+}
+
+export interface RunnerAccount { email: string | null; organization: string | null; plan: string | null }
+
+/** A short single-line string from the tool's output, or null. Never more than `max` characters. */
+function shortText(value: unknown, max = 200): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text ? (text.length > max ? `${text.slice(0, max - 1)}…` : text) : null;
+}
+
+function accountOf(auth: Record<string, unknown>): RunnerAccount | null {
+  const account = { email: shortText(auth['email']), organization: shortText(auth['orgName']), plan: shortText(auth['subscriptionType'], 40) };
+  return account.email || account.organization || account.plan ? account : null;
 }
 
 /** Why the runner ended a run itself, when it did. */
@@ -376,7 +395,7 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
     if (trusted === false) {
       problems.push({ code: 'not_trusted', message: 'Claude Code has not trusted this workspace folder yet, so it would ignore the workspace\'s permission rules. Open a terminal in the workspace folder, run claude once and accept "trust this folder", then try again.' });
     }
-    return { ...base, installed: true, logged_in: loggedIn, trusted, problems };
+    return { ...base, installed: true, logged_in: loggedIn, trusted, problems, account: auth && loggedIn ? accountOf(auth) : null };
   }
 
   start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate, onStep?: (step: RunStep) => void): RunHandle {
@@ -495,15 +514,18 @@ export function explainOutcome(outcome: RunOutcome, updateStatus: string | null,
     default: break;
   }
   const clean = outcome.exit_code === 0 && r?.subtype === 'success' && r.is_error !== true;
+  // Claude Code ended the run with an error of its own (a usage limit, an outage): its short text, said as it is.
+  const said = r?.is_error === true ? shortText(r.result, 300) : null;
+  const saidNote = said ? ` Claude Code said: "${said}".` : '';
   if (command === 'analyze') {
     if (updateStatus === 'in_review' && clean) return { ...facts, status: 'succeeded', message: 'The analysis finished. Review the proposals below.' };
-    if (updateStatus === 'in_review') return failed('Proposals are ready to review, but Claude Code reported an error at the end of the run. Check them carefully.');
+    if (updateStatus === 'in_review') return failed(`Proposals are ready to review, but Claude Code reported an error at the end of the run.${saidNote} Check them carefully.`);
   } else {
     const missing = apply?.not_applied ?? [];
     const blocked = apply?.refused_writes.length ? ` Writes refused because you had not accepted them: ${apply.refused_writes.join(', ')}.` : '';
     if (updateStatus === 'done' && clean && missing.length === 0) return { ...facts, status: 'succeeded', message: `Your accepted changes are written.${blocked}` };
     if (updateStatus === 'done') {
-      return failed(`The update is finished, but ${missing.length ? `these accepted changes are not recorded as applied: ${missing.join(', ')}` : 'Claude Code reported an error at the end of the run'}. Check the outcome of each change below.${blocked}`);
+      return failed(`The update is finished, but ${missing.length ? `these accepted changes are not recorded as applied: ${missing.join(', ')}` : 'Claude Code reported an error at the end of the run'}.${saidNote} Check the outcome of each change below.${blocked}`);
     }
   }
   const text = `${r?.result ?? ''}\n${outcome.stderr}`;
@@ -512,7 +534,20 @@ export function explainOutcome(outcome: RunOutcome, updateStatus: string | null,
   }
   if (r?.subtype === 'error_max_turns') return failed(`The ${w.noun} stopped after ${MAX_TURNS} steps without finishing. ${capital(w.again)}, or run the command in Claude Code yourself.`);
   const where = updateStatus ? ` The update is now "${updateStatus}".` : '';
+  if (said && isPlanLimit(said)) {
+    return failed(`Claude Code stopped: "${said}". The Claude account it is signed in to has reached a usage limit.${where} ${capital(w.again)} once the limit resets, or run the command in Claude Code yourself with another account.`);
+  }
+  if (said) return failed(`The ${w.noun} did not finish. Claude Code said: "${said}".${where} ${capital(w.again)}, or run the command in Claude Code yourself to see what happens.`);
   return failed(`The ${w.noun} did not finish.${where} ${capital(w.again)}, or run the command in Claude Code yourself to see what happens.`);
+}
+
+/**
+ * Whether Claude Code's error says the signed-in account reached its plan's usage limit ("You've hit your weekly
+ * limit"), as opposed to a server slowing requests down ("not your usage limit"), a full context or a size limit.
+ */
+export function isPlanLimit(text: string): boolean {
+  if (/not your usage limit/i.test(text)) return false;
+  return /\b(?:you've|you have) (?:hit|reached) your\b[^.·]*\blimit\b|\busage limit (?:reached|exceeded)\b|\b(?:5-hour|five-hour|session|daily|weekly|monthly|opus|sonnet) (?:usage )?limit\b/i.test(text);
 }
 
 function capital(text: string): string {

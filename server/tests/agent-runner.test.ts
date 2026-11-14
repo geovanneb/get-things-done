@@ -68,6 +68,29 @@ test('outcomes are explained in plain words; success needs both the update and t
   assert.match(explainOutcome({ exit_code: 1, result: { result: 'Failed to authenticate: OAuth session expired' }, stderr: '' }, 'ready').message, /sign in again/);
   assert.doesNotMatch(explainOutcome({ exit_code: 1, result: { result: 'The note mentions OAuth scopes' }, stderr: '' }, 'ready').message, /sign in/);
   assert.match(explainOutcome({ exit_code: 1, result: { subtype: 'error_max_turns' }, stderr: '' }, 'analyzing').message, /stopped after 80 steps/);
+  // Claude Code's own error (here a usage limit) is said, not hidden behind "did not finish".
+  const limit = explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, num_turns: 1, total_cost_usd: 0, result: "You've hit your weekly limit · resets 2am (UTC)" }, stderr: '' }, 'approved', 'apply');
+  assert.equal(limit.status, 'failed');
+  assert.match(limit.message, /You've hit your weekly limit · resets 2am \(UTC\)/);
+  assert.match(limit.message, /reached a usage limit\. The update is now "approved"\. Apply again once the limit resets/);
+  const outage = explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: 'API Error: 529\n  Overloaded' }, stderr: '' }, 'ready');
+  assert.match(outage.message, /^The analysis did not finish\. Claude Code said: "API Error: 529 Overloaded"\./);
+  const long = explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: 'x'.repeat(5000) }, stderr: '' }, 'ready');
+  assert.ok(long.message.length < 500, 'a long error is cut short');
+  for (const text of ['API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited', 'Context limit reached · /compact or /clear to continue', 'API Error: 413 request exceeds the size limit']) {
+    const m = explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: text }, stderr: '' }, 'ready').message;
+    assert.doesNotMatch(m, /usage limit\./, `not a plan limit: ${text}`);
+    assert.match(m, /Claude Code said:/);
+  }
+  for (const text of ["You've hit your session limit · resets 5pm", 'Claude usage limit reached. Your limit will reset at 3pm', 'You have reached your 5-hour limit']) {
+    assert.match(explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: text }, stderr: '' }, 'ready').message, /reached a usage limit/, text);
+  }
+  assert.equal(long.message.match(/"(x+…)"/)?.[1].length, 300, 'the quote is cut at 300 characters');
+  // A run that wrote its proposals or changes and then hit an error still says what Claude Code said.
+  assert.match(explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: "You've hit your weekly limit" }, stderr: '' }, 'in_review').message, /^Proposals are ready to review, but .* Claude Code said: "You've hit your weekly limit"\. Check them carefully\.$/);
+  assert.match(explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: 'API Error: 529 Overloaded' }, stderr: '' }, 'done', 'apply', { not_applied: [], refused_writes: [] }).message, /Claude Code said: "API Error: 529 Overloaded"\. Check the outcome/);
+  assert.match(explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' }, stderr: '' }, 'ready').message, /sign in again/, 'a sign-in problem keeps its own message');
+  assert.doesNotMatch(explainOutcome({ exit_code: 1, result: { result: 'A note about rate limits' }, stderr: '' }, 'ready').message, /Claude Code said|usage limit/, 'text from a run that did not report an error is never quoted');
   for (const [stopped, text] of [['timeout', /30 minutes/], ['api_key', /API key instead of your Claude plan/], ['not_trusted', /trust this folder/], ['shutdown', /dashboard stopped/]] as const) {
     assert.match(explainOutcome({ exit_code: null, result: null, stderr: '', stopped }, 'ready').message, text, stopped);
   }
@@ -454,6 +477,12 @@ test('the Claude Code adapter checks sign-in, plan, workspace settings and trust
   assert.deepEqual(await codes(new ClaudeCodeAdapter(() => null, env)), ['not_installed']);
   const bin = await fakeCli(ws, signedIn, '');
   assert.deepEqual(await codes(new ClaudeCodeAdapter(() => bin, env)), []);
+  assert.equal((await new ClaudeCodeAdapter(() => bin, env).status(ws)).account, null, 'no account details: none shown');
+  const away = await fakeCli(ws, `process.stdout.write(JSON.stringify({ loggedIn: false, email: 'someone@example.com' })); process.exit(0);`, '');
+  assert.equal((await new ClaudeCodeAdapter(() => away, env).status(ws)).account, null, 'not signed in: no account, even with an email');
+  // fakeCli rewrites the same file: checked after the plain sign-in above.
+  const team = await fakeCli(ws, `process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'someone@example.com', orgName: 'Example Org', subscriptionType: 'team' })); process.exit(0);`, '');
+  assert.deepEqual((await new ClaudeCodeAdapter(() => team, env).status(ws)).account, { email: 'someone@example.com', organization: 'Example Org', plan: 'team' }, 'the status says which account runs use');
   const api = await fakeCli(ws, `process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'apiKey' })); process.exit(0);`, '');
   assert.deepEqual(await codes(new ClaudeCodeAdapter(() => api, env)), ['not_subscription']);
   const out = await fakeCli(ws, `process.stdout.write(JSON.stringify({ loggedIn: false })); process.exit(0);`, '');
