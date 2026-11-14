@@ -63,7 +63,7 @@ The workspace and offline transcription need no Get Things Done account. AI anal
 
 The dashboard is available in English, Japanese, Portuguese (Brazil) and Spanish. It follows your system language; change it in **Settings → Appearance → Language**.
 
-> **New in 0.13:** sharing labels on context notes, with only shareable notes going into a shared file or a deliverable for outside readers, a share pack that puts chosen task files into one ZIP, a names and terms check for deliverables, and meetings sent from your iPhone. [See what changed](CHANGELOG.md).
+> **New in 0.14:** a stakeholder's page lists the open tasks waiting on them, the dashboard says which Claude account runs use and quotes Claude Code when it stops a run, and a file written by hand can no longer blank a screen. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 
