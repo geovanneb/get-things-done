@@ -140,7 +140,8 @@ export class SearchService {
     try {
       const tasks = await taskService.listTasks();
       for (const t of tasks) {
-        rows.push({ id: t.id, type: 'task', title: t.title, body: [t.description, t.objective, t.body, t.tags.join(' ')].filter(Boolean).join(' '), status: t.status, path: t.path || null });
+        rows.push({ id: t.id, type: 'task', title: t.title, // A task made from the board starts with its description as its body: indexed once, so the excerpt does not repeat it.
+        body: [...new Set([t.description, t.objective, t.body].map((part) => (typeof part === 'string' ? part.trim() : '')))].concat(t.tags.join(' ')).filter(Boolean).join(' '), status: t.status, path: t.path || null });
       }
     } catch { /* no tasks yet */ }
 

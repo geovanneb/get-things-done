@@ -98,7 +98,8 @@ export function getStatusColor(s: string): string {
 }
 
 export function getInitials(name: string): string {
-  if (!name) return '?';
+  // Data read from workspace files is not always what its type says.
+  if (typeof name !== 'string' || !name.trim()) return '?';
   return name
     .split(/\s+/)
     .filter(Boolean)

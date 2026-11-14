@@ -49,9 +49,10 @@ export const startCommand = new Command('start')
     }
 
     // An explicit --port is a hard request; otherwise fall back to config, then the default.
-    const requestedPort = options.port ? parseInt(options.port, 10) : getPort();
-    if (Number.isNaN(requestedPort)) {
-      console.error(chalk.red(`Invalid port: ${options.port}`));
+    // The whole value must be a port: parseInt read "3001abc" as 3001, and 0 or 70000 failed later with a raw error.
+    const requestedPort = options.port !== undefined ? (/^\d{1,5}$/.test(options.port.trim()) ? Number(options.port.trim()) : NaN) : getPort();
+    if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
+      console.error(chalk.red(`Invalid port: ${options.port ?? requestedPort}. Use a number from 1 to 65535.`));
       process.exit(1);
     }
 

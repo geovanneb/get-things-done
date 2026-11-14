@@ -1,7 +1,13 @@
 import { Request, RequestHandler } from 'express';
 
+/**
+ * The dashboard's own origin. The Vite and preview ports are added only outside an installed dashboard (`gtd start`
+ * and the desktop app set NODE_ENV=production): there, any other program serving a page on localhost:3000 or :5173
+ * would otherwise be allowed to read and change the whole workspace from the browser.
+ */
 export function allowedOrigins(port: number): Set<string> {
-  return new Set([3000, 5173, 4173, port].flatMap((p) => [
+  const development = process.env['NODE_ENV'] === 'production' ? [] : [3000, 5173, 4173];
+  return new Set([...development, port].flatMap((p) => [
     `http://localhost:${p}`, `http://127.0.0.1:${p}`,
   ]));
 }

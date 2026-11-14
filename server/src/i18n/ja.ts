@@ -2724,4 +2724,7 @@ export default {
   "dictation.fieldContent": "内容",
   "dictation.fieldNotes": "メモ",
   "dictation.fieldObjective": "目的",
+  "pageError.title": "このページを表示できませんでした",
+  "pageError.description": "このページの一部を読み込めませんでした。ダッシュボードのほかの画面は使えます。ページを再読み込みしてください。繰り返す場合は、設定の「ワークスペースを検証」で原因のファイルを確認してください。",
+  "pageError.reload": "ページを再読み込み",
 } satisfies Catalog;

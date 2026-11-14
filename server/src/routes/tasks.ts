@@ -41,11 +41,12 @@ router.get('/', async (req: Request, res: Response) => {
   const { status, priority, tags, stakeholder_ref, search } = req.query;
 
   const filters: { status?: TaskStatus; priority?: Priority; tags?: string[]; stakeholder_ref?: string; search?: string } = {};
-  if (status) filters.status = status as TaskStatus;
-  if (priority) filters.priority = priority as Priority;
-  if (tags) filters.tags = (tags as string).split(',');
-  if (stakeholder_ref) filters.stakeholder_ref = stakeholder_ref as string;
-  if (search) filters.search = search as string;
+  if (typeof status === 'string' && status) filters.status = status as TaskStatus;
+  if (typeof priority === 'string' && priority) filters.priority = priority as Priority;
+  // ?tags=a&tags=b arrives as a list, ?tags=a,b as text.
+  if (tags) filters.tags = (Array.isArray(tags) ? tags : [tags]).flatMap((v) => (typeof v === 'string' ? v.split(',') : []));
+  if (typeof stakeholder_ref === 'string' && stakeholder_ref) filters.stakeholder_ref = stakeholder_ref as string;
+  if (typeof search === 'string' && search) filters.search = search as string;
 
   const tasks = await taskService.listTasks(filters);
   res.json(tasks);

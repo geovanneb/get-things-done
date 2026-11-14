@@ -124,7 +124,7 @@ export class SituationService {
         priority: t.priority,
         due_date: t.due_date,
         stakeholders: t.stakeholder_refs ?? [],
-        deliverables: (t.deliverables as unknown[]).map((d) => ({
+        deliverables: (Array.isArray(t.deliverables) ? t.deliverables as unknown[] : []).map((d) => ({
           format: typeof d === 'object' && d !== null && 'format' in d ? (d as Record<string, unknown>)['format'] as string : String(d),
         })),
         progress: this.estimateProgress(t),

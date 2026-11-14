@@ -4,6 +4,9 @@ import { Stakeholder, InfluenceLevel } from '../types';
 import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { reserveIds, reservedSequence } from './idReservations';
+import { requireText, requireList, textList, textOf } from '../utils/loose';
+
+const TEXT_FIELDS = ['name', 'role', 'organization', 'email', 'what_matters', 'notes', 'avatar_initials', 'influence'] as const;
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -35,7 +38,9 @@ export class StakeholderService {
           const { data, content } = await fileService.readMarkdown<Stakeholder>(filePath);
           results.push({
             ...data,
-            tags: data.tags || [],
+            // A file written by hand may have no name, or one YAML reads as a number: listed under its id, never dropped.
+            name: textOf(data.name).trim() || textOf(data.id) || path.basename(filePath, '.md'),
+            tags: textList(data.tags),
             influence: data.influence || 'informed',
             created_at: data.created_at || new Date().toISOString(),
             updated_at: data.updated_at || new Date().toISOString(),
@@ -59,7 +64,8 @@ export class StakeholderService {
     return {
       ...data,
       id,
-      tags: data.tags || [],
+      name: textOf(data.name).trim() || id,
+      tags: textList(data.tags),
       influence: data.influence || 'informed',
       created_at: data.created_at || new Date().toISOString(),
       updated_at: data.updated_at || new Date().toISOString(),
@@ -69,6 +75,8 @@ export class StakeholderService {
   }
 
   async createStakeholder(data: Partial<Stakeholder> & { type?: 'people' | 'groups' }): Promise<Stakeholder> {
+    requireText(data, TEXT_FIELDS);
+    requireList(data, ['tags']);
     const isGroup = data.type === 'groups';
     const id = await this.generateId(isGroup);
     const now = new Date().toISOString();
@@ -104,6 +112,8 @@ export class StakeholderService {
   }
 
   async updateStakeholder(id: string, data: Partial<Stakeholder>): Promise<Stakeholder> {
+    requireText(data, TEXT_FIELDS);
+    requireList(data, ['tags']);
     const existing = await this.getStakeholder(id);
     const filePath = existing.path!;
     const { content } = await fileService.readMarkdown<Stakeholder>(filePath);

@@ -117,7 +117,9 @@ export async function listFolderFiles(dir: string, exclude: string[] = []): Prom
 
 /** A plain top-level file name for upload or delete; names with folders are refused. */
 export function topLevelName(name: string): string {
-  if (typeof name !== 'string' || !name || name.includes('\0') || name.includes(':') || /[. ]$/.test(name) || name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+  if (typeof name !== 'string' || !name || name.includes('\0') || name.includes(':') || /[. ]$/.test(name) || name.includes('/') || name.includes('\\') || name === '.' || name === '..'
+    // Longer than any file system allows: refused as a name here, before a lock or folder is made from it.
+    || Buffer.byteLength(name) > 200) {
     throw new Error('Invalid file name: only files at the top of the folder can be changed');
   }
   // Keep rejection above: basename alone would silently accept traversal attempts.

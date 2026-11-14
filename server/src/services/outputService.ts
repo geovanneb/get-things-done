@@ -5,6 +5,9 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
 import { titleSlug } from '../utils/slug';
+import { requireText, requireList, textList, textOf } from '../utils/loose';
+
+const TEXT_FIELDS = ['name', 'slug', 'format', 'description', 'style_guide'] as const;
 import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
@@ -39,8 +42,10 @@ export class OutputService {
         const { data } = await fileService.readMarkdown<OutputTemplate>(filePath);
         results.push({
           ...data,
+          // A template written by hand may have no name: listed under its id, never dropped.
+          name: textOf(data.name).trim() || textOf(data.id) || path.basename(path.dirname(filePath)),
           format: normaliseFormat(data.format),
-          tags: data.tags ?? [],
+          tags: textList(data.tags),
           required_sections: data.required_sections ?? [],
           created_at: data.created_at || new Date().toISOString(),
           updated_at: data.updated_at || new Date().toISOString(),
@@ -62,8 +67,9 @@ export class OutputService {
     return {
       ...data,
       id,
+      name: textOf(data.name).trim() || id,
       format: normaliseFormat(data.format),
-      tags: data.tags ?? [],
+      tags: textList(data.tags),
       required_sections: data.required_sections ?? [],
       created_at: data.created_at || new Date().toISOString(),
       updated_at: data.updated_at || new Date().toISOString(),
@@ -72,6 +78,8 @@ export class OutputService {
   }
 
   async createTemplate(data: Partial<OutputTemplate>): Promise<OutputTemplate> {
+    requireText(data, TEXT_FIELDS);
+    requireList(data, ['tags', 'required_sections']);
     const now = new Date().toISOString();
     const slug = data.slug || titleSlug(data.name || 'untitled', 'template');
     const id = `OUT-${slug}`;
@@ -111,6 +119,8 @@ export class OutputService {
   }
 
   async updateTemplate(id: string, data: Partial<OutputTemplate>): Promise<OutputTemplate> {
+    requireText(data, TEXT_FIELDS);
+    requireList(data, ['tags', 'required_sections']);
     const existing = await this.getTemplate(id);
     const filePath = existing.path!;
 

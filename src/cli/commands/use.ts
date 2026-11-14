@@ -15,6 +15,11 @@ export const useCommand = new Command('use')
       console.error(chalk.red(`Directory not found: ${resolved}`));
       process.exit(1);
     }
+    // A file passed by mistake was saved as the workspace, and `gtd start` then failed with ENOTDIR.
+    if (!fs.statSync(resolved).isDirectory()) {
+      console.error(chalk.red(`Not a folder: ${resolved}`));
+      process.exit(1);
+    }
 
     await writeConfig({ workspace_path: resolved });
     console.log(chalk.green('✓') + ` Workspace set to: ${chalk.cyan(resolved)}`);

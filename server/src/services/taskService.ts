@@ -9,6 +9,7 @@ import { WorkspaceService } from './workspace';
 import { reserveIds, reservedSequence } from './idReservations';
 import { lock, unlock } from '../utils/fileLock';
 import { StakeholderService } from './stakeholderService';
+import { requireList, requireText, textList, textOf } from '../utils/loose';
 
 const fileService = new FileService();
 
@@ -80,6 +81,51 @@ const TASK_LOCK_WAIT_MS = 5000;
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
+}
+
+const STATUSES: readonly TaskStatus[] = ['backlog', 'ready', 'in_progress', 'blocked', 'review', 'in_review', 'approved', 'done', 'archived'];
+const PRIORITIES: readonly Priority[] = ['critical', 'high', 'medium', 'low'];
+const TASK_TEXT_FIELDS = ['title', 'description', 'objective', 'body', 'template_ref', 'agent_ref', 'due_date', 'start_date', 'done_date'] as const;
+const TASK_LIST_FIELDS = ['tags', 'skills', 'deliverables', 'dependencies', 'stakeholders'] as const;
+
+/**
+ * A save from the dashboard or a script: the fields every screen reads must have the type they are read as, and a
+ * status or priority must be one the board knows, or the task would be saved and then shown nowhere.
+ */
+function checkTaskInput(data: Record<string, unknown>): void {
+  requireText(data, TASK_TEXT_FIELDS);
+  requireList(data, TASK_LIST_FIELDS);
+  const { status, priority } = data;
+  if (status !== undefined && status !== null && !(STATUSES as readonly unknown[]).includes(status)) throw httpError(400, `Invalid status: use one of ${STATUSES.join(', ')}.`);
+  if (priority !== undefined && priority !== null && !(PRIORITIES as readonly unknown[]).includes(priority)) throw httpError(400, `Invalid priority: use one of ${PRIORITIES.join(', ')}.`);
+}
+
+/**
+ * A task as every screen reads it, whatever the file held. task.md is also written by hand and by agents:
+ * `tags: urgent` is one tag, `stakeholders: [STK-0001]` names a person, `title: 2026` is a title. One loose file
+ * used to stop the Board, Situation, Insights or the workspace check for every task.
+ */
+function readable(read: Task, id: string, content: string, filePath: string): Task {
+  const data = withTextDates(read);
+  const raw = data as Record<string, unknown>;
+  const listed = Array.isArray(raw['stakeholders']) ? raw['stakeholders'] as unknown[] : [];
+  const stakeholders = listed
+    .map((s) => (typeof s === 'string' ? { ref: s } : s))
+    .filter((s): s is { ref: string; role?: string; key?: boolean } => !!s && typeof s === 'object' && typeof (s as { ref?: unknown }).ref === 'string' && !!(s as { ref: string }).ref);
+  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : typeof value === 'string' && value.trim() ? [value] : []);
+  return {
+    ...data,
+    id,
+    title: textOf(raw['title']).trim() || 'Untitled task',
+    body: content || undefined,
+    tags: textList(raw['tags']),
+    stakeholders,
+    stakeholder_refs: stakeholders.length > 0 ? stakeholders.map((s) => s.ref) : textList(raw['stakeholder_refs']),
+    skills: textList(raw['skills']),
+    deliverables: list(raw['deliverables']) as Task['deliverables'],
+    dependencies: textList(raw['dependencies']),
+    path: filePath,
+  };
 }
 
 /** A timestamp is also the optimistic version: rapid writes and a backwards clock must advance it. */
@@ -241,25 +287,7 @@ export class TaskService {
 
       try {
         const { data: read, content } = await fileService.readMarkdown<Task>(taskFile);
-        const data = withTextDates(read);
-        const rawData = data as Record<string, unknown>;
-        const stakeholderObjs = Array.isArray(rawData['stakeholders'])
-          ? (rawData['stakeholders'] as { ref?: string; role?: string; key?: boolean }[])
-          : [];
-        const task: Task = {
-          ...data,
-          id: data.id || entry.name,
-          body: content || undefined,
-          tags: data.tags || [],
-          stakeholders: stakeholderObjs,
-          stakeholder_refs: stakeholderObjs.length > 0
-            ? stakeholderObjs.map((s) => s.ref ?? '').filter(Boolean)
-            : (data.stakeholder_refs || []),
-          skills: data.skills || [],
-          deliverables: data.deliverables || [],
-          dependencies: data.dependencies || [],
-          path: taskFile,
-        };
+        const task = readable(read, textOf((read as Record<string, unknown>)['id']) || entry.name, content, taskFile);
 
         if (filters) {
           if (filters.status && task.status !== filters.status) continue;
@@ -295,27 +323,7 @@ export class TaskService {
   async getTask(id: string): Promise<Task> {
     const taskFile = path.join(this.getActiveDir(), topLevelName(id), 'task.md');
 
-    const buildTask = (read: Task, content: string, filePath: string): Task => {
-      const data = withTextDates(read);
-      const raw = data as Record<string, unknown>;
-      const stakeholderObjs = Array.isArray(raw['stakeholders'])
-        ? (raw['stakeholders'] as { ref?: string; role?: string; key?: boolean }[])
-        : [];
-      return {
-        ...data,
-        id,
-        body: content || undefined,
-        tags: data.tags || [],
-        stakeholders: stakeholderObjs,
-        stakeholder_refs: stakeholderObjs.length > 0
-          ? stakeholderObjs.map((s) => s.ref ?? '').filter(Boolean)
-          : (data.stakeholder_refs || []),
-        skills: data.skills || [],
-        deliverables: data.deliverables || [],
-        dependencies: data.dependencies || [],
-        path: filePath,
-      };
-    };
+    const buildTask = (read: Task, content: string, filePath: string): Task => readable(read, id, content, filePath);
 
     if (!(await fileService.exists(taskFile))) {
       const archiveFile = path.join(this.getArchiveDir(), topLevelName(id), 'task.md');
@@ -358,6 +366,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
    */
   async createTask(data: Partial<Task>, origin?: { meeting_action: string; source?: MeetingActionSource }): Promise<Task> {
     const rawData = data as Record<string, unknown>;
+    checkTaskInput(rawData);
     // Set by routines, so a scheduled occurrence never produces a second task. Request bodies are not
     // typed at runtime: only well-formed pairs are kept, as the task schema requires.
     const routineRef = rawData['routine_ref'];
@@ -380,7 +389,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
     await fileService.ensureDir(path.join(taskDir, 'notes'));
 
     const incomingStakeholders = Array.isArray(rawData['stakeholders'])
-      ? (rawData['stakeholders'] as { ref: string; role: string; key?: boolean }[])
+      ? (rawData['stakeholders'] as { ref: string; role: string; key?: boolean }[]).filter((x) => !!x && typeof x === 'object' && typeof x.ref === 'string')
       : [];
 
     const task: Task = {
@@ -388,17 +397,17 @@ If the executive comes back with feedback on a task that is already \`in_review\
       title: data.title || 'Untitled Task',
       status: data.status || 'backlog',
       priority: data.priority || 'medium',
-      due_date: data.due_date,
-      start_date: data.start_date,
-      done_date: data.done_date,
+      due_date: data.due_date ?? undefined,
+      start_date: data.start_date ?? undefined,
+      done_date: data.done_date ?? undefined,
       tags: data.tags || [],
       stakeholders: incomingStakeholders,
       stakeholder_refs: incomingStakeholders.map((s) => s.ref).filter(Boolean),
-      template_ref: data.template_ref,
-      agent_ref: data.agent_ref,
+      template_ref: data.template_ref ?? undefined,
+      agent_ref: data.agent_ref ?? undefined,
       skills: data.skills || [],
-      description: data.description,
-      objective: data.objective,
+      description: data.description ?? undefined,
+      objective: data.objective ?? undefined,
       deliverables: data.deliverables || [],
       dependencies: data.dependencies || [],
       created_at: now,
@@ -546,6 +555,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
 
   async updateTask(id: string, data: Partial<Task>): Promise<Task> {
     checkBoardColumn((data as Record<string, unknown>)['board_column'], true);
+    checkTaskInput(data as Record<string, unknown>);
     return this.withTaskLock(id, () => this.updateTaskUnlocked(id, data));
   }
 
@@ -569,8 +579,14 @@ If the executive comes back with feedback on a task that is already \`in_review\
       updated_at: now,
     };
 
+    // A field sent as null is cleared (the task page clears a due date this way): removed, never written as `null`,
+    // which no field of the task schema allows. The required ones keep what they had.
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== null) continue;
+      if (key === 'title' || key === 'status' || key === 'priority' || (TASK_LIST_FIELDS as readonly string[]).includes(key)) (updated as Record<string, unknown>)[key] = (existing as Record<string, unknown>)[key];
+      else delete (updated as Record<string, unknown>)[key];
+    }
     stampStatusDates(existing.status, updated, now);
-    if (updated['board_column'] === null) delete updated['board_column'];
     // What the server recorded about the task's origin stays as it was, whatever the request says.
     for (const key of SERVER_FIELDS) {
       if (key in existing) (updated as Record<string, unknown>)[key] = (existing as Record<string, unknown>)[key];

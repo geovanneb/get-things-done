@@ -2726,4 +2726,7 @@ export default {
   "dictation.fieldContent": "conteúdo",
   "dictation.fieldNotes": "notas",
   "dictation.fieldObjective": "objetivo",
+  "pageError.title": "Não foi possível mostrar esta página",
+  "pageError.description": "Algo nesta página não pôde ser lido. O resto do painel continua funcionando. Recarregue a página; se acontecer de novo, use \"Validar espaço de trabalho\" em Configurações para encontrar o arquivo.",
+  "pageError.reload": "Recarregar página",
 } satisfies Catalog;

@@ -2725,4 +2725,7 @@ export const en = {
   "dictation.fieldContent": "content",
   "dictation.fieldNotes": "notes",
   "dictation.fieldObjective": "objective",
+  "pageError.title": "This page could not be shown",
+  "pageError.description": "Something on this page could not be read. The rest of the dashboard still works. Reload the page; if it happens again, use \"Validate workspace\" in Settings to find the file.",
+  "pageError.reload": "Reload page",
 } as const;

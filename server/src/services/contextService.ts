@@ -5,6 +5,11 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
 import { titleSlug } from '../utils/slug';
+import { requireText, textList, textOf } from '../utils/loose';
+
+const TEXT_FIELDS = ['title', 'slug', 'body', 'content', 'relevance'] as const;
+/** A timestamp as text: YAML reads an unquoted `updated_at: 2026-11-08` as a date, which cannot be sorted as text. */
+const stamp = (value: unknown): string => value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : typeof value === 'string' && value ? value : new Date().toISOString();
 import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
 
 const fileService = new FileService();
@@ -71,7 +76,8 @@ export class ContextService {
   }
 
   async listContextNotes(category?: ContextCategory): Promise<ContextNote[]> {
-    const categories: readonly ContextCategory[] = category ? [category] : CATEGORIES;
+    // Checked before any folder is touched: a read never creates a folder for a category that does not exist.
+    const categories: readonly ContextCategory[] = category ? [requestedCategory(category)] : CATEGORIES;
 
     const results: ContextNote[] = [];
 
@@ -100,10 +106,11 @@ export class ContextService {
           const { data, content } = await fileService.readMarkdown<ContextNote>(filePath);
           results.push({
             ...data,
+            title: textOf(data.title).trim() || entry.name.replace(/\.md$/, ''),
             category: cat,
-            tags: data.tags || [],
-            created_at: data.created_at || new Date().toISOString(),
-            updated_at: data.updated_at || new Date().toISOString(),
+            tags: textList(data.tags),
+            created_at: stamp(data.created_at),
+            updated_at: stamp(data.updated_at),
             body: content,
             path: filePath,
           });
@@ -125,16 +132,18 @@ export class ContextService {
     return {
       ...data,
       id,
+      title: textOf(data.title).trim() || id,
       category,
-      tags: data.tags || [],
-      created_at: data.created_at || new Date().toISOString(),
-      updated_at: data.updated_at || new Date().toISOString(),
+      tags: textList(data.tags),
+      created_at: stamp(data.created_at),
+      updated_at: stamp(data.updated_at),
       body: content,
       path: filePath,
     };
   }
 
   async createContextNote(data: Partial<ContextNote>): Promise<ContextNote> {
+    requireText(data, TEXT_FIELDS);
     const now = new Date().toISOString();
     const category = requestedCategory(data.category || 'situation');
     const slug = data.slug || titleSlug(data.title || 'untitled', 'note');
@@ -180,14 +189,14 @@ export class ContextService {
   }
 
   async updateContextNote(id: string, data: Partial<ContextNote>): Promise<ContextNote> {
+    requireText(data, TEXT_FIELDS);
     const sensitivity = requestedSensitivity(data.sensitivity);
     const requested = data.category ? requestedCategory(data.category) : undefined;
     const existing = await this.getContextNote(id);
     const incomingCategory = requested ?? existing.category;
 
-    const bodyContent = data.body !== undefined
-      ? data.body
-      : (data.content !== undefined ? data.content : (existing.body || existing.content || ''));
+    // null is not text to write: it keeps the note's text, like a field left out.
+    const bodyContent = data.body ?? data.content ?? existing.body ?? existing.content ?? '';
 
     let filePath = existing.path!;
 
