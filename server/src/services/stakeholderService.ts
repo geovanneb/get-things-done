@@ -93,9 +93,10 @@ export class StakeholderService {
     // Two creates at the same moment can pick the same number, and a plain write would silently replace the
     // other person. The exclusive create lets only one have it; the other takes the next number.
     let filePath = path.join(dir, `${stk.id.toLowerCase()}.md`);
-    for (;;) {
+    for (let attempt = 0; ; attempt++) {
       try { await fileService.createMarkdown(filePath, frontmatter as Record<string, unknown>, notes || ''); break; } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+        if (attempt === 19) throw Object.assign(new Error(`Could not reserve a new ${isGroup ? 'group' : 'stakeholder'} id; try again`), { statusCode: 409 });
         stk.id = frontmatter.id = stk.id.replace(/\d+$/, (n) => String(Number(n) + 1).padStart(4, '0'));
         filePath = path.join(dir, `${stk.id.toLowerCase()}.md`);
       }
