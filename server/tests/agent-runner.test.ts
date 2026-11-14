@@ -77,12 +77,12 @@ test('outcomes are explained in plain words; success needs both the update and t
   assert.match(outage.message, /^The analysis did not finish\. Claude Code said: "API Error: 529 Overloaded"\./);
   const long = explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: 'x'.repeat(5000) }, stderr: '' }, 'ready');
   assert.ok(long.message.length < 500, 'a long error is cut short');
-  for (const text of ['API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited', 'Context limit reached · /compact or /clear to continue', 'API Error: 413 request exceeds the size limit']) {
+  for (const text of ['API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited', 'Context limit reached · /compact or /clear to continue', 'API Error: 413 request exceeds the size limit', "You've hit your context limit", 'Session limit not reached; API overloaded', 'Output token limit exceeded', `You've hit your weekly limit${'.'.repeat(400)} (not your usage limit)`]) {
     const m = explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: text }, stderr: '' }, 'ready').message;
     assert.doesNotMatch(m, /usage limit\./, `not a plan limit: ${text}`);
     assert.match(m, /Claude Code said:/);
   }
-  for (const text of ["You've hit your session limit · resets 5pm", 'Claude usage limit reached. Your limit will reset at 3pm', 'You have reached your 5-hour limit']) {
+  for (const text of ["You've hit your session limit · resets 5pm", 'Claude usage limit reached. Your limit will reset at 3pm', 'You have reached your 5-hour limit', "You've hit your limit · resets 5pm", '5-hour limit reached ∙ resets 3pm', 'Claude AI usage limit reached|1763100000']) {
     assert.match(explainOutcome({ exit_code: 1, result: { subtype: 'success', is_error: true, result: text }, stderr: '' }, 'ready').message, /reached a usage limit/, text);
   }
   assert.equal(long.message.match(/"(x+…)"/)?.[1].length, 300, 'the quote is cut at 300 characters');

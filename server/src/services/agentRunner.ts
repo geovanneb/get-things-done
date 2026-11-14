@@ -534,7 +534,8 @@ export function explainOutcome(outcome: RunOutcome, updateStatus: string | null,
   }
   if (r?.subtype === 'error_max_turns') return failed(`The ${w.noun} stopped after ${MAX_TURNS} steps without finishing. ${capital(w.again)}, or run the command in Claude Code yourself.`);
   const where = updateStatus ? ` The update is now "${updateStatus}".` : '';
-  if (said && isPlanLimit(said)) {
+  // Classified on the whole text: a qualifier past the quoted 300 characters still counts.
+  if (said && typeof r?.result === 'string' && isPlanLimit(r.result)) {
     return failed(`Claude Code stopped: "${said}". The Claude account it is signed in to has reached a usage limit.${where} ${capital(w.again)} once the limit resets, or run the command in Claude Code yourself with another account.`);
   }
   if (said) return failed(`The ${w.noun} did not finish. Claude Code said: "${said}".${where} ${capital(w.again)}, or run the command in Claude Code yourself to see what happens.`);
@@ -546,8 +547,10 @@ export function explainOutcome(outcome: RunOutcome, updateStatus: string | null,
  * limit"), as opposed to a server slowing requests down ("not your usage limit"), a full context or a size limit.
  */
 export function isPlanLimit(text: string): boolean {
-  if (/not your usage limit/i.test(text)) return false;
-  return /\b(?:you've|you have) (?:hit|reached) your\b[^.·]*\blimit\b|\busage limit (?:reached|exceeded)\b|\b(?:5-hour|five-hour|session|daily|weekly|monthly|opus|sonnet) (?:usage )?limit\b/i.test(text);
+  // Other limits, and a limit said not to be the cause, never count: waiting for a plan reset would not help.
+  if (/\bnot (?:your |the )?(?:usage |plan )?limit\b|\blimit (?:is |was |has )?not\b|\b(?:context|size|token|prompt|request|rate|output) limit\b/i.test(text)) return false;
+  const plan = '(?:5-hour|five-hour|session|daily|weekly|monthly|usage|plan|opus|sonnet)';
+  return new RegExp(`\\b(?:you've|you have) (?:hit|reached) your (?:${plan} )?limit\\b|\\b(?:usage|${plan}) limit (?:reached|exceeded|hit)\\b|\\b(?:5-hour|five-hour|session|daily|weekly|monthly|opus|sonnet) (?:usage )?limit\\b`, 'i').test(text);
 }
 
 function capital(text: string): string {
