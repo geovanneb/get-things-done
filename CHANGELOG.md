@@ -8,6 +8,106 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-15
+
+**Queue a second analysis, and keep every save.** Running analysis on a context update while
+another run is going now **puts it in line** instead of refusing it, and it starts by itself when
+the run before it ends. Most of the rest makes **two changes at the same moment** safe: a
+stakeholder, an org chart, a context note, an attachment and the task panel no longer lose or bring
+back what the other change did. Dates written by hand keep their form when the dashboard saves the
+file, a task due today is no longer overdue on a stakeholder's page, and `gtd upgrade` no longer
+runs under a dashboard that is still running.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.15.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.15.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.15.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.15.0`, or **Update and restart** in Settings. No schema
+or agent instruction changes, so your workspace needs no upgrade. If you script `gtd stop` or
+`gtd start`, see Changed: they now exit with 1 when they cannot tell whether a dashboard is running.
+
+### Added
+
+- **A second analysis waits in line.** **Run analysis** on another context update while one is
+  going was refused. Now it waits ("Waiting: starts when the current run
+  ends", with **Cancel this run**) and starts by itself when the run before it ends, however that
+  run ends. If its update changed meanwhile (no longer ready, deleted, or another workspace is
+  open), it does not start, and its page says why. The line is kept only while the dashboard runs,
+  and an apply never waits in line: start it once nothing else is running. (#432)
+- **Accepted tasks in the memory review (preview, off by default).** With the new System cleanup
+  setting `memory_review.accepted_tasks`, the weekly memory review also gathers the tasks you
+  accepted since you turned it on: a list in `accepted-tasks.md` and copies of each task, its
+  deliverables and its latest execution log, so the review can check them against your context.
+  Confidential and restricted tasks are only counted, never copied or named, and the cleanup rules
+  keep a task until it is gathered. For now it is set through the API (see
+  [docs/api.md](docs/api.md)); the switch in System cleanup and the agent instructions come in a
+  later release. (#433, #435)
+- **A 22-minute video tutorial** is linked from the README and the user guide. (#434)
+
+### Changed
+
+- **`gtd upgrade` stops when a dashboard is running.** It said "Run `gtd stop` first" and then
+  upgraded the workspace anyway, under a dashboard that keeps the code it started with. Now it
+  changes nothing, says why and exits with 1. (#429)
+- **`gtd stop` waits for the dashboard to close on its own** (up to 12 seconds) before forcing it.
+  It forced it after 5 seconds, while the dashboard gives itself 10. (#429)
+- **When the CLI cannot confirm that the process it recorded is the dashboard,** `gtd stop`,
+  `gtd start` and `gtd upgrade` say the same thing: what it could be, how to see which program it
+  is, and how to stop it or delete the PID file. `gtd stop` and `gtd start` now exit with 1 in this
+  case instead of 0, because nothing was stopped or started. (#429)
+- **A stakeholder save writes only stakeholder fields.** Fields a request carries for other
+  reasons, such as `expected_version`, were written into the stakeholder file. Keys an agent added
+  to the file are still kept. The PUT response no longer echoes those request-only fields. (#427)
+
+### Fixed
+
+#### Two changes at the same moment
+
+- **Stakeholders: one save or delete at a time per person.** A save during a delete could write
+  the deleted person back, and two saves at once could undo each other. A save after the delete now
+  answers "not found", and a person busy for more than 5 seconds answers "try again". (#427)
+- **Org charts: two charts created at once are both kept.** They got the same id, and the second
+  replaced the first. (#415)
+- **Org charts: a removed person or a deleted chart stays removed.** Deleting a stakeholder while a
+  chart was saving could put the person back into the chart, or write a deleted chart back. A
+  chart save also keeps front-matter keys the dashboard does not know, such as one an agent
+  added. (#426)
+- **Context notes: moving, editing and deleting one note wait for each other.** Two of them at once
+  could end in a server error and lose the edit. Now both succeed, or the second one says the note
+  is not found. (#416)
+- **Removing one attachment from two tabs at once** removes it once and tells the other tab it is
+  gone. On a Mac both could say they removed it. Removing a name that is a folder is refused
+  instead of ending in a server error. (#431)
+- **The task panel compares your edits with the version you started from.** When an agent changed
+  the task while you edited it, saving stayed on even after you undid your edits, and the
+  save was refused as a conflict. A task archived or deleted elsewhere while you edit now keeps your
+  edits on screen, read only, with a notice to copy them. (#428)
+
+#### Values written by hand
+
+- **Dates written by hand keep their form.** An unquoted day such as `review_date: 2026-11-20` in a
+  task, an `expiry_date` in a context note or a `source_date` in a context update was saved back as
+  `2026-11-20T00:00:00.000Z`. It now stays the day (saved as `'2026-11-20'`). One context note with
+  an unquoted `updated_at` no longer makes the whole Context list fail. (#421)
+- **An oversized hand-written id no longer blocks every new item.** Deleting an item with an id
+  such as `STK-99999999999999999999` made every later create (tasks, stakeholders, groups, context
+  updates, queued meetings) fail until the reservations file was edited by hand. (#414)
+- **Waiting on them: a date that is not a real day counts as not given.** A hand-written
+  `2026-13-01` showed "NaN days". (#420)
+
+#### Stakeholders, search and runs
+
+- **A task due today is due soon all day, not overdue,** in a stakeholder's task list. It turned
+  red from 09:00 on its due day in Japan, and the evening before in the Americas. The Situation
+  progress bar of a task in progress also measures to the end of its due day. (#418)
+- **Meeting search snippets show the text as it was written,** around the real hit. With
+  half-width katakana, ligatures and some other characters, a snippet showed the converted text, or
+  missed the word. A snippet no longer splits an emoji or a letter from its accent. (#430)
+- **Only a real plan usage limit is called one.** "You've hit your context limit" or "Output token
+  limit exceeded" were named a plan limit, with advice to wait for a reset. (#419)
+
 ## [0.14.0] - 2026-11-14
 
 **See who you are waiting on, and why a run stopped.** A stakeholder's page now lists the open
@@ -1275,7 +1375,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/geovanneb/get-things-done/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/geovanneb/get-things-done/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/geovanneb/get-things-done/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/geovanneb/get-things-done/compare/v0.12.0...v0.13.0

@@ -65,7 +65,7 @@ The workspace and offline transcription need no Get Things Done account. AI anal
 
 The dashboard is available in English, Japanese, Portuguese (Brazil) and Spanish. It follows your system language; change it in **Settings → Appearance → Language**.
 
-> **New in 0.14:** a stakeholder's page lists the open tasks waiting on them, the dashboard says which Claude account runs use and quotes Claude Code when it stops a run, and a file written by hand can no longer blank a screen. [See what changed](CHANGELOG.md).
+> **New in 0.15:** a second analysis waits in line instead of being refused, two saves at the same moment no longer undo each other, and dates you write by hand stay as you wrote them. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 
