@@ -7,6 +7,7 @@ import Button from '../common/Button';
 import GitIndicator from '../common/GitIndicator';
 import { apiPost } from '../../utils/api';
 import { RecordButton } from '@/components/recording/RecordButton';
+import { useAssistant } from '../../hooks/useAssistant';
 
 const VIEW_LABELS: Record<string, PlainMessageKey> = {
   '/situation': 'situation',
@@ -46,19 +47,20 @@ export default function Header() {
   const crumb = getBreadcrumb(location.pathname, t);
   const isMac = navigator.platform.toLowerCase().includes('mac');
 
-  const [openingClaude, setOpeningClaude] = useState(false);
+  const assistant = useAssistant();
+  const [openingAssistant, setOpeningAssistant] = useState(false);
 
-  const handleOpenClaude = async () => {
-    setOpeningClaude(true);
+  const handleOpenAssistant = async () => {
+    setOpeningAssistant(true);
     try {
-      await apiPost<{ opened: boolean; command: string }>('/api/workspace/open-claude');
+      const opened = await apiPost<{ opened: boolean; via: 'terminal' | 'editor'; command: string }>('/api/workspace/open-assistant', { tool: assistant.tool });
       dispatch({
         type: 'ADD_NOTIFICATION',
-        payload: { type: 'success', message: t('claudeOpened') },
+        payload: { type: 'success', message: opened.via === 'editor' ? t('assistantOpenedInEditor') : t('assistantOpened', { label: assistant.label }) },
       });
-    } catch (err) {
-      // Terminal launch failed — fall back to handing the user the command.
-      const command = `cd "${workspace?.path ?? '.'}" && claude`;
+    } catch {
+      // The launch failed: fall back to handing the user the command.
+      const command = `cd "${workspace?.path ?? '.'}" && ${assistant.tool === 'claude-code' ? 'claude' : assistant.tool}`;
       let copied = false;
       try {
         await navigator.clipboard.writeText(command);
@@ -75,9 +77,8 @@ export default function Header() {
             : t('terminalRun', { command }),
         },
       });
-      void err;
     } finally {
-      setOpeningClaude(false);
+      setOpeningAssistant(false);
     }
   };
 
@@ -209,14 +210,14 @@ export default function Header() {
           </button>
         )}
 
-        <Button variant="secondary" size="sm" onClick={handleOpenClaude} loading={openingClaude}
-          aria-label={t('openClaude')} title={t('openClaude')}>
+        <Button variant="secondary" size="sm" onClick={handleOpenAssistant} loading={openingAssistant}
+          aria-label={t('openAssistant', { label: assistant.label })} title={t('openAssistant', { label: assistant.label })}>
           <span className="app-header__compact-icon" aria-hidden="true">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
               <path d="M2 3.5l3 3-3 3M6.5 10h4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <span className="app-header__label app-header__label--claude">{t('openClaude')}</span>
+          <span className="app-header__label app-header__label--claude">{t('openAssistant', { label: assistant.label })}</span>
         </Button>
 
         <RecordButton />

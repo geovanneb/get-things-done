@@ -9,7 +9,8 @@ import { WorkspaceService } from '../services/workspace';
 import { ValidationService } from '../services/validationService';
 import { GitService, GitUnavailableError } from '../services/gitService';
 import { activateWorkspace } from '../services/workspaceActivation';
-import { getAppVersion } from '../services/scaffold';
+import { getAppVersion, detectAiTools, type AiTool } from '../services/scaffold';
+import { findCommand } from '../services/aiToolDetection';
 import { MeetingRecordingService } from '../services/meetingRecording';
 import {
   InvalidIconError, decodeIcon, removeWorkspaceIcon, saveWorkspaceIcon, workspaceIconPath, workspaceIconVersion,
@@ -27,6 +28,16 @@ const validationService = new ValidationService();
 const gitService = new GitService();
 const execFileAsync = promisify(execFile);
 
+/**
+ * The assistants this workspace was set up for, in the dashboard's order. A workspace with none of their instruction
+ * files was made before the choice existed, with Claude Code, which stays the default.
+ */
+export function workspaceAssistants(workspacePath: string): AiTool[] {
+  const found = detectAiTools(workspacePath);
+  const ordered = ASSISTANTS.filter((tool) => found.includes(tool));
+  return ordered.length ? ordered : ['claude-code'];
+}
+
 /** Wrap a string as a single-quoted POSIX shell argument. */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -37,26 +48,45 @@ function appleScriptQuote(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/** The assistants a workspace can have, in the order the dashboard offers them. */
+export const ASSISTANTS: readonly AiTool[] = ['claude-code', 'codex', 'copilot'];
+
+/** How the dashboard opens an assistant at the workspace: its program in a terminal, or an editor window. */
+export type AssistantLaunch = { via: 'terminal'; program: string } | { via: 'editor'; program: string | null };
+
+/**
+ * What opens each assistant. Copilot opens in a terminal when its CLI is installed; otherwise in VS Code, where most
+ * people use it (`program` null: the VS Code app on macOS, opened with `open -a`). Only these fixed names reach a shell.
+ */
+export function assistantLaunch(tool: AiTool, find: (command: string) => string | null = findCommand, platform: NodeJS.Platform = process.platform): AssistantLaunch {
+  if (tool === 'claude-code') return { via: 'terminal', program: 'claude' };
+  if (tool === 'codex') return { via: 'terminal', program: 'codex' };
+  if (find('copilot')) return { via: 'terminal', program: 'copilot' };
+  const code = find('code');
+  if (code) return { via: 'editor', program: code };
+  return platform === 'darwin' ? { via: 'editor', program: null } : { via: 'terminal', program: 'copilot' };
+}
+
 /**
  * The Windows launch passes the workspace as the working directory, not inside the command line:
  * Node escapes quotes in a way cmd does not read, so a `&` or `%` in the path would run as cmd syntax.
  * `start` opens the new window in the current directory.
  */
-export function windowsClaudeLaunch(workspacePath: string): {
+export function windowsTerminalLaunch(workspacePath: string, program: string): {
   file: string;
   args: string[];
   options: { cwd: string };
 } {
-  return { file: 'cmd', args: ['/c', 'start', '', 'cmd', '/k', 'claude'], options: { cwd: workspacePath } };
+  return { file: 'cmd', args: ['/c', 'start', '', 'cmd', '/k', program], options: { cwd: workspacePath } };
 }
 
 /**
- * Launch `claude` in a new terminal window at the workspace directory.
- * The command is built entirely from server-side state — nothing from the
+ * Launch an assistant's program in a new terminal window at the workspace directory.
+ * The command is built entirely from server-side state: nothing from the
  * request body reaches the shell.
  */
-async function openClaudeCode(workspacePath: string): Promise<void> {
-  const shellCommand = `cd ${shellQuote(workspacePath)} && claude`;
+async function openInTerminal(workspacePath: string, program: string): Promise<void> {
+  const shellCommand = `cd ${shellQuote(workspacePath)} && ${program}`;
 
   if (process.platform === 'darwin') {
     const script = [
@@ -70,12 +100,12 @@ async function openClaudeCode(workspacePath: string): Promise<void> {
   }
 
   if (process.platform === 'win32') {
-    const launch = windowsClaudeLaunch(workspacePath);
+    const launch = windowsTerminalLaunch(workspacePath, program);
     await execFileAsync(launch.file, launch.args, launch.options);
     return;
   }
 
-  // Linux — try the common terminal emulators in order.
+  // Linux: try the common terminal emulators in order.
   const candidates = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
   for (const term of candidates) {
     try {
@@ -86,6 +116,20 @@ async function openClaudeCode(workspacePath: string): Promise<void> {
     }
   }
   throw new Error('No supported terminal emulator found.');
+}
+
+/** Opens the workspace folder in VS Code, for Copilot without its CLI. The path is an argument, never shell text. */
+async function openInEditor(workspacePath: string, program: string | null): Promise<void> {
+  if (program === null) {
+    await execFileAsync('open', ['-a', 'Visual Studio Code', workspacePath]);
+    return;
+  }
+  // `code` is a .cmd script on Windows, which only runs through a shell; the path stays out of the command line.
+  if (process.platform === 'win32') {
+    await execFileAsync('cmd', ['/c', 'code', '.'], { cwd: workspacePath });
+    return;
+  }
+  await execFileAsync(program, [workspacePath]);
 }
 
 /**
@@ -138,7 +182,7 @@ router.get('/', async (req: Request, res: Response) => {
   const config = workspaceService.getWorkspaceConfig();
   const git_enabled = await gitService.isGitRepo();
   const git_installed = await gitService.isInstalled();
-  res.json({ ...config, git_enabled, git_installed, app_version: getAppVersion() });
+  res.json({ ...config, git_enabled, git_installed, app_version: getAppVersion(), ai_tools: workspaceAssistants(workspaceService.getWorkspacePath()) });
 });
 
 // PUT /api/workspace — update workspace name
@@ -372,17 +416,26 @@ router.post('/open', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/workspace/open-claude — open Claude Code in a terminal at the workspace
-router.post('/open-claude', async (req: Request, res: Response) => {
+// POST /api/workspace/open-assistant  { tool?: "claude-code" | "codex" | "copilot" }
+// Opens the workspace's assistant: the first one the workspace has when no tool is named.
+router.post('/open-assistant', async (req: Request, res: Response) => {
   const workspacePath = workspaceService.getWorkspacePath();
-  const command = `cd "${workspacePath}" && claude`;
+  const requested = (req.body as Record<string, unknown> | undefined)?.['tool'];
+  if (requested !== undefined && !ASSISTANTS.includes(requested as AiTool)) {
+    res.status(400).json({ error: `tool must be one of: ${ASSISTANTS.join(', ')}.` });
+    return;
+  }
+  const tool = (requested as AiTool | undefined) ?? workspaceAssistants(workspacePath)[0];
+  const launch = assistantLaunch(tool);
+  const command = launch.via === 'terminal' ? `cd "${workspacePath}" && ${launch.program}` : `code "${workspacePath}"`;
 
   try {
-    await openClaudeCode(workspacePath);
-    res.json({ opened: true, command });
+    if (launch.via === 'terminal') await openInTerminal(workspacePath, launch.program);
+    else await openInEditor(workspacePath, launch.program);
+    res.json({ opened: true, tool, via: launch.via, command });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: 'Failed to open Claude Code', message, command });
+    res.status(500).json({ error: 'Failed to open the assistant', message, tool, via: launch.via, command });
   }
 });
 

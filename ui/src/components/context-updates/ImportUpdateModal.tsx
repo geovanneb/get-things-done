@@ -1,4 +1,5 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
+import { useAssistant } from '@/hooks/useAssistant';
 import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
 import { useEffect, useRef, useState } from 'react';
@@ -103,6 +104,7 @@ interface Props {
 
 export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued }: Props) {
   const { t } = useLanguage();
+  const assistant = useAssistant();
   const [mode, setMode] = useState<'update' | 'meeting'>('update');
   const [title, setTitle] = useState('');
   const [sourceDate, setSourceDate] = useState(today);
@@ -195,7 +197,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
             </>
           ) : (
             <>
-              {rich(t, 'importUpdateModal.addAnythingThatMightChange', { strong: <strong>{t('importUpdateModal.nothingChangesUntilYouReview')}</strong> })}
+              {rich(t, 'importUpdateModal.addAnythingThatMightChange', { label: assistant.label, strong: <strong>{t('importUpdateModal.nothingChangesUntilYouReview')}</strong> })}
             </>
           )}
         </HelpBox>

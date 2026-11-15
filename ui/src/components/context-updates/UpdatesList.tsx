@@ -1,4 +1,5 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
+import { useAssistant } from '@/hooks/useAssistant';
 import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
 import Button from '@/components/common/Button';
@@ -25,10 +26,10 @@ function summaryLine(u: ContextUpdate): string {
   return tr('updatesList.proposals', { count: u.proposals.length, files });
 }
 
-const STEPS = () => ((
+const STEPS = (label: string) => ((
   <ol style={{ margin: '8px 0 0', paddingLeft: 20 }}>
     <li>{rich(tr, 'updatesList.uploadFilesOrPasteA', { strong: <strong>{tr('updatesList.collect')}</strong> })}</li>
-    <li>{rich(tr, 'updatesList.copyTheCommandAndRun', { strong: <strong>{tr('updatesList.analyze')}</strong> })}</li>
+    <li>{rich(tr, 'updatesList.copyTheCommandAndRun', { label, strong: <strong>{tr('updatesList.analyze')}</strong> })}</li>
     <li>{rich(tr, 'updatesList.tickTheProposalsYouAccept', { strong: <strong>{tr('updatesList.review')}</strong> })}</li>
     <li>{rich(tr, 'updatesList.runTheSecondCommandDone', { strong: <strong>{tr('updatesList.apply')}</strong> })}</li>
   </ol>
@@ -106,10 +107,11 @@ export default function UpdatesList({ updates, type, query, historyShown, onType
   onImport: () => void;
 }) {
   const { t } = useLanguage();
+  const assistant = useAssistant();
   if (updates.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 900 }}>
-        <HelpBox title={t('updatesList.keepYourContextTrueWithout')}>{INTRO()}{STEPS()}</HelpBox>
+        <HelpBox title={t('updatesList.keepYourContextTrueWithout')}>{INTRO()}{STEPS(assistant.label)}</HelpBox>
         <EmptyState title={t('updatesList.noContextUpdatesYet')}
           description={t('updatesList.importATranscriptADeck')}
           action={{ label: t('updatesList.importUpdate'), onClick: onImport }} />
@@ -127,7 +129,7 @@ export default function UpdatesList({ updates, type, query, historyShown, onType
       {/* Once there are updates, the explanation is reference: closed, so the work comes first. */}
       <details style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text)', lineHeight: 1.5 }}>
         <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--color-text-secondary)' }}>{t('updatesList.howContextUpdatesWork')}</summary>
-        <div style={{ marginTop: 8 }}><HelpBox>{INTRO()}{STEPS()}</HelpBox></div>
+        <div style={{ marginTop: 8 }}><HelpBox>{INTRO()}{STEPS(assistant.label)}</HelpBox></div>
       </details>
 
       {(showChips || (filtering && shown.length > 0)) && (

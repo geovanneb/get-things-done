@@ -20,11 +20,13 @@ test('the watcher reports a meeting\'s meeting.json with Windows and POSIX separ
   assert.ok(!MEETING_MANIFEST.test('/home/demo/northwind/tasks/T-0001/meeting.json'));
 });
 
-test('the Windows Claude Code launch keeps the workspace path out of the cmd line', async () => {
-  const { windowsClaudeLaunch } = await import('../src/routes/workspace');
+test('the Windows assistant launch keeps the workspace path out of the cmd line', async () => {
+  const { windowsTerminalLaunch } = await import('../src/routes/workspace');
   const workspace = 'C:\\Users\\demo\\R&D 100% Plan';
-  const launch = windowsClaudeLaunch(workspace);
-  assert.equal(launch.options.cwd, workspace);
-  assert.ok(launch.args.every((arg) => !arg.includes('R&D') && !arg.includes('%')));
-  assert.deepEqual(launch.args.slice(-2), ['/k', 'claude']);
+  for (const program of ['claude', 'codex', 'copilot']) {
+    const launch = windowsTerminalLaunch(workspace, program);
+    assert.equal(launch.options.cwd, workspace);
+    assert.ok(launch.args.every((arg) => !arg.includes('R&D') && !arg.includes('%')));
+    assert.deepEqual(launch.args.slice(-2), ['/k', program]);
+  }
 });

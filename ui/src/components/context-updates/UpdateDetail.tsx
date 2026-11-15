@@ -2,6 +2,7 @@ import { serverText } from '@/i18n/serverText';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
+import { useAssistant } from '@/hooks/useAssistant';
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link, useNavigate } from 'react-router-dom';
@@ -628,8 +629,24 @@ export default function UpdateDetail({ id, onBack, workspace }: { id: string; on
   );
 }
 
+/** The same request for the workspace's other assistants, one line each: Codex and Copilot share theirs. */
+function OtherAssistants({ others }: { others: { labels: string; text: string }[] }) {
+  const { t } = useLanguage();
+  if (!others.length) return null;
+  return (
+    <>
+      {others.map(({ labels, text }) => (
+        <p key={text} style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+          {rich(t, 'updateDetail.inOtherAssistants', { labels, code: <code style={{ fontFamily: 'var(--font-mono)' }}>{text}</code> })}
+        </p>
+      ))}
+    </>
+  );
+}
+
 function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   const { t, locale } = useLanguage();
+  const assistant = useAssistant();
   const confirm = useConfirm();
   const navigate = useNavigate();
   const version = useDataVersion('context-updates');
@@ -729,7 +746,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   const reviewing = u.status === 'in_review';
   // Steps where nothing moves until the user runs a command in the agent.
   // A follow-up whose correction is no longer current is never offered for analysis or apply: it is closed or deleted.
-  const command = running || u.follow_up_problem ? null : u.status === 'ready' ? `/gtd-context-analyze ${u.id}` : u.status === 'approved' ? `/gtd-context-apply ${u.id}` : null;
+  const command = running || u.follow_up_problem ? null : u.status === 'ready' ? assistant.request('analyze', u.id) : u.status === 'approved' ? assistant.request('apply', u.id) : null;
   const copied = copiedFor === u.status;
   const selectable = u.proposals.filter((p) => !p.problem);
   const acceptedCount = u.proposals.filter((p) => decisions[p.id]?.decision === 'accepted').length;
@@ -951,7 +968,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
           : meta.next}</div>
         {/* A run going by hand (no dashboard run): its command stays at hand to run again. */}
         {u.status === 'analyzing' && !running && !u.follow_up_problem && (
-          <CommandBox command={`/gtd-context-analyze ${u.id}`} label={t('updateDetail.runInClaudeCodeTo')} onCopied={() => setCopiedFor(u.status)} />
+          <CommandBox command={assistant.request('analyze', u.id)} label={t('updateDetail.runInAssistantToAnalyze', { label: assistant.label })} onCopied={() => setCopiedFor(u.status)} />
         )}
         {/* One primary action (#246): the dashboard runs it, the command one click away under "Or run it yourself";
             when the dashboard cannot run it, copying the command is the main action, with the reason. */}
@@ -959,28 +976,24 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
           <AnalysisRun ref={runRef} startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} onAction={setNextAction} onStartFailed={showNextBox}
             {...(u.status === 'ready' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
               <>
-                <CommandBox command={`/gtd-context-analyze ${u.id}`} emphasis={emphasis}
-                  label={emphasis ? t('updateDetail.yourTurnCopyThisAnd') : t('updateDetail.copyThisAndRunIt')}
+                <CommandBox command={assistant.request('analyze', u.id)} emphasis={emphasis}
+                  label={emphasis ? t('updateDetail.yourTurnCopyThisAnd', { label: assistant.label }) : t('updateDetail.copyThisAndRunIt', { label: assistant.label })}
                   onCopied={() => setCopiedFor(u.status)} />
-                <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  {rich(t, 'updateDetail.usingCodexOrCopilotAsk', { id: u.id })}
-                </p>
+                <OtherAssistants others={assistant.others('analyze', u.id)} />
               </>
             ) } : {})} />
         )}
         {u.status === 'applying' && !running && !u.follow_up_problem && (
-          <CommandBox command={`/gtd-context-apply ${u.id}`} label={t('updateDetail.runInClaudeCodeTo2')} onCopied={() => setCopiedFor(u.status)} />
+          <CommandBox command={assistant.request('apply', u.id)} label={t('updateDetail.runInAssistantToApply', { label: assistant.label })} onCopied={() => setCopiedFor(u.status)} />
         )}
         {['approved', 'applying', 'done'].includes(u.status) && (
           <AnalysisRun ref={runRef} startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} onAction={setNextAction} onStartFailed={showNextBox}
             {...(u.status === 'approved' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
               <>
-                <CommandBox command={`/gtd-context-apply ${u.id}`} emphasis={emphasis}
-                  label={emphasis ? t('updateDetail.lastStepCopyThisAnd') : t('updateDetail.copyThisAndRunIt')}
+                <CommandBox command={assistant.request('apply', u.id)} emphasis={emphasis}
+                  label={emphasis ? t('updateDetail.lastStepCopyThisAnd', { label: assistant.label }) : t('updateDetail.copyThisAndRunIt', { label: assistant.label })}
                   onCopied={() => setCopiedFor(u.status)} />
-                <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-                  {rich(t, 'updateDetail.usingCodexOrCopilotAsk2', { id: u.id })}
-                </p>
+                <OtherAssistants others={assistant.others('apply', u.id)} />
               </>
             ) } : {})} />
         )}
@@ -990,11 +1003,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             {u.status === 'analyzing' && <> {t('updateDetail.or')} <button type="button" onClick={reopen} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'inherit' }}>{t('updateDetail.goBackToCollecting')}</button>.</>}
           </p>
         )}
-        {u.status === 'analyzing' && !u.follow_up_problem && (
-          <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-            {rich(t, 'updateDetail.usingCodexOrCopilotAsk', { id: u.id })}
-          </p>
-        )}
+        {u.status === 'analyzing' && !u.follow_up_problem && <OtherAssistants others={assistant.others('analyze', u.id)} />}
         {u.status === 'approved' && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button variant="secondary" size="sm" loading={busy === 'back'} onClick={() => run('back', () => api.post(`/api/context-updates/${u.id}/back-to-review`))}>{t('updateDetail.changeMySelection')}</Button>
@@ -1196,9 +1205,9 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             {nextAction !== 'copy' ? (
               <><strong>{u.status === 'ready' ? t('updateDetail.yourTurn') : t('updateDetail.lastStep')}</strong>{u.status === 'ready' ? t('updateDetail.runTheAnalysisTheAgent') : t('updateDetail.applyYourAcceptedChangesNothing')}</>
             ) : copied ? (
-              <>{rich(t, 'updateDetail.pasteItIntoClaudeCode', { strong: <strong style={{ color: 'var(--color-success)' }}>{t('updateDetail.copied')}</strong> })}</>
+              <>{rich(t, 'updateDetail.pasteItIntoAssistant', { label: assistant.label, strong: <strong style={{ color: 'var(--color-success)' }}>{t('updateDetail.copied')}</strong> })}</>
             ) : (
-              <>{rich(t, 'updateDetail.runInClaudeCode', { strong: <strong>{u.status === 'ready' ? t('updateDetail.yourTurn') : t('updateDetail.lastStep')}</strong>, code: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{command.split(' ')[0]}</code>, value: u.status === 'ready' ? t('updateDetail.soTheAgentCanAnalyze') : t('updateDetail.toWriteTheAcceptedChanges') })}</>
+              <>{rich(t, 'updateDetail.runInAssistant', { label: assistant.label, strong: <strong>{u.status === 'ready' ? t('updateDetail.yourTurn') : t('updateDetail.lastStep')}</strong>, code: <code style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)' }}>{assistant.tool === 'claude-code' ? command.split(' ')[0] : command}</code>, value: u.status === 'ready' ? t('updateDetail.soTheAgentCanAnalyze') : t('updateDetail.toWriteTheAcceptedChanges') })}</>
             )}
           </span>
           {nextAction !== 'copy'
