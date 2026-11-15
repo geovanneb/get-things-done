@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { promises as fsp } from 'fs';
+import { randomUUID } from 'crypto';
 import { Response } from 'express';
 import { atomicWrite } from './atomicWrite';
 import { buildZip } from './zip';
@@ -209,11 +210,21 @@ export function safeFileName(name: string, maxBytes = 200): string {
  * "File not found" (404) like every other missing file, not a server error.
  */
 export async function deleteAttachment(dir: string, name: string): Promise<void> {
-  await fsp.unlink(path.join(dir, name)).catch((err: NodeJS.ErrnoException) => {
-    // ENOTDIR: the owner's "folder" is a file, so it has no attachments either.
+  const target = path.join(dir, name);
+  // ENOTDIR: the owner's "folder" is a file, so it has no attachments either.
+  const gone = (err: NodeJS.ErrnoException): never => {
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') throw new Error(`File not found: ${name}`);
     throw err;
-  });
+  };
+  const stat = await fsp.lstat(target).catch(gone);
+  // A folder is not an attachment: refused, never moved aside or removed here.
+  if (stat.isDirectory()) throw new Error(`Invalid file name: ${name} is a folder`);
+  // Two removals at the same moment must have one winner. A second unlink of the same file can also succeed on
+  // macOS (APFS), so the file is first moved to a hidden name of this request's own: only one rename can take it,
+  // the other is told it is gone. Listings skip hidden names, so the moved file is never shown.
+  const moved = path.join(dir, `.${name}.${randomUUID()}.deleting`);
+  await fsp.rename(target, moved).catch(gone);
+  await fsp.unlink(moved);
 }
 
 /** Save attachments without following an existing file symlink or replacing entity metadata. */
