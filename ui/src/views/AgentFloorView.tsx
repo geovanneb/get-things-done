@@ -1,4 +1,5 @@
 import { currentLocale } from '@/i18n/current';
+import { useAssistant } from '@/hooks/useAssistant';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { rich } from '@/i18n/rich';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -99,6 +100,7 @@ function ControlChip({
 
 export default function AgentFloorView() {
   const { t } = useLanguage();
+  const assistant = useAssistant();
   const { agenticVisualMode } = useAppState();
   const navigate = useNavigate();
   const stageRef = useRef<StageHandle | null>(null);
@@ -354,7 +356,7 @@ export default function AgentFloorView() {
 
             {hud.agents.length === 0 ? (
               <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                {rich(t, 'agentFloor.nothingIsInProgressMove', { code: <code style={{ fontFamily: 'var(--font-mono)' }}>/gtd-task</code> })}
+                {rich(t, 'agentFloor.nothingIsInProgressMove', { code: <code style={{ fontFamily: 'var(--font-mono)' }}>{assistant.request('task', 'TASK-…')}</code> })}
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

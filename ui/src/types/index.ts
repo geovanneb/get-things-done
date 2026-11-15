@@ -415,6 +415,8 @@ export interface WorkspaceConfig {
   icon_version?: string | null;
   /** The running app's version, from its package.json. Older servers leave it out. */
   app_version?: string;
+  /** The assistants the workspace was set up for, first the one the dashboard opens. Older servers leave it out. */
+  ai_tools?: string[];
 }
 
 /** A workspace opened on this machine before, as listed by `GET /api/workspace/recent`. */

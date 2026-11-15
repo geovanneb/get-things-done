@@ -34,6 +34,7 @@ import { apiDelete, apiGet, errorMessage } from '../utils/api';
 import { isMeetingPrepTask, recordPrefillFromTask } from '../utils/meetingParticipants';
 import { formatDate, formatPriorityLabel, formatStatusLabel } from '../utils/format';
 import { canSave, emptyDraft, hasEdits, isArchived, taskDraftReducer } from '../utils/taskDraft';
+import { useAssistant } from '../hooks/useAssistant';
 
 /* ---- Tab type ------------------------------------------------------ */
 type TaskTab = 'work' | 'files';
@@ -91,10 +92,9 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions, read
   );
 }
 
-/* ---- Slash command field ------------------------------------------ */
-function SlashCommandField({ taskId }: { taskId: string }) {
+/* ---- Assistant command field: what to paste into the workspace's assistant ---- */
+function AssistantCommandField({ command }: { command: string }) {
   const { t } = useLanguage();
-  const command = `/gtd-task ${taskId}`;
   const [copied, setCopied] = React.useState(false);
 
   const handleCopy = async () => {
@@ -153,6 +153,7 @@ function nextDeliverableId(deliverables: Task['deliverables']): string {
 
 function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, onRequested, readOnly = false }: { task: Task; onFieldChange: (field: string, value: unknown) => void; savedCount: number; pinError: string | null; onPinned: () => void; dirty: boolean; onRequested: () => void; readOnly?: boolean }) {
   const { t } = useLanguage();
+  const assistant = useAssistant();
   const { data: allStakeholders } = useApi<Stakeholder[]>('/api/stakeholders');
 
   const saveField = (field: string) => (value: unknown) => onFieldChange(field, value);
@@ -205,8 +206,8 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
           options={(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => ({ value: p, label: formatPriorityLabel(p) }))} />
         <Input label={t('newTaskModal.dueDate')} type="date" size="sm" disabled={readOnly} value={task.due_date ? task.due_date.slice(0, 10) : ''}
           onChange={(v) => onFieldChange('due_date', v || null)} />
-        <SidebarField label={t('taskDetail.slashCommand')}>
-          <SlashCommandField taskId={task.id} />
+        <SidebarField label={t('taskDetail.assistantCommand', { label: assistant.label })}>
+          <AssistantCommandField command={assistant.request('task', task.id)} />
         </SidebarField>
         {readOnly ? (
           <SidebarField label={t('stakeholders')}>

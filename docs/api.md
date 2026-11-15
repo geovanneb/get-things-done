@@ -730,7 +730,7 @@ is selected.
 
 | Method | Path | What it does |
 |---|---|---|
-| `GET` | `/api/workspace` | The current workspace: path, name, settings and whether it is a git repository |
+| `GET` | `/api/workspace` | The current workspace: path, name, settings, whether it is a git repository, and `ai_tools`: the assistants it was set up for (`claude-code`, `codex`, `copilot`, from its instruction files; `["claude-code"]` when it has none), first the one the dashboard opens |
 | `PUT` | `/api/workspace` | Rename the workspace. Body: `{ "name": "…" }` |
 | `GET` | `/api/workspace/board` | The task board's columns: `{ "columns": [{ "id", "label", "status" }] }`, the default four when none are saved |
 | `PUT` | `/api/workspace/board` | Save the columns (1 to 12; unique ids and names; `status` is `backlog`, `in_progress`, `blocked`, `in_review` or `done`). Returns `400` and changes nothing when the body is invalid |
@@ -742,7 +742,7 @@ is selected.
 | `POST` | `/api/workspace/pick-folder` | Open the system folder picker on the machine running the server. Returns `{ "path": null }` on cancel and `501` where there is no picker |
 | `POST` | `/api/workspace/reinitialize` | Re-run the scaffold on the current workspace to add missing files |
 | `POST` | `/api/workspace/open` | Open the workspace folder in Finder, Explorer or the file manager |
-| `POST` | `/api/workspace/open-claude` | Open Claude Code in a new terminal window at the workspace |
+| `POST` | `/api/workspace/open-assistant` | Open the workspace's assistant. Body: optional `tool` (`claude-code`, `codex` or `copilot`; default the first in `ai_tools`). Claude Code and Codex open in a new terminal window at the workspace; Copilot does too with its CLI installed, otherwise VS Code opens the workspace (`via: "editor"`) |
 | `GET` | `/api/workspace/validate` | Validate every workspace file against its schema |
 | `GET` | `/api/workspace/validation/count` | The number of validation errors and warnings |
 | `GET` | `/api/workspace/git/status` | Git status of the workspace |
@@ -758,7 +758,7 @@ other dashboard preferences, so they follow the workspace through git. A column 
 task statuses: its `status` is what a task gets when it is dropped there. Tasks keep their
 statuses; a deleted or renamed column never changes a task.
 
-`switch`, `recent/forget`, `pick-folder`, `open` and `open-claude` return
+`switch`, `recent/forget`, `pick-folder`, `open` and `open-assistant` return
 `{ "error": "…" }` on failure.
 
 Git is optional. When no git program is installed, `git_enabled` and `is_repo` are
@@ -813,8 +813,8 @@ POST /api/workspace/reinitialize
 POST /api/workspace/open
 → 200 {"opened":true}
 
-POST /api/workspace/open-claude
-→ 200 {"opened":true,"command":"cd \"/Users/alex/gtd-demo\" && claude"}
+POST /api/workspace/open-assistant  {"tool":"codex"}
+→ 200 {"opened":true,"tool":"codex","via":"terminal","command":"cd \"/Users/alex/gtd-demo\" && codex"}
 
 GET /api/workspace/validate
 → 200 [{"level":"info","rule":"workspace","message":"Workspace validation passed with no issues"}]

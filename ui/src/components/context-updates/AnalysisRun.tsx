@@ -1,4 +1,5 @@
 import { serverText } from '@/i18n/serverText';
+import { useAssistant } from '@/hooks/useAssistant';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { rich } from '@/i18n/rich';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
@@ -58,6 +59,7 @@ export default forwardRef<AnalysisRunHandle, {
   onStartFailed?: () => void;
 }>(function AnalysisRun({ updateId, status, onChange, onRunning, startable = true, manual, onAction, onStartFailed }, handle) {
   const { t } = useLanguage();
+  const assistant = useAssistant();
   // The page's requests: bound to the workspace it was opened for, when it was opened from a notice.
   const api = usePageApi();
   const [runner, setRunner] = useState<RunnerStatus | null>(null);
@@ -179,7 +181,9 @@ export default forwardRef<AnalysisRunHandle, {
     } finally { if (mine === generation.current) setBusy(false); }
   };
 
-  const problem = serverText(runner?.problems[0]?.message);
+  // The dashboard's runner is one assistant (Claude Code today): a workspace set up only for others copies the request.
+  const runnerFits = !runner || (assistant.tools as string[]).includes(runner.id);
+  const problem = runnerFits ? serverText(runner?.problems[0]?.message) : t('analysisRun.runnerNeedsClaude', { label: assistant.label });
   // Which sign-in the dashboard uses: with several Claude accounts on one computer it may not be the one a terminal uses.
   const account = runner?.account;
   // A personal plan's organization is often named after the email: then it is left out.

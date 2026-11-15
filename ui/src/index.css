@@ -422,7 +422,7 @@ input, textarea, select {
 .markdown-view img { max-width: 100%; }
 
 /* App header: compacts step by step as its own width shrinks (follows the collapsible sidebar).
-   The page title truncates; Search, then Open Claude Code, then Record and New task fall back to icons.
+   The page title truncates; Search, then Open <assistant>, then Record and New task fall back to icons.
    Accessible names stay the same (aria-label / title on each button). */
 .app-header { container: app-header / inline-size; }
 .app-header__search { min-width: 200px; padding: 0 12px; }

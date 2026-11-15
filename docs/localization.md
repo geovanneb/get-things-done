@@ -67,7 +67,7 @@ Translator notes for this slice:
 - `automatic`: the interface language detected on this device, not transcription detection.
 - `context`: saved background for the AI; `memory`: the navigation group containing it.
 - `outputs`: reusable output templates, not generated deliverables.
-- `newTask`: opens the task creation dialog; `openClaude`: opens a local terminal.
+- `newTask`: opens the task creation dialog; `openAssistant`: opens the workspace's assistant (a local terminal, or VS Code for Copilot).
 - `validationErrors` / `validationWarnings`: workspace validation counts, not failed jobs.
 - Keep Get Things Done, Claude Code and Agent Floor as product names.
 
