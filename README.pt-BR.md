@@ -67,6 +67,7 @@ O idioma da interface é independente do idioma falado nas gravações e do idio
 
 - [Apresentação completa (inglês)](README.md)
 - [Guia do usuário (inglês)](docs/user-guide.md)
+- [Tutorial em vídeo (inglês, 22 minutos, com capítulos)](https://www.youtube.com/watch?v=sJJZRUFVV50)
 - [Histórico de mudanças](CHANGELOG.md) e [como contribuir](CONTRIBUTING.md)
 - [Bugs e sugestões](https://github.com/geovanneb/get-things-done/issues) e [relatos de segurança](SECURITY.md)
 

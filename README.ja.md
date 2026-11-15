@@ -67,6 +67,7 @@ gtd start
 
 - [詳しい紹介（英語）](README.md)
 - [ユーザーガイド（英語）](docs/user-guide.md)
+- [動画チュートリアル（英語、22分、チャプター付き）](https://www.youtube.com/watch?v=sJJZRUFVV50)
 - [変更履歴](CHANGELOG.md)・[貢献方法](CONTRIBUTING.md)
 - [不具合報告・機能提案](https://github.com/geovanneb/get-things-done/issues)・[セキュリティの報告](SECURITY.md)
 

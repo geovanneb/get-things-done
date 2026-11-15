@@ -12,7 +12,7 @@ Record meetings. Review what changed. Give your AI the context to deliver.
 [![CI](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml/badge.svg)](https://github.com/geovanneb/get-things-done/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Get started](#get-started) · [How it works](#how-it-works-in-a-nutshell) · [User guide](docs/user-guide.md) · [40-second demo](https://youtu.be/v0GaoY16CU0)
+[Get started](#get-started) · [How it works](#how-it-works-in-a-nutshell) · [User guide](docs/user-guide.md) · [Video tutorial](https://www.youtube.com/watch?v=sJJZRUFVV50) · [40-second demo](https://youtu.be/v0GaoY16CU0)
 
 <img src="docs/images/memory-loop.gif" alt="Animated walkthrough: a meeting transcript, the agent's proposed memory update being accepted, the profile, context notes and people the agent reads, then a task and the board" width="900">
 
@@ -58,6 +58,8 @@ gtd start
 Choose your AI tool during setup. The local dashboard opens in your browser. You can also run `gtd start` first and create a workspace through the setup screen.
 
 **Try the loop:** add one person you work with, write a few lines about your project, then record or import a meeting. Download a speech model in **Settings → Transcription** before transcribing audio. Review the resulting context update and create a task that uses it.
+
+Prefer to watch first? The [video tutorial](https://www.youtube.com/watch?v=sJJZRUFVV50) (22 minutes, with chapters) does all of this in a fictional workspace: people, org charts, templates, context, a task with an AI agent, feedback that becomes a Kaizen lesson, and a recorded meeting turned into approved memory updates.
 
 The workspace and offline transcription need no Get Things Done account. AI analysis and task execution use the AI tool you bring; that tool may require its own account or subscription.
 
@@ -186,6 +188,7 @@ See the [user guide](docs/user-guide.md#version-control-and-privacy) and [securi
 
 ## Documentation and contributing
 
+- [Video tutorial](https://www.youtube.com/watch?v=sJJZRUFVV50): a 22-minute walkthrough from your first stakeholder to meetings and Kaizen lessons, with chapters
 - [User guide](docs/user-guide.md): setup, recording, transcription, context review and task execution
 - [CLI commands](docs/user-guide.md#command-reference) · [Workspace layout](docs/user-guide.md#workspace-layout) · [Upgrading](docs/user-guide.md#upgrading)
 - [HTTP API](docs/api.md) · [Architecture](docs/architecture.md) · [Desktop development](desktop/README.md)

@@ -3,6 +3,7 @@
 [Back to the project overview](../README.md) · [HTTP API](api.md) · [Architecture](architecture.md)
 
 Detailed setup, task execution, meeting recording, memory review and workspace reference.
+To see these steps on screen first, watch the [video tutorial](https://www.youtube.com/watch?v=sJJZRUFVV50) (22 minutes, with chapters).
 This guide accompanies 0.14.0; see the [changelog](../CHANGELOG.md).
 
 ## Install
