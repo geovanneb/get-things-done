@@ -1,6 +1,6 @@
 // Entry point used by `gtd start` and `npm run dev`: settings come from env vars.
 // Hosts that run the server in their own process call startServer() from ./server instead.
-import { startServer } from './server';
+import { SHUTDOWN_TIMEOUT_MS, startServer } from './server';
 
 const port = parseInt(process.env['PORT'] || '3001', 10);
 
@@ -12,11 +12,11 @@ startServer({ port, uiPath: process.env['ESB_UI_PATH'] })
       stopping = true;
       console.log('\nShutting down server...');
 
-      // Force exit after 10s if graceful shutdown fails
+      // Force exit if graceful shutdown takes too long
       setTimeout(() => {
         console.error('Forced shutdown after timeout.');
         process.exit(1);
-      }, 10000).unref();
+      }, SHUTDOWN_TIMEOUT_MS).unref();
 
       running.close().then(
         () => {

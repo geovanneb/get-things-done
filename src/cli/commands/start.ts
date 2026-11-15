@@ -7,7 +7,8 @@ import { getBundledServerPath, getBundledUiPath } from '../utils/paths';
 import {
   clearDaemonState,
   findFreePort,
-  getRunningDaemon,
+  findRecordedDaemon,
+  unconfirmedDaemonAdvice,
   waitForServer,
   writeDaemonState,
 } from '../utils/daemon';
@@ -32,7 +33,16 @@ export const startCommand = new Command('start')
       process.exit(1);
     }
 
-    const existing = await getRunningDaemon();
+    const recorded = await findRecordedDaemon();
+    if (recorded?.check === 'unknown') {
+      const [headline, ...advice] = unconfirmedDaemonAdvice(recorded.state);
+      console.log(chalk.yellow(`${headline} A new dashboard was not started.`));
+      for (const line of advice) console.log(chalk.dim(line));
+      console.log(chalk.dim('Then run `gtd start` again.'));
+      process.exitCode = 1;
+      return;
+    }
+    const existing = recorded?.state;
     if (existing) {
       console.log(
         chalk.yellow('Server is already running') +

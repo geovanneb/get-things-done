@@ -114,18 +114,43 @@ export async function checkRecordedDaemon(state: DaemonState): Promise<'ours' | 
 }
 
 /**
- * Returns the running daemon, clearing the PID file if the process is gone.
+ * The recorded daemon and whether it is confirmed as ours, clearing the PID file if the process is gone.
  * Guards against a recycled PID pointing at an unrelated process.
  */
-export async function getRunningDaemon(): Promise<DaemonState | null> {
+export async function findRecordedDaemon(): Promise<{ state: DaemonState; check: 'ours' | 'unknown' } | null> {
   const state = readDaemonState();
   if (!state) return null;
 
-  if ((await checkRecordedDaemon(state)) === 'stale') {
+  const check = await checkRecordedDaemon(state);
+  if (check === 'stale') {
     clearDaemonState();
     return null;
   }
-  return state;
+  return { state, check };
+}
+
+/** Returns the running daemon (confirmed or not), clearing the PID file if the process is gone. */
+export async function getRunningDaemon(): Promise<DaemonState | null> {
+  return (await findRecordedDaemon())?.state ?? null;
+}
+
+/**
+ * What the user can do when the recorded process could not be confirmed as the dashboard: the CLI does not signal
+ * it, because it may be another program that now has this process ID.
+ */
+export function unconfirmedDaemonAdvice(state: DaemonState): string[] {
+  const windows = process.platform === 'win32';
+  const show = windows ? `tasklist /FI "PID eq ${state.pid}" /V` : `ps -p ${state.pid} -o command=`;
+  const stop = windows
+    ? `\`taskkill /PID ${state.pid} /F\``
+    : `\`kill ${state.pid}\` (\`kill -9 ${state.pid}\` if it does not exit)`;
+  return [
+    `Process ${state.pid} could not be confirmed as the dashboard: port ${state.port} did not confirm its process identity.`,
+    'It may be an older dashboard, a dashboard that is not responding, or another program that now has this process ID.',
+    `To see which program it is: \`${show}\`.`,
+    `If it is the dashboard, stop it yourself: ${stop}.`,
+    `If it is another program, leave it running and delete ${ESB_PID_FILE}.`,
+  ];
 }
 
 export function isPortFree(port: number, host = '127.0.0.1'): Promise<boolean> {
