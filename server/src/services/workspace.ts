@@ -23,6 +23,14 @@ export function withWorkspacePath<T>(workspacePath: string, fn: () => T): T {
   return operationWorkspace.run({ path: workspacePath }, fn);
 }
 
+/**
+ * The workspace selected now, whatever operation this code runs in: work that outlives a request (a run's end, say)
+ * still carries that request's pinned workspace, which may no longer be the one open.
+ */
+export function selectedWorkspacePath(): string {
+  return operationWorkspace.exit(() => new WorkspaceService().getWorkspacePath());
+}
+
 interface RecentEntry {
   path: string;
   last_opened: string;

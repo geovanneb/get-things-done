@@ -4,6 +4,8 @@ import * as fsp from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { AsyncResource } from 'node:async_hooks';
+import { withWorkspacePath } from '../src/services/workspace';
 import { AgentRunnerService, ClaudeCodeAdapter, childEnv, claudeProjectKey, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { stepsFromMessage, type RunStep } from '../src/services/runSteps';
@@ -267,6 +269,168 @@ test('an analysis runs the workspace\'s own command, one at a time, and locks th
   await setStatus(ws, 'in_review');
   await assert.rejects(service.startAnalysis('CU-2026-0001'), /while the update is "in_review"/, 'only a ready update is analyzed');
   await assert.rejects(service.startAnalysis('../x'), /Invalid context update id/);
+});
+
+/** Another fictional update in the same workspace. */
+async function addUpdate(ws: string, id: string, status = 'ready'): Promise<void> {
+  const dir = path.join(ws, 'context-updates', id);
+  await fsp.mkdir(path.join(dir, 'materials'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'update.md'), stringifyMarkdown('', { id, status, title: 'Fictional', source_date: '2026-10-28', created_at: '2026-10-28T00:00:00.000Z' }));
+}
+
+/**
+ * An adapter that keeps every run it started, so a test can end any of them and see which started next. `finish` ends
+ * a run in the async context it started in, as a real child process's events do.
+ */
+function lineAdapter() {
+  const runs: { workspace: string; prompt: string; done: (o: RunOutcome) => void; scope: AsyncResource }[] = [];
+  const adapter: AgentRunnerAdapter = {
+    id: 'fake', label: 'Fake tool',
+    status: async () => ({ id: 'fake', label: 'Fake tool', installed: true, logged_in: true, trusted: true, problems: [] }),
+    start: (workspace, prompt, done) => {
+      runs.push({ workspace, prompt, done, scope: new AsyncResource('fake-run') });
+      return { pid: null, stop: async (reason) => { done({ exit_code: null, result: null, stderr: '', stopped: reason }); } };
+    },
+  };
+  const prompts = () => runs.map((r) => r.prompt.replace('/gtd-context-analyze ', ''));
+  const finish = (i: number, o: RunOutcome) => runs[i]!.scope.runInAsyncScope(() => runs[i]!.done(o));
+  return { adapter, runs, prompts, finish };
+}
+
+test('a second analysis waits in line instead of being refused, and the next one starts however the run before it ends (#344)', async (t) => {
+  const ws = await workspace(t);
+  for (const n of [2, 3, 4, 5]) await addUpdate(ws, `CU-2026-000${n}`);
+  const fake = lineAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+
+  assert.equal((await service.startAnalysis('CU-2026-0001')).status, 'running');
+  const second = await service.startAnalysis('CU-2026-0002');
+  assert.deepEqual([second.status, second.position, second.message], ['queued', 1, 'Waiting: starts when the current run ends.'], 'answered as waiting, not refused');
+  assert.equal((await service.startAnalysis('CU-2026-0003')).position, 2);
+  assert.equal((await service.startAnalysis('CU-2026-0002')).position, 1, 'asking again keeps its place');
+  assert.deepEqual(AgentRunnerService.queued(), ['CU-2026-0002', 'CU-2026-0003'], 'first in, first out, each once');
+  assert.deepEqual([(await service.get('CU-2026-0003'))?.status, (await service.get('CU-2026-0003'))?.position], ['queued', 2]);
+  assert.equal(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0002.json'), 'utf-8').catch(() => null), null, 'a queued run is never saved');
+  await new ContextUpdateService().addMaterial('CU-2026-0002', 'more.txt', Buffer.from('x')); // waiting does not lock the update
+  assert.deepEqual(fake.prompts(), ['CU-2026-0001']);
+
+  // Succeeded: the first in line starts, and a request made while it ends waits behind the rest.
+  await setStatus(ws, 'in_review');
+  fake.runs[0]!.done(success);
+  const late = service.startAnalysis('CU-2026-0004');
+  assert.ok(await eventually(async () => fake.runs.length === 2));
+  assert.equal((await late).status, 'queued');
+  assert.deepEqual(fake.prompts(), ['CU-2026-0001', 'CU-2026-0002'], 'one start, never two');
+  assert.deepEqual(AgentRunnerService.queued(), ['CU-2026-0003', 'CU-2026-0004']);
+  assert.equal((await service.get('CU-2026-0002'))?.status, 'running');
+  assert.equal((await service.get('CU-2026-0001'))?.status, 'succeeded');
+
+  // Failed.
+  fake.runs[1]!.done({ exit_code: 1, result: null, stderr: '' });
+  assert.ok(await eventually(async () => fake.runs.length === 3));
+  assert.equal((await service.get('CU-2026-0002'))?.status, 'failed');
+
+  // Stopped by the user.
+  await service.cancel('CU-2026-0003');
+  assert.ok(await eventually(async () => fake.runs.length === 4));
+  assert.equal((await service.get('CU-2026-0003'))?.status, 'cancelled');
+
+  // Timed out.
+  await service.startAnalysis('CU-2026-0005');
+  fake.runs[3]!.done({ exit_code: null, result: null, stderr: '', stopped: 'timeout' });
+  assert.ok(await eventually(async () => fake.runs.length === 5));
+  assert.match((await service.get('CU-2026-0004'))!.message, /30 minutes/);
+  assert.deepEqual(fake.prompts(), ['CU-2026-0001', 'CU-2026-0002', 'CU-2026-0003', 'CU-2026-0004', 'CU-2026-0005']);
+
+  fake.runs[4]!.done({ exit_code: 1, result: null, stderr: '' });
+  await ended();
+  assert.deepEqual(AgentRunnerService.queued(), []);
+});
+
+test('a queued analysis starts only in the workspace open now, pinned to its own, whatever request started the run before (#344)', async (t) => {
+  const a = await workspace(t);
+  await addUpdate(a, 'CU-2026-0002');
+  const b = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-runner-b-')));
+  t.after(() => fsp.rm(b, { recursive: true, force: true }));
+  await addUpdate(b, 'CU-2026-0001');
+  const fake = lineAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+  // Each call as a request makes it: pinned to the workspace open when it came, as the routes' middleware does.
+  const request = <T>(ws: string, fn: () => T): T => withWorkspacePath(ws, fn);
+
+  await request(a, () => service.startAnalysis('CU-2026-0001'));
+  assert.equal((await request(a, () => service.startAnalysis('CU-2026-0002'))).status, 'queued', 'queued in A');
+  process.env.ESB_WORKSPACE_PATH = b; // the user switches to B
+  assert.equal((await request(b, () => service.startAnalysis('CU-2026-0001'))).status, 'queued', 'queued in B behind the run in A');
+
+  // The run in A ends in the request scope that started it (pinned to A).
+  await setStatus(a, 'in_review');
+  fake.finish(0, success);
+  assert.ok(await eventually(async () => fake.runs.length === 2));
+  assert.deepEqual(fake.runs.map((r) => [r.workspace, r.prompt]), [[a, '/gtd-context-analyze CU-2026-0001'], [b, '/gtd-context-analyze CU-2026-0001']],
+    'the one queued in A is not started in A once B is open; the one queued in B starts, in B');
+  const dropped = await request(a, () => service.get('CU-2026-0002'));
+  assert.deepEqual([dropped?.status, dropped?.not_started], ['cancelled', true]);
+  assert.match(dropped!.message, /did not start: The dashboard now shows another workspace\./);
+  assert.equal((await request(b, () => service.get('CU-2026-0001')))?.status, 'running');
+  assert.equal(JSON.parse(await fsp.readFile(path.join(b, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8')).status, 'running', 'its record is in B');
+
+  fake.finish(1, { exit_code: 1, result: null, stderr: '' });
+  await ended();
+  assert.equal(JSON.parse(await fsp.readFile(path.join(b, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8')).status, 'failed');
+  assert.equal(JSON.parse(await fsp.readFile(path.join(a, '.situation-board', 'runs', 'CU-2026-0001.json'), 'utf-8')).status, 'succeeded', 'A keeps its own record');
+});
+
+test('a queued analysis can be cancelled, is dropped with the reason when its update changed, and an apply never waits (#344)', async (t) => {
+  const ws = await workspace(t);
+  for (const n of [2, 3, 4]) await addUpdate(ws, `CU-2026-000${n}`);
+  await addUpdate(ws, 'CU-2026-0005', 'approved');
+  const fake = lineAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+  await service.startAnalysis('CU-2026-0001');
+
+  // Cancel: it leaves the line; what became of it stays readable (in memory), for another page that saw it waiting.
+  await service.startAnalysis('CU-2026-0002');
+  const removed = await service.cancel('CU-2026-0002');
+  assert.deepEqual([removed.status, removed.not_started], ['cancelled', true]);
+  assert.match(removed.message, /Removed from the queue/);
+  assert.deepEqual(AgentRunnerService.queued(), []);
+  assert.deepEqual(await service.get('CU-2026-0002'), removed);
+  assert.equal(await fsp.readFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0002.json'), 'utf-8').catch(() => null), null, 'never saved');
+
+  // Refused at once, never queued: an apply, an update that is not ready, one that does not exist, the run itself,
+  // and a caller that asked not to wait (the meeting digest).
+  await assert.rejects(service.start('CU-2026-0005', 'apply'), /Another run is going \(CU-2026-0001\)/);
+  await assert.rejects(service.startAnalysis('CU-2026-0005'), /while the update is "approved"/);
+  await assert.rejects(service.startAnalysis('CU-2026-0009'), /not found/);
+  await assert.rejects(service.startAnalysis('CU-2026-0001'), /Another run is going/);
+  await assert.rejects(service.startAnalysis('CU-2026-0002', { queue: false }), /Another run is going/);
+  assert.deepEqual(AgentRunnerService.queued(), []);
+
+  // Changed while waiting: no longer ready, deleted. Each is dropped with its reason and the next one in line goes.
+  await service.startAnalysis('CU-2026-0002');
+  await service.startAnalysis('CU-2026-0003');
+  await service.startAnalysis('CU-2026-0004');
+  await addUpdate(ws, 'CU-2026-0002', 'collecting');
+  await fsp.rm(path.join(ws, 'context-updates', 'CU-2026-0003'), { recursive: true });
+  await setStatus(ws, 'in_review');
+  fake.runs[0]!.done(success);
+  assert.ok(await eventually(async () => fake.runs.length === 2));
+  assert.deepEqual(fake.prompts(), ['CU-2026-0001', 'CU-2026-0004'], 'only the one that can still start');
+  const stale = await service.get('CU-2026-0002');
+  assert.deepEqual([stale?.status, stale?.not_started], ['cancelled', true]);
+  assert.match(stale!.message, /^It waited for another run, then did not start: Cannot analyze while the update is "collecting"\.$/);
+  assert.match((await service.get('CU-2026-0003'))!.message, /did not start: Context update not found: CU-2026-0003\./);
+
+  // A dashboard that stops forgets the line: nothing starts after the run going is stopped.
+  await addUpdate(ws, 'CU-2026-0002');
+  await service.startAnalysis('CU-2026-0002');
+  await AgentRunnerService.stopAll();
+  await ended();
+  await settle();
+  assert.deepEqual(AgentRunnerService.queued(), []);
+  assert.equal(fake.runs.length, 2, 'the queued analysis never started');
+  assert.match((await service.get('CU-2026-0004'))!.message, /dashboard stopped/);
 });
 
 test('a finished run is announced once, after its record is saved, with the update and how it ended (#246)', async (t) => {

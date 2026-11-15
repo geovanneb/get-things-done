@@ -1241,7 +1241,8 @@ export class MeetingDigestService {
 
   /**
    * With automatic analysis on, starts the analysis of the open digest while it is ready and has never had a run.
-   * Another run going (the runner does one at a time) means trying again on the next check; any other refusal (not
+   * Another run going (the runner does one at a time) means trying again on the next check, not waiting in the
+   * runner's queue: a queue is lost on restart, and this check comes back every minute anyway. Any other refusal (not
    * installed, not signed in, folder not trusted) is reported once and not retried, and a digest that had a run,
    * even a failed one, is never started again by itself: the user starts it from the digest's page. A paused job
    * starts nothing on its own; "Make digest now" is the user's own click, so its digest is analyzed even then.
@@ -1259,7 +1260,7 @@ export class MeetingDigestService {
     if (await this.runner.get(open.id)) return null;
     let analysis: NonNullable<DigestState['analysis']>;
     try {
-      await this.runner.startAnalysis(open.id);
+      await this.runner.startAnalysis(open.id, { queue: false });
       analysis = { update_id: open.id, status: 'started', message: `Started the analysis of ${open.id}.`, at: now.toISOString() };
     } catch (err) {
       const reason = (err as Error).message;

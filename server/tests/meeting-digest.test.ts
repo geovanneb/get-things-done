@@ -404,7 +404,9 @@ function fakeRunner() {
   const runs = new Map<string, AgentRun>();
   let next: 'start' | 'busy' | 'refuse' = 'start';
   const runner: DigestRunner = {
-    startAnalysis: async (id: string) => {
+    startAnalysis: async (id: string, options?: { queue?: boolean }) => {
+      // The digest tries again on its next check rather than waiting in the runner's queue (#344).
+      assert.equal(options?.queue, false);
       if (next === 'busy') throw new Error('Another run is going (CU-2026-0099). Wait for it, or stop it first.');
       if (next === 'refuse') throw new Error('Claude Code is not signed in.');
       started.push(id);
