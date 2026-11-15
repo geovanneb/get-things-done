@@ -13,7 +13,7 @@ import EmptyState from '@/components/common/EmptyState';
 import { Tabs } from '@/components/common/Tabs';
 import { useNotify } from '@/hooks/useNotify';
 import { useConfirm } from '@/components/common/ConfirmDialog';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useReducer } from 'react';
 import ReactDOM from 'react-dom';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
@@ -33,6 +33,7 @@ import { useRecorder } from '../components/recording/RecordingProvider';
 import { apiDelete, apiGet, errorMessage } from '../utils/api';
 import { isMeetingPrepTask, recordPrefillFromTask } from '../utils/meetingParticipants';
 import { formatDate, formatPriorityLabel, formatStatusLabel } from '../utils/format';
+import { canSave, emptyDraft, hasEdits, isArchived, taskDraftReducer } from '../utils/taskDraft';
 
 /* ---- Tab type ------------------------------------------------------ */
 type TaskTab = 'work' | 'files';
@@ -57,6 +58,8 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions, read
 
   // The task was saved: show the rendered text again.
   useEffect(() => { setEditing(false); }, [closeSignal]);
+  // Read-only now (archived or deleted elsewhere while open): show the text, which can still be copied, not an editor.
+  const open = editing && !readOnly;
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -64,7 +67,7 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions, read
         <h3 style={sectionLabelStyle}>
           {label}
         </h3>
-        {editing ? (
+        {open ? (
           <>
             <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>{t('taskDetail.doneEditing')}</Button>
             <Button size="sm" variant="ghost"
@@ -79,7 +82,7 @@ function MarkdownSection({ label, content, onChange, closeSignal, mentions, read
           </Button>
         )}
       </div>
-      {editing ? (
+      {open ? (
         <MarkdownEditor value={content} onChange={onChange} rows={10} autoFocus mentions={mentions} placeholder={mentions ? t('taskDetail.typeToMentionAStakeholder') : undefined} />
       ) : (
         <MarkdownView content={content} />
@@ -351,25 +354,25 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
 
   // Re-read the task when it changes on disk (agent updating status, deliverables)
   const tasksVersion = useDataVersion('tasks');
-  const { data: task, loading, refetch } = useApi<Task>(`/api/tasks/${id}`, [id, tasksVersion]);
-  const [localTask, setLocalTask] = useState<Task | null>(null);
-  // Set while the user has unsaved edits, so a background refresh never
-  // overwrites what they are typing.
-  const editingRef = useRef(false);
-  // The version the draft started from. A draft equal to it has no edits (changed and changed back, or discarded),
-  // so a refresh is taken again; its `updated_at` is what a save says it started from.
-  const baselineRef = useRef<Task | null>(null);
+  const { data: task, loading, error, refetch } = useApi<Task>(`/api/tasks/${id}`, [id, tasksVersion]);
+  // The draft, the version it started from and the newest copy read: see utils/taskDraft. A background refresh never
+  // overwrites what the user is typing, and Save shows only for edits made since the draft's own version.
+  const [draftState, dispatch] = useReducer(taskDraftReducer, emptyDraft);
+  const localTask = draftState.draft;
 
   useEffect(() => {
-    if (!task) return;
-    setLocalTask((prev) => {
-      const clean = !prev || !editingRef.current || JSON.stringify(prev) === JSON.stringify(baselineRef.current);
-      if (!clean) return prev;
-      editingRef.current = false;
-      baselineRef.current = task;
-      return task;
-    });
+    if (task) dispatch({ type: 'refresh', task });
   }, [task]);
+
+  // A refresh failed: when the task is gone (deleted elsewhere), say so rather than keep a draft that cannot be saved.
+  useEffect(() => {
+    if (!error || !id) return;
+    let cancelled = false;
+    fetch(`/api/tasks/${encodeURIComponent(id)}`, { headers: { Accept: 'application/json' } })
+      .then((res) => { if (!cancelled && res.status === 404) dispatch({ type: 'gone' }); })
+      .catch(() => { /* offline: the next refresh tries again */ });
+    return () => { cancelled = true; };
+  }, [error, id]);
 
   const { openRecordDialogFor } = useRecordLauncher();
   const recorder = useRecorder();
@@ -378,19 +381,15 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
   const stakeholdersVersion = useDataVersion('stakeholders');
   const { data: people, loading: peopleLoading, error: peopleError } = useApi<Stakeholder[]>(`/api/stakeholders?v=${stakeholdersVersion}`);
 
-  const handleFieldChange = useCallback((field: string, value: unknown) => {
-    setLocalTask((prev) => {
-      // An archived task is shown as it was: nothing on it can be saved.
-      if (!prev || task?.status === 'archived') return prev;
-      editingRef.current = true;
-      return { ...prev, [field]: value } as Task;
-    });
-  }, [task?.status]);
+  // An archived or deleted task takes no edits: nothing on it can be saved.
+  const handleFieldChange = useCallback((field: string, value: unknown) => dispatch({ type: 'edit', field, value }), []);
 
   const handleSave = useCallback(async () => {
     if (!localTask || !id) return;
     const sent = localTask;
     setSaving(true);
+    // What the server shows from here on is newer than this save, even if the response arrives after it.
+    dispatch({ type: 'saving' });
     try {
       // The version editing started from: a save from an older one is refused rather than undoing what changed meanwhile.
       const res = await fetch(`/api/tasks/${encodeURIComponent(id)}`, {
@@ -404,18 +403,14 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
         setConflict(true);
         return;
       }
+      if (res.status === 404) { dispatch({ type: 'gone' }); return; }
       if (!res.ok) throw new Error(errorMessage(await res.json().catch(() => null), t('taskDetail.couldNotSave')));
       const saved = await res.json() as Task & { meeting_sources_error?: string };
       setPinError(saved?.meeting_sources_error ?? null);
       setConflict(false);
       // The saved version is the new start at once, before the refresh: edits made while saving keep going from it,
       // so the next save never claims the old version and is never refused for it.
-      setLocalTask((prev) => {
-        if (!prev) return prev;
-        const next = { ...prev, updated_at: saved.updated_at };
-        if (prev === sent) { editingRef.current = false; baselineRef.current = next; }
-        return next;
-      });
+      dispatch({ type: 'saved', sent, updatedAt: saved.updated_at });
       setSavedCount((n) => n + 1);
       refetch();
       refetchTasks();
@@ -431,9 +426,7 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
     if (!id) return;
     try {
       const fresh = await apiGet<Task>(`/api/tasks/${encodeURIComponent(id)}`);
-      editingRef.current = false;
-      baselineRef.current = fresh;
-      setLocalTask(fresh);
+      dispatch({ type: 'reset', task: fresh });
       setConflict(false);
       refetch();
     } catch (err) {
@@ -447,6 +440,8 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
     setDeleting(true);
     try {
       await apiDelete(`/api/tasks/${id}`);
+      // Gone on purpose: the draft goes with it, and the 404 that follows is not news.
+      dispatch({ type: 'deleted' });
       refetchTasks();
       navigate('/board');
     } catch {
@@ -454,13 +449,15 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
     }
   }, [id, localTask, navigate, refetchTasks, t]);
 
-  const isDirty = JSON.stringify(task) !== JSON.stringify(localTask);
-
+  // Unsaved edits and whether they can be saved are separate: a task archived or deleted elsewhere keeps its edits.
+  const isDirty = hasEdits(draftState);
+  const gone = draftState.gone;
   // An archived task lives in tasks/archive/: shown read-only, and its files are reached through its deliverables.
-  const archived = task?.status === 'archived';
+  const archived = isArchived(draftState);
+  const readOnly = archived || gone;
   const tabs: { key: TaskTab; label: string }[] = [
     { key: 'work', label: t('groupWork') },
-    ...(archived ? [] : [{ key: 'files' as TaskTab, label: t('newTaskModal.files') }]),
+    ...(readOnly ? [] : [{ key: 'files' as TaskTab, label: t('newTaskModal.files') }]),
   ];
 
   const frame = (body: React.ReactNode, label = t('taskDetail.taskDetails')) => ReactDOM.createPortal(
@@ -473,7 +470,8 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
 
   if (loading) return frame(<LoadingSpinner text={t('taskDetail.loadingTask')} />);
 
-  if (!localTask) return frame(
+  // Deleted elsewhere with nothing unsaved: the same message as a task that was never found.
+  if (!localTask || (gone && !isDirty)) return frame(
     <div style={{ padding: 'var(--space-6)' }}>
       <EmptyState title={t('taskDetail.taskNotFound')} description={t('taskDetail.itMayHaveBeenDeleted')}
         action={{ label: t('taskDetail.backToTheBoard'), onClick: close }} />
@@ -498,15 +496,15 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
               {t('taskDetail.recordThisMeeting')}
             </Button>
           )}
-          {isDirty && !archived && <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>{t('orgChartDialogs.saveChanges')}</Button>}
-          {!archived && <IconButton label={t('taskDetail.deleteTask')} icon={icons.trash} tone="danger" outline onClick={handleDelete} disabled={deleting} />}
+          {isDirty && canSave(draftState) && <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>{t('orgChartDialogs.saveChanges')}</Button>}
+          {!readOnly && <IconButton label={t('taskDetail.deleteTask')} icon={icons.trash} tone="danger" outline onClick={handleDelete} disabled={deleting} />}
           <IconButton label={t('taskDetail.closeTask')} icon={icons.close} onClick={close} />
         </div>
         <input
           type="text"
           aria-label={t('newTaskModal.taskTitle')}
           className="gtd-title-input"
-          readOnly={archived}
+          readOnly={readOnly}
           value={localTask.title}
           onChange={(e) => handleFieldChange('title', e.target.value)}
         />
@@ -533,6 +531,13 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
             <Notice tone="info">{t('taskDetail.archivedReadOnly')}</Notice>
           </div>
         )}
+        {readOnly && isDirty && (
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <Notice tone="critical" title={t('taskDetail.unsavedEditsTitle')}>
+              {t(gone ? 'taskDetail.unsavedEditsDeleted' : 'taskDetail.unsavedEditsArchived')}
+            </Notice>
+          </div>
+        )}
         {conflict && (
           <div style={{ marginBottom: 'var(--space-4)' }}>
             <Notice tone="critical" title={t('taskDetail.changedElsewhereTitle')}
@@ -541,8 +546,8 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
             </Notice>
           </div>
         )}
-        {(tab === 'work' || archived) && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} dirty={isDirty} onRequested={() => { refetch(); refetchTasks(); }} readOnly={archived} />}
-        {tab === 'files' && !archived && id && <FilesTab taskId={id} />}
+        {(tab === 'work' || readOnly) && <WorkTab task={localTask} onFieldChange={handleFieldChange} savedCount={savedCount} pinError={pinError} onPinned={() => setPinError(null)} dirty={isDirty} onRequested={() => { refetch(); refetchTasks(); }} readOnly={readOnly} />}
+        {tab === 'files' && !readOnly && id && <FilesTab taskId={id} />}
       </div>
     </>,
     localTask.title
