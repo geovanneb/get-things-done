@@ -147,8 +147,8 @@ work-memory/
 | Tool | Integration |
 | --- | --- |
 | **Claude Code** | Workspace instructions, commands and specialist agents; dashboard analysis/apply runner |
-| **Codex** | `AGENTS.md` with the workspace conventions |
-| **GitHub Copilot** | `.github/copilot-instructions.md` with equivalent guidance |
+| **Codex** | `AGENTS.md` with the workspace conventions; the same procedures, specialists and skills as Agent Skills in `.agents/skills/` |
+| **GitHub Copilot** | `.github/copilot-instructions.md` with equivalent guidance; the same Agent Skills in `.agents/skills/` |
 | **Other agents** | Read the files and follow the conventions; compatibility depends on the tool |
 
 The app does not require an MCP server or proprietary memory API. You can inspect the files, edit them, back them up and change agents. The dashboard adds a task board, meeting workflow, search, review and insights over the same workspace.

@@ -310,6 +310,13 @@ from the Anthropic skills marketplace inside the dashboard's Agents view.
 Selecting `copilot` or `codex` at init writes `.github/copilot-instructions.md` or
 `AGENTS.md` with equivalent guidance. Same files, same conventions.
 
+They also get the same procedures, specialists and skills as Claude Code, as Agent Skills in
+`.agents/skills/` (Codex and Copilot both read that folder). Ask in plain words, for example
+"Execute task TASK-2026-0001" or "Analyze context update CU-2026-0001", and the assistant follows
+the same steps Claude Code follows for `/gtd-task` and `/gtd-context-analyze`. In Codex you can
+also name a skill directly: `$gtd-task TASK-2026-0001`. The app keeps `.agents/` up to date like
+its other files: one you changed is kept, with the new version beside it as `.new`.
+
 ---
 
 ## Keeping context up to date
@@ -568,10 +575,9 @@ treats instructions inside the material as content, not as commands.
 This folder sits outside `context/` on purpose: agents writing tasks never read raw
 transcripts as if they were reviewed context.
 
-**I use Codex or Copilot.** They have no slash commands, so ask in plain words:
-"analyze context update CU-2026-0001", then "apply context update CU-2026-0001". The
-workspace instructions (`AGENTS.md`, `.github/copilot-instructions.md`) describe the
-same steps.
+**I use Codex or Copilot.** Ask in plain words: "analyze context update CU-2026-0001",
+then "apply context update CU-2026-0001". They follow the `gtd-context-analyze` and
+`gtd-context-apply` skills in `.agents/skills/`, the same steps Claude Code's commands take.
 
 ---
 
