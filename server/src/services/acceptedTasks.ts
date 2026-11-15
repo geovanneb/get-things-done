@@ -319,10 +319,12 @@ export async function gatherAccepted(ws: string, now: Date, date: string): Promi
   const files: { name: string; data: Buffer }[] = [];
   const taken = new Set([ACCEPTED_TASKS_FILE, 'memory-scan.md', 'update.md']);
   const unique = (wanted: string) => {
-    const safe = safeFileName(wanted);
-    const ext = path.extname(safe);
     for (let n = 1; ; n++) {
-      const candidate = n === 1 ? safe : `${safe.slice(0, safe.length - ext.length)}-${n}${ext}`;
+      const suffix = n === 1 ? '' : `-${n}`;
+      // Reserve room before shortening: the suffix must survive the material writer's filename limit too.
+      const safe = safeFileName(wanted, 200 - Buffer.byteLength(suffix));
+      const ext = path.extname(safe);
+      const candidate = `${safe.slice(0, safe.length - ext.length)}${suffix}${ext}`;
       if (!taken.has(candidate.toLowerCase())) { taken.add(candidate.toLowerCase()); return candidate; }
     }
   };
