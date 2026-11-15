@@ -50,6 +50,9 @@ execFileSync(process.execPath, [path.join(root, 'bin/gtd.js'), 'init', '-y', '-d
   { env, stdio: 'pipe' });
 check('gtd init creates a workspace', fs.existsSync(path.join(ws, 'workspace.yaml')));
 check('gtd init writes the Claude Code setup', fs.existsSync(path.join(ws, 'CLAUDE.md')));
+check('gtd init gives Codex and Copilot the workspace procedures as skills',
+  ['gtd-task', 'gtd-context-analyze', 'gtd-context-apply', 'executive-report-writer', 'risk-analysis']
+    .every((name) => fs.existsSync(path.join(ws, '.agents', 'skills', name, 'SKILL.md'))));
 
 // `gtd upgrade` used to say "run gtd stop first" and then refresh the files under a running dashboard anyway.
 {

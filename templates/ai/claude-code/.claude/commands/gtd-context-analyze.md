@@ -340,7 +340,7 @@ happening again.
    that was missing a fact.
 4. Propose the change. Usually one file and one rule is enough. Targets are `CLAUDE.md`,
    `AGENTS.md`, `.github/copilot-instructions.md`, `outputs/templates/<slug>/output.md`, or a context note or stakeholder
-   file when the missing signal was a fact. Never `.claude/`, `.schemas/`, `profile/` or
+   file when the missing signal was a fact. Never `.claude/`, `.agents/`, `.schemas/`, `profile/` or
    tasks: if the fix belongs there, say so in `summary` and propose nothing for it.
 5. Each draft is the whole file with only your change in it. Keep every other line
    exactly as it is: the executive reviews the diff line by line.

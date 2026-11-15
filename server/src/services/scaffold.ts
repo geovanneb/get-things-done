@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { quoteYaml } from '../utils/yamlScalar';
 import { parseMarkdown } from '../utils/markdown';
+import { portableSkillFiles, type PortableFile, type TemplateTransform } from './portableSkills';
 
 /**
  * Single source of truth for creating and upgrading a workspace.
@@ -253,11 +254,12 @@ function interpolate(content: string, vars: Record<string, string>): string {
   return content.replace(/\{\{(name|role|organization)\}\}/g, (_match, key: string) => vars[key] || '');
 }
 
-/** The exact bytes a template file produces for this workspace. */
-function renderTemplate(srcPath: string, vars: Record<string, string>): Buffer {
+/** The exact bytes a template file produces for this workspace. `transform` reshapes a text file before the profile fills it. */
+function renderTemplate(srcPath: string, vars: Record<string, string>, transform?: TemplateTransform): Buffer {
   const name = path.basename(srcPath);
   if (!isTextFile(name)) return fs.readFileSync(srcPath);
-  return Buffer.from(interpolate(fs.readFileSync(srcPath, 'utf-8'), vars), 'utf-8');
+  const raw = fs.readFileSync(srcPath, 'utf-8');
+  return Buffer.from(interpolate(transform ? transform(raw) : raw, vars), 'utf-8');
 }
 
 /** Walks a template tree and yields [absoluteSourcePath, workspaceRelativeDestPath] pairs. */
@@ -279,13 +281,22 @@ function walkTemplates(src: string, relBase = ''): [string, string][] {
   return out;
 }
 
-/** Every app-owned template file for this workspace, given the selected AI tools. */
-function collectAppFiles(aiTools: AiTool[] = []): [string, string][] {
+/** The AI tools that read the workspace procedures as Agent Skills from `.agents/skills/` (Claude Code has its own). */
+const PORTABLE_SKILL_TOOLS: readonly AiTool[] = ['codex', 'copilot'];
+
+/**
+ * Every app-owned template file for this workspace, given the selected AI tools, as [source, workspace path,
+ * transform]. Codex and Copilot also get Claude Code's procedures, specialists and skills as Agent Skills, once.
+ */
+function collectAppFiles(aiTools: AiTool[] = []): PortableFile[] {
   const templatesPath = getTemplatesPath();
-  const files = walkTemplates(path.join(templatesPath, 'workspace'));
+  const files: PortableFile[] = walkTemplates(path.join(templatesPath, 'workspace'));
 
   for (const tool of aiTools) {
     files.push(...walkTemplates(path.join(templatesPath, 'ai', tool)));
+  }
+  if (aiTools.some((tool) => PORTABLE_SKILL_TOOLS.includes(tool))) {
+    files.push(...portableSkillFiles(path.join(templatesPath, 'ai', 'claude-code')));
   }
   return files;
 }
@@ -459,9 +470,9 @@ export function scaffoldWorkspace(workspacePath: string, opts: ScaffoldOptions):
   const skipped: string[] = [];
   const manifestEntries: ManifestEntry[] = [];
 
-  for (const [srcPath, relPath] of collectAppFiles(aiTools)) {
+  for (const [srcPath, relPath, transform] of collectAppFiles(aiTools)) {
     const destPath = path.join(workspacePath, relPath);
-    const content = renderTemplate(srcPath, profile);
+    const content = renderTemplate(srcPath, profile, transform);
 
     // Record provenance even when skipping, so upgrade can still reason about the file.
     manifestEntries.push({ path: relPath, sha256: sha256(content) });
@@ -523,9 +534,9 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
 
   const manifestEntries: ManifestEntry[] = [];
 
-  for (const [srcPath, relPath] of collectAppFiles(aiTools)) {
+  for (const [srcPath, relPath, transform] of collectAppFiles(aiTools)) {
     const destPath = path.join(workspacePath, relPath);
-    const nextContent = renderTemplate(srcPath, profile);
+    const nextContent = renderTemplate(srcPath, profile, transform);
     const nextHash = sha256(nextContent);
 
     const entry: ManifestEntry = { path: relPath, sha256: nextHash };
@@ -639,8 +650,8 @@ export function detectAiTools(workspacePath: string): AiTool[] {
  */
 export function appFileVersions(workspacePath: string, profile = readWorkspaceProfile(workspacePath)): Map<string, { content: Buffer; sha256: string }> {
   const versions = new Map<string, { content: Buffer; sha256: string }>();
-  for (const [srcPath, relPath] of collectAppFiles(detectAiTools(workspacePath))) {
-    const content = renderTemplate(srcPath, profile);
+  for (const [srcPath, relPath, transform] of collectAppFiles(detectAiTools(workspacePath))) {
+    const content = renderTemplate(srcPath, profile, transform);
     versions.set(relPath, { content, sha256: sha256(content) });
   }
   return versions;

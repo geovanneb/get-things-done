@@ -31,7 +31,7 @@ test('shipped Claude Code settings keep each folder in its write tier', async ()
   const { allow, ask, deny } = await shipped();
   for (const dir of ['tasks', 'context-updates', '.situation-board/logs']) assert.ok(allow.includes(`Edit(/${dir}/**)`), dir);
   for (const dir of ['stakeholders', 'context', 'outputs']) assert.ok(ask.includes(`Edit(/${dir}/**)`), dir);
-  for (const dir of ['.claude', 'profile', '.schemas']) assert.ok(deny.includes(`Edit(/${dir}/**)`), dir);
+  for (const dir of ['.claude', '.agents', 'profile', '.schemas']) assert.ok(deny.includes(`Edit(/${dir}/**)`), dir);
 });
 
 test('gtd upgrade replaces untouched settings that still have Write rules, and keeps edited ones', async (t) => {
