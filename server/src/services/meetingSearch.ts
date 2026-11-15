@@ -3,6 +3,8 @@
  * history service reads each meeting's own text and hands it here. Nothing is indexed or stored.
  */
 
+import { excerptAround, fold } from '../utils/textFold';
+
 /** One place in a meeting's text that holds a searched word: a transcript turn (with its time) or a line of notes. */
 export interface SearchSnippet {
   /** The meeting file it is in, as the meeting lists it (a recording or transcript is named by its original). */
@@ -28,9 +30,7 @@ const MAX_SNIPPETS = 3;
 const AROUND = 90;
 
 /** The same text however it was typed: full-width and half-width forms alike, any case. */
-export function fold(text: string): string {
-  return text.normalize('NFKC').toLowerCase();
-}
+export { fold };
 
 /** The words of a query, folded; at most 10, so a pasted paragraph cannot make every search slow. */
 export function queryWords(query: string): string[] {
@@ -62,17 +62,12 @@ export function textUnits(markdown: string): Unit[] {
   return lines.map((l) => l.trim()).filter(Boolean).map((text) => ({ time: null, speaker: null, text }));
 }
 
-/** The text around the first word found in it, cut at about AROUND characters on each side. */
+/**
+ * The original text around the first word found in it, about AROUND characters on each side. Folding can change
+ * lengths and positions (ｶﾞ → ガ, ﬁ → fi), so the hit is mapped back to the text as written.
+ */
 function around(text: string, words: string[]): string {
-  const folded = fold(text);
-  // NFKC can change lengths (a ligature, a half-width katakana), so cut on the folded text when they differ.
-  const source = folded.length === text.length ? text : folded;
-  // A word found only in the speaker's name: the text from its start.
-  const found = words.map((w) => folded.indexOf(w)).filter((i) => i >= 0);
-  const at = found.length ? Math.min(...found) : 0;
-  const start = Math.max(0, at - AROUND);
-  const end = Math.min(source.length, at + AROUND);
-  return `${start > 0 ? '…' : ''}${source.slice(start, end).trim()}${end < source.length ? '…' : ''}`;
+  return excerptAround(text, words, AROUND);
 }
 
 /**
