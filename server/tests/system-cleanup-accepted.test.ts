@@ -71,6 +71,33 @@ const exists = (p: string) => fsp.access(p).then(() => true, () => false);
 const ledger = async (ws: string) => JSON.parse(await read(path.join(ws, '.situation-board/routines/system-cleanup-accepted.json'))) as { since: string; tasks: Record<string, { accepted_at: string; update?: string; left_out?: string; files?: { name: string | null; sha256: string; copied: boolean }[] }> };
 const at = (s: string) => new Date(s);
 
+for (const stem of ['a'.repeat(190), '記'.repeat(62)]) test(`long duplicate deliverable names keep distinct copies and matching ledger hashes (${stem[0]})`, async (t) => {
+  const ws = await workspace(t);
+  const service = new SystemCleanupService();
+  await turnOn(service);
+  const id = 'TASK-2026-0001';
+  const name = `${stem}.md`;
+  const deliverables = [];
+  for (let part = 1; part <= 12; part++) {
+    const file = `tasks/active/${id}/deliverables/${part}/${name}`;
+    await fsp.mkdir(path.dirname(path.join(ws, file)), { recursive: true });
+    await fsp.writeFile(path.join(ws, file), `Fictional ${part} report.`);
+    deliverables.push({ id: `DEL-${part}`, file_path: file });
+  }
+  await write(ws, `tasks/active/${id}/task.md`, {
+    id, title: 'Long report names', status: 'done', done_date: '2026-11-03T10:00:00.000Z', deliverables,
+  });
+  const run = await service.runNow(at('2026-11-09T09:00:00.000Z'));
+  assert.equal(run.status, 'ok', run.message);
+  const record = (await ledger(ws)).tasks[id]!;
+  assert.equal(record.files!.length, 13, 'the task and all twelve deliverables are recorded');
+  for (const file of record.files!.filter((f) => f.copied)) {
+    assert.ok(Buffer.byteLength(file.name!) <= 200, 'names fit the material writer limit');
+    const copy = await fsp.readFile(path.join(materials(ws, run.context_update!), file.name!));
+    assert.equal(createHash('sha256').update(copy).digest('hex'), file.sha256, `copy matches its ledger: ${file.name}`);
+  }
+});
+
 async function turnOn(service: SystemCleanupService, extra: Record<string, unknown> = {}, now = at('2026-11-02T00:00:00.000Z')): Promise<void> {
   await service.update({ memory_review: { accepted_tasks: true }, ...extra }, now);
 }

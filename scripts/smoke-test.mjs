@@ -681,7 +681,15 @@ try {
     const secret = await (await send('POST', '/api/tasks', { title: 'Smoke secret task', confidentiality: 'confidential' })).json();
     fs.mkdirSync(path.join(ws, 'tasks', 'active', made.id, 'deliverables'), { recursive: true });
     fs.writeFileSync(path.join(ws, 'tasks', 'active', made.id, 'deliverables', 'smoke-report.md'), '# Fictional smoke report\n');
-    await send('PUT', `/api/tasks/${made.id}`, { status: 'done', deliverables: [{ id: 'DEL-01', template_ref: 'memo', status: 'complete', file_path: `tasks/active/${made.id}/deliverables/smoke-report.md` }] });
+    const deliverables = [{ id: 'DEL-01', template_ref: 'memo', status: 'complete', file_path: `tasks/active/${made.id}/deliverables/smoke-report.md` }];
+    const longName = `${'a'.repeat(190)}.md`;
+    for (const part of ['first', 'second']) {
+      const file = `tasks/active/${made.id}/deliverables/${part}/${longName}`;
+      fs.mkdirSync(path.dirname(path.join(ws, file)), { recursive: true });
+      fs.writeFileSync(path.join(ws, file), `Fictional ${part} report.`);
+      deliverables.push({ id: `DEL-${part}`, template_ref: 'memo', status: 'complete', file_path: file });
+    }
+    await send('PUT', `/api/tasks/${made.id}`, { status: 'done', deliverables });
     await send('PUT', `/api/tasks/${secret.id}`, { status: 'done' });
     const gathered = await (await send('POST', '/api/routines/system-cleanup/run')).json();
     const review = gathered.context_update ? await (await fetch(`${base}/api/context-updates/${gathered.context_update}`)).json() : {};
@@ -692,6 +700,10 @@ try {
         && review.material_files?.some((f) => f.name === `${made.id}-smoke-report.md`)
         && list.includes(made.id) && !list.includes(secret.id) && !list.includes('Smoke secret task') && /1 accepted task was left out/.test(list),
       `${gathered.message} ${list.slice(0, 300)}`);
+    const copies = (review.material_files ?? []).filter((f) => f.name.startsWith(`${made.id}-a`));
+    const contents = copies.map((f) => fs.readFileSync(path.join(path.dirname(listFile), f.name), 'utf8')).sort();
+    check('accepted deliverables with long duplicate names keep both copies',
+      JSON.stringify(contents) === JSON.stringify(['Fictional first report.', 'Fictional second report.']), gathered.message);
     await fetch(`${base}/api/context-updates/${gathered.context_update}`, { method: 'DELETE' });
     const again = await (await send('POST', '/api/routines/system-cleanup/run')).json();
     check('an accepted task is gathered only once',
