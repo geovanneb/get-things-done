@@ -646,7 +646,7 @@ prefix.
 | `POST` | `/api/routines/preview` | Describe a schedule and list its next runs. Nothing is saved |
 | `POST` | `/api/routines/run-due` | Create the tasks that are due now (what the timer does) |
 | `GET` | `/api/routines/system-cleanup` | The System cleanup job: settings, schedule and last run |
-| `PUT` | `/api/routines/system-cleanup` | Update System cleanup settings |
+| `PUT` | `/api/routines/system-cleanup` | Update System cleanup settings. `memory_review.accepted_tasks` (default `false`): the memory review also gathers the tasks accepted since it was turned on into `materials/accepted-tasks.md`, with copies of their task, deliverables and latest execution log (30 tasks, 5 MB per file and 25 MB per review at most; the rest is listed with its SHA-256). Confidential and restricted tasks are only counted. What was gathered is recorded in `.situation-board/routines/system-cleanup-accepted.json`, and the task cleanup rules skip a task until it is gathered |
 | `POST` | `/api/routines/system-cleanup/preview` | What a cleanup run would do now. Optional `settings` to try. Nothing changes |
 | `POST` | `/api/routines/system-cleanup/run` | Run System cleanup now. Returns `201` |
 | `GET` | `/api/routines/meeting-digest` | The Meeting digest job: settings, schedule, last run, the open digest and the meeting queue, with each recording's `recording` state (`pending`, `running`, `done`, `partial`, `failed` or `stopped`) and `transcription`: the job this dashboard runs (`meeting`, `file`, `done` and `total` seconds of audio), or `null`, with `installed_models` and `model_speeds` (seconds of speech per second of work, for the models tested on this computer) |
@@ -678,11 +678,11 @@ POST /api/routines/run-due
 GET /api/routines/system-cleanup
 → 200 {"id":"SYSTEM-CLEANUP","title":"System cleanup","settings":{"enabled":true,
        "schedule":{"frequency":"weekly","weekdays":["mon"],"time":"09:00", …},
-       "memory_review":{"enabled":true,"stale_after_days":180},"rules":{…}, …}, …}
+       "memory_review":{"enabled":true,"stale_after_days":180,"accepted_tasks":false},"rules":{…}, …}, …}
 
 PUT /api/routines/system-cleanup
 {"memory_review":{"enabled":true,"stale_after_days":120}}
-→ 200 {"id":"SYSTEM-CLEANUP","settings":{"memory_review":{"enabled":true,"stale_after_days":120}, …}, …}
+→ 200 {"id":"SYSTEM-CLEANUP","settings":{"memory_review":{"enabled":true,"stale_after_days":120,"accepted_tasks":false}, …}, …}
 
 POST /api/routines/system-cleanup/preview
 {}

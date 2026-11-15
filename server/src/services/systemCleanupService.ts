@@ -12,6 +12,7 @@ import { moveToTrash, trashDir, trashedAt } from './trash';
 import { reserveIds } from './idReservations';
 import { heldMeetings, ownFiles, retentionStart } from './meetingLibrary';
 import { folderFiles, folderOf, foldersOfUpdate } from './meetingFolder';
+import { gatherAccepted, heldTaskIds, isHeld, pendingCount, readLedger, recordGathered, startGathering } from './acceptedTasks';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -23,7 +24,8 @@ const contextUpdateService = new ContextUpdateService();
  *
  * 1. Memory review: scans context notes and stakeholders for likely duplicates, stale and empty notes,
  *    and opens a context update tagged `origin: system-cleanup`, `kind: memory-review`. The analyze
- *    command turns it into proposals; nothing changes until the user approves them.
+ *    command turns it into proposals; nothing changes until the user approves them. With
+ *    `memory_review.accepted_tasks` on, it also gathers the tasks the user accepted (acceptedTasks.ts).
  * 2. File cleanup: per content type, finished items older than a threshold are archived, moved to the
  *    trash or deleted. Every rule is off until the user turns it on, except Meetings: kept meeting text is moved to
  *    the trash 180 days after the meeting, and what it moved there is deleted for good 30 days later.
@@ -60,7 +62,11 @@ export interface CleanupRule { enabled: boolean; older_than_days: number; action
 export interface CleanupSettings {
   enabled: boolean;
   schedule: Schedule;
-  memory_review: { enabled: boolean; stale_after_days: number };
+  /**
+   * `accepted_tasks`: the review also gathers the tasks the user accepted since this was turned on, with copies of
+   * their files (confidential and restricted ones only counted). Off by default.
+   */
+  memory_review: { enabled: boolean; stale_after_days: number; accepted_tasks: boolean };
   rules: Record<RuleType, CleanupRule>;
   /** Tasks with this tag are never cleaned up. Empty: no tag protects a task. */
   keep_tag: string;
@@ -153,7 +159,7 @@ export function defaultSettings(): CleanupSettings {
     enabled: true,
     // 2026-01-05 is a Monday; a weekly schedule counts its weeks from there.
     schedule: parseSchedule({ frequency: 'weekly', interval: 1, weekdays: ['mon'], time: '09:00', starts_on: '2026-01-05' }),
-    memory_review: { enabled: true, stale_after_days: 180 },
+    memory_review: { enabled: true, stale_after_days: 180, accepted_tasks: false },
     rules: {
       completed_tasks: { enabled: false, older_than_days: 30, action: 'archive' },
       archived_tasks: { enabled: false, older_than_days: 365, action: 'trash' },
@@ -207,7 +213,7 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
   }
   const keepTag = o['keep_tag'] === undefined ? base.keep_tag : o['keep_tag'];
   if (typeof keepTag !== 'string' || (keepTag && !/^[\w-]{1,50}$/.test(keepTag))) throw httpError(400, 'Invalid keep_tag: letters, digits, - and _ only');
-  for (const [k, v] of [['enabled', o['enabled']], ['memory_review.enabled', mr['enabled']]] as const) {
+  for (const [k, v] of [['enabled', o['enabled']], ['memory_review.enabled', mr['enabled']], ['memory_review.accepted_tasks', mr['accepted_tasks']]] as const) {
     if (v !== undefined && typeof v !== 'boolean') throw httpError(400, `Invalid ${k}`);
   }
   return {
@@ -216,6 +222,7 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
     memory_review: {
       enabled: mr['enabled'] === undefined ? base.memory_review.enabled : mr['enabled'] as boolean,
       stale_after_days: mr['stale_after_days'] === undefined ? base.memory_review.stale_after_days : days(mr['stale_after_days'], 'memory_review.stale_after_days', 7, 3650),
+      accepted_tasks: mr['accepted_tasks'] === undefined ? base.memory_review.accepted_tasks : mr['accepted_tasks'] as boolean,
     },
     rules,
     keep_tag: keepTag,
@@ -365,6 +372,8 @@ export class SystemCleanupService {
     const current = await this.readSettings().catch(() => defaultSettings());
     const next = parseSettings(input, current);
     next.updated_at = now.toISOString();
+    // Turned on: tasks accepted from now on are gathered, not the whole history.
+    if (next.memory_review.accepted_tasks && !current.memory_review.accepted_tasks) await startGathering(workspaceService.getWorkspacePath(), now);
     await this.writeSettings(next);
     if (JSON.stringify(next.schedule) !== JSON.stringify(current.schedule) || next.enabled !== current.enabled) {
       await this.writeState({ ...await this.readState(), checked_at: now.toISOString(), disabled: !next.enabled });
@@ -472,16 +481,19 @@ export class SystemCleanupService {
       found.push({ type, id, title, path: rel(ws, p), age_days: age, action: rule.action });
     };
     const kept = (tags: unknown) => Boolean(settings.keep_tag) && Array.isArray(tags) && tags.includes(settings.keep_tag);
+    // Accepted tasks not gathered yet stay where they are until a memory review has their copies.
+    const held = gathering(settings) && (settings.rules.completed_tasks.enabled || settings.rules.archived_tasks.enabled)
+      ? await heldTaskIds(ws) : new Set<string>();
 
     if (settings.rules.completed_tasks.enabled) {
       for (const t of await taskService.listTasks().catch(() => [])) {
-        if (!TASK_ID.test(t.id) || !isDone(t.status) || kept(t.tags)) continue;
+        if (!TASK_ID.test(t.id) || !isDone(t.status) || kept(t.tags) || held.has(t.id)) continue;
         add('completed_tasks', t.id, t.title, path.join(ws, 'tasks', 'active', t.id), ageDays(when(t.done_date) ?? when(t.updated_at), now));
       }
     }
     if (settings.rules.archived_tasks.enabled) {
       for (const t of await taskService.listArchivedTasks().catch(() => [])) {
-        if (!TASK_ID.test(t.id) || kept(t.tags)) continue;
+        if (!TASK_ID.test(t.id) || kept(t.tags) || held.has(t.id)) continue;
         // updated_at is stamped when the task is archived: the clock starts when it was filed away.
         add('archived_tasks', t.id, t.title, path.join(ws, 'tasks', 'archive', t.id), ageDays(when(t.updated_at) ?? when(t.done_date), now));
       }
@@ -582,6 +594,10 @@ export class SystemCleanupService {
       const data = obj(parseMarkdown(raw).data);
       if (item.type === 'completed_tasks' && !isDone(String(data['status'] ?? ''))) return false;
       if (settings.keep_tag && Array.isArray(data['tags']) && data['tags'].includes(settings.keep_tag)) return false;
+      if (gathering(settings)) {
+        const { ledger, broken } = await readLedger(ws);
+        if (await isHeld(ws, item.id, data, ledger, broken)) return false;
+      }
       const date = item.type === 'completed_tasks'
         ? when(data['done_date']) ?? when(data['updated_at'])
         : when(data['updated_at']) ?? when(data['done_date']);
@@ -668,22 +684,39 @@ export class SystemCleanupService {
   // ---- memory review -----------------------------------------------------------------
 
   private async openMemoryReview(settings: CleanupSettings, now: Date): Promise<{ id?: string; message: string }> {
+    const ws = workspaceService.getWorkspacePath();
+    const withTasks = gathering(settings);
+    // Switched on by hand in the settings file: start from now, like the switch in the dashboard.
+    if (withTasks) {
+      const { ledger, broken } = await readLedger(ws);
+      if (!broken && ledger.since === null) await startGathering(ws, now);
+    }
     const open = await this.openReview();
-    // One review at a time: a backlog of unread reviews helps nobody.
-    if (open) return { message: `The memory review ${open} is still open, so no new one was started.` };
+    // One review at a time: a backlog of unread reviews helps nobody. Accepted tasks are not marked, so they wait.
+    if (open) {
+      const waiting = withTasks ? await pendingCount(ws) : 0;
+      const tasksNote = waiting === null
+        ? ' The record of gathered tasks cannot be read: no accepted task will be gathered, and every accepted task is kept from cleanup, until it is fixed or removed.'
+        : waiting ? ` ${waiting} accepted task${waiting === 1 ? ' waits' : 's wait'} for the next one.` : '';
+      return { message: `The memory review ${open} is still open, so no new one was started.${tasksNote}` };
+    }
     const scan = await this.scanMemory(settings, now);
-    if (scan.notes + scan.stakeholders === 0) return { message: 'No context notes or stakeholders yet, so there is no memory to review.' };
     const date = localDate(now);
+    const tasks = withTasks ? await gatherAccepted(ws, now, date) : null;
+    if (scan.notes + scan.stakeholders === 0 && !tasks?.gathered) return { message: 'No context notes or stakeholders yet, so there is no memory to review.' };
     const update = await contextUpdateService.create({
       title: `Memory review ${date}`,
       source_date: date,
-      notes: memoryBrief(settings),
+      notes: memoryBrief(settings, tasks !== null),
       text: scanReport(scan, settings, date),
-    }, { origin: CLEANUP_ORIGIN, kind: MEMORY_REVIEW_KIND, textName: 'memory-scan.md' });
+    }, { origin: CLEANUP_ORIGIN, kind: MEMORY_REVIEW_KIND, textName: 'memory-scan.md', ...(tasks ? { files: tasks.files } : {}) });
+    // Marked only now that the copies are saved: a failure before this gathers them again next time, never loses them.
+    if (tasks) await recordGathered(ws, tasks, update.id);
     const found = scan.duplicates.length + scan.stale.length + scan.thin.length;
+    const fromTasks = tasks ? ` ${describeGathered(tasks)}` : '';
     return {
       id: update.id,
-      message: `Started memory review ${update.id} (${scan.notes} notes, ${scan.stakeholders} stakeholders; ${found} candidate${found === 1 ? '' : 's'} from the scan). Run the analyze command to get proposals.`,
+      message: `Started memory review ${update.id} (${scan.notes} notes, ${scan.stakeholders} stakeholders; ${found} candidate${found === 1 ? '' : 's'} from the scan).${fromTasks} Run the analyze command to get proposals.`,
     };
   }
 
@@ -789,6 +822,18 @@ async function holdsMeetingText(ws: string, id: string, keepText: boolean, delet
   return entries.length > 0;
 }
 
+/** Accepted tasks are gathered only while the memory review, which carries them, is on. */
+function gathering(settings: CleanupSettings): boolean {
+  return settings.memory_review.enabled && settings.memory_review.accepted_tasks;
+}
+
+function describeGathered(g: { gathered: number; leftOut: number; waiting: number }): string {
+  const parts = [`Gathered ${g.gathered} accepted task${g.gathered === 1 ? '' : 's'}`];
+  if (g.leftOut) parts.push(`left out ${g.leftOut} marked confidential or restricted`);
+  if (g.waiting) parts.push(`${g.waiting} wait for the next review`);
+  return `${parts.join('; ')}.`;
+}
+
 function describeCleaned(cleaned: CleanupRunResult['cleaned']): string {
   const verbs: Record<CleanupAction, string> = { archive: 'archived', trash: 'moved to the trash', delete: 'deleted' };
   const by = new Map<CleanupAction, number>();
@@ -797,16 +842,27 @@ function describeCleaned(cleaned: CleanupRunResult['cleaned']): string {
 }
 
 /** The body of the update: what the analyze command should do with it. */
-function memoryBrief(settings: CleanupSettings): string {
+function memoryBrief(settings: CleanupSettings, withTasks = false): string {
+  const tasks = withTasks ? [
+    '',
+    'materials/accepted-tasks.md lists the tasks the user accepted since the last review, with copies of their files.',
+    'Also propose what that work changed in `context/` or `stakeholders/`: a decision taken, a new owner, a date that',
+    'moved, a fact no longer true. Deliverables are claims written for an audience, not facts: check each against the',
+    'context, skip placeholders and estimates, cite the file a proposal rests on, and keep what the files state apart',
+    'from what you infer. Tasks marked confidential or restricted were left out; do not look for them.',
+    '',
+  ] : [];
   return [
-    'Opened by the weekly **System cleanup** job, not imported by you. There is no new material:',
-    'this review looks at the memory that is already in the workspace.',
+    withTasks
+      ? 'Opened by the weekly **System cleanup** job, not imported by you. It looks at the memory that is already in the\nworkspace, and at the work the user accepted since the last review.'
+      : 'Opened by the weekly **System cleanup** job, not imported by you. There is no new material:\nthis review looks at the memory that is already in the workspace.',
     '',
     'Review the whole context library and the stakeholder files, and propose only changes that make the',
     'memory more accurate and easier to use: merge duplicates, move a fact to the note where it belongs,',
     `remove what is obsolete or no longer useful, and flag notes not updated in ${settings.memory_review.stale_after_days} days or more that may be out of date.`,
     '',
     'materials/memory-scan.md lists what a quick mechanical scan found. It is a starting point, not a verdict.',
+    ...tasks,
     'Nothing changes until you approve the proposals.',
   ].join('\n');
 }
