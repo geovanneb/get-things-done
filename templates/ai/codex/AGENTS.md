@@ -57,7 +57,8 @@ asks for in conversation:
    `proposed_fix` and `files_affected`, `created_at`, and `status: proposed`. One root
    cause per note. The dashboard opens a Kaizen context update from it; never apply it
    yourself.
-4. Save deliverables to `tasks/active/<TASK-ID>/deliverables/`
+4. Save deliverables to `tasks/active/<TASK-ID>/deliverables/`. A deliverable with `fill_file` has no
+   output template: return that attached file answered, in a copy of the same format (`gtd-task` skill, Step 7)
 5. Log execution to `tasks/active/<TASK-ID>/executions/<timestamp>.md`
 6. The first time you set `in_progress`, also set `start_date` to the current UTC
    timestamp if it is missing. Leave it untouched afterwards — it marks when work

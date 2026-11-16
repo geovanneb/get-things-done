@@ -131,6 +131,14 @@ export default function NewTaskModal({
     setFiles((prev) => [...prev, ...incoming.filter((f) => !prev.some((p) => p.name === f.name && p.size === f.size))]);
   };
 
+  const removeFile = (file: File) => {
+    setFiles((prev) => prev.filter((p) => p !== file));
+    // A deliverable that answered in this file has to be pointed at another one.
+    if (!files.some((p) => p !== file && p.name === file.name)) {
+      setField('deliverables', form.deliverables.map((d) => d.fill_file === file.name ? { ...d, fill_file: '', format: undefined } : d));
+    }
+  };
+
   const tooBig = files.filter((f) => f.size > MAX_FILE);
 
   const validate = (): boolean => {
@@ -141,6 +149,11 @@ export default function NewTaskModal({
     setTitleError('');
     if (tooBig.length) {
       setSaveError(t('newTaskModal.removeFilesOver50Mb', { join: tooBig.map((f) => f.name).join(', ') }));
+      return false;
+    }
+    const unpicked = form.deliverables.findIndex((d) => d.fill_file !== undefined && !files.some((f) => f.name === d.fill_file));
+    if (unpicked >= 0) {
+      setSaveError(t('deliverableRow.pickTheFileForDeliverable', { value: `DEL-${String(unpicked + 1).padStart(2, '0')}` }));
       return false;
     }
     return true;
@@ -170,6 +183,8 @@ export default function NewTaskModal({
           id: `DEL-${String(i + 1).padStart(2, '0')}`,
           format: d.format,
           template_ref: d.template_ref,
+          // The server stores the name the upload below gives the file.
+          fill_file: d.fill_file,
           status: 'pending' as const,
         })),
         contexts: [],
@@ -271,6 +286,8 @@ export default function NewTaskModal({
                   onAdd={addDeliverable}
                   label={t('newTaskModal.outputType')}
                   emptyText={t('newTaskModal.noOutputsDefinedYet')}
+                  files={files.map((f) => f.name)}
+                  noFilesHint={t('newTaskModal.addTheFileUnderFiles')}
                 />
               </div>
 
@@ -284,7 +301,7 @@ export default function NewTaskModal({
                       <li key={`${f.name}-${f.size}`} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-sm)', padding: '2px 4px 2px 8px', background: 'var(--color-surface-hover)', borderRadius: 'var(--radius-sm)' }}>
                         <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{f.name}</span>
                         <span style={{ fontSize: 'var(--text-xs)', color: f.size > MAX_FILE ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>{formatBytes(f.size)}</span>
-                        <IconButton label={t('removeNamedFile', { name: f.name })} icon={icons.close} tone="danger" disabled={saving} onClick={() => setFiles((prev) => prev.filter((p) => p !== f))} />
+                        <IconButton label={t('removeNamedFile', { name: f.name })} icon={icons.close} tone="danger" disabled={saving} onClick={() => removeFile(f)} />
                       </li>
                     ))}
                   </ul>

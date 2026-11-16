@@ -1,4 +1,4 @@
-import { deleteAttachment, saveAttachment, topLevelName, workspaceEntry, withOfficeCheck, FolderFile } from '../utils/files';
+import { deleteAttachment, safeFileName, saveAttachment, topLevelName, workspaceEntry, withOfficeCheck, FolderFile } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
@@ -98,6 +98,32 @@ function checkTaskInput(data: Record<string, unknown>): void {
   const { status, priority } = data;
   if (status !== undefined && status !== null && !(STATUSES as readonly unknown[]).includes(status)) throw httpError(400, `Invalid status: use one of ${STATUSES.join(', ')}.`);
   if (priority !== undefined && priority !== null && !(PRIORITIES as readonly unknown[]).includes(priority)) throw httpError(400, `Invalid priority: use one of ${PRIORITIES.join(', ')}.`);
+  checkFillFiles(data);
+}
+
+/**
+ * A deliverable answered in one of the task's own files (`fill_file`) has no output template: it is a filled-in
+ * copy of that file, so its format is the file's type. The file is often picked before it is uploaded, and uploads
+ * are renamed ("Q&A sheet.xlsx" is saved as "Q_A_sheet.xlsx"), so the name is stored the way the upload saves it.
+ */
+function checkFillFiles(data: Record<string, unknown>): void {
+  const list = data['deliverables'];
+  if (!Array.isArray(list)) return;
+  data['deliverables'] = list.map((d: unknown) => {
+    if (!d || typeof d !== 'object' || !('fill_file' in d)) return d;
+    const { fill_file: raw, template_ref: _template, ...item } = d as Record<string, unknown>;
+    // null clears it (the deliverable goes back to an output template).
+    if (raw === null) return _template === undefined ? item : { ...item, template_ref: _template };
+    const id = typeof item['id'] === 'string' ? item['id'] : 'A deliverable';
+    if (typeof raw !== 'string' || !raw.trim()) throw httpError(400, `${id}: pick the attached file to answer in.`);
+    let name = '';
+    try { name = topLevelName(safeFileName(raw.trim())); } catch { /* refused below */ }
+    const ext = path.extname(name).slice(1).toLowerCase();
+    if (!name || name.startsWith('.') || name.toLowerCase() === 'task.md' || !/^[a-z0-9]{1,10}$/.test(ext)) {
+      throw httpError(400, `${id}: ${raw} cannot be answered in. Pick a file with a type, such as .xlsx or .docx.`);
+    }
+    return { ...item, fill_file: name, format: ext };
+  });
 }
 
 /**

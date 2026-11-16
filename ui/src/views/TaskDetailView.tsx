@@ -155,6 +155,8 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
   const { t } = useLanguage();
   const assistant = useAssistant();
   const { data: allStakeholders } = useApi<Stakeholder[]>('/api/stakeholders');
+  // For "Answer in an attached file" (not offered on an archived task, whose files are reached through its deliverables).
+  const { data: taskFiles } = useApi<Array<{ name: string }>>(`/api/tasks/${encodeURIComponent(task.id)}/files`, [savedCount]);
 
   const saveField = (field: string) => (value: unknown) => onFieldChange(field, value);
 
@@ -194,6 +196,8 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
             onRemove={removeDeliverable}
             onAdd={addDeliverable}
             readOnly={readOnly}
+            files={readOnly ? undefined : (taskFiles ?? []).map((f) => f.name)}
+            noFilesHint={t('taskDetail.addTheFileOnTheFilesTab')}
           />
         </div>
         <NameCheck task={task} dirty={dirty} />

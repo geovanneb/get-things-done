@@ -73,10 +73,14 @@
         "properties": {
           "id": {"type": "string"},
           "template_ref": {"type": "string"},
-          "format": {"type": "string", "enum": ["pptx", "docx", "pdf", "md", "xlsx", "html", "txt"]},
+          "fill_file": {"type": "string", "description": "Instead of an output template: the name of a file in the task's folder that the deliverable answers in. The deliverable is a filled-in copy of that file, in its format."},
+          "format": {"type": "string"},
           "status": {"type": "string", "enum": ["pending", "in_progress", "complete", "cancelled"]},
           "file_path": {"type": "string"}
-        }
+        },
+        "if": {"required": ["fill_file"]},
+        "then": {"properties": {"format": {"pattern": "^[a-z0-9]{1,10}$"}}},
+        "else": {"properties": {"format": {"enum": ["pptx", "docx", "pdf", "md", "xlsx", "html", "txt"]}}}
       }
     },
     "contexts": {

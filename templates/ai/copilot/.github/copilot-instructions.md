@@ -38,7 +38,8 @@ asks for in conversation:
   `proposed_fix` and `files_affected`, `created_at`, and `status: proposed`. One root
   cause per note. The dashboard opens a Kaizen context update from it; never apply it
   yourself.
-- Save deliverables to `tasks/active/<TASK-ID>/deliverables/`.
+- Save deliverables to `tasks/active/<TASK-ID>/deliverables/`. A deliverable with `fill_file` has no output
+  template: return that attached file answered, in a copy of the same format (`gtd-task` skill, Step 7).
 - Read the executive profile before writing anything — adapt voice and tone to match.
 - Adapt tone and detail to each stakeholder's profile.
 - Sharing labels on context notes: a note's `sensitivity` is `shareable`, `internal` (also when it is missing
