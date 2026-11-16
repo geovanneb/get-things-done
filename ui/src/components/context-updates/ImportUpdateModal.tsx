@@ -1,6 +1,7 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { useAssistant } from '@/hooks/useAssistant';
 import { tr } from '@/i18n/current';
+import { serverText } from '@/i18n/serverText';
 import { rich } from '@/i18n/rich';
 import { useEffect, useRef, useState } from 'react';
 import Modal from '@/components/common/Modal';
@@ -46,7 +47,7 @@ export async function uploadMaterial(updateId: string, file: File, workspace?: s
     });
     if (res.ok) return null;
     const body = await res.json().catch(() => null) as { message?: string } | null;
-    return `${file.name}: ${body?.message ?? tr('newTaskModal.uploadFailed', { status: res.status })}`;
+    return `${file.name}: ${body?.message ? serverText(body.message) : tr('newTaskModal.uploadFailed', { status: res.status })}`;
   } catch {
     return tr('newTaskModal.uploadFailed2', { name: file.name });
   }

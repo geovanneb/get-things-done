@@ -32,6 +32,7 @@ const RoutinesView = lazy(() => import('./views/RoutinesView'));
 const MeetingsView = lazy(() => import('./views/MeetingsView'));
 const AgentFloorView = lazy(() => import('./views/AgentFloorView'));
 const SetupView = lazy(() => import('./views/SetupView'));
+const GetStartedView = lazy(() => import('./views/GetStartedView'));
 const DesignSystemView = lazy(() => import('./views/DesignSystemView'));
 
 function AppInitializer() {
@@ -88,6 +89,8 @@ function AppRoutes() {
       <AppInitializer />
       <Suspense fallback={loading()}>
       <Routes>
+        {/* The get-started interview after the first-run setup: one step at a time, outside the app shell. */}
+        <Route path="get-started" element={<GetStartedView />} />
         <Route path="/" element={<AppLayout />}>
           <Route index element={<Navigate to="/situation" replace />} />
           <Route path="situation" element={<SituationView />} />

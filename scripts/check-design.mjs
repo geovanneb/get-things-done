@@ -41,13 +41,14 @@ const DIALOG_OWNERS = {
 // Routed views that do not use <Page>, with the reason.
 const PAGE_EXEMPT = {
   'views/SetupView.tsx': 'first-run flow outside the app shell',
+  'views/GetStartedView.tsx': 'the get-started interview after setup, outside the app shell',
   'views/AgentFloorView.tsx': 'experimental full-bleed canvas',
   'views/ContextView.tsx': 'split view (gtd-split), owns its panes',
   'views/TaskDetailView.tsx': 'a dialog over the board, not a page',
   'views/MeetingDetailView.tsx': 'a dialog over the Meetings list, not a page',
 };
 
-const H1_OWNERS = ['components/layout/Header.tsx', 'views/SetupView.tsx'];
+const H1_OWNERS = ['components/layout/Header.tsx', 'views/SetupView.tsx', 'views/GetStartedView.tsx'];
 
 const isArt = (rel) => ART_AND_DATA.some(([p]) => rel.startsWith(p));
 const RAW_COLOR = /(['"`])#[0-9a-fA-F]{3,8}\1|\b(?:rgba?|hsla?)\(\s*\d|\boklch\(\s*[\d.]/;

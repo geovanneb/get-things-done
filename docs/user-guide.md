@@ -93,6 +93,25 @@ gtd start
 It opens <http://localhost:3001> in your browser and keeps running in the
 background. Close the terminal; it stays up. `gtd stop` when you are done.
 
+### Give your assistant a head start
+
+A new workspace knows nothing about your work yet. Right after setup, the dashboard offers
+**Get started**: a short interview (you and your work, your organization, the people and other
+organizations you deal with, what is going on now) and a place to drop the files you already
+have, such as org charts, strategy decks, status reports and meeting notes. It takes about
+10 minutes, every question is optional, and your answers are saved as you type, so you can stop
+with **Finish later** and continue from the Situation page.
+
+**Organize my workspace** sends it all to your assistant as one context update (shown as
+*First context* under **Context > Updates**). The analysis builds your first context notes,
+stakeholders, groups and org chart, and ends with what it understood, the gaps and a few
+suggested first tasks. As with any update, nothing is written until you review and approve it.
+With Claude Code the dashboard starts the analysis itself; with Codex or Copilot the update page
+shows the request to paste. The answers about you (responsibilities, communication style,
+languages) also go into your profile, where it is still empty.
+
+**Not now** stops the offer. You can always add context later with an ordinary update.
+
 ### Scripted setup
 
 For dotfiles, containers or CI, skip the prompts entirely:

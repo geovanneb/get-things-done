@@ -15,6 +15,8 @@ export function serverText(text: string | null | undefined) {
   if (memory) return tr('server.lowMemory', { total: memory[1], heavy: memory[2], needed: memory[3], light: memory[4] });
   const billed = /^This workspace's \.claude\/settings\.json sets (.+), which would bill an API account instead of your plan\. Remove it to run from the dashboard\.$/.exec(text);
   if (billed) return tr('server.workspaceAuth', { settings: billed[1] });
+  const duplicate = /^This file is already in the update, as (.+)$/.exec(text);
+  if (duplicate) return tr('server.duplicateMaterial', { name: duplicate[1] });
   return text;
 }
 

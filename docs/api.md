@@ -921,3 +921,29 @@ POST /api/setup
 → 409 {"error":"This folder is not a Get Things Done workspace yet.","needs_init":true,"path":"/Users/alex/Downloads"}
 ```
 
+## First context
+
+After setup, the dashboard offers **Get started** (`/get-started`): a short interview and the
+executive's own files, sent to their assistant as one context update with `origin: onboarding`
+and `kind: first-context`. The analyze command then builds the first context library and
+stakeholders from it, and the executive reviews every proposal as for any update. The answers are
+saved as a draft in `.situation-board/first-context.json` while the executive goes through the
+steps.
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| `GET` | `/api/first-context` | The draft (`status`, `answers`), its update (or `null`), `memory_empty`, and `suggested`: whether the dashboard should offer it |
+| `PUT` | `/api/first-context` | `{ answers }`: save the draft. Fields over their limits are shortened, not refused. `409` once sent |
+| `POST` | `/api/first-context/update` | `{ title }`: the update the files go into, made on the first file; files are then added with `POST /api/context-updates/:id/materials` |
+| `POST` | `/api/first-context/submit` | `{ answers, title }`: write the interview to the update as `first-context-interview.md`, fill the empty profile sections it answers, and mark the draft sent. `400` with no answer and no file |
+| `POST` | `/api/first-context/skip` | "Not now": stop offering it; the answers are kept |
+| `POST` | `/api/first-context/restart` | Start again after sending: the answers stay, the next files go into a new update |
+
+`status` is `not_started`, `in_progress`, `skipped` or `submitted`. `suggested` is true for a draft
+in progress, or for a workspace never started whose `context/` and `stakeholders/people/` are
+empty, so a workspace already in use is never asked to get started.
+
+`answers` holds `work` (`responsibilities`, `priorities`, `communication_style`,
+`language_preferences`), `organization` (`overview`, `structure`, `strategy`), `people` (each
+`name`, `role`, `organization`, `relationship`, `notes`), `organizations` (each `name`,
+`relationship`, `notes`), `current` (`programs`, `decisions`, `risks`, `glossary`) and `notes`.

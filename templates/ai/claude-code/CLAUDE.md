@@ -231,6 +231,12 @@ Kaizen note in `kaizen/`. `/gtd-context-analyze` checks the root cause against t
 and drafts the smallest change that prevents it; such an update may also change
 `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md` and the output templates.
 
+An update with `origin: onboarding` and `kind: first-context` was made by the dashboard's
+get-started interview for a new workspace: the executive's answers and their own files.
+`/gtd-context-analyze` builds the first context library and stakeholders from it (the
+opposite of changing little), and ends with what it understood, the gaps and suggested
+first tasks.
+
 ## Schema references
 
 All frontmatter structures are documented in `.schemas/`. Refer to these when creating new files:

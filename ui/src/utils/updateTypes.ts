@@ -5,7 +5,7 @@ import type { ContextUpdate, ContextUpdateStatus } from '@/types';
  * What kind of update it is, from who opened it. One list of types feeds the filter, the badge and the counts,
  * so a new kind of update is one more entry here.
  */
-export type UpdateType = 'imported' | 'meeting-digest' | 'meeting-correction' | 'correction-follow-up' | 'memory-review' | 'kaizen' | 'other';
+export type UpdateType = 'imported' | 'meeting-digest' | 'meeting-correction' | 'correction-follow-up' | 'memory-review' | 'kaizen' | 'first-context' | 'other';
 
 export const UPDATE_TYPES = (): { id: UpdateType; label: string; hint: string }[] => ([
   { id: 'imported', label: tr('updateTypes.imported'), hint: tr('updateTypes.materialYouImportedFilesOr') },
@@ -14,10 +14,11 @@ export const UPDATE_TYPES = (): { id: UpdateType; label: string; hint: string }[
   { id: 'correction-follow-up', label: tr('updateTypes.followUp'), hint: tr('updateTypes.openedFromAFinishedCorrection') },
   { id: 'memory-review', label: tr('systemCleanup.memoryReview'), hint: tr('updateTypes.openedByTheWeeklySystem') },
   { id: 'kaizen', label: tr('updateTypes.kaizen'), hint: tr('updateTypes.openedAfterATaskNeeded') },
+  { id: 'first-context', label: tr('updateTypes.firstContext'), hint: tr('updateTypes.madeByGetStarted') },
   { id: 'other', label: tr('updateTypes.other'), hint: tr('updateTypes.openedBySomethingThisVersion') },
 ]);
 
-const BY_ORIGIN: Record<string, UpdateType> = { meetings: 'meeting-digest', 'system-cleanup': 'memory-review', kaizen: 'kaizen' };
+const BY_ORIGIN: Record<string, UpdateType> = { meetings: 'meeting-digest', 'system-cleanup': 'memory-review', kaizen: 'kaizen', onboarding: 'first-context' };
 
 /** Who opened it decides the type; within the meetings, a correction is told apart by its kind. */
 type Typed = Pick<ContextUpdate, 'origin'> & { kind?: string | null };

@@ -13,6 +13,7 @@ import { useStakeholderNames } from '../hooks/useStakeholderNames';
 import { usePendingActions, TONE_COLOR, type PendingAction } from '../hooks/usePendingActions';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
+import FirstContextPrompt from '../components/situation/FirstContextPrompt';
 import { formatDate, formatDueStatus, formatRelativeTime, formatStatusLabel } from '../utils/format';
 
 /* ---- Metric Card -------------------------------------------------- */
@@ -277,6 +278,7 @@ export default function SituationView() {
 
   return (
     <Page width="wide" className="situation">
+      <FirstContextPrompt />
       {/* Metric cards */}
       <div className="situation__metrics" role="region" aria-label={t('situation.keyMetrics')}>
         <MetricCard

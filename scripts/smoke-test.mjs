@@ -177,6 +177,11 @@ try {
   const setupStatus = await setupResponse.json();
   check('setup reports the open workspace, so the dashboard skips the setup screen',
     setupStatus.configured === true && setupStatus.ai_tools?.length === 3);
+  const firstContext = await (await fetch(`${base}/api/first-context`)).json();
+  check('a new workspace, with an empty memory, is offered the get-started interview',
+    firstContext.status === 'not_started' && firstContext.suggested === true && firstContext.update === null, JSON.stringify(firstContext).slice(0, 200));
+  check('the workspace analyze command knows how to build a first context',
+    fs.readFileSync(path.join(ws, '.claude', 'commands', 'gtd-context-analyze.md'), 'utf8').includes('kind: first-context'));
   const malformed = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
   check('malformed JSON returns a client error', malformed.status === 400);
   fs.writeFileSync(path.join(tmp, 'outside.txt'), 'private fixture');
@@ -278,6 +283,8 @@ try {
 
   const people = await (await fetch(`${base}/api/stakeholders`)).json();
   check('stakeholders are listed', people.length === 6, `count=${people.length}`);
+  const usedFirstContext = await (await fetch(`${base}/api/first-context`)).json();
+  check('a workspace already in use is not offered the get-started interview', usedFirstContext.suggested === false && usedFirstContext.memory_empty === false);
 
   const search = await (await fetch(`${base}/api/search?q=carrier`)).json();
   check('search finds seeded content', (search.results ?? []).length > 0);
