@@ -25,6 +25,7 @@
     "test:meeting-action": "tsx src/utils/meetingAction.test.ts",
     "test:desktop-bridge": "tsx src/utils/desktop.test.ts",
     "test:setup": "tsx src/utils/setup.test.ts",
+    "test:first-context": "tsx src/utils/firstContext.test.ts",
     "test:assistant": "tsx src/utils/assistant.test.ts",
     "test:nav": "tsx src/components/layout/navGroups.test.ts",
     "test:search-results": "tsx src/utils/searchResults.test.ts",

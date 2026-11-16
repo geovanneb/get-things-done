@@ -23,6 +23,7 @@ check('the meeting digest and memory review are told apart by origin',
   updateType({ origin: 'meetings' }) === 'meeting-digest' && updateType({ origin: 'system-cleanup' }) === 'memory-review');
 check('an unknown origin is "other", never an import', updateType({ origin: 'future-job' }) === 'other');
 check('a Kaizen is its own type', updateType({ origin: 'kaizen' }) === 'kaizen');
+check('the get-started interview is its own type', updateType({ origin: 'onboarding', kind: 'first-context' }) === 'first-context');
 check('a correction is told from a digest by its kind',
   updateType({ origin: 'meetings', kind: 'meeting-correction' }) === 'meeting-correction' && updateType({ origin: 'meetings', kind: 'daily-digest' }) === 'meeting-digest');
 check('a follow-up of a correction is its own type', updateType({ origin: 'meetings', kind: 'correction-follow-up' }) === 'correction-follow-up');

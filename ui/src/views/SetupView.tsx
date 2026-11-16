@@ -7,6 +7,7 @@ import Input from '@/components/common/Input';
 import Toggle from '@/components/common/Toggle';
 import Badge from '@/components/common/Badge';
 import { pickFolder } from '@/utils/desktop';
+import { ASSISTANT_LABELS } from '@/utils/assistant';
 import {
   createRequest,
   initialAnswers,
@@ -323,6 +324,7 @@ export default function SetupView({ status }: { status: SetupStatus }) {
     );
   } else {
     const pending = toolsToInstall(answers, status.ai_tools);
+    const assistant = answers.aiTools[0] ? ASSISTANT_LABELS[answers.aiTools[0]] : ASSISTANT_LABELS['claude-code'];
     content = (
       <>
         <h1 style={title}>{t('setup.yourWorkspaceIsReady')}</h1>
@@ -341,8 +343,13 @@ export default function SetupView({ status }: { status: SetupStatus }) {
             {t('setup.youCanDoItAny')}
           </div>
         )}
-        <div style={{ ...footer, justifyContent: 'flex-end' }}>
-          <Button variant="primary" onClick={openDashboard}>{t('setup.openTheDashboard')}</Button>
+        <div style={{ marginTop: 24, padding: '16px 18px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--color-accent)', background: 'var(--color-accent-subtle)' }}>
+          <div style={{ fontSize: 'var(--text-md)', fontWeight: 600, marginBottom: 4 }}>{t('getStarted.giveAHeadStart', { assistant })}</div>
+          <div style={muted}>{t('setup.headStartText', { assistant })}</div>
+        </div>
+        <div style={{ ...footer, flexWrap: 'wrap' }}>
+          <Button variant="ghost" onClick={openDashboard}>{t('setup.skipForNowOpenTheDashboard')}</Button>
+          <Button variant="primary" onClick={() => window.location.assign('/get-started')} autoFocus>{t('getStarted.getStarted')}</Button>
         </div>
       </>
     );
