@@ -40,6 +40,8 @@ export interface Task {
   deliverables: Array<{
     id?: string;
     template_ref?: string;
+    /** Instead of an output template: the task file this deliverable answers in. */
+    fill_file?: string;
     format?: string;
     status?: 'pending' | 'in_progress' | 'complete' | 'cancelled';
     file_path?: string;

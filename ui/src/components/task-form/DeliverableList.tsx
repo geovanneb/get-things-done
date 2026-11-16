@@ -14,6 +14,10 @@ interface DeliverableListProps {
   emptyText?: string;
   /** Shown as it is: no adding (an archived task). */
   readOnly?: boolean;
+  /** The task's files, for "Answer in an attached file"; left out where tasks have no files (routines). */
+  files?: string[];
+  /** Where to add a file when none is attached yet. */
+  noFilesHint?: string;
 }
 
 /**
@@ -28,6 +32,8 @@ export default function DeliverableList({
   label = tr('deliverableList.deliverables'),
   emptyText = tr('deliverableList.noDeliverablesDefined'),
   readOnly = false,
+  files,
+  noFilesHint,
 }: DeliverableListProps) {
   const { data: templates } = useApi<OutputTemplate[]>('/api/outputs/templates');
 
@@ -51,6 +57,8 @@ export default function DeliverableList({
               templates={templates ?? []}
               onChange={(patch) => onChange(i, patch)}
               onRemove={() => onRemove(i)}
+              files={files}
+              noFilesHint={noFilesHint}
             />
           ))}
         </div>

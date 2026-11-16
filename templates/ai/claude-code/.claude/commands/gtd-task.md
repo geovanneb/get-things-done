@@ -74,6 +74,8 @@ Also list all files in the template folder (`outputs/templates/<template-slug>/`
 
 If the template folder contains a document file whose format matches the deliverable format (`.pptx`/`.potx` for PPTX, `.docx`/`.dotx` for DOCX, `.xlsx` for XLSX), that file **is** the template. Do not generate the deliverable from scratch and do not treat the file as a color or style reference. Copy it, then edit it in place: keep its slide masters, layouts, placeholders, logos, footers and page numbers, and replace only the sample content with yours. Reuse its existing layouts rather than drawing new ones. Delete the guide and sample pages the template ships with before saving. Confirm no template sample text survives in the output.
 
+**A deliverable with `fill_file` has no output template.** The executive attached a file to the task (a questionnaire, a form, a sheet to complete) and wants it back answered. `fill_file` names that file in the task folder, `tasks/active/$ARGUMENTS/<fill_file>`; the other files in the folder are reference material. Skip the template steps above for this deliverable and follow "Answering in an attached file" in Step 7. If `fill_file` is empty or the file is not in the task folder, ask the executive which file to answer in; never guess between the attached files.
+
 ## Step 7 — Produce the deliverable
 
 Write the output with all of the above loaded. The output must:
@@ -94,6 +96,8 @@ Save the deliverable in the format specified by the template's `format` field:
 Never produce an HTML file when the template specifies a different format.
 
 Save to `tasks/active/$ARGUMENTS/deliverables/<DEL-ID>.<extension>` where the extension matches the format above.
+
+**Answering in an attached file** (a deliverable with `fill_file`): copy the file to `tasks/active/$ARGUMENTS/deliverables/<DEL-ID>.<format>` (its `format` is the file's own type) and fill in the copy. Never change the original. Answer every question, blank cell and empty field the file asks for, in place. Keep everything else as it is: the structure, sheets, tables, styles, the questions' wording and the file's language, unless the objective says otherwise. Use the skill for the file's format (`xlsx`, `docx`, `pptx`, `pdf`) when one is available. The output template rules above do not apply; the voice, audience and placeholder rules do, and a question you cannot answer from the task, the context or the reference files gets a placeholder rather than an invented answer.
 
 ## Step 8 — Verify names and terminology
 

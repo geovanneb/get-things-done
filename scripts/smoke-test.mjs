@@ -568,6 +568,29 @@ try {
       up.status === 201 && Array.isArray(listed) && listed.some((f) => f.name === 'brief.txt'), `${up.status} ${JSON.stringify(listed).slice(0, 200)}`);
   }
 
+  // "Answer in an attached file": picked in the New Task modal before the upload renames it, the deliverable still
+  // names the saved file, with the file's type as its format and no output template.
+  {
+    const res = await fetch(`${base}/api/tasks`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Fill the fictional form', deliverables: [{ id: 'DEL-01', fill_file: 'Fictional form (v1).docx', status: 'pending' }] }),
+    });
+    const task = await res.json();
+    const form = new FormData();
+    form.append('file', new Blob(['fictional form']), 'Fictional form (v1).docx');
+    const saved = await (await fetch(`${base}/api/tasks/${task.id}/files`, { method: 'POST', body: form })).json();
+    const deliverable = (await (await fetch(`${base}/api/tasks/${task.id}`)).json()).deliverables?.[0];
+    const unpicked = await fetch(`${base}/api/tasks/${task.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deliverables: [{ id: 'DEL-01', fill_file: '', status: 'pending' }] }),
+    });
+    check('a deliverable answered in an attached file names the uploaded file, in its format',
+      res.status === 201 && deliverable?.fill_file === saved.name && deliverable?.format === 'docx' && !('template_ref' in deliverable)
+        && unpicked.status === 400,
+      JSON.stringify({ status: res.status, saved: saved.name, deliverable, unpicked: unpicked.status }));
+    await fetch(`${base}/api/tasks/${task.id}`, { method: 'DELETE' });
+  }
+
   // An Office file agents cannot read is reported on upload, in the list, by validation and in the execution package,
   // also when an agent wrote it straight into the task folder. (Encrypted packages are covered by the server tests.)
   {
