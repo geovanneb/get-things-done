@@ -4,7 +4,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import {
-  FirstContextService, INTERVIEW_FILE, emptyAnswers, hasAnswers, interviewMarkdown, normalizeAnswers,
+  FirstContextService, INTERVIEW_FILE, emptyAnswers, hasAnswers, interviewMarkdown, normalizeAnswers, onlyComments,
 } from '../src/services/firstContext';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { ProfileService } from '../src/services/profileService';
@@ -56,6 +56,15 @@ test('answers are cleaned, not refused, while the executive types; anything but 
   assert.equal(hasAnswers(emptyAnswers()), false);
   assert.equal(hasAnswers(normalizeAnswers({ people: [{ relationship: 'peer' }] })), false, 'a relationship alone is no answer');
   assert.equal(hasAnswers(cleaned), true);
+});
+
+test('a profile section is empty when it holds only placeholder comments', () => {
+  assert.equal(onlyComments(''), true);
+  assert.equal(onlyComments('  <!-- Describe your main responsibilities here -->\n'), true);
+  assert.equal(onlyComments('<!-- a --> <!-- b -->'), true);
+  assert.equal(onlyComments('<!-- note --> Runs operations'), false);
+  assert.equal(onlyComments('Runs operations <!-- note -->'), false);
+  assert.equal(onlyComments('<!-- never closed'), false);
 });
 
 test('the interview keeps the executive text as data and says which questions were skipped', () => {
@@ -186,7 +195,7 @@ test('the analyze command, and every assistant, knows how to build a first conte
   const root = path.join(__dirname, '..', '..', 'templates');
   const command = await fsp.readFile(path.join(root, 'ai', 'claude-code', '.claude', 'commands', 'gtd-context-analyze.md'), 'utf-8');
   assert.match(command, /## First context \(`origin: onboarding`, `kind: first-context`\)/);
-  assert.match(command, new RegExp(INTERVIEW_FILE.replace(/\./g, '\\.')));
+  assert.ok(command.includes(INTERVIEW_FILE), 'the command names the interview file');
   for (const file of ['ai/claude-code/CLAUDE.md', 'ai/codex/AGENTS.md', 'ai/copilot/.github/copilot-instructions.md']) {
     assert.match(await fsp.readFile(path.join(root, file), 'utf-8'), /kind: first-context/, file);
   }

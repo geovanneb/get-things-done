@@ -236,6 +236,17 @@ export function interviewMarkdown(answers: FirstContextAnswers, profile: { name?
   return `${out.join('\n')}\n`;
 }
 
+/** True when the text is nothing but whitespace and complete `<!-- ... -->` comments. Reads the text; never changes it. */
+export function onlyComments(text: string): boolean {
+  let rest = text.trim();
+  while (rest.startsWith('<!--')) {
+    const end = rest.indexOf('-->', 4);
+    if (end < 0) return false;
+    rest = rest.slice(end + 3).trim();
+  }
+  return rest === '';
+}
+
 /** True when a folder holds at least one Markdown file somewhere below it (`note.md`, `STK-0001.md`). */
 async function hasMarkdown(dir: string, depth = 3): Promise<boolean> {
   const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
@@ -416,7 +427,7 @@ export class FirstContextService {
     const profile = await profiles.getProfile();
     const patch: Record<string, string> = {};
     // A new workspace's profile holds a placeholder comment in each section ("<!-- Describe ... -->"): that is empty.
-    const isEmpty = (current: unknown) => typeof current !== 'string' || current.replace(/<!--[\s\S]*?-->/g, '').trim() === '';
+    const isEmpty = (current: unknown) => typeof current !== 'string' || onlyComments(current);
     const fill = (key: 'responsibilities' | 'communication_style' | 'language_preferences', value: string) => {
       if (value && isEmpty(profile[key])) patch[key] = value;
     };
