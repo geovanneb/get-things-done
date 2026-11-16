@@ -8,6 +8,76 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-17
+
+**Get started, with any assistant.** A new workspace now offers **Get started**: a short interview
+and a place to drop the files you already have, which your assistant turns into your first context
+notes, stakeholders and org chart, for you to review. Codex and Copilot workspaces get the **same
+procedures, specialists and skills** as Claude Code, and the dashboard **opens and talks to the
+assistant your workspace uses** instead of assuming Claude Code. A task can also be answered **in a
+file you attached**, such as a questionnaire to fill in, and a new System cleanup setting keeps the
+original files of new context updates by default.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.16.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.16.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.16.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.16.0`, or **Update and restart** in Settings. The task
+schema gains the optional `fill_file` field and the context update schema the `first-context` kind.
+The agent instructions for Claude Code, Codex and Copilot learn the get-started analysis and how to
+answer in an attached file, and Codex and Copilot workspaces get the new `.agents/skills/` folder.
+The dashboard brings these up to date when it opens a workspace, or run `gtd upgrade`. If you
+changed your instructions file, it is kept: **Settings > Instruction updates** shows the new version
+to merge. If you call the API directly, see Changed: `POST /api/workspace/open-claude` is now
+`POST /api/workspace/open-assistant`.
+
+### Added
+
+- **Get started: give your assistant a head start.** Right after setup, and on the Situation page
+  of a workspace whose memory is still empty, the dashboard offers a short interview: you and your
+  work, your organization, the people and other organizations you deal with, and what is going on
+  now. You can also drop the files you already have, such as org charts, strategy decks and status
+  reports. Every question is optional and answers are saved as you type, so **Finish later** picks
+  up where you left off. **Organize my workspace** sends it all as one context update (*First
+  context*), whose analysis proposes your first context notes, stakeholders, groups and org chart
+  and ends with what it understood, the gaps and a few suggested first tasks. Nothing is written
+  until you review and approve it. Your answers about yourself also fill your profile where it is
+  still empty. **Not now** stops the offer for good. Works with Claude Code, Codex and Copilot, in
+  all four languages. (#443, #448)
+- **Codex and Copilot get the full procedures.** Their workspaces only had short summaries. They now
+  get the same task, context analysis and context apply procedures, the four specialists and the
+  five skills as Claude Code, as Agent Skills in `.agents/skills/`, which both tools read.
+  `AGENTS.md` and `copilot-instructions.md` point to them. Existing workspaces get the files on
+  their next refresh, and a file you edited is kept with the new version beside it. (#437)
+- **Answer in an attached file.** A deliverable can now be **Answer in an attached file** instead
+  of an output template: pick one of the task's files (a form, a questionnaire, a Q&A sheet) and
+  the assistant returns a filled-in copy in the same format, keeping its structure, styles and
+  language, and uses placeholders instead of inventing answers. The original is never changed, and
+  the task's other files stay reference material. With one file attached, it is picked already.
+  (#442)
+- **Keep the original files of new context updates by default.** A new System cleanup setting,
+  under Finished context updates, ticks **Keep the original files after this update finishes** on
+  every update you create. You can still untick it on each update. It is off by default, and the
+  dashboard's own updates (meeting digests, memory reviews, Kaizen) keep their own rules. (#440)
+
+### Changed
+
+- **The dashboard follows your workspace's assistant.** It assumed Claude Code everywhere. Now the
+  header button is **Open Claude Code**, **Open Codex** or **Open Copilot**, for the first assistant
+  the workspace was set up for. Codex opens in a terminal like Claude Code; Copilot does too with
+  its CLI installed, otherwise VS Code opens the workspace. The requests to copy follow the
+  assistant: slash commands for Claude Code, plain words for Codex and Copilot ("Execute task
+  TASK-…"). With more than one assistant, a context update shows the request for each. One-click
+  runs are still Claude Code only, and a workspace without it now says so and copies the request
+  instead of "Claude Code is not installed". (#438)
+- **API:** `GET /api/workspace` now returns `ai_tools`, and `POST /api/workspace/open-assistant`
+  (with an optional `tool`) replaces `POST /api/workspace/open-claude`, which is removed. See
+  [docs/api.md](docs/api.md). (#438)
+- Dependency updates: Electron 45.3.2 and dugite 3.3.3 in the desktop app, `@inquirer/prompts`
+  8.8.0 and `express-rate-limit` 8.7.4, and the usual development tools. (#444 to #447)
+
 ## [0.15.0] - 2026-11-15
 
 **Queue a second analysis, and keep every save.** Running analysis on a context update while
@@ -1375,7 +1445,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/geovanneb/get-things-done/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/geovanneb/get-things-done/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/geovanneb/get-things-done/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/geovanneb/get-things-done/compare/v0.13.0...v0.13.1
