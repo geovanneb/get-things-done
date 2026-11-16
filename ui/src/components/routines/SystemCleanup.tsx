@@ -333,6 +333,14 @@ export function SystemCleanupEditor({ isOpen, job, onClose, onSaved }: { isOpen:
                         description={t('systemCleanup.onlyTheMeetingTextNot')} />
                     </div>
                   )}
+                  {r.type === 'context_updates' && (
+                    <div style={{ gridColumn: 2 }}>
+                      <Checkbox checked={draft.context_updates.keep_materials}
+                        onChange={(on) => { setDraft({ ...draft, context_updates: { keep_materials: on } }); setPreview(null); }}
+                        label={t('systemCleanup.keepTheOriginalFilesOfNewUpdates')}
+                        description={t('systemCleanup.newUpdatesStartWithKeepTicked')} />
+                    </div>
+                  )}
                 </div>
               );
             })}

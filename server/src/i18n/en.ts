@@ -1436,6 +1436,8 @@ export const en = {
   "systemCleanup.days2": "days",
   "systemCleanup.keepMeetingTranscriptsAndNotes": "Keep meeting transcripts and notes after review",
   "systemCleanup.onlyTheMeetingTextNot": "Only the meeting text, not other materials. Recordings are kept with Keep recordings in Settings > Transcription. Off: they are deleted when the review is done, as before.",
+  "systemCleanup.keepTheOriginalFilesOfNewUpdates": "Keep the original files of new updates by default",
+  "systemCleanup.newUpdatesStartWithKeepTicked": "Every update you create starts with \"Keep the original files\" ticked; untick it on an update to let its files go when it is done. Off: the files are deleted when the update is done, as before.",
   "systemCleanup.advanced": "Advanced",
   "systemCleanup.protectTasksWithTheTag": "Protect tasks with the tag",
   "systemCleanup.atMostThisManyItems": "At most this many items per run",

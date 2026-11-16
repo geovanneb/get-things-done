@@ -233,6 +233,28 @@ test('a done update left with materials by the agent is cleaned up when opened',
   await assert.rejects(fsp.access(path.join(ws, 'context-updates', id, 'proposals')));
 });
 
+test('with "keep the original files" on by default, a new update starts kept, and unticking it lets the files go', async (t) => {
+  const ws = await workspace(t);
+  const service = new ContextUpdateService();
+  const settingsFile = path.join(ws, '.situation-board', 'routines', 'system-cleanup.json');
+  assert.equal((await service.create({ text: 'Before the setting' })).keep_materials, false, 'off until the user turns it on');
+
+  await fsp.mkdir(path.dirname(settingsFile), { recursive: true });
+  await fsp.writeFile(settingsFile, JSON.stringify({ context_updates: { keep_materials: true } }));
+  const kept = await service.create({ text: 'Notes from a fictional supplier' });
+  assert.equal(kept.keep_materials, true, 'a new update starts with the box ticked');
+  await analyze(ws, kept.id, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md' }], { 'P-01.md': 'New plan\n' });
+  await service.close(kept.id);
+  assert.equal(await fsp.readFile(await service.materialPath(kept.id, 'pasted-text.md'), 'utf-8'), 'Notes from a fictional supplier', 'kept after done');
+
+  // The default is only the starting point: the user can still untick it on one update.
+  const released = await service.create({ text: 'A throwaway note' });
+  assert.equal((await service.keepMaterials(released.id, false)).keep_materials, false);
+  await analyze(ws, released.id, [{ id: 'P-01', action: 'update', target: 'context/strategy/growth-plan/note.md' }], { 'P-01.md': 'Newer plan\n' });
+  await service.close(released.id);
+  await assert.rejects(fsp.access(path.join(ws, 'context-updates', released.id, 'materials')));
+});
+
 test('kept materials survive closing and opening a done update, and go only when the user releases them', async (t) => {
   const ws = await workspace(t);
   const service = new ContextUpdateService();

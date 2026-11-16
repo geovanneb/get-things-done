@@ -19,7 +19,7 @@ import { TaskService } from './taskService';
 import { readManifest } from './scaffold';
 import { heldMeetings, isMeetingId, meetingLinks, meetingTextToKeep, ownFiles } from './meetingLibrary';
 import { folderFiles, folderOf, meetingFiles, meetingsRoot, moveMeetingText, trashFoldersOf } from './meetingFolder';
-import { meetingTextKept } from './meetingTextSetting';
+import { materialsKeptByDefault, meetingTextKept } from './meetingTextSetting';
 import type { Task } from '../types';
 import { parseChange } from './transcriptChanges';
 import { effectiveChanges, effectiveProblems, suggestionProblem, transcriptBase, transcriptReview, writerChange, type TranscriptReview } from './correctionTranscript';
@@ -2004,6 +2004,8 @@ export class ContextUpdateService {
       materials: await this.materialList(dir),
       ...(transcripts.length ? { transcripts } : {}),
       ...(problems.length ? { transcript_problems: problems } : {}),
+      // The user's default for updates they make; the dashboard's own updates (digests, reviews, Kaizen) have their own rules.
+      ...(!system && await materialsKeptByDefault() ? { keep_materials: true } : {}),
       proposals: [],
     };
     await this.write(path.join(dir, 'update.md'), data, notes, {});

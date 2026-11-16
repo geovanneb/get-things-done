@@ -1437,6 +1437,8 @@ export default {
   "systemCleanup.days2": "dias",
   "systemCleanup.keepMeetingTranscriptsAndNotes": "Manter transcrições e notas após a revisão",
   "systemCleanup.onlyTheMeetingTextNot": "Apenas o texto da reunião, não outros materiais. Gravações são mantidas com Manter gravações em Configurações > Transcrição. Desativado: são excluídos ao fim da revisão, como antes.",
+  "systemCleanup.keepTheOriginalFilesOfNewUpdates": "Manter por padrão os arquivos originais das novas atualizações",
+  "systemCleanup.newUpdatesStartWithKeepTicked": "Toda atualização que você criar começa com \"Manter os arquivos originais\" marcado; desmarque em uma atualização para que os arquivos dela sejam excluídos quando ela terminar. Desativado: os arquivos são excluídos quando a atualização termina, como antes.",
   "systemCleanup.advanced": "Avançado",
   "systemCleanup.protectTasksWithTheTag": "Proteger tarefas com a etiqueta",
   "systemCleanup.atMostThisManyItems": "No máximo estes itens por execução",
