@@ -403,7 +403,11 @@ export class FirstContextService {
 
       // Saved before the update changes, so a failure below leaves the answers safe and the step can be tried again.
       await this.writeStored({ status: 'in_progress', answers, update_id: update?.id ?? null, interview_file: update ? stored?.interview_file ?? null : null });
-      if (!update) update = await this.createUpdate(input.title);
+      if (!update) {
+        update = await this.createUpdate(input.title);
+        // Keep the new update linked before profile or material writes can fail, including across an app restart.
+        await this.writeStored({ status: 'in_progress', answers, update_id: update.id, interview_file: null });
+      }
       if (update.id === stored?.update_id && stored.interview_file && update.materials.some((m) => m.name === stored.interview_file)) {
         await this.updates.removeMaterial(update.id, stored.interview_file);
       }

@@ -131,6 +131,33 @@ test('the draft is saved, files go into one first-context update, and sending wr
   await assert.rejects(service.submit({ answers: answers() }), /already sent/);
 });
 
+test('retrying a submission after a profile read failure reuses its first update', async (t) => {
+  const ws = await workspace(t);
+  const profilePath = path.join(ws, 'profile', 'executive-profile.md');
+  const original = await fsp.readFile(profilePath);
+  await fsp.unlink(profilePath);
+  await fsp.mkdir(profilePath);
+  const service = new FirstContextService();
+  const updates = new ContextUpdateService();
+
+  await assert.rejects(service.submit({ answers: answers() }), { code: 'EISDIR' });
+  const pending = await updates.list();
+  assert.equal(pending.length, 1);
+  const draft = await service.get();
+  assert.equal(draft.status, 'in_progress');
+  assert.deepEqual(draft.answers, answers());
+  assert.equal(draft.update?.id, pending[0]!.id, 'the created update stays linked after failure');
+
+  await fsp.rmdir(profilePath);
+  await fsp.writeFile(profilePath, original);
+  // A new service models retrying after the app has restarted.
+  const sent = await new FirstContextService().submit({ answers: answers() });
+  assert.equal(sent.status, 'submitted');
+  assert.equal(sent.update?.id, pending[0]!.id);
+  assert.equal((await updates.list()).length, 1, 'retry must not leave an orphan update');
+  assert.equal(sent.update?.materials.filter((m) => m.name === INTERVIEW_FILE).length, 1);
+});
+
 test('an own file named like the interview stays, and starting over after sending makes a fresh update', async (t) => {
   const ws = await workspace(t);
   const service = new FirstContextService();
