@@ -918,6 +918,14 @@ try {
       badKeep.status === 400 && keptDetail.status === 'done' && keptDetail.keep_materials === true
       && keptFile.status === 200 && released.status === 200 && !fs.existsSync(path.join(keptDir, 'materials')),
       `bad=${badKeep.status} file=${keptFile.status} released=${released.status}`);
+    // With the System cleanup default on, a new update starts with its files kept; the user can still untick it.
+    await json('PUT', '/api/routines/system-cleanup', { context_updates: { keep_materials: true } });
+    const byDefault = await (await json('POST', '/api/context-updates', { title: 'Fictional supplier notes', text: 'Fictional price list' })).json();
+    await json('PUT', '/api/routines/system-cleanup', { context_updates: { keep_materials: false } });
+    const notByDefault = await (await json('POST', '/api/context-updates', { title: 'Fictional loose note', text: 'x' })).json();
+    check('new context updates keep their files when the System cleanup default is on',
+      byDefault.keep_materials === true && notByDefault.keep_materials === false, `on=${byDefault.keep_materials} off=${notByDefault.keep_materials}`);
+    for (const u of [byDefault, notByDefault]) await fetch(`${base}/api/context-updates/${u.id}`, { method: 'DELETE' });
     // A context update never loosens a note's sharing label (#107): such a proposal cannot be accepted.
     {
       const personal = await (await json('POST', '/api/context', { title: 'Smoke private view', category: 'Risks', sensitivity: 'personal', body: 'Mine.\n' })).json();

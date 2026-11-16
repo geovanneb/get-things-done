@@ -191,6 +191,7 @@ test('settings are validated, and an unreadable settings file stops the job inst
     { keep_tag: '../x' },
     { schedule: { frequency: 'hourly' } },
     { enabled: 'yes' },
+    { context_updates: { keep_materials: 'yes' } },
   ]) assert.throws(() => parseSettings(bad), JSON.stringify(bad));
   assert.deepEqual(parseSettings({}), defaultSettings());
 

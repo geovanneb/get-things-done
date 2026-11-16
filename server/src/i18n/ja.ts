@@ -1435,6 +1435,8 @@ export default {
   "systemCleanup.days2": "日",
   "systemCleanup.keepMeetingTranscriptsAndNotes": "確認後も会議の文字起こしとメモを保持",
   "systemCleanup.onlyTheMeetingTextNot": "会議のテキストのみが対象で、他の資料は含まれません。録音は 設定 > 文字起こし の「録音を保持」で保持されます。オフの場合、これまでどおり確認完了時に削除されます。",
+  "systemCleanup.keepTheOriginalFilesOfNewUpdates": "新しい更新の元ファイルを既定で保持",
+  "systemCleanup.newUpdatesStartWithKeepTicked": "作成するすべての更新で「元のファイルを保持」が最初からオンになります。ファイルを削除してよい更新では、その更新でチェックを外してください。オフの場合、これまでどおり更新の完了時にファイルが削除されます。",
   "systemCleanup.advanced": "詳細設定",
   "systemCleanup.protectTasksWithTheTag": "次のタグのタスクを保護",
   "systemCleanup.atMostThisManyItems": "1 回の実行あたりの最大項目数",

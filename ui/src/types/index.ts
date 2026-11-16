@@ -769,6 +769,8 @@ export interface CleanupSettings {
   max_items_per_run: number;
   /** Meeting transcripts and notes stay after review (true) or go (false); null until the user chose. */
   meetings: { keep_text: boolean | null };
+  /** New context updates start with "Keep the original files" ticked. */
+  context_updates: { keep_materials: boolean };
   updated_at: string | null;
 }
 

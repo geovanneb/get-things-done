@@ -77,6 +77,11 @@ export interface CleanupSettings {
    * materials as before (false). Null until the user chose, which counts as false: nothing is kept without asking.
    */
   meetings: { keep_text: boolean | null };
+  /**
+   * `keep_materials`: a context update the user creates starts with "Keep the original files" ticked, so its files
+   * stay after it is done unless the user unticks it. Off by default: the files go when the update is done, as before.
+   */
+  context_updates: { keep_materials: boolean };
   updated_at: string | null;
 }
 
@@ -171,6 +176,7 @@ export function defaultSettings(): CleanupSettings {
     keep_tag: 'keep',
     max_items_per_run: 200,
     meetings: { keep_text: null },
+    context_updates: { keep_materials: false },
     updated_at: null,
   };
 }
@@ -197,6 +203,9 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
   const mt = obj(o['meetings']);
   const keepText = mt['keep_text'] === undefined ? base.meetings.keep_text : mt['keep_text'];
   if (keepText !== null && typeof keepText !== 'boolean') throw httpError(400, 'Invalid meetings.keep_text: use true, false or null');
+  const cu = obj(o['context_updates']);
+  const keepMaterials = cu['keep_materials'] === undefined ? base.context_updates.keep_materials : cu['keep_materials'];
+  if (typeof keepMaterials !== 'boolean') throw httpError(400, 'Invalid context_updates.keep_materials: use true or false');
   const rulesIn = obj(o['rules']);
   const rules = {} as Record<RuleType, CleanupRule>;
   for (const type of RULE_TYPES) {
@@ -228,6 +237,7 @@ export function parseSettings(input: unknown, base: CleanupSettings = defaultSet
     keep_tag: keepTag,
     max_items_per_run: o['max_items_per_run'] === undefined ? base.max_items_per_run : days(o['max_items_per_run'], 'max_items_per_run', 1, MAX_ITEMS_LIMIT),
     meetings: { keep_text: keepText as boolean | null },
+    context_updates: { keep_materials: keepMaterials },
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
   };
 }
