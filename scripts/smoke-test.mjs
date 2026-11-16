@@ -182,6 +182,30 @@ try {
     firstContext.status === 'not_started' && firstContext.suggested === true && firstContext.update === null, JSON.stringify(firstContext).slice(0, 200));
   check('the workspace analyze command knows how to build a first context',
     fs.readFileSync(path.join(ws, '.claude', 'commands', 'gtd-context-analyze.md'), 'utf8').includes('kind: first-context'));
+  // A profile read error after creating the interview update must leave it linked for a retry.
+  const onboardingProfile = path.join(ws, 'profile', 'executive-profile.md');
+  const onboardingProfileBytes = fs.readFileSync(onboardingProfile);
+  fs.unlinkSync(onboardingProfile);
+  fs.mkdirSync(onboardingProfile);
+  const interviewRequest = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: { notes: 'Fictional onboarding retry.' } }) };
+  let failedInterview;
+  try {
+    failedInterview = await fetch(`${base}/api/first-context/submit`, interviewRequest);
+  } finally {
+    fs.rmdirSync(onboardingProfile);
+    fs.writeFileSync(onboardingProfile, onboardingProfileBytes);
+  }
+  const interruptedInterview = await (await fetch(`${base}/api/first-context`)).json();
+  check('a failed first-context submission keeps its update linked',
+    failedInterview.status === 500 && interruptedInterview.status === 'in_progress' && Boolean(interruptedInterview.update?.id));
+  const retriedInterviewResponse = await fetch(`${base}/api/first-context/submit`, interviewRequest);
+  const retriedInterview = await retriedInterviewResponse.json();
+  check('retrying the first-context submission reuses the update and saves one interview',
+    retriedInterviewResponse.ok && retriedInterview.status === 'submitted' &&
+    retriedInterview.update?.id === interruptedInterview.update?.id && retriedInterview.update?.materials.length === 1);
+  // Restore the empty onboarding fixture before the demo and later cleanup checks.
+  fs.rmSync(path.join(ws, 'context-updates', retriedInterview.update.id), { recursive: true });
+  fs.unlinkSync(path.join(ws, '.situation-board', 'first-context.json'));
   const malformed = await fetch(`${base}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{' });
   check('malformed JSON returns a client error', malformed.status === 400);
   fs.writeFileSync(path.join(tmp, 'outside.txt'), 'private fixture');
