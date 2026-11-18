@@ -7,6 +7,7 @@ import { EventEmitter } from 'events';
 import { WorkspaceService, selectedWorkspacePath, withWorkspacePath } from './workspace';
 import { findCommand } from './aiToolDetection';
 import { ContextUpdateService, proposalTarget, updateId } from './contextUpdateService';
+import { categoryIds } from './contextCategories';
 import { GATE_TOOL, readGateLog, removeApprovalGate, writeApprovalGate, type ApprovalGate } from './approvalGate';
 import { processAlive, setAnalysisRunning } from './runState';
 import { refuseWhileUpdating } from './appActivity';
@@ -713,9 +714,10 @@ export class AgentRunnerService {
     // A Kaizen may also change the instruction files and output templates; the user accepted each one by path.
     const kind = typeof data['kind'] === 'string' ? data['kind'] : null;
     if (!Array.isArray(proposals)) return [];
+    const categories = await categoryIds(workspace);
     return proposals.flatMap((entry) => {
       const p = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
-      const target = proposalTarget(p['target'], kind);
+      const target = proposalTarget(p['target'], kind, categories);
       const writes = p['action'] === 'create' || p['action'] === 'update';
       return p['decision'] === 'accepted' && writes && target ? [{ id: String(p['id']), action: String(p['action']), target }] : [];
     });
@@ -737,13 +739,14 @@ export class AgentRunnerService {
     } catch {
       return started.map((c) => `${c.id} (the update could not be read to check)`);
     }
+    const categories = await categoryIds(workspace);
     const now = new Map<string, Record<string, unknown>>();
     for (const entry of Array.isArray(proposals) ? proposals : []) {
       if (entry && typeof entry === 'object') now.set(String((entry as Record<string, unknown>)['id']), entry as Record<string, unknown>);
     }
     return started.flatMap((c) => {
       const p = now.get(c.id);
-      const same = p && p['decision'] === 'accepted' && p['action'] === c.action && proposalTarget(p['target'], kind) === c.target;
+      const same = p && p['decision'] === 'accepted' && p['action'] === c.action && proposalTarget(p['target'], kind, categories) === c.target;
       const done = same && (p['outcome'] === 'applied' || p['outcome'] === 'merged');
       return done ? [] : [p && !same ? `${c.id} (changed during the run)` : c.id];
     });

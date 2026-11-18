@@ -191,6 +191,15 @@ Agents scan the whole library, not just what a task lists. Put the strategy deck
 summary, the risk register, the org chart, the acronyms your company invented. This
 is the memory you stop having to repeat.
 
+**Your own categories.** When the eight do not fit how you work (vendors, regulators, board
+matters, a product line), click **Add category** at the end of the category list on the Context
+page. Give it a name and, optionally, a short description of what belongs there: your AI tool
+reads it when it decides where a new note goes. The category gets its own folder,
+`context/<id>/`, and is listed in `context/categories.md`. It works like a built-in one
+everywhere: notes, search, `@` mentions, sharing, context updates and the memory review.
+Open the category to rename it (the folder and its notes stay where they are) or delete it.
+A category is deleted only when it holds no notes, so move or delete them first.
+
 **Sharing labels.** The **Sharing** field in the note editor says who may see the whole note:
 **Shareable**, **Internal** or **Personal**. A note with no label counts as internal, and only you
 make a note shareable. **Share** on the Context page offers only shareable notes: tick them,

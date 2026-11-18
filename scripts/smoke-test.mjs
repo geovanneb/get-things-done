@@ -435,6 +435,35 @@ try {
       unknown.status === 400 && (await fetch(`${base}/api/context/CTX-smoke-unknown-category`)).status === 404, `status=${unknown.status}`);
   }
 
+  // The workspace's own context categories: added, used by a note, renamed, and removed only once empty.
+  {
+    const json = (method, url, body) => fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const added = await json('POST', '/api/context/categories', { label: 'Smoke vendors', description: 'Fictional suppliers.' });
+    const category = await added.json();
+    const listed = await (await fetch(`${base}/api/context/categories`)).json();
+    check('a context category can be added; it is listed after the built-in ones and gets its folder',
+      added.status === 201 && category.id === 'smoke-vendors' && listed.length === 9 && listed[8]?.id === 'smoke-vendors' && listed[0]?.builtin === true
+        && fs.existsSync(path.join(ws, 'context', 'smoke-vendors')) && fs.existsSync(path.join(ws, 'context', 'categories.md')),
+      JSON.stringify({ status: added.status, category, count: listed.length }));
+    const clash = await json('POST', '/api/context/categories', { label: 'risks' });
+    const traversal = await json('DELETE', '/api/context/categories/..%2Ftasks');
+    check('a category named like another, or a category id that is not a folder name, is refused',
+      clash.status === 409 && traversal.status === 400 && fs.existsSync(path.join(ws, 'tasks')), `clash=${clash.status} traversal=${traversal.status}`);
+    const note = await (await json('POST', '/api/context', { title: 'Smoke carrier terms', category: 'smoke-vendors', body: 'Fictional terms.\n' })).json();
+    const inCategory = await (await fetch(`${base}/api/context?category=smoke-vendors`)).json();
+    const renamed = await (await json('PUT', '/api/context/categories/smoke-vendors', { label: 'Smoke suppliers' })).json();
+    const busy = await json('DELETE', '/api/context/categories/smoke-vendors');
+    check('a note in a custom category is saved and listed there; renaming keeps it; a category with notes is not removed',
+      note.category === 'smoke-vendors' && inCategory.map((n) => n.id).join() === note.id && renamed.id === 'smoke-vendors' && renamed.label === 'Smoke suppliers'
+        && busy.status === 409 && (await fetch(`${base}/api/context/${note.id}`)).status === 200,
+      JSON.stringify({ note: note.category, listed: inCategory.length, renamed, busy: busy.status }));
+    await json('DELETE', `/api/context/${note.id}`);
+    const removed = await json('DELETE', '/api/context/categories/smoke-vendors');
+    check('an empty custom category is removed with its folder',
+      removed.status === 204 && !fs.existsSync(path.join(ws, 'context', 'smoke-vendors'))
+        && (await (await fetch(`${base}/api/context/categories`)).json()).length === 8, `status=${removed.status}`);
+  }
+
   // Share context notes as one Markdown file (#107): only shareable notes, the download is the preview, a change refuses it.
   {
     const post = (url, body) => fetch(`${base}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

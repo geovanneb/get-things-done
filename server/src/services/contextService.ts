@@ -7,6 +7,7 @@ import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
 import { titleSlug } from '../utils/slug';
 import { requireText, textList, textOf } from '../utils/loose';
+import { categoryIds } from './contextCategories';
 
 const TEXT_FIELDS = ['title', 'slug', 'body', 'content', 'relevance'] as const;
 /** A timestamp as text: YAML reads an unquoted `updated_at: 2026-11-08` as a date, which cannot be sorted as text. */
@@ -38,14 +39,15 @@ function requestedSensitivity(value: unknown): Sensitivity | null | undefined {
 }
 const workspaceService = new WorkspaceService();
 
-/** The categories in .schemas/context.schema.json; a note anywhere else is never listed, read or deleted. */
-const CATEGORIES: readonly ContextCategory[] = ['company', 'organization', 'strategy', 'programs', 'decisions', 'risks', 'glossary', 'situation'];
+/** The built-in categories and the workspace's own (context/categories.md); a note anywhere else is never listed, read or deleted. */
+const categories = (): Promise<string[]> => categoryIds(workspaceService.getWorkspacePath());
 
-/** A category sent by the user, matched without case: anything outside the eight is refused before a folder is made. */
-function requestedCategory(value: unknown): ContextCategory {
+/** A category sent by the user, matched without case: anything that is not a category is refused before a folder is made. */
+async function requestedCategory(value: unknown): Promise<ContextCategory> {
   const category = typeof value === 'string' ? value.toLowerCase() : value;
-  if ((CATEGORIES as readonly unknown[]).includes(category)) return category as ContextCategory;
-  throw httpError(400, `category must be one of ${CATEGORIES.join(', ')}.`);
+  const known = await categories();
+  if (known.includes(category as string)) return category as ContextCategory;
+  throw httpError(400, `category must be one of ${known.join(', ')}.`);
 }
 
 /**
@@ -98,11 +100,11 @@ export class ContextService {
 
   async listContextNotes(category?: ContextCategory): Promise<ContextNote[]> {
     // Checked before any folder is touched: a read never creates a folder for a category that does not exist.
-    const categories: readonly ContextCategory[] = category ? [requestedCategory(category)] : CATEGORIES;
+    const wanted: readonly ContextCategory[] = category ? [await requestedCategory(category)] : await categories();
 
     const results: ContextNote[] = [];
 
-    for (const cat of categories) {
+    for (const cat of wanted) {
       const dir = this.getContextDir(cat);
       await fileService.ensureDir(dir);
 
@@ -179,7 +181,7 @@ export class ContextService {
   async createContextNote(data: Partial<ContextNote>): Promise<ContextNote> {
     requireText(data, TEXT_FIELDS);
     const now = new Date().toISOString();
-    const category = requestedCategory(data.category || 'situation');
+    const category = await requestedCategory(data.category || 'situation');
     const slug = data.slug || titleSlug(data.title || 'untitled', 'note');
     const sensitivity = requestedSensitivity(data.sensitivity);
     const id = `CTX-${slug}`;
@@ -221,7 +223,7 @@ export class ContextService {
   async updateContextNote(id: string, data: Partial<ContextNote>): Promise<ContextNote> {
     requireText(data, TEXT_FIELDS);
     const sensitivity = requestedSensitivity(data.sensitivity);
-    const requested = data.category ? requestedCategory(data.category) : undefined;
+    const requested = data.category ? await requestedCategory(data.category) : undefined;
     const held = await this.lockNote(id, 'This context note is being changed elsewhere. Try again.');
     try {
       return await this.updateLocked(id, data, sensitivity, requested);
@@ -337,9 +339,7 @@ export class ContextService {
   }
 
   private async findContextFile(id: string): Promise<{ filePath: string; category: ContextCategory } | null> {
-    const categories = CATEGORIES;
-
-    for (const cat of categories) {
+    for (const cat of await categories()) {
       const dir = this.getContextDir(cat);
       await fileService.ensureDir(dir);
 

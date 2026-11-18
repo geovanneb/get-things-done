@@ -56,7 +56,7 @@ The chart is the source of truth for reporting lines. If a title in a stakeholde
 
 ## Step 5 — Load relevant context
 
-Scan the full `context/` library (company, organization, strategy, programs, decisions, risks, glossary, situation). Use the task's `contexts` field and any `@` mentioned context notes as a starting point, but go beyond them. Pull in every note that is relevant to the task subject. Ground all claims in these notes — never fabricate data.
+Scan the full `context/` library (company, organization, strategy, programs, decisions, risks, glossary, situation, and any category listed in `context/categories.md`). Use the task's `contexts` field and any `@` mentioned context notes as a starting point, but go beyond them. Pull in every note that is relevant to the task subject. Ground all claims in these notes — never fabricate data.
 
 Check each note's `sensitivity` before using it in the deliverable: see the sharing labels rule under Confidentiality rules in `CLAUDE.md`.
 

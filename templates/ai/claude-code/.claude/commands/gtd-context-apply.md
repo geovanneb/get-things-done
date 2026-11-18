@@ -33,7 +33,8 @@ Skip proposals with `action: remove`: do not delete or edit their target, and do
 set their `outcome`. The dashboard moves those files to the trash once the update is
 done, and only when no other accepted change failed.
 
-1. Check the `target` is a workspace-relative path under `context/<category>/` or
+1. Check the `target` is a workspace-relative path under `context/<category>/` (a built-in
+   category or one listed in `context/categories.md`) or
    `stakeholders/people/`, `stakeholders/groups/` or `stakeholders/org-charts/`, ending
    in `.md`. For a Kaizen (`kind: kaizen`), `CLAUDE.md`, `AGENTS.md`,
    `.github/copilot-instructions.md` and `outputs/templates/<slug>/output.md` are

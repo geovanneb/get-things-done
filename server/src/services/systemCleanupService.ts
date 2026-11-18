@@ -13,6 +13,7 @@ import { reserveIds } from './idReservations';
 import { heldMeetings, ownFiles, retentionStart } from './meetingLibrary';
 import { folderFiles, folderOf, foldersOfUpdate } from './meetingFolder';
 import { gatherAccepted, heldTaskIds, isHeld, pendingCount, readLedger, recordGathered, startGathering } from './acceptedTasks';
+import { categoryIds } from './contextCategories';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -153,7 +154,6 @@ const MAX_LISTED = 50;
 const SIMILARITY = 0.6;
 const TASK_ID = /^TASK-\d{4}-\d{4}$/;
 const CU_ID = /^CU-\d{4}-\d{4}$/;
-const CONTEXT_CATEGORIES = ['company', 'organization', 'strategy', 'programs', 'decisions', 'risks', 'glossary', 'situation'];
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
@@ -736,7 +736,7 @@ export class SystemCleanupService {
     const scan: MemoryScan = { notes: 0, stakeholders: 0, duplicates: [], stale: [], thin: [], unreadable: [] };
     const notes: { path: string; title: string; text: string }[] = [];
 
-    for (const category of CONTEXT_CATEGORIES) {
+    for (const category of await categoryIds(ws)) {
       const dir = path.join(ws, 'context', category);
       for (const entry of await fsp.readdir(dir, { withFileTypes: true }).catch(() => [])) {
         if (!entry.isDirectory()) continue;
