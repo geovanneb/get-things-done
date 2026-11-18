@@ -86,6 +86,37 @@ are given only through the existing confirm paths, `nameSpeakers` for the queue 
 that changed. Saving a voice re-checks the confirmed name, a forget counter and the print's revision under the
 store's lock, so a Forget or a correction during an extraction always wins.
 
+### Assistant chat
+
+The chat (`server/src/services/chat/`, `routes/chat.ts`, `ui/src/components/chat/`) talks to the AI tool the
+user already signed in to, through that tool's own command line: Claude Code (`claude -p` with stream-json on
+stdin), Codex (`codex app-server`, JSON-RPC) and Copilot (`copilot --acp`, the Agent Client Protocol). The
+dashboard never holds a password, token or API key. What each tool may do:
+
+- **Read-only.** Claude Code gets only `Read`, `Glob` and `Grep` under `dontAsk`, the workspace's settings only,
+  no hooks and no MCP servers (`--strict-mcp-config`). Codex threads, new or resumed, run in the `read-only`
+  sandbox without network, with `approvalPolicy: never` and web search off; any approval request is declined.
+  Copilot is denied `shell`, `write`, `url` and `memory` (deny rules win over approvals the user saved), its
+  built-in and user MCP servers are off, and every permission question is refused.
+- **The plan only.** API-key and provider variables are removed from each tool's environment; Claude Code must
+  report a claude.ai sign-in and a run that reports an API key is stopped; Codex must report a ChatGPT sign-in;
+  Copilot's custom providers (BYOK) are removed. Folder trust is not required: it only gates allow rules, which a
+  read-only chat never needs.
+- **Prompt injection.** The instructions tell the tool to treat workspace text as data, the tools cannot write
+  or reach the network, and the page turns Markdown images into links (the CSP blocks remote images too), so an
+  answer steered by a file cannot send workspace data anywhere without a click.
+
+A conversation is `.situation-board/chat/<id>.json` (git-ignored by the template and by a `.gitignore` inside the
+folder; the watcher skips it). It keeps the tool's own session id, so a conversation resumes after its process
+ends; when the tool lost that session or the user switched tools, the next message carries the earlier messages
+as bounded text and the chat says so. One turn per conversation, at most three tool processes, ten idle minutes,
+ten minutes per answer; Stop, a timeout and shutdown keep what was written. Answers stream on a per-conversation
+SSE stream (`/api/chat/conversations/:id/stream`), never on the shared `/api/events`. Errors are classified for
+what the user can do (sign in again, wait for the plan reset, start a new chat, use another tool); plan usage and
+context use come from the tools' own reports. Tests: `server/tests/chat.test.ts` (fake CLIs for all three tools),
+`ui/src/utils/chat.test.ts`, and the chat block of the smoke test. Copilot's ACP adapter is tested against a fake
+server; check it with a signed-in Copilot CLI before relying on it.
+
 ## Request and file flow
 
 1. The listener binds to loopback. The local request guard checks Host, Origin and

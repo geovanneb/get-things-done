@@ -1,0 +1,91 @@
+/* The assistant chat: the launcher in the bottom-right corner and the panel it opens. Tokens only. */
+
+.gtd-chat-launcher.gtd-icon-btn {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: var(--z-floating);
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+  box-shadow: var(--shadow-md);
+}
+.gtd-chat-launcher.gtd-icon-btn:hover { background: var(--color-accent-hover); color: var(--color-text-on-accent); }
+.gtd-chat-launcher--busy::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+
+.gtd-chat-panel {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(var(--space-4) + 56px);
+  z-index: var(--z-floating);
+  width: min(420px, calc(100vw - 2 * var(--space-4)));
+  /* Below the app header (56px) at any window height. */
+  height: min(680px, calc(100vh - 144px));
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.gtd-chat-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+.gtd-chat-header h2 { margin: 0; font-size: var(--text-md); font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.gtd-chat-body { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+
+.gtd-chat-msg { display: flex; flex-direction: column; gap: var(--space-1); max-width: 100%; }
+.gtd-chat-msg--user { align-self: flex-end; max-width: 85%; }
+.gtd-chat-msg--user .gtd-chat-bubble {
+  background: var(--color-accent-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+}
+.gtd-chat-msg--assistant .gtd-chat-bubble { font-size: var(--text-sm); overflow-wrap: anywhere; }
+.gtd-chat-msg--assistant .markdown-view { color: var(--color-text); }
+.gtd-chat-meta { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--color-text-muted); flex-wrap: wrap; }
+.gtd-chat-notice { font-size: var(--text-xs); color: var(--color-text-muted); text-align: center; padding: 0 var(--space-4); }
+
+.gtd-chat-caret { display: inline-block; width: 0.5em; height: 1em; vertical-align: text-bottom; background: var(--color-text-muted); animation: gtd-chat-blink 1s steps(2) infinite; }
+@keyframes gtd-chat-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .gtd-chat-caret { animation: none; } }
+
+.gtd-chat-footer { border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.gtd-chat-composer { display: flex; align-items: flex-end; gap: var(--space-2); }
+.gtd-chat-composer .gtd-field { flex: 1; min-width: 0; }
+.gtd-chat-composer textarea { resize: none; max-height: 160px; }
+.gtd-chat-status { font-size: var(--text-xs); color: var(--color-text-muted); display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center; }
+
+.gtd-chat-suggestions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.gtd-chat-row { display: flex; align-items: center; gap: var(--space-2); }
+.gtd-chat-row > .gtd-btn { flex: 1; min-width: 0; justify-content: flex-start; text-align: left; }
+.gtd-chat-row .gtd-chat-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A phone: the panel takes the whole screen and the launcher steps aside. */
+@media (max-width: 640px) {
+  .gtd-chat-panel { inset: 0; width: auto; height: auto; border-radius: 0; border: none; }
+  .gtd-chat-launcher--open.gtd-icon-btn { display: none; }
+}

@@ -174,6 +174,11 @@ interface TextareaProps extends FieldFrameProps {
   textareaStyle?: React.CSSProperties;
   /** Shown right under the box, above the hint: for example a DictateButton. */
   footer?: React.ReactNode;
+  /** For a message box that sends on Enter (the assistant chat). */
+  onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>;
+  /** To move focus into the box, as a panel that opens on it does. */
+  textareaRef?: React.Ref<HTMLTextAreaElement>;
+  maxLength?: number;
 }
 
 export function Textarea({
@@ -193,6 +198,9 @@ export function Textarea({
   mono,
   textareaStyle,
   footer,
+  onKeyDown,
+  textareaRef,
+  maxLength,
 }: TextareaProps) {
   const a11y = useFieldProps(idProp, { error, hint, required });
   return (
@@ -200,7 +208,10 @@ export function Textarea({
       <textarea
         {...a11y}
         value={value}
+        ref={textareaRef}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        maxLength={maxLength}
         placeholder={placeholder}
         disabled={disabled}
         rows={rows}

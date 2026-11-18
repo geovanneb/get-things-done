@@ -39,6 +39,8 @@ export class WatcherService {
       path.join(workspacePath, '.situation-board', 'logs'),
       // Soft deletes and backups: a cleanup run moving many files there must not flood the dashboard.
       path.join(workspacePath, '.situation-board', 'trash'),
+      // Chat conversations are saved while an answer streams; the chat follows its own stream.
+      path.join(workspacePath, '.situation-board', 'chat'),
     ];
     // Symlinked folders are followed (a folder kept on a shared drive), except a link back to a folder the path already
     // went through: chokidar would crawl that loop a level deeper each time, a copy of the workspace per level.

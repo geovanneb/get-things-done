@@ -59,7 +59,7 @@ export function RecordingBanner() {
   const line: React.CSSProperties = { fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', margin: 0 };
   return (
     <div role="region" aria-label={t('queuedMeetingActions.recording')} className="gtd-card" style={{
-      position: 'fixed', right: 'var(--space-4)', bottom: 'var(--space-4)', zIndex: 'var(--z-floating)', width: 340, maxWidth: 'calc(100vw - 32px)',
+      position: 'fixed', right: 'var(--space-4)', bottom: 'calc(var(--space-4) + var(--chat-launcher-space, 0px))', zIndex: 'var(--z-floating)', width: 340, maxWidth: 'calc(100vw - 32px)',
       padding: 'var(--space-3) var(--space-4)', boxShadow: 'var(--shadow-md)', gap: 'var(--space-2)', fontSize: 'var(--text-sm)',
     }}>
       {r.notice && r.status === 'idle' && (
