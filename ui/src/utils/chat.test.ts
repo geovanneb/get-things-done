@@ -1,0 +1,87 @@
+/**
+ * Unit tests for the workspace chat helpers. Run with `npm run test:chat --workspace=ui`.
+ */
+import {
+  applyStreamEvent, composerKey, contextPercent, defaultProvider, effortOptions, errorActions, modelOptions, pageContext,
+  safeMarkdown, tightestWindow, untilText, type Conversation, type ProviderStatus,
+} from './chat';
+
+let failures = 0;
+function check(name: string, ok: boolean, detail = '') {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  ' + detail : ''}`);
+  if (!ok) failures++;
+}
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+const conversation: Conversation = {
+  id: 'chat-abcdefgh01', title: 'Fictional', provider: 'claude-code', model: null, effort: null, carry_over: false,
+  created_at: '', updated_at: '', usage: null,
+  messages: [
+    { id: 'm1', role: 'user', text: 'What is due?', created_at: '' },
+    { id: 'm2', role: 'assistant', text: 'TASK-2026-', created_at: '', status: 'streaming', steps: 0 },
+  ],
+};
+
+const streamed = applyStreamEvent(conversation, { type: 'text', message_id: 'm2', text: '0001 is due.' });
+check('streamed words are added to their answer', streamed?.messages[1]?.text === 'TASK-2026-0001 is due.');
+check('the conversation shown is not changed in place', conversation.messages[1]!.text === 'TASK-2026-');
+const stepped = applyStreamEvent(streamed, { type: 'step', message_id: 'm2', step: { kind: 'read', path: 'tasks/x.md' }, steps: 3 });
+check('a step updates the count and the last step', stepped?.messages[1]?.steps === 3 && stepped.messages[1]!.last_step?.path === 'tasks/x.md');
+check('an event for a message not shown changes nothing', applyStreamEvent(conversation, { type: 'text', message_id: 'other', text: 'x' }) === conversation);
+const whole = { ...conversation, title: 'From the server' };
+check('the whole conversation always wins', applyStreamEvent(stepped, { type: 'conversation', conversation: whole }) === whole);
+check('a deleted conversation is gone', applyStreamEvent(conversation, { type: 'deleted' }) === null);
+check('usage is replaced', applyStreamEvent(conversation, { type: 'usage', usage: { context_used: 1, context_window: 2 } })?.usage?.context_window === 2);
+
+check('context: a share of the window', contextPercent({ context_used: 50_000, context_window: 200_000 }) === 25);
+check('context: unknown when the tool has not said', contextPercent({ context_used: 10, context_window: null }) === null && contextPercent(null) === null);
+check('context: never over 100', contextPercent({ context_used: 300, context_window: 200 }) === 100);
+
+check('plan: a window at its limit is shown first', tightestWindow([{ kind: 'five_hour', used_percent: 90, resets_at: null, limited: false }, { kind: 'weekly', used_percent: 100, resets_at: null, limited: true }])?.kind === 'weekly');
+check('plan: otherwise the fullest', tightestWindow([{ kind: 'five_hour', used_percent: 20, resets_at: null, limited: false }, { kind: 'weekly', used_percent: 70, resets_at: null, limited: false }])?.kind === 'weekly');
+check('plan: nothing reported, nothing shown', tightestWindow(null) === null && tightestWindow([]) === null);
+
+check('an expired sign-in offers to check again, then to retry', same(errorActions('sign_in'), ['check_again', 'retry']));
+check('a plan limit offers another tool, never a retry that would fail', same(errorActions('plan_limit'), ['switch_provider']));
+check('a full context offers a new chat', same(errorActions('context_full'), ['new_chat']));
+check('a crash offers a retry', errorActions('crashed')[0] === 'retry');
+
+check('Enter sends', composerKey({ key: 'Enter', shiftKey: false }) === 'send');
+check('Shift+Enter is a new line', composerKey({ key: 'Enter', shiftKey: true }) === null);
+check('Enter while an input method composes never sends (Japanese input)', composerKey({ key: 'Enter', shiftKey: false, isComposing: true }) === null);
+check('Safari composing Enter (keyCode 229) never sends', composerKey({ key: 'Enter', shiftKey: false, keyCode: 229 }) === null);
+check('other keys do nothing', composerKey({ key: 'a', shiftKey: false }) === null);
+
+const p = (id: ProviderStatus['id'], ready: boolean, installed = true): ProviderStatus => ({ id, label: id, installed, ready, problems: [], plan: null, models: [], limits: null, notes: [] });
+check('default: the tool used before, when ready', defaultProvider([p('claude-code', true), p('codex', true)], ['claude-code'], 'codex') === 'codex');
+check('default: the workspace\'s first ready tool', defaultProvider([p('claude-code', false), p('codex', true), p('copilot', true)], ['copilot', 'codex']) === 'copilot');
+check('default: any ready tool', defaultProvider([p('claude-code', false), p('codex', true)], ['claude-code']) === 'codex');
+check('default: none ready, the installed one set up, so the page can say what it needs', defaultProvider([p('claude-code', false), p('codex', false)], ['codex']) === 'codex');
+check('default: nothing installed', defaultProvider([p('claude-code', false, false)], []) === null);
+
+check('images become links, so nothing is fetched without a click', safeMarkdown('See ![chart](https://example.com/x?d=secret) and ![a][ref]') === 'See [chart](https://example.com/x?d=secret) and [a][ref]');
+check('text without images is unchanged', safeMarkdown('**TASK-2026-0001** is [here](/board)') === '**TASK-2026-0001** is [here](/board)');
+
+check('page context: the path of a page', pageContext('/board/task/TASK-2026-0001') === '/board/task/TASK-2026-0001');
+check('page context: none on the home page or for odd paths', pageContext('/') === null && pageContext('/../x') === null && pageContext('/a b') === null);
+
+const now = Date.parse('2026-11-18T10:00:00Z');
+check('resets in minutes', untilText('2026-11-18T10:30:00Z', now, 'en') === 'in 30 minutes');
+check('resets in hours', untilText('2026-11-18T13:00:00Z', now, 'en') === 'in 3 hours');
+check('resets in days', untilText('2026-11-21T10:00:00Z', now, 'en') === 'in 3 days');
+check('a time in the past says nothing', untilText('2026-11-18T09:00:00Z', now, 'en') === null && untilText(null, now, 'en') === null);
+
+const claude: ProviderStatus = { ...p('claude-code', true), models: [
+  { id: 'haiku', label: 'Haiku', description: null, efforts: ['low', 'high'], is_default: false },
+  { id: 'default', label: 'Default', description: null, efforts: ['low', 'medium', 'high'], is_default: true },
+] };
+check('models: the tool\'s default first', modelOptions(claude)[0]?.id === 'default');
+check('efforts: of the chosen model', same(effortOptions(claude, 'haiku'), ['low', 'high']));
+check('efforts: of the default when none is chosen', same(effortOptions(claude, null), ['low', 'medium', 'high']));
+check('efforts: none for a tool that lists no models', same(effortOptions(p('copilot', true), 'x'), []));
+
+if (failures) {
+  console.error(`${failures} chat check(s) failed`);
+  process.exit(1);
+}
+console.log('All chat checks passed');

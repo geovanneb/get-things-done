@@ -8,6 +8,7 @@ import RunFinishedNotifier from './RunFinishedNotifier';
 import SearchOverlay from '../common/SearchOverlay';
 import Toaster from '../common/Toaster';
 import NewTaskModal from '../board/NewTaskModal';
+import ChatDock from '../chat/ChatDock';
 import { useAppState, useAppDispatch } from '../../store';
 
 export default function AppLayout() {
@@ -69,6 +70,7 @@ export default function AppLayout() {
           navigate(`/board/task/${task.id}`);
         }}
       />
+      <ChatDock />
       <Toaster />
     </div>
   );

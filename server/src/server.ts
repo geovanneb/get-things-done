@@ -18,6 +18,7 @@ import { refreshWorkspaceFiles } from './services/workspaceActivation';
 import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 import { AgentRunnerService, runEvents, type RunFinished } from './services/agentRunner';
+import { ChatService } from './services/chat/chatService';
 import { transcriptionEvents } from './services/transcriptionModels';
 import { meetingTranscriptionEvents } from './services/meetingTranscription';
 import { voiceprintEvents } from './services/voiceprints/service';
@@ -134,6 +135,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     stopUpdateChecks();
     // A running analysis is stopped first, with everything it started, and its record saved.
     const runnerStopped = AgentRunnerService.stopAll().catch(() => {});
+    // Chat processes too: what was answered so far is saved, marked as stopped.
+    const chatStopped = ChatService.stopAll().catch(() => {});
     // A transcription worker is ended too, so nothing keeps running (or holding gigabytes) after the dashboard.
     const transcriptionStopped = TranscriptionEngine.stopAll().catch(() => {});
     const inboxStopped = deviceInbox.stop().catch(() => {});
@@ -143,7 +146,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       // Idle keep-alive connections would otherwise hold close() open.
       server.closeIdleConnections();
     });
-    return Promise.all([runnerStopped, transcriptionStopped, inboxStopped, serverClosed]).then(() => undefined);
+    return Promise.all([runnerStopped, chatStopped, transcriptionStopped, inboxStopped, serverClosed]).then(() => undefined);
   };
 
   return new Promise((resolve, reject) => {

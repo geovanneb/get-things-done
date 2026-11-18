@@ -1140,6 +1140,22 @@ try {
       runnerStatus.id === 'claude-code' && typeof runnerStatus.installed === 'boolean' && Array.isArray(runnerStatus.problems)
       && notReady.status === 409 && notApproved.status === 409 && badCommand.status === 400 && noRun === null,
       `installed=${runnerStatus.installed} notReady=${notReady.status} notApproved=${notApproved.status} bad=${badCommand.status}`);
+    // The assistant chat, without sending a message: no AI tool is ever started here.
+    const chatTools = await (await fetch(`${base}/api/chat/providers`)).json();
+    const chatNew = await json('POST', '/api/chat/conversations', { provider: 'codex' });
+    const chatBody = await chatNew.json();
+    const chatList = await (await fetch(`${base}/api/chat/conversations`)).json();
+    const chatBadId = await fetch(`${base}/api/chat/conversations/..%2F..%2Fworkspace.yaml`);
+    const chatBadTool = await json('POST', '/api/chat/conversations', { provider: 'gemini' });
+    const chatEmpty = chatBody.id ? await json('POST', `/api/chat/conversations/${chatBody.id}/messages`, { text: '   ' }) : null;
+    const chatIgnored = fs.existsSync(path.join(ws, '.situation-board', 'chat', '.gitignore'));
+    const chatGone = chatBody.id ? await json('DELETE', `/api/chat/conversations/${chatBody.id}`) : null;
+    check('the chat lists the three AI tools, keeps chats out of git, and checks ids, tools and empty messages',
+      JSON.stringify(chatTools.providers?.map((p) => p.id)) === '["claude-code","codex","copilot"]'
+      && chatTools.providers.every((p) => typeof p.ready === 'boolean' && Array.isArray(p.problems) && Array.isArray(p.models))
+      && chatNew.status === 201 && /^chat-[0-9a-z]+$/.test(chatBody.id ?? '') && chatList.conversations?.some((c) => c.id === chatBody.id)
+      && chatBadId.status === 400 && chatBadTool.status === 400 && chatEmpty?.status === 400 && chatIgnored && chatGone?.status === 204,
+      `tools=${chatTools.providers?.length} new=${chatNew.status} badId=${chatBadId.status} badTool=${chatBadTool.status} empty=${chatEmpty?.status} ignored=${chatIgnored} gone=${chatGone?.status}`);
     // Trust is read where Claude Code files it: a trusted folder above the workspace does not count, because Claude
     // Code would ignore the workspace's permission rules (#306). CI has no Claude Code, so a second server gets a
     // stand-in that only answers the sign-in probe (anything else fails, so no AI work can happen) and a settings

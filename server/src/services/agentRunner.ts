@@ -277,7 +277,7 @@ export async function workspaceTrusted(workspace: string, env: NodeJS.ProcessEnv
 }
 
 /** What the workspace's own `.claude/settings.json` does about billing: the names it sets, if any. */
-async function workspaceBillingOverrides(workspace: string): Promise<string[]> {
+export async function workspaceBillingOverrides(workspace: string): Promise<string[]> {
   try {
     const settings = JSON.parse(await fsp.readFile(path.join(workspace, '.claude', 'settings.json'), 'utf-8')) as Record<string, unknown>;
     const env = (settings['env'] && typeof settings['env'] === 'object' ? settings['env'] : {}) as Record<string, unknown>;
@@ -288,9 +288,9 @@ async function workspaceBillingOverrides(workspace: string): Promise<string[]> {
 }
 
 /** Settings the runner adds on top of the workspace's for unattended runs: no hooks. A file, so no JSON goes through a shell. */
-const RUNNER_SETTINGS = JSON.stringify({ disableAllHooks: true }, null, 2) + '\n';
+export const RUNNER_SETTINGS = JSON.stringify({ disableAllHooks: true }, null, 2) + '\n';
 
-function runnerSettingsFile(workspace: string): string {
+export function runnerSettingsFile(workspace: string): string {
   return path.join(workspace, '.situation-board', 'runs', 'runner-settings.json');
 }
 
@@ -303,20 +303,20 @@ function viaCmd(bin: string): boolean {
  * Starts a program without a shell where possible. On Windows a .cmd shim needs cmd.exe: the whole command line
  * is quoted by hand (program path included) and anything cmd.exe would still interpret is refused.
  */
-function launch(bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): ChildProcess {
+export function launch(bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, stdin: 'ignore' | 'pipe' = 'ignore'): ChildProcess {
   if (!viaCmd(bin)) {
-    return spawn(bin, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
+    return spawn(bin, args, { cwd, env, stdio: [stdin, 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
   }
   const parts = [bin, ...args].map((part) => {
     if (/["%!^\r\n]/.test(part)) throw httpError(400, 'Claude Code is installed in a folder the dashboard cannot start it from');
     return `"${part}"`;
   });
   return spawn(process.env['ComSpec'] ?? 'cmd.exe', ['/d', '/s', '/c', `"${parts.join(' ')}"`],
-    { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: true });
+    { cwd, env, stdio: [stdin, 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: true });
 }
 
 /** Ends a process and everything it started: its process group on macOS and Linux, its tree on Windows. */
-function killTree(child: ChildProcess, hard: boolean): void {
+export function killTree(child: ChildProcess, hard: boolean): void {
   if (!child.pid) return;
   try {
     if (process.platform === 'win32') {
@@ -332,7 +332,7 @@ function killTree(child: ChildProcess, hard: boolean): void {
 const gone = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null;
 
 /** Stops a process tree: a polite request first, then a hard stop. Resolves once the process has exited. */
-function stopTree(child: ChildProcess): Promise<void> {
+export function stopTree(child: ChildProcess): Promise<void> {
   if (gone(child)) return Promise.resolve();
   return new Promise((resolve) => {
     const hard = setTimeout(() => killTree(child, true), KILL_GRACE_MS);

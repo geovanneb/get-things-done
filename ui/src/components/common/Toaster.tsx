@@ -79,7 +79,8 @@ export default function Toaster() {
       aria-live="polite"
       style={{
         position: 'fixed',
-        bottom: 20,
+        // Above the assistant button when it is in the corner.
+        bottom: 'calc(20px + var(--chat-launcher-space, 0px))',
         right: 20,
         zIndex: 'var(--z-toast)',
         display: 'flex',
