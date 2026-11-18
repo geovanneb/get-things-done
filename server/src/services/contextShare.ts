@@ -5,6 +5,7 @@ import { constants as fsConstants } from 'fs';
 import { Worker } from 'worker_threads';
 import { WorkspaceService } from './workspace';
 import { effectiveSensitivity } from './contextService';
+import { categoryIds } from './contextCategories';
 import { parseMarkdown } from '../utils/markdown';
 import { workspaceEntry } from '../utils/files';
 import type { exportSection } from './contextShareExport';
@@ -25,7 +26,6 @@ import type { exportSection } from './contextShareExport';
 
 const workspace = new WorkspaceService();
 
-const CATEGORIES = ['company', 'organization', 'strategy', 'programs', 'decisions', 'risks', 'glossary', 'situation'];
 const MAX_NOTES = 50;
 const MAX_NOTE_BYTES = 512 * 1024;
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024;
@@ -103,7 +103,7 @@ async function findNotes(ws: string, wanted: Set<string>): Promise<{ found: Map<
   const unreadable = new Set<string>();
   let anyUnreadable = false;
   const base = path.join(ws, 'context');
-  for (const cat of CATEGORIES) {
+  for (const cat of await categoryIds(ws)) {
     const dir = path.join(base, cat);
     let entries: import('fs').Dirent[];
     try {

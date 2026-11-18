@@ -30,6 +30,8 @@ tasks/archive/          Completed tasks moved out of the way
 context/                Background knowledge, by category
   company/ organization/ strategy/ programs/
   decisions/ risks/ glossary/ situation/
+  <your own>/           Categories you add in the dashboard (Context, Add category)
+  categories.md         Lists them: folder id, name and what belongs there
 outputs/templates/      Output templates: required sections + style guides
 context-updates/        Imported material (transcripts, slides...) and the
                         record of what it changed in the context

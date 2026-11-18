@@ -257,8 +257,38 @@ DELETE /api/org-charts/ORG-0002
 | `GET` | `/api/context/:id/files/<path>` | Open an attachment in the browser. Add `?download=1` to save it. The path may include subfolders |
 | `DELETE` | `/api/context/:id/files/:filename` | Delete one attachment. Returns `204` |
 
-Categories are `company`, `organization`, `strategy`, `programs`, `decisions`, `risks`,
-`glossary` and `situation`.
+The built-in categories are `company`, `organization`, `strategy`, `programs`, `decisions`,
+`risks`, `glossary` and `situation`. A workspace can add its own (below); a note's `category` is
+the id of either kind, matched without case. Any other value is refused with `400`.
+
+### Context categories
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/context/categories` | Every category: the built-in ones first (`builtin: true`), then the workspace's own in the order they were added |
+| `POST` | `/api/context/categories` | Add a category: `{label, description?}`. The id (its folder) comes from the label. Returns `201` |
+| `PUT` | `/api/context/categories/:category` | Rename it or change its description. The id, the folder and its notes stay |
+| `DELETE` | `/api/context/categories/:category` | Remove it. Only while it holds no note (`409` otherwise). Its folder goes when empty. Returns `204` |
+
+The workspace's own categories are kept in `context/categories.md` (frontmatter `categories`,
+each with `id`, `label` and an optional `description`). A label is 1 to 40 characters and unique
+without case among all categories; a description is up to 300 characters. Built-in categories
+cannot be changed or removed (`400`), and a workspace has up to 30 of its own (`409`). An entry
+written by hand that is not valid is skipped. Notes in a folder that is not a category are not
+listed, as before; adding a category with that folder's id shows them.
+
+```text
+POST /api/context/categories
+{"label":"Vendors","description":"Suppliers, their contracts and service levels."}
+→ 201 {"id":"vendors","label":"Vendors","description":"Suppliers, their contracts and service levels.","builtin":false}
+
+PUT /api/context/categories/vendors
+{"label":"Suppliers"}
+→ 200 {"id":"vendors","label":"Suppliers","description":"Suppliers, their contracts and service levels.","builtin":false}
+
+DELETE /api/context/categories/vendors
+→ 409 {"error":"Error","message":"This category still holds 2 notes. Move them to another category or delete them first."}
+```
 
 ```text
 GET /api/context?category=risks

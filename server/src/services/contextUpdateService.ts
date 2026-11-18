@@ -27,6 +27,7 @@ import { readFolder } from './meetingFolder';
 import { writeCorrectedVersion } from './meetingVersions';
 import { effectiveSensitivity } from './contextService';
 import { orgChartService } from './orgChartService';
+import { BUILTIN_CATEGORIES, categoryIds } from './contextCategories';
 
 const workspaceService = new WorkspaceService();
 const taskService = new TaskService();
@@ -71,7 +72,6 @@ const pendingKinds = new Map<string, Promise<void>>();
 export const UPDATE_STATUSES = ['ready', 'analyzing', 'in_review', 'approved', 'applying', 'done'] as const;
 export type UpdateStatus = (typeof UPDATE_STATUSES)[number];
 
-const CONTEXT_CATEGORIES = ['company', 'organization', 'strategy', 'programs', 'decisions', 'risks', 'glossary', 'situation'];
 const STAKEHOLDER_FOLDERS = ['people', 'groups', 'org-charts'];
 
 const ID_PATTERN = /^CU-\d{4}-\d{4}$/;
@@ -557,18 +557,19 @@ export function updateId(value: unknown): string {
 
 /**
  * A proposal target from the agent's frontmatter, as a workspace-relative POSIX path. Only Markdown files
- * under context/<category>/ and stakeholders/{people,groups,org-charts}/ can be proposed. A Kaizen may also
+ * under context/<category>/ (a built-in category or one in `categories`, the workspace's own) and
+ * stakeholders/{people,groups,org-charts}/ can be proposed. A Kaizen may also
  * change the agent instruction files (CLAUDE.md, AGENTS.md, .github/copilot-instructions.md) and the output
  * templates under outputs/templates/.
  * Returns null when the path is outside those folders or is not a plain relative path.
  */
-export function proposalTarget(value: unknown, kind: string | null = null): string | null {
+export function proposalTarget(value: unknown, kind: string | null = null, categories: readonly string[] = BUILTIN_CATEGORIES): string | null {
   if (typeof value !== 'string' || !value || value.length > 300) return null;
   if (kind === KAIZEN_KIND && KAIZEN_INSTRUCTION_FILES.includes(value)) return value;
   if (value.includes('\\') || value.includes('\0') || value.startsWith('/') || !value.endsWith('.md')) return null;
   const parts = value.split('/');
   if (parts.some((p) => !p || p === '.' || p === '..' || p.startsWith('.') || p.includes(':'))) return null;
-  if (parts[0] === 'context') return parts.length >= 3 && CONTEXT_CATEGORIES.includes(parts[1]!) ? value : null;
+  if (parts[0] === 'context') return parts.length >= 3 && categories.includes(parts[1]!) ? value : null;
   if (parts[0] === 'stakeholders') return parts.length >= 3 && STAKEHOLDER_FOLDERS.includes(parts[1]!) ? value : null;
   if (kind !== KAIZEN_KIND) return null;
   return parts[0] === 'outputs' && parts[1] === 'templates' && parts.length >= 4 ? value : null;
@@ -1445,13 +1446,14 @@ export class ContextUpdateService {
     if (pending.length === 0) return;
     const otherFailed = update.proposals.some((p) => p.action !== 'remove' && p.decision === 'accepted' && p.outcome !== 'applied' && p.outcome !== 'merged');
     const ws = workspaceService.getWorkspacePath();
+    const categories = await categoryIds(ws);
     const results = new Map<string, { outcome: string; outcome_note: string }>();
     for (const p of pending) {
       if (otherFailed) {
         results.set(p.id, { outcome: 'skipped', outcome_note: 'Kept: another accepted change was not confirmed as applied, so removing this file could lose information.' });
         continue;
       }
-      const target = proposalTarget(p.target);
+      const target = proposalTarget(p.target, null, categories);
       if (!target) { results.set(p.id, { outcome: 'failed', outcome_note: 'The target is not a context note or stakeholder file.' }); continue; }
       try {
         const full = await workspaceEntry(ws, path.join(ws, target));
@@ -1870,7 +1872,7 @@ export class ContextUpdateService {
 
   private async proposalDetail(dir: string, update: ContextUpdate, p: UpdateProposal, appFiles: Set<string>): Promise<ProposalDetail> {
     const kaizen = update.kind === KAIZEN_KIND;
-    const target = proposalTarget(p.target, update.kind);
+    const target = proposalTarget(p.target, update.kind, await categoryIds(workspaceService.getWorkspacePath()));
     const detail: ProposalDetail = { ...p, current: null, proposed: null, target_exists: false, stale: false, problem: null, app_provided: !!target && appFiles.has(target) };
     if (!target) {
       return { ...detail, problem: kaizen

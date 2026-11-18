@@ -26,7 +26,9 @@ import ShareNotes from '@/components/context/ShareNotes';
 import UpdatesList from '@/components/context-updates/UpdatesList';
 import UpdateDetail from '@/components/context-updates/UpdateDetail';
 import { filterUpdates, HISTORY_PAGE, waitingCounts, waitingLabel, type TypeFilter } from '@/utils/updateTypes';
-import type { ContextNote, ContextUpdate, QueuedMeeting } from '@/types';
+import type { ContextCategoryInfo, ContextNote, ContextUpdate, QueuedMeeting } from '@/types';
+import CategoryModal from '@/components/context/CategoryModal';
+import { BUILTIN_CATEGORIES, categoryLabel as labelOf } from '@/utils/contextCategories';
 import DictateButton from '@/components/common/DictateButton';
 import { withDictation } from '@/utils/dictation';
 
@@ -34,19 +36,13 @@ import { withDictation } from '@/utils/dictation';
 // Constants
 // ---------------------------------------------------------------------------
 
-// Stored in each note's file: translate at display time, never here.
-const CATEGORIES = ['Company', 'Organization', 'Strategy', 'Programs', 'Decisions', 'Risks', 'Glossary', 'Situation'] as const;
-
 /** A label from a fixed table; a hand-written value such as `__proto__` is never looked up on the object's prototype. */
 const lookup = (table: Record<string, string>, key: unknown): string | undefined =>
   typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
 
-const categoryLabel = (category: string): string => lookup({
-  All: tr('all'), Company: tr('context.company'), Organization: tr('context.organization'), Strategy: tr('context.strategy'), Programs: tr('context.programs'),
-  Decisions: tr('updateDetail.decisions'), Risks: tr('context.risks'), Glossary: tr('context.glossary'), Situation: tr('situation'),
-}, category) ?? String(category);
-
-type Category = (typeof CATEGORIES)[number] | 'All';
+/** A category id (stored in each note's file, so translated at display time), or `all` for every note. */
+type Category = string;
+const ALL = 'all';
 
 const RELEVANCE_OPTIONS = ['required', 'recommended', 'optional'] as const;
 type Relevance = (typeof RELEVANCE_OPTIONS)[number];
@@ -57,6 +53,16 @@ const RELEVANCE_BADGE: Record<Relevance, { bg: string; color: string }> = {
   recommended: { bg: 'var(--color-warning-subtle)',  color: 'var(--color-warning)'  },
   optional:    { bg: 'var(--color-info-subtle)',     color: 'var(--color-info)'     },
 };
+
+/**
+ * The category choices of a note: built-in ones first, then the workspace's own, under headings once there are any.
+ * A category this list does not have stays as the current choice, so saving the note does not move it.
+ */
+function categoryOptions(categories: readonly ContextCategoryInfo[], current: string, builtinGroup: string, customGroup: string) {
+  const grouped = categories.some((c) => !c.builtin);
+  const options = categories.map((c) => ({ value: c.id, label: labelOf(c.id, categories), ...(grouped ? { group: c.builtin ? builtinGroup : customGroup } : {}) }));
+  return current && !categories.some((c) => c.id === current) ? [{ value: current, label: current }, ...options] : options;
+}
 
 const sensitivityLabel = (value: unknown): string => lookup({
   shareable: tr('context.sensitivityShareable'), internal: tr('context.sensitivityInternal'), personal: tr('context.sensitivityPersonal'),
@@ -78,7 +84,8 @@ interface NoteFormState {
 function noteToForm(note: Partial<ContextNote>): NoteFormState {
   return {
     title: note.title ?? '',
-    category: note.category ? note.category.charAt(0).toUpperCase() + note.category.slice(1) : 'Company',
+    // Ids are lowercase; older notes and dashboards may say "Company".
+    category: note.category ? note.category.toLowerCase() : 'company',
     relevance: note.relevance ?? 'recommended',
     sensitivity: sensitivityFormValue(note.sensitivity),
     body: note.body ?? '',
@@ -91,9 +98,10 @@ interface NoteModalProps {
   initial: ContextNote | null;
   mode: 'create' | 'edit';
   onSaved: (note: ContextNote) => void;
+  categories: readonly ContextCategoryInfo[];
 }
 
-function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) {
+function NoteModal({ isOpen, onClose, initial, mode, onSaved, categories }: NoteModalProps) {
   const { t } = useLanguage();
   const [form, setForm] = useState<NoteFormState>(() => noteToForm(initial ?? {}));
   const [saving, setSaving] = useState(false);
@@ -162,7 +170,8 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
           error={error && !form.title.trim() ? t('context.giveTheNoteATitle') : undefined} />
         <div className="gtd-form-grid">
           <Select label={t('context.category')} value={form.category} onChange={(v) => set('category', v)}
-            options={CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))} />
+            hint={categories.find((c) => c.id === form.category)?.description}
+            options={categoryOptions(categories, form.category, t('context.builtInCategories'), t('context.yourCategories'))} />
           <Select label={t('context.relevance')} value={form.relevance} onChange={(v) => set('relevance', v)}
             hint={t('context.requiredNotesAreReadBefore')}
             options={RELEVANCE_OPTIONS.map((r) => ({ value: r, label: relevanceLabel(r) }))} />
@@ -194,12 +203,13 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved }: NoteModalProps) 
 
 interface NoteCardProps {
   note: ContextNote;
+  categoryName: string;
   onEdit: (e: React.MouseEvent) => void;
   onDelete: (e: React.MouseEvent) => void;
   onTitleClick: () => void;
 }
 
-function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
+function NoteCard({ note, categoryName, onEdit, onDelete, onTitleClick }: NoteCardProps) {
   const { t } = useLanguage();
   const relevanceStyle = (RELEVANCE_OPTIONS as readonly string[]).includes(note.relevance) ? RELEVANCE_BADGE[note.relevance as Relevance] : RELEVANCE_BADGE.optional;
   const preview = note.body ? note.body.slice(0, 160).trimEnd() + (note.body.length > 160 ? '…' : '') : null;
@@ -221,7 +231,7 @@ function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
           <span style={{ ...chip, background: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }}>
-            {categoryLabel((note.category ?? '').charAt(0).toUpperCase() + (note.category ?? '').slice(1))}
+            {categoryName}
           </span>
           {note.relevance && (
             <span style={{ ...chip, background: relevanceStyle.bg, color: relevanceStyle.color }}>
@@ -253,8 +263,10 @@ function NoteCard({ note, onEdit, onDelete, onTitleClick }: NoteCardProps) {
 
 interface SidebarProps {
   notes: ContextNote[];
+  categories: readonly ContextCategoryInfo[];
   activeCategory: Category | null;
   onSelect: (cat: Category) => void;
+  onAddCategory: () => void;
   updatesActive: boolean;
   /** Updates ready for you (review or apply), and material waiting for an analysis. */
   waiting: { ready: number; toAnalyze: number };
@@ -285,7 +297,7 @@ function WaitingCounts({ waiting, onShow }: { waiting: { ready: number; toAnalyz
   );
 }
 
-function Sidebar({ notes, activeCategory, onSelect, updatesActive, waiting, onSelectUpdates }: SidebarProps) {
+function Sidebar({ notes, categories, activeCategory, onSelect, onAddCategory, updatesActive, waiting, onSelectUpdates }: SidebarProps) {
   const { t } = useLanguage();
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -296,22 +308,31 @@ function Sidebar({ notes, activeCategory, onSelect, updatesActive, waiting, onSe
     return map;
   }, [notes]);
 
-  const items: Category[] = ['All', ...CATEGORIES];
+  const item = (cat: Category, label: string) => {
+    const isActive = activeCategory === cat;
+    const count = cat === ALL ? notes.length : (counts[cat] ?? 0);
+    return (
+      <button key={cat} type="button" onClick={() => onSelect(cat)} className="gtd-subnav__item" aria-current={isActive ? 'true' : undefined}>
+        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{label}</span>
+        {count > 0 && <CountBadge count={count} active={isActive} />}
+      </button>
+    );
+  };
+  const custom = categories.filter((c) => !c.builtin);
 
   return (
     <div className="gtd-split__nav">
       <nav aria-label={t('context.contextSections')}>
         <div className="gtd-subnav__label">{t('context')}</div>
-        {items.map((cat) => {
-          const isActive = activeCategory === cat;
-          const count = cat === 'All' ? notes.length : (counts[cat.toLowerCase()] ?? 0);
-          return (
-            <button key={cat} type="button" onClick={() => onSelect(cat)} className="gtd-subnav__item" aria-current={isActive ? 'true' : undefined}>
-              <span>{categoryLabel(cat)}</span>
-              {count > 0 && <CountBadge count={count} active={isActive} />}
-            </button>
-          );
-        })}
+        {item(ALL, t('all'))}
+        {categories.filter((c) => c.builtin).map((c) => item(c.id, labelOf(c.id, categories)))}
+
+        {/* The workspace's own categories, as their owner named them, then the way to add one. */}
+        {custom.length > 0 && <div className="gtd-subnav__label">{t('context.yourCategories')}</div>}
+        {custom.map((c) => item(c.id, c.label))}
+        <div style={{ padding: 'var(--space-1) var(--space-2) var(--space-2)' }}>
+          <Button variant="ghost" size="sm" icon={icons.plus} onClick={onAddCategory}>{t('context.addCategory')}</Button>
+        </div>
 
         {/* Right under the library, not pinned to the bottom: material that may change it. Its own group, so raw input never looks like context. */}
         <div style={{ borderTop: '1px solid var(--color-border)', marginTop: 'var(--space-2)', paddingBottom: 'var(--space-4)' }}>
@@ -381,29 +402,49 @@ export default function ContextView() {
   const [notes, setNotes] = useState<ContextNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<Category>('All');
+  const [activeCategory, setActiveCategory] = useState<Category>(ALL);
+  // Built-in and the workspace's own categories; reloaded when anything under context/ changes (categories.md too).
+  const contextVersion = useDataVersion('context');
+  const { data: loadedCategories, error: categoriesError, refetch: refetchCategories } = useApi<ContextCategoryInfo[]>('/api/context/categories', [contextVersion]);
+  const [categories, setCategories] = useState<ContextCategoryInfo[]>(BUILTIN_CATEGORIES);
+  const [categoryModal, setCategoryModal] = useState<{ editing: ContextCategoryInfo | null } | null>(null);
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [selectedNote, setSelectedNote] = useState<ContextNote | null>(null);
 
-  useEffect(() => {
+  const loadNotes = useCallback(() => {
     apiGet<ContextNote[]>('/api/context')
-      .then((data) => { setNotes(data); setLoading(false); })
+      .then((data) => { setNotes(data); setError(null); setLoading(false); })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : t('context.failedToLoadNotes')); setLoading(false); });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- t only words the error
   }, []);
+  useEffect(loadNotes, [loadNotes]);
+
+  // A category added in another window, by hand or by an agent may bring a folder of notes with it: load them too.
+  // A category that is gone takes the page back to all notes.
+  const seenCategories = useRef<string | null>(null);
+  useEffect(() => {
+    if (!loadedCategories) return;
+    setCategories(loadedCategories);
+    const key = loadedCategories.map((c) => c.id).join('\n');
+    if (seenCategories.current !== null && seenCategories.current !== key) loadNotes();
+    seenCategories.current = key;
+    setActiveCategory((active) => active === ALL || loadedCategories.some((c) => c.id === active) ? active : ALL);
+  }, [loadedCategories, loadNotes]);
+  const activeCustom = categories.find((c) => c.id === activeCategory && !c.builtin) ?? null;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return notes.filter((n) => {
-      const matchCat = activeCategory === 'All' || n.category.toLowerCase() === activeCategory.toLowerCase();
+      const matchCat = activeCategory === ALL || n.category.toLowerCase() === activeCategory;
       const matchSearch = !q || n.title.toLowerCase().includes(q) || (n.body ?? '').toLowerCase().includes(q);
       return matchCat && matchSearch;
     });
   }, [notes, activeCategory, search]);
 
   const openCreate = () => {
-    const defaultCategory = activeCategory === 'All' ? 'Company' : activeCategory;
+    const defaultCategory = activeCategory === ALL ? 'company' : activeCategory;
     setSelectedNote({ category: defaultCategory } as ContextNote);
     setModalMode('create');
     setIsModalOpen(true);
@@ -453,6 +494,39 @@ export default function ContextView() {
     }
   }, [confirm, notify, t]);
 
+  const handleCategorySaved = (saved: ContextCategoryInfo, created: boolean) => {
+    setCategoryModal(null);
+    setCategories((list) => list.some((c) => c.id === saved.id) ? list.map((c) => c.id === saved.id ? saved : c) : [...list, saved]);
+    refetchCategories();
+    if (!created) return;
+    setActiveCategory(saved.id);
+    setSearch('');
+    if (showUpdates) navigate('/context');
+    notify.success(t('context.categoryAdded', { label: saved.label }));
+  };
+
+  const handleDeleteCategory = async (category: ContextCategoryInfo) => {
+    const count = notes.filter((n) => n.category.toLowerCase() === category.id).length;
+    // Never removes notes: they are moved or deleted first, one by one, where the user can see them.
+    if (count > 0) { notify.warning(t('context.categoryHasNotes', { count, label: category.label })); return; }
+    const ok = await confirm({
+      title: t('context.deleteCategoryTitle', { label: category.label }),
+      message: t('context.deleteCategoryMessage'),
+      confirmLabel: t('context.deleteCategory'),
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await apiDelete(`/api/context/categories/${encodeURIComponent(category.id)}`);
+      setCategories((list) => list.filter((c) => c.id !== category.id));
+      setActiveCategory(ALL);
+      refetchCategories();
+      notify.success(t('context.categoryDeleted', { label: category.label }));
+    } catch (err: unknown) {
+      notify.error(err, t('context.couldNotDeleteTheCategory'));
+    }
+  };
+
   const handleSaved = useCallback((saved: ContextNote) => {
     setNotes((prev) => {
       const idx = prev.findIndex((n) => n.id === saved.id);
@@ -465,7 +539,7 @@ export default function ContextView() {
 
   if (loading) return <LoadingSpinner text={t('context.loadingContextNotes')} />;
 
-  const categoryTitle = showUpdates ? t('context.contextUpdates') : activeCategory === 'All' ? t('context.allNotes') : categoryLabel(activeCategory);
+  const categoryTitle = showUpdates ? t('context.contextUpdates') : activeCategory === ALL ? t('context.allNotes') : labelOf(activeCategory, categories);
 
   const handleImported = (update: ContextUpdate, uploadErrors: string[]) => {
     setImportOpen(false);
@@ -484,7 +558,8 @@ export default function ContextView() {
 
   return (
     <div className="gtd-split">
-      <Sidebar notes={notes} activeCategory={showUpdates ? null : activeCategory}
+      <Sidebar notes={notes} categories={categories} activeCategory={showUpdates ? null : activeCategory}
+        onAddCategory={() => setCategoryModal({ editing: null })}
         onSelect={(cat) => { setActiveCategory(cat); setSearch(''); if (showUpdates) navigate('/context'); }}
         updatesActive={showUpdates} waiting={waiting} onSelectUpdates={() => navigate('/context/updates')} />
 
@@ -498,6 +573,13 @@ export default function ContextView() {
             )}
           </h2>
           {updatesList && <WaitingCounts waiting={waiting} onShow={showGroup} />}
+          {/* Next to the name they change: the workspace's own categories only. */}
+          {!showUpdates && activeCustom && (
+            <div style={{ display: 'flex', gap: 2 }}>
+              <IconButton label={t('context.editCategoryNamed', { label: activeCustom.label })} icon={icons.edit} onClick={() => setCategoryModal({ editing: activeCustom })} />
+              <IconButton label={t('context.deleteCategoryNamed', { label: activeCustom.label })} icon={icons.trash} tone="danger" onClick={() => void handleDeleteCategory(activeCustom)} />
+            </div>
+          )}
           </div>
           <div className="gtd-page-header__actions">
             {!showUpdates && <SearchInput value={search} onChange={setSearch} placeholder={t('context.searchNotes')} width={220} />}
@@ -537,6 +619,12 @@ export default function ContextView() {
         <div className="gtd-split__body" style={{ display: showUpdates ? 'none' : undefined }}>
           <div className="gtd-stack" style={{ gap: 'var(--space-3)', maxWidth: 'var(--page-width-default)' }}>
             {error && <Notice tone="critical" title={t('context.couldNotLoadTheNotes')}>{error}</Notice>}
+            {categoriesError && !loadedCategories && <Notice tone="warning">{t('context.couldNotLoadCategories')}</Notice>}
+            {activeCustom?.description && (
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)', lineHeight: 'var(--leading-normal)', whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>
+                {activeCustom.description}
+              </p>
+            )}
 
             {filtered.length === 0 && !error && (
               <EmptyState
@@ -547,7 +635,7 @@ export default function ContextView() {
             )}
 
             {filtered.map((note) => (
-              <NoteCard key={note.id} note={note}
+              <NoteCard key={note.id} note={note} categoryName={labelOf(note.category, categories)}
                 onTitleClick={() => openEdit(note)}
                 onEdit={(e) => openEdit(note, e)}
                 onDelete={(e) => handleDelete(note, e)} />
@@ -557,11 +645,13 @@ export default function ContextView() {
       </div>
 
       <ShareNotes isOpen={shareOpen} onClose={() => setShareOpen(false)} notes={notes}
-        categoryLabel={(c) => categoryLabel(c.charAt(0).toUpperCase() + c.slice(1))} />
+        categoryLabel={(c) => labelOf(c, categories)} />
       <ImportUpdateModal isOpen={importOpen} onClose={() => setImportOpen(false)} onCreated={handleImported} onQueued={handleQueued} />
 
       <NoteModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}
-        initial={selectedNote} mode={modalMode} onSaved={handleSaved} />
+        initial={selectedNote} mode={modalMode} onSaved={handleSaved} categories={categories} />
+      <CategoryModal isOpen={categoryModal !== null} onClose={() => setCategoryModal(null)} editing={categoryModal?.editing ?? null}
+        categories={categories} onSaved={handleCategorySaved} />
     </div>
   );
 }

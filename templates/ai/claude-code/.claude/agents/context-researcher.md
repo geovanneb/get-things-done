@@ -27,6 +27,8 @@ Each context note lives in its own folder: `context/<category>/<slug>/note.md`
 
 Categories: `company`, `organization`, `strategy`, `programs`, `decisions`, `risks`, `glossary`, `situation`
 
+A workspace may add its own categories. `context/categories.md` lists them in its frontmatter (`id` is the folder, `label` the name, `description` what belongs there). Read it if it exists, and use those folders like the built-in ones. File a note only in a built-in or listed category: never create a folder under `context/`, and never edit `context/categories.md` (the executive manages categories in the dashboard).
+
 Frontmatter template:
 ```yaml
 ---

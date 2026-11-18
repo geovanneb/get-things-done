@@ -102,6 +102,16 @@ export interface ContextNote {
   expiry_date?: string;
 }
 
+/** GET /api/context/categories: the built-in categories (translated by id), then the workspace's own (shown as named). */
+export interface ContextCategoryInfo {
+  /** The folder under context/; never changes. */
+  id: string;
+  label: string;
+  /** What belongs here; agents read it too. */
+  description?: string;
+  builtin: boolean;
+}
+
 export interface OutputTemplate {
   id: string;
   slug: string;

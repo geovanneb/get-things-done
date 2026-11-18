@@ -5,10 +5,13 @@ import { ContextService } from '../services/contextService';
 import { downloadContextShare, previewContextShare } from '../services/contextShare';
 import { sendFile, sendZip } from '../utils/files';
 import { ContextCategory } from '../types';
+import { WorkspaceService } from '../services/workspace';
+import { createCategory, deleteCategory, listCategories, updateCategory } from '../services/contextCategories';
 import { utf8FileNames } from '../utils/uploadNames';
 
 const router = Router();
 const contextService = new ContextService();
+const workspaceService = new WorkspaceService();
 const upload = multer({ storage: multer.memoryStorage(), ...utf8FileNames, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // GET /api/context
@@ -22,6 +25,27 @@ router.get('/', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   const note = await contextService.createContextNote(req.body);
   res.status(201).json(note);
+});
+
+// GET /api/context/categories  the built-in categories, then the workspace's own (context/categories.md)
+router.get('/categories', async (_req: Request, res: Response) => {
+  res.json(await listCategories(workspaceService.getWorkspacePath()));
+});
+
+// POST /api/context/categories  { label, description? }  adds a category; its id (the folder) comes from the label
+router.post('/categories', async (req: Request, res: Response) => {
+  res.status(201).json(await createCategory(workspaceService.getWorkspacePath(), req.body));
+});
+
+// PUT /api/context/categories/:category  { label?, description? }  renames it; the folder and its notes stay
+router.put('/categories/:category', async (req: Request, res: Response) => {
+  res.json(await updateCategory(workspaceService.getWorkspacePath(), param(req, 'category'), req.body));
+});
+
+// DELETE /api/context/categories/:category  only while it holds no note
+router.delete('/categories/:category', async (req: Request, res: Response) => {
+  await deleteCategory(workspaceService.getWorkspacePath(), param(req, 'category'));
+  res.status(204).send();
 });
 
 // POST /api/context/share/preview  { notes: [id] }  the exact text of one Markdown file, and a token; only shareable notes
