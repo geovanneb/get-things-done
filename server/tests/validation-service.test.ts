@@ -4,6 +4,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { ValidationService } from '../src/services/validationService';
+import { TaskService } from '../src/services/taskService';
 import type { Stakeholder, Task, ValidationResult } from '../src/types';
 
 const service = new ValidationService();
@@ -60,12 +61,14 @@ test('a blank title is reported as a required field', () => {
   assert.ok(results.some((r) => r.rule === 'required_fields' && r.level === 'error' && r.path === 'title'));
 });
 
-test('a due date before the start date is an error, but the same calendar day is fine', () => {
-  const late = service.validateTask(task({ start_date: '2026-03-10T08:00:00.000Z', due_date: '2026-03-09' }));
-  assert.ok(late.some((r) => r.rule === 'date_logic' && r.level === 'error'));
+test('a task started or finished after its due date is late, not invalid', () => {
+  // Moved straight to Done three days late: the app stamps start_date and done_date with the same moment.
+  const doneLate = task({ status: 'done', due_date: '2026-03-09', start_date: '2026-03-12T07:30:00.000Z', done_date: '2026-03-12T07:30:00.000Z' });
+  assert.deepEqual(service.validateTask(doneLate), []);
 
-  const sameDay = service.validateTask(task({ start_date: '2026-03-10T18:00:00.000Z', due_date: '2026-03-10' }));
-  assert.ok(!sameDay.some((r) => r.rule === 'date_logic'));
+  // Started late and still open: only the overdue warning, which is the lateness.
+  const startedLate = service.validateTask(task({ status: 'in_progress', due_date: PAST, start_date: '2026-03-10T08:00:00.000Z' }));
+  assert.deepEqual(rules(startedLate), ['overdue']);
 });
 
 test('a done_date on an open task is a warning', () => {
@@ -169,6 +172,17 @@ test('task findings are prefixed with the task id', async (t) => {
 
   const overdue = (await service.validateWorkspace()).find((r) => r.rule === 'overdue');
   assert.equal(overdue?.path, 'TASK-2026-0003: due_date');
+});
+
+test('a task the app moves to Done after its due date passes validation', async (t) => {
+  const ws = await workspace(t);
+  await writeTask(ws, 'TASK-2026-0004', ['id: TASK-2026-0004', 'title: Fictional agenda clash', 'status: backlog', 'priority: high', `due_date: '${PAST}'`]);
+  // The board's drag to Done: stampStatusDates writes start_date and done_date as today, after the due date.
+  const moved = await new TaskService().updateTask('TASK-2026-0004', { status: 'done' });
+  assert.ok(moved.start_date && moved.start_date.slice(0, 10) > PAST, 'start_date is stamped after the due date');
+
+  const results = await service.validateWorkspace();
+  assert.deepEqual(results.map((r) => [r.level, r.rule]), [['info', 'workspace']]);
 });
 
 test('an org chart with a reporting loop or an unknown member is reported', async (t) => {

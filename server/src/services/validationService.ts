@@ -82,15 +82,9 @@ export class ValidationService {
       results.push({ level: 'error', rule: 'required_fields', message: 'Task title is required', path: 'title' });
     }
 
-    // Date logic checks
-    if (typeof task.due_date === 'string' && typeof task.start_date === 'string') {
-      // Compare calendar days: due_date is a date, start_date is usually a timestamp, and a task
-      // started on its due day is not late.
-      if (task.due_date.slice(0, 10) < task.start_date.slice(0, 10)) {
-        results.push({ level: 'error', rule: 'date_logic', message: 'due_date must be after start_date', path: 'due_date' });
-      }
-    }
-
+    // Date logic checks. start_date is never compared with due_date: it records when work actually began
+    // (stamped on the move to In progress or Done, or by the agent), so a task started after its due date
+    // is late, not wrong. Lateness is the overdue check below, for open tasks only.
     if (task.done_date && !isDone(task.status) && task.status !== 'archived') {
       results.push({ level: 'warning', rule: 'date_logic', message: 'Task has done_date but status is not done or archived', path: 'done_date' });
     }
