@@ -188,6 +188,7 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - run: npm ci --prefix desktop
       - run: npm run build --prefix desktop
-      # Electron is a dev dependency of the package but ships inside the app, so every advisory counts.
+      # Electron is a dev dependency of the package but ships inside the app, so every advisory counts. Exceptions are
+      # per advisory, each with its reason, in scripts/audit-check.mjs.
       - name: Reject high or critical advisories
-        run: npm audit --prefix desktop --audit-level=high
+        run: node scripts/audit-check.mjs desktop
