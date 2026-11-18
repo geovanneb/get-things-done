@@ -5,6 +5,7 @@ import { EventEmitter } from 'events';
 import { WorkspaceService } from '../workspace';
 import { refuseWhileUpdating } from '../appActivity';
 import { atomicWrite } from '../../utils/atomicWrite';
+import { workspaceEntry } from '../../utils/files';
 import type { RunStep } from '../runSteps';
 import { ClaudeChatAdapter } from './claude';
 import { CodexChatAdapter } from './codex';
@@ -230,8 +231,15 @@ export class ChatService {
     return this.workspaceService.getWorkspacePath();
   }
 
-  private file(workspace: string, id: string): string {
-    return path.join(chatDir(workspace), `${conversationId(id)}.json`);
+  /**
+   * A conversation's file: the id is checked, the path must stay in the chat folder, and no part of it below the
+   * workspace may be a symlink, so a linked folder can never send a chat (or a delete) elsewhere.
+   */
+  private async file(workspace: string, id: string): Promise<string> {
+    const dir = path.resolve(chatDir(workspace));
+    const full = path.resolve(dir, `${conversationId(id)}.json`);
+    if (!full.startsWith(dir + path.sep)) throw httpError(400, 'Invalid conversation id');
+    return workspaceEntry(workspace, full, true);
   }
 
   async providers(options: { fresh?: boolean } = {}): Promise<ProviderStatus[]> {
@@ -243,8 +251,9 @@ export class ChatService {
   }
 
   private async read(workspace: string, id: string): Promise<Conversation> {
+    const file = await this.file(workspace, id);
     let raw: string;
-    try { raw = await fsp.readFile(this.file(workspace, id), 'utf-8'); } catch { throw httpError(404, 'Conversation not found'); }
+    try { raw = await fsp.readFile(file, 'utf-8'); } catch { throw httpError(404, 'Conversation not found'); }
     let parsed: unknown;
     try { parsed = JSON.parse(raw); } catch { parsed = null; }
     const conversation = normalize(parsed, id);
@@ -253,11 +262,12 @@ export class ChatService {
   }
 
   private async write(workspace: string, conversation: Conversation): Promise<void> {
+    const file = await this.file(workspace, conversation.id);
     await fsp.mkdir(chatDir(workspace), { recursive: true });
     // Chats can hold anything the user asked: never committed, even where the workspace's .gitignore was customised.
     await fsp.writeFile(path.join(chatDir(workspace), '.gitignore'), '*\n', { flag: 'wx' }).catch(() => {});
     const { busy: _busy, ...saved } = conversation;
-    await atomicWrite(this.file(workspace, conversation.id), JSON.stringify(saved, null, 2) + '\n');
+    await atomicWrite(file, JSON.stringify(saved, null, 2) + '\n');
   }
 
   private view(workspace: string, conversation: Conversation): Conversation {
@@ -341,7 +351,7 @@ export class ChatService {
     const key = keyOf(workspace, conversationId(id));
     await turns.get(key)?.stop();
     await this.closeLive(key);
-    await fsp.rm(this.file(workspace, id), { force: true });
+    await fsp.rm(await this.file(workspace, id), { force: true });
     this.publish(workspace, id, { type: 'deleted' });
   }
 

@@ -723,3 +723,18 @@ test('a conversation file that cannot be read is reported, not crashed on, and l
   await assert.rejects(chat.get('chat-brokenfile01'), /cannot be read/);
   assert.deepEqual(await chat.list(), []);
 });
+
+test('a chat folder that is a symlink is refused: nothing is written, read or deleted through it', posix, async (t) => {
+  const ws = await workspace(t);
+  const outside = await fsp.realpath(await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-chat-outside-')));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  await fsp.writeFile(path.join(outside, 'chat-outsidefile1.json'), JSON.stringify({ provider: 'codex', messages: [] }));
+  await fsp.mkdir(path.join(ws, '.situation-board'), { recursive: true });
+  await fsp.symlink(outside, path.join(ws, '.situation-board', 'chat'));
+  const chat = service({});
+  await assert.rejects(chat.create({ provider: 'codex' }), /Invalid path traversal/);
+  await assert.rejects(chat.get('chat-outsidefile1'), /Invalid path traversal/);
+  await assert.rejects(chat.remove('chat-outsidefile1'), /Invalid path traversal/);
+  assert.deepEqual(await chat.list(), [], 'files behind the link are never listed');
+  assert.deepEqual((await fsp.readdir(outside)).sort(), ['chat-outsidefile1.json'], 'nothing written or deleted outside the workspace');
+});
