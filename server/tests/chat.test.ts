@@ -738,3 +738,21 @@ test('a chat folder that is a symlink is refused: nothing is written, read or de
   assert.deepEqual(await chat.list(), [], 'files behind the link are never listed');
   assert.deepEqual((await fsp.readdir(outside)).sort(), ['chat-outsidefile1.json'], 'nothing written or deleted outside the workspace');
 });
+
+test('deleting a chat while it answers: the answer\'s last save never brings the chat back', async (t) => {
+  const ws = await workspace(t);
+  // A tool that takes a moment to stop, so the answer ends (and would save) after the file is gone.
+  const tool = fakeTool('claude-code', { autoStop: false });
+  const chat = service({ 'claude-code': tool.adapter }, { stopGraceMs: 2000 });
+  const c = await chat.create({ provider: 'claude-code' });
+  await chat.send(c.id, { text: 'hello' });
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.last().on !== null));
+  tool.last().emit({ type: 'text', text: 'Half an answer' });
+  const s = tool.last();
+  s.interrupt = async () => { s.interrupted = true; setTimeout(() => s.on?.({ type: 'end', outcome: { status: 'stopped' } }), 150); };
+  await chat.remove(c.id);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(existsSync(path.join(ws, '.situation-board', 'chat', `${c.id}.json`)), false, 'still deleted after the answer ended');
+  await assert.rejects(chat.get(c.id), /Conversation not found/);
+  assert.deepEqual(await chat.list(), []);
+});

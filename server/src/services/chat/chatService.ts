@@ -206,6 +206,8 @@ const live = new Map<string, Live>();
 const turns = new Map<string, Turn>();
 /** Conversations being changed right now (a send being set up, a model change), so two changes never overlap. */
 const reserved = new Set<string>();
+/** Conversations being deleted: an answer still ending saves nothing, so a deleted chat never comes back. */
+const removing = new Set<string>();
 const streams = new EventEmitter();
 streams.setMaxListeners(100);
 const keyOf = (workspace: string, id: string) => `${workspace}\0${id}`;
@@ -349,9 +351,20 @@ export class ChatService {
   async remove(id: string): Promise<void> {
     const workspace = this.workspace();
     const key = keyOf(workspace, conversationId(id));
-    await turns.get(key)?.stop();
-    await this.closeLive(key);
-    await fsp.rm(await this.file(workspace, id), { force: true });
+    const file = await this.file(workspace, id);
+    removing.add(key);
+    const turn = turns.get(key);
+    try {
+      if (turn) {
+        await turn.stop();
+        await Promise.race([turn.done, new Promise((r) => setTimeout(r, this.limits.stopGraceMs + 2000))]);
+      }
+      await this.closeLive(key);
+      await fsp.rm(file, { force: true });
+    } finally {
+      // Kept until the answer has really ended, however long that takes, so its last save is skipped too.
+      if (turn) void turn.done.then(() => removing.delete(key)); else removing.delete(key);
+    }
     this.publish(workspace, id, { type: 'deleted' });
   }
 
@@ -375,7 +388,7 @@ export class ChatService {
     const page = typeof body['page'] === 'string' && PAGE.test(body['page']) && !/\.\./.test(body['page']) ? body['page'] : null;
     const workspace = this.workspace();
     const key = keyOf(workspace, conversationId(id));
-    if (turns.has(key) || reserved.has(key)) throw httpError(409, 'The assistant is still answering. Wait for it, or stop it first.', 'busy');
+    if (turns.has(key) || reserved.has(key) || removing.has(key)) throw httpError(409, 'The assistant is still answering. Wait for it, or stop it first.', 'busy');
     reserved.add(key);
     try {
       const c = await this.read(workspace, id);
@@ -444,7 +457,7 @@ export class ChatService {
     let hardStop: ReturnType<typeof setTimeout> | null = null;
     // Saves one after the other, so an older one never lands after a newer one.
     let saves = Promise.resolve();
-    const save = () => { saves = saves.then(() => this.write(workspace, c)).catch((err: Error) => console.error(`Could not save chat ${c.id}: ${err.message}`)); return saves; };
+    const save = () => { saves = saves.then(() => (removing.has(key) ? undefined : this.write(workspace, c))).catch((err: Error) => console.error(`Could not save chat ${c.id}: ${err.message}`)); return saves; };
     const saveSoon = () => { saveTimer ??= setTimeout(() => { saveTimer = null; void save(); }, SAVE_EVERY_MS); };
 
     const finish = async (ended: TurnOutcome) => {
@@ -470,7 +483,7 @@ export class ChatService {
       if (outcome.error?.code === 'resume_failed') { c.provider_session = null; c.carry_over = true; }
       await save();
       turns.delete(key);
-      this.publish(workspace, c.id, { type: 'conversation', conversation: this.view(workspace, c) });
+      if (!removing.has(key)) this.publish(workspace, c.id, { type: 'conversation', conversation: this.view(workspace, c) });
       resolveDone();
     };
 
