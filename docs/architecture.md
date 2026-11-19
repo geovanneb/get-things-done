@@ -94,10 +94,25 @@ stdin), Codex (`codex app-server`, JSON-RPC) and Copilot (`copilot --acp`, the A
 dashboard never holds a password, token or API key. What each tool may do:
 
 - **Read-only.** Claude Code gets only `Read`, `Glob` and `Grep` under `dontAsk`, the workspace's settings only,
-  no hooks and no MCP servers (`--strict-mcp-config`). Codex threads, new or resumed, run in the `read-only`
-  sandbox without network, with `approvalPolicy: never` and web search off; any approval request is declined.
-  Copilot is denied `shell`, `write`, `url` and `memory` (deny rules win over approvals the user saved), its
-  built-in and user MCP servers are off, and every permission question is refused.
+  no hooks (`--settings` with `disableAllHooks`) and no MCP servers (`--strict-mcp-config`); its model check runs
+  the same way, in an empty temporary folder. Codex starts with hooks, apps, plugins, memories and the other
+  non-read features off (`-c features.<name>=false`). The MCP servers `config/read` reports for the workspace are
+  read by a short-lived process that starts no thread, and the chat's process is launched with each of them off
+  (`-c mcp_servers={<name>={enabled=false},...}`: a dotted `-c` path cannot name a server with a dot or slash, and
+  an empty table would be merged, not replace them). Before a thread starts, Codex must report every configured
+  server off; then threads, new or resumed, run in the `read-only` sandbox without network, with
+  `approvalPolicy: never`, web search off and the same overrides, and are checked again through `hooks/list` and
+  `mcpServerStatus/list`. A Codex that reports a hook or server still on, or cannot report it, is not used. Copilot
+  is offered only `view`, `grep` and `glob` (`--available-tools`), is denied `shell`, `write`, `url` and `memory`
+  (deny rules win over approvals the user saved), has the built-in servers and every server in the user's and the
+  workspace's MCP files off (`--disable-mcp-server=<name>`, one argument each), plugins undiscovered
+  (`COPILOT_PLUGIN_DIR_ONLY`) and experimental features off; every permission question is refused. Copilot has no
+  option to turn hooks off, so it is not offered while its settings, its hooks folder or the workspace (Copilot
+  and Claude Code settings, `.github/hooks`) define one it would run (a personal `disableAllHooks` covers the
+  personal settings' hooks; a trusted workspace's covers personal and repository settings' hooks; hook files always
+  count), while one of those files cannot be read (settings are JSON with comments, a byte order mark and any line
+  ending), or when its `--help` lacks an option above. Its sign-in
+  check opens its session in an empty temporary folder, not the workspace. Any approval request is declined.
 - **The plan only.** API-key and provider variables are removed from each tool's environment; Claude Code must
   report a claude.ai sign-in and a run that reports an API key is stopped; Codex must report a ChatGPT sign-in;
   Copilot's custom providers (BYOK) are removed. Folder trust is not required: it only gates allow rules, which a

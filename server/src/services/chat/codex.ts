@@ -15,12 +15,87 @@ import {
  * asks for approval (anything that would need one is refused), and has web search off. Only a ChatGPT sign-in
  * counts: an API-key sign-in or another model provider is refused, and API-key variables are removed from its
  * environment.
+ *
+ * Nothing the user set up for Codex runs in the chat either: the process starts with hooks, apps (connectors),
+ * plugins, memories and the other tools that do more than read turned off (`-c features.<name>=false`; a name a
+ * Codex version does not know is ignored). The MCP servers Codex would load for the workspace (personal and
+ * project config, as `config/read` reports them) are read by a short-lived process that starts no thread, and the
+ * chat's process starts with each of them off; before a thread starts, Codex must report every configured server
+ * off, else the chat is not opened. An empty `mcp_servers` table would not do: Codex merges it into the configured
+ * one. The thread gets the same overrides, new or resumed, and after it starts it is checked again as Codex
+ * reports it: no MCP server (including any a plugin or app would bring) and no hook may be on. A Codex that cannot
+ * report this, or still has one on, is not used.
  */
 
 const BILLING_OVERRIDES = ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_ORG_ID', 'OPENAI_PROJECT_ID', 'AZURE_OPENAI_API_KEY'];
 const STATUS_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 20_000;
 const CLIENT = { name: 'get-things-done', title: 'Get Things Done', version: '1' };
+
+/** Codex features that run the user's own code or add tools beyond reading files: off for the chat's process. */
+export const CODEX_FEATURES_OFF = [
+  'hooks', 'apps', 'plugins', 'remote_plugin', 'memories', 'image_generation', 'browser_use', 'browser_use_external',
+  'computer_use', 'in_app_browser', 'multi_agent', 'multi_agent_v2', 'tool_suggest', 'skill_mcp_dependency_install',
+  'request_permissions_tool',
+];
+
+const BARE_KEY = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * `codex app-server` for the chat and for its checks, with the named MCP servers turned off for the whole process
+ * (before any thread can start them). They go in one inline table: Codex splits a dotted `-c` path at every dot
+ * and does not read quoted keys there, so `mcp_servers.<name>.enabled` cannot name `a.b` or `a/b`; the value of
+ * `-c mcp_servers=...` is TOML, where any name can be quoted, and Codex merges it into the configured servers.
+ * Plain names need no quotes, which a Windows `.cmd` launch refuses.
+ */
+export function codexLaunchArgs(mcpServers: string[] = []): string[] {
+  const off = mcpServers.map((name) => `${BARE_KEY.test(name) ? name : JSON.stringify(name)}={enabled=false}`);
+  return [
+    'app-server', ...CODEX_FEATURES_OFF.flatMap((name) => ['-c', `features.${name}=false`]), '-c', 'web_search=disabled',
+    ...(off.length ? ['-c', `mcp_servers={${off.join(',')}}`] : []),
+  ];
+}
+
+/** The MCP servers in Codex's effective configuration for a folder, and which of them are not turned off. */
+export function codexConfiguredServers(result: unknown): { names: string[]; on: string[] } | null {
+  const config = isObject(result) && isObject(result['config']) ? result['config'] : null;
+  if (!config) return null;
+  const servers = isObject(config['mcp_servers']) ? config['mcp_servers'] : {};
+  const names = Object.keys(servers);
+  return { names, on: names.filter((name) => !isObject(servers[name]) || servers[name]['enabled'] !== false) };
+}
+
+/** A thread's settings, the same for a new thread and a resumed one: a resumed thread never keeps looser ones. */
+export function codexThreadSettings(options: Pick<ChatOpenOptions, 'workspace' | 'instructions' | 'model'>, mcpServers: string[]): Record<string, unknown> {
+  return {
+    cwd: options.workspace, sandbox: 'read-only', approvalPolicy: 'never',
+    developerInstructions: options.instructions,
+    config: { web_search: 'disabled', mcp_servers: Object.fromEntries(mcpServers.map((name) => [name, { enabled: false }])) },
+    ...(options.model ? { model: options.model } : {}),
+  };
+}
+
+const NOT_READ_ONLY = 'This Codex version cannot be limited to reading files for the chat: it does not confirm that hooks and MCP servers are off. Update Codex, then try again.';
+
+/** Why Codex is not used, or null: the hooks it reports for a folder or thread must all be off. */
+export function codexHooksProblem(result: unknown): string | null {
+  if (!isObject(result) || !Array.isArray(result['data'])) return NOT_READ_ONLY;
+  for (const entry of result['data']) {
+    const hooks = isObject(entry) && Array.isArray(entry['hooks']) ? entry['hooks'] : null;
+    if (!hooks) return NOT_READ_ONLY;
+    if (hooks.some((h) => !isObject(h) || h['enabled'] !== false)) {
+      return 'Codex would run hooks you set up, and the dashboard chat cannot turn them off in this Codex version. Update Codex, then try again.';
+    }
+  }
+  return null;
+}
+
+/** The MCP servers Codex reports for a thread: null when every one is off, else what is still on. */
+export function codexServersOn(result: unknown): string[] | null {
+  if (!isObject(result) || !Array.isArray(result['data'])) return ['(unknown)'];
+  const on = result['data'].filter((s) => !isObject(s) || s['runtimeStatus'] !== 'disabled').map((s) => (isObject(s) && typeof s['name'] === 'string' ? s['name'] : '(unnamed)'));
+  return on.length ? on : null;
+}
 
 export function codexEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env = { ...base };
@@ -76,8 +151,8 @@ export function codexTurnError(error: unknown, resetsAt: string | null = null): 
 const lastLimits: { windows: UsageWindow[] | null } = { windows: null };
 
 /** Starts `codex app-server` and says hello. Rejects when it cannot start or does not answer. */
-async function connect(bin: string, cwd: string, env: NodeJS.ProcessEnv, handlers: Partial<ConstructorParameters<typeof RpcConnection>[1]> = {}): Promise<{ child: ChildProcess; rpc: RpcConnection }> {
-  const child = launch(bin, ['app-server'], cwd, env, 'pipe');
+async function connect(bin: string, cwd: string, env: NodeJS.ProcessEnv, handlers: Partial<ConstructorParameters<typeof RpcConnection>[1]> = {}, mcpServers: string[] = []): Promise<{ child: ChildProcess; rpc: RpcConnection }> {
+  const child = launch(bin, codexLaunchArgs(mcpServers), cwd, env, 'pipe');
   const rpc = new RpcConnection(child, {
     onNotification: handlers.onNotification ?? (() => {}),
     onRequest: handlers.onRequest ?? refuse,
@@ -105,23 +180,23 @@ export function refuse(method: string): unknown {
 export class CodexChatAdapter implements ChatAdapter {
   id = 'codex' as const;
   label = 'OpenAI Codex';
-  private cached: { at: number; result: Promise<ProviderStatus> } | null = null;
+  private cached: { at: number; workspace: string; result: Promise<ProviderStatus> } | null = null;
 
   constructor(
     private readonly binary: () => string | null = () => findCommand('codex'),
     private readonly env: () => NodeJS.ProcessEnv = () => codexEnv(),
   ) {}
 
-  status(_workspace: string, options: { fresh?: boolean } = {}): Promise<ProviderStatus> {
-    if (!options.fresh && this.cached && Date.now() - this.cached.at < STATUS_TTL_MS) {
+  status(workspace: string, options: { fresh?: boolean } = {}): Promise<ProviderStatus> {
+    if (!options.fresh && this.cached && this.cached.workspace === workspace && Date.now() - this.cached.at < STATUS_TTL_MS) {
       return this.cached.result.then((s) => ({ ...s, limits: lastLimits.windows ?? s.limits }));
     }
-    const result = this.check();
-    this.cached = { at: Date.now(), result };
+    const result = this.check(workspace);
+    this.cached = { at: Date.now(), workspace, result };
     return result;
   }
 
-  private async check(): Promise<ProviderStatus> {
+  private async check(workspace: string): Promise<ProviderStatus> {
     const base = { id: this.id, label: this.label, notes: [] as ProviderStatus['notes'], plan: null as string | null, models: [] as ChatModel[], limits: null as UsageWindow[] | null };
     const bin = this.binary();
     if (!bin) return { ...base, installed: false, ready: false, problems: [{ code: 'not_installed', message: 'OpenAI Codex is not installed on this computer. Install it, sign in once with your ChatGPT account, then try again.' }] };
@@ -142,11 +217,17 @@ export class CodexChatAdapter implements ChatAdapter {
       } else if (account['type'] !== 'chatgpt') {
         problems.push({ code: 'not_subscription', message: 'Codex is signed in with an API key, not a ChatGPT plan. The dashboard chat uses a ChatGPT plan only; run codex login and sign in with ChatGPT.' });
       }
-      const signedIn = problems.length === 0;
+      // Hooks are checked for the workspace without starting a thread; MCP servers only start with one, so they
+      // are checked when a conversation opens.
+      if (problems.length === 0) {
+        const hooks = codexHooksProblem(await conn.rpc.request('hooks/list', { cwds: [workspace] }, PROBE_TIMEOUT_MS).catch(() => null));
+        if (hooks) problems.push({ code: 'not_read_only', message: hooks });
+      }
+      const signedIn = problems.every((p) => p.code === 'not_read_only');
       const models = signedIn ? codexModels(await conn.rpc.request('model/list', {}, PROBE_TIMEOUT_MS).catch(() => null)) : [];
       const limits = signedIn ? codexLimits(await conn.rpc.request('account/rateLimits/read', {}, PROBE_TIMEOUT_MS).catch(() => null)) : null;
       if (limits) lastLimits.windows = limits;
-      return { ...base, installed: true, ready: signedIn, problems, plan: account ? shortDetail(account['planType'], 40) : null, models, limits };
+      return { ...base, installed: true, ready: problems.length === 0, problems, plan: account ? shortDetail(account['planType'], 40) : null, models, limits };
     } finally {
       killTree(conn.child, true);
     }
@@ -163,6 +244,25 @@ export class CodexChatAdapter implements ChatAdapter {
   }
 }
 
+/** The MCP server names Codex reads for a folder, from a short-lived process that never starts a thread. */
+async function discoverServers(bin: string, workspace: string, env: NodeJS.ProcessEnv): Promise<string[]> {
+  let conn: { child: ChildProcess; rpc: RpcConnection };
+  try { conn = await connect(bin, workspace, env); } catch (err) {
+    throw Object.assign(err as Error, { turnError: turnError((err as Error).message, 'crashed') });
+  }
+  try {
+    const configured = codexConfiguredServers(await conn.rpc.request('config/read', { cwd: workspace, includeLayers: false }, PROBE_TIMEOUT_MS).catch(() => null));
+    if (!configured) throw notReadOnly(NOT_READ_ONLY);
+    return configured.names;
+  } finally {
+    await stopTree(conn.child);
+  }
+}
+
+function notReadOnly(message: string): Error {
+  return Object.assign(new Error(message), { statusCode: 409, turnError: { code: 'provider', detail: message } satisfies TurnError });
+}
+
 class CodexSession implements ChatSession {
   sessionId: string | null = null;
   private child: ChildProcess | null = null;
@@ -174,23 +274,40 @@ class CodexSession implements ChatSession {
   }
 
   async start(bin: string, options: ChatOpenOptions, env: NodeJS.ProcessEnv): Promise<void> {
-    const { child, rpc } = await connect(bin, options.workspace, env, {
-      onNotification: (method, params) => this.onNotification(method, params),
-      onRequest: refuse,
-      onExit: () => {
-        const text = this.rpc?.stderr ?? '';
-        if (this.turn?.interrupted) this.end({ status: 'stopped' });
-        else this.end({ status: 'error', error: turnError(text, 'crashed') });
-      },
-    });
+    // 1. Which MCP servers Codex would load for this folder (personal and project config), read by a process that
+    //    starts no thread: reading the configuration starts no server.
+    const names = await discoverServers(bin, options.workspace, env);
+    if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) && names.some((name) => !BARE_KEY.test(name))) {
+      throw notReadOnly('Codex has an MCP server whose name cannot be passed to it from here to turn it off (use letters, digits, - and _ only, or install the Codex app). Rename it, or use another tool for the chat.');
+    }
+    // 2. The chat's process starts with every one of them off.
+    let conn: { child: ChildProcess; rpc: RpcConnection };
+    try {
+      conn = await connect(bin, options.workspace, env, {
+        onNotification: (method, params) => this.onNotification(method, params),
+        onRequest: refuse,
+        onExit: () => {
+          const text = this.rpc?.stderr ?? '';
+          if (this.turn?.interrupted) this.end({ status: 'stopped' });
+          else this.end({ status: 'error', error: turnError(text, 'crashed') });
+        },
+      }, names);
+    } catch (err) {
+      throw Object.assign(err as Error, { turnError: turnError((err as Error).message, 'crashed') });
+    }
+    const { child, rpc } = conn;
     this.child = child;
     this.rpc = rpc;
-    // The same limits on a new thread and a resumed one: a resumed thread never keeps looser settings.
-    const settings = {
-      cwd: options.workspace, sandbox: 'read-only', approvalPolicy: 'never',
-      developerInstructions: options.instructions, config: { web_search: 'disabled' },
-      ...(options.model ? { model: options.model } : {}),
-    };
+    // 3. Before any thread: Codex itself must report every configured server off. One added since step 1, or an
+    //    override it did not take, means the chat does not start.
+    const configured = codexConfiguredServers(await rpc.request('config/read', { cwd: options.workspace, includeLayers: false }).catch(() => null));
+    if (!configured) { killTree(child, true); throw notReadOnly(NOT_READ_ONLY); }
+    if (configured.on.length) {
+      killTree(child, true);
+      throw notReadOnly(`Codex would start MCP servers in the chat (${configured.on.slice(0, 5).join(', ')}). Try again; if it keeps happening, update Codex.`);
+    }
+    // The thread gets the same overrides, a second time.
+    const settings = codexThreadSettings(options, configured.names);
     try {
       const result = options.resume
         ? await rpc.request<Record<string, unknown>>('thread/resume', { threadId: options.resume, ...settings })
@@ -201,7 +318,26 @@ class CodexSession implements ChatSession {
       killTree(child, true);
       throw Object.assign(err as Error, { turnError: turnError((err as Error).message, options.resume ? 'resume_failed' : 'crashed') });
     }
+    // Checked as Codex reports the thread, before any message: no MCP server and no hook on.
+    const problem = await this.lockedDown(rpc, this.sessionId);
+    if (problem) { killTree(child, true); throw notReadOnly(problem); }
     this.effort = options.effort;
+  }
+
+  private async lockedDown(rpc: RpcConnection, threadId: string | null): Promise<string | null> {
+    // Never asked without a thread: Codex would then start the configured servers to list them.
+    if (!threadId) return NOT_READ_ONLY;
+    const hooks = codexHooksProblem(await rpc.request('hooks/list', { threadId }, PROBE_TIMEOUT_MS).catch(() => null));
+    if (hooks) return hooks;
+    let cursor: string | null = null;
+    for (let page = 0; page < 20; page++) {
+      const result: unknown = await rpc.request('mcpServerStatus/list', { threadId, detail: 'toolsAndAuthOnly', ...(cursor ? { cursor } : {}) }, PROBE_TIMEOUT_MS).catch(() => null);
+      const on = codexServersOn(result);
+      if (on) return result === null || on[0] === '(unknown)' ? NOT_READ_ONLY : `Codex kept MCP servers on for the chat (${on.slice(0, 5).join(', ')}). Update Codex, then try again.`;
+      cursor = isObject(result) && typeof result['nextCursor'] === 'string' ? result['nextCursor'] : null;
+      if (!cursor) return null;
+    }
+    return NOT_READ_ONLY;
   }
 
   private effort: string | null = null;
