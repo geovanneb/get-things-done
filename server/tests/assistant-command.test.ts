@@ -27,15 +27,97 @@ test(
   },
 );
 
-test('Windows copy commands keep shell syntax and Unicode out of the calling shell', () => {
-  const workspace = "C:\\Fictional 'notes' $(echo text) & 100% 会議 🚚";
-  for (const program of ['claude', 'codex', 'copilot', 'code'] as const) {
-    const command = assistantCommand(workspace, program, true);
-    assert.match(command, /^powershell -NoProfile -EncodedCommand [A-Za-z0-9+/=]+$/);
-    const script = Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le');
-    assert.equal(
-      script,
-      `Set-Location -LiteralPath 'C:\\Fictional ''notes'' $(echo text) & 100% 会議 🚚' -ErrorAction Stop; ${program === 'code' ? 'code .' : program}`,
-    );
+/** The Windows command as v0.17.0 made it, which doubled only ASCII apostrophes. */
+function v017Command(workspace: string, program: string): string {
+  const script = `Set-Location -LiteralPath '${workspace.replace(/'/g, "''")}' -ErrorAction Stop; ${program === 'code' ? 'code .' : program}`;
+  return `powershell -NoProfile -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;
+}
+
+const PROGRAMS = ['claude', 'codex', 'copilot', 'code'] as const;
+const QUOTES = ["'", '\u2018', '\u2019', '\u201a', '\u201b'];
+/**
+ * The script's UTF-16 code units as encoded in the command. For well-formed text this is the script PowerShell runs;
+ * PowerShell's decoder replaces an unpaired surrogate, which Node's keeps, so that case is checked for bytes only.
+ */
+const decoded = (command: string) => Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le');
+
+/**
+ * The single-quoted string the way PowerShell's tokenizer reads it (ScanStringLiteral): a single quote of any kind
+ * followed by another one is a literal (the second); one followed by anything else ends the string.
+ */
+function readSingleQuoted(script: string, start: number): { value: string; end: number } {
+  assert.ok(QUOTES.includes(script[start]!), 'a single-quoted string starts here');
+  let value = '';
+  for (let i = start + 1; i < script.length; i++) {
+    const c = script[i]!;
+    if (QUOTES.includes(c)) {
+      if (!QUOTES.includes(script[i + 1] ?? '')) return { value, end: i };
+      i++;
+      value += script[i];
+      continue;
+    }
+    value += c;
   }
+  assert.fail('the string is never closed');
+}
+
+test('Windows copy commands keep every workspace name inside one PowerShell string', () => {
+  const names = [
+    'C:\\Fictional $(echo text) & 100% 会議 🚚',
+    'C:\\Fictional `echo text` $env:PATH ${x} @(1) "double"',
+    'D:\\Проект λ 📁 𝒳 notes',
+    'C:\\',
+    "C:\\Fictional 'notes' $(echo text)",
+    'C:\\Team\u2019s notes',
+    'C:\\Team\u2018s notes\u201a and \u201b more',
+    "C:\\a'b\u2019c'\u2019; Remove-Item x; '",
+    "C:\\ends with quotes '\u2018\u2019\u201a\u201b",
+    "C:\\mixed pair '\u2019 and \u2018' ''",
+  ];
+  for (const workspace of names) {
+    for (const program of PROGRAMS) {
+      const command = assistantCommand(workspace, program, true);
+      assert.match(command, /^powershell -NoProfile -EncodedCommand [A-Za-z0-9+/=]+$/);
+      const script = decoded(command);
+      const prefix = 'Set-Location -LiteralPath ';
+      assert.ok(script.startsWith(prefix), script);
+      const { value, end } = readSingleQuoted(script, prefix.length);
+      // The string holds the path exactly, and the script goes on as fixed text right after it.
+      assert.equal(value, workspace);
+      assert.equal(script.slice(end + 1), ` -ErrorAction Stop; ${program === 'code' ? 'code .' : program}`);
+      // One character more than the path for each single quote in it, nothing else.
+      const quotes = [...workspace].filter((c) => QUOTES.includes(c)).length;
+      assert.equal(script.length, `${prefix}'' -ErrorAction Stop; ${program === 'code' ? 'code .' : program}`.length + workspace.length + quotes);
+    }
+  }
+});
+
+test('each kind of single quote is doubled with itself', () => {
+  for (const quote of QUOTES) {
+    const script = decoded(assistantCommand(`C:\\a${quote}b`, 'claude', true));
+    assert.equal(script, `Set-Location -LiteralPath 'C:\\a${quote}${quote}b' -ErrorAction Stop; claude`);
+  }
+});
+
+test('Windows commands are v0.17.0\'s for quote-free paths, and each typographic quote adds one UTF-16 unit', () => {
+  // Without a typographic quote, the very same command as v0.17.0 (which already doubled ASCII apostrophes).
+  for (const workspace of ['C:\\Plain notes', "C:\\Team's notes", 'D:\\Проект 📁']) {
+    for (const program of PROGRAMS) assert.equal(assistantCommand(workspace, program, true), v017Command(workspace, program));
+  }
+  // A lone surrogate: the same encoded bytes as v0.17.0. Only byte compatibility is claimed; what PowerShell's
+  // decoder makes of the unit (a replacement character) is unchanged by this fix.
+  for (const program of PROGRAMS) {
+    assert.equal(assistantCommand("C:\\lone \ud800 surrogate's", program, true), v017Command("C:\\lone \ud800 surrogate's", program));
+  }
+  // The review's long paths: a drive and six or twelve folders of 199 letters.
+  const long = (folders: number) => 'C:' + Array.from({ length: folders }, (_, i) => '\\' + String.fromCharCode(97 + (i % 26)).repeat(199)).join('');
+  assert.equal(long(6).length, 1202);
+  assert.equal(assistantCommand(long(6), 'code', true).length, 3390);
+  const straight = long(12).slice(0, -1) + "'";
+  assert.equal(assistantCommand(straight, 'code', true).length, 6590);
+  assert.equal(assistantCommand(straight, 'code', true), v017Command(straight, 'code'));
+  // A curly apostrophe adds one UTF-16 unit to the script: base64 grows by at most 4 characters, as for a straight one.
+  const curly = long(12).slice(0, -1) + '\u2019';
+  assert.ok(assistantCommand(curly, 'code', true).length <= v017Command(long(12), 'code').length + 4);
+  for (const program of PROGRAMS) assert.ok(assistantCommand(curly, program, true).length < 8191, program);
 });

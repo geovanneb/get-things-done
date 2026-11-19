@@ -772,7 +772,7 @@ is selected.
 | `POST` | `/api/workspace/pick-folder` | Open the system folder picker on the machine running the server. Returns `{ "path": null }` on cancel and `501` where there is no picker |
 | `POST` | `/api/workspace/reinitialize` | Re-run the scaffold on the current workspace to add missing files |
 | `POST` | `/api/workspace/open` | Open the workspace folder in Finder, Explorer or the file manager |
-| `POST` | `/api/workspace/open-assistant` | Open the workspace's assistant. Body: optional `tool` (`claude-code`, `codex` or `copilot`; default the first in `ai_tools`). Claude Code and Codex open in a new terminal window at the workspace; Copilot does too with its CLI installed, otherwise VS Code opens the workspace (`via: "editor"`). Returned `command` quotes the workspace literally (an encoded PowerShell invocation safe to paste into cmd or PowerShell on Windows, POSIX shell otherwise) |
+| `POST` | `/api/workspace/open-assistant` | Open the workspace's assistant. Body: optional `tool` (`claude-code`, `codex` or `copilot`; default the first in `ai_tools`). Claude Code and Codex open in a new terminal window at the workspace; Copilot does too with its CLI installed, otherwise VS Code opens the workspace (`via: "editor"`). Returned `command` quotes the workspace literally (an encoded PowerShell invocation safe to paste into cmd or PowerShell on Windows, with every single quote in the path, straight or typographic, doubled as PowerShell requires; POSIX shell otherwise) |
 | `GET` | `/api/workspace/validate` | Validate every workspace file against its schema |
 | `GET` | `/api/workspace/validation/count` | The number of validation errors and warnings |
 | `GET` | `/api/workspace/git/status` | Git status of the workspace |
