@@ -1,15 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, promises } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { ClaudeChatAdapter, claudeLimits, claudeModels } from '../src/services/chat/claude';
-import { CodexChatAdapter, codexEnv, codexLimits, codexTurnError, refuse } from '../src/services/chat/codex';
-import { CopilotChatAdapter, copilotArgs, copilotEnv, copilotModels, refusePermission } from '../src/services/chat/copilot';
+import { ClaudeChatAdapter, claudeLimits, claudeModels, conversationArgs, modelProbeArgs } from '../src/services/chat/claude';
+import { CodexChatAdapter, codexEnv, codexHooksProblem, codexLaunchArgs, codexLimits, codexServersOn, codexThreadSettings, codexTurnError, refuse } from '../src/services/chat/codex';
+import { CopilotChatAdapter, copilotArgs, copilotEnv, copilotLockdownProblem, copilotModels, copilotScan, parseJsonc, refusePermission } from '../src/services/chat/copilot';
 import { ChatService, CHAT_INSTRUCTIONS, carryOverText, composePrompt, normalize, titleFrom, type Conversation } from '../src/services/chat/chatService';
 import { classifyError, type ChatAdapter, type ChatEvent, type ChatOpenOptions, type ChatProviderId, type ChatSession, type ProviderStatus, type TurnOutcome } from '../src/services/chat/types';
-import { childEnv } from '../src/services/agentRunner';
+import { childEnv, runnerSettingsFile } from '../src/services/agentRunner';
 
 /** A throwaway fictional workspace; the services read its path from ESB_WORKSPACE_PATH. */
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -65,6 +65,9 @@ async function seenOf(dir: string, name: string): Promise<Record<string, unknown
 
 // ---------------------------------------------------------------- pure helpers
 
+/** What `copilot --help` lists of the options the chat's lock-down needs. */
+const REQUIRED_HELP = '--available-tools --deny-tool --disable-builtin-mcps --disable-mcp-server --no-experimental --no-ask-user';
+
 test('errors are classified for what the user can do: sign in again, wait for the plan, start a new chat', () => {
   assert.equal(classifyError('Failed to authenticate. API Error: 401 OAuth token has expired'), 'sign_in');
   assert.equal(classifyError('Authentication required'), 'sign_in');
@@ -115,19 +118,127 @@ test('environments lose every variable that would bill another account instead o
   assert.equal(copilot['COPILOT_PROVIDER_API_KEY'], undefined);
   assert.equal(copilot['COPILOT_ALLOW_ALL'], undefined, 'allow-all would let it write');
   assert.equal(copilot['GH_TOKEN'], 'user-sign-in', 'the GitHub sign-in itself stays');
+  assert.equal(copilotEnv({ ...base, GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS: 'true', GITHUB_COPILOT_PROMPT_MODE_EXTENSIONS: 'true' })['GITHUB_COPILOT_PROMPT_MODE_REPO_HOOKS'], undefined, 'opt-ins that load a folder\'s hooks are removed');
+  assert.equal(copilot['COPILOT_PLUGIN_DIR_ONLY'], 'true', 'no installed plugin (with its hooks and MCP servers) is loaded');
 });
 
-test('Copilot is denied shell, writes, URLs and memory, and every MCP server the user set up', async (t) => {
+test('Copilot is offered only its read tools, denied shell, writes, URLs and memory, and every MCP server it would start is off', async (t) => {
   const ws = await workspace(t);
   const home = path.join(ws, 'copilot-home');
   await fsp.mkdir(home, { recursive: true });
-  await fsp.writeFile(path.join(home, 'mcp-config.json'), JSON.stringify({ mcpServers: { 'fictional-crm': {}, 'bad name; rm -rf': {} } }));
-  const args = copilotArgs({ COPILOT_HOME: home }, 'gpt-x', 'low');
-  for (const rule of ['shell', 'write', 'url', 'memory']) assert.ok(args.includes(`--deny-tool=${rule}`), rule);
-  assert.ok(args.includes('--disable-builtin-mcps'));
-  assert.deepEqual(args.slice(args.indexOf('--disable-mcp-server'), args.indexOf('--disable-mcp-server') + 3), ['--disable-mcp-server', 'fictional-crm', '--deny-tool=fictional-crm']);
-  assert.ok(!args.some((a) => a.includes('rm -rf')), 'a server name that is not a plain name is never passed on');
-  assert.deepEqual(args.slice(-4), ['--model', 'gpt-x', '--effort', 'low']);
+  // Any name Copilot accepts is passed on, as one argument each and never through a shell.
+  await fsp.writeFile(path.join(home, 'mcp-config.json'), JSON.stringify({ mcpServers: { 'fictional-crm': {}, 'fictional/search': {}, 'with space': {}, 'ünïcode': {}, '-dash': {}, 'odd(name)': {} } }));
+  // The workspace's own MCP files (Copilot loads them once the folder is trusted) are turned off too.
+  await fsp.writeFile(path.join(ws, '.mcp.json'), JSON.stringify({ mcpServers: { 'project-notes': {} } }));
+  await fsp.mkdir(path.join(ws, '.github'), { recursive: true });
+  await fsp.writeFile(path.join(ws, '.github', 'mcp.json'), JSON.stringify({ mcpServers: { 'project-tracker': {}, 'fictional-crm': {} } }));
+  assert.deepEqual(copilotArgs({ COPILOT_HOME: home }, ws, 'gpt-x', 'low'), [
+    '--acp', '--stdio', '--disable-builtin-mcps', '--disallow-temp-dir', '--no-ask-user', '--no-experimental',
+    '--available-tools=view,grep,glob',
+    '--deny-tool=shell', '--deny-tool=write', '--deny-tool=url', '--deny-tool=memory',
+    '--disable-mcp-server=fictional-crm', '--deny-tool=fictional-crm',
+    '--disable-mcp-server=fictional/search', '--deny-tool=fictional/search',
+    '--disable-mcp-server=with space',
+    '--disable-mcp-server=ünïcode',
+    '--disable-mcp-server=-dash', '--deny-tool=-dash',
+    '--disable-mcp-server=odd(name)',
+    '--disable-mcp-server=project-notes', '--deny-tool=project-notes',
+    '--disable-mcp-server=project-tracker', '--deny-tool=project-tracker',
+    '--model', 'gpt-x', '--effort', 'low',
+  ], 'a name Copilot would not read as a deny rule gets none (it refuses to start on one): the allow-list covers it');
+  assert.deepEqual(copilotScan({ COPILOT_HOME: home }, null).servers, ['fictional-crm', 'fictional/search', 'with space', 'ünïcode', '-dash', 'odd(name)'], 'without a workspace, the user\'s servers are still off');
+});
+
+test('Copilot settings are read as JSON with comments, as Copilot reads them', () => {
+  assert.deepEqual(parseJsonc('{\n  // personal\n  "a": "x // not a comment", /* block */ "b": [1, 2,],\n  "c": "quote \\" /* still text */",\n}\n'), { a: 'x // not a comment', b: [1, 2], c: 'quote " /* still text */' });
+  assert.deepEqual(parseJsonc('{"a": 1, // trailing\n}'), { a: 1 });
+  assert.deepEqual(parseJsonc('\ufeff{"disableAllHooks": true}'), { disableAllHooks: true }, 'a byte order mark, as Windows editors save it');
+  assert.deepEqual(parseJsonc('{\r  // CR line endings\r  "disableAllHooks": true\r}\r'), { disableAllHooks: true }, 'CR ends a line comment');
+  assert.deepEqual(parseJsonc('{\r\n  "a": 1, // CRLF\r\n  "b": [2, /* last */],\r\n}'), { a: 1, b: [2] }, 'CRLF, and trailing commas followed by comments');
+  assert.deepEqual(parseJsonc('{"a": [1, // after the comma\n], }'), { a: [1] });
+  assert.throws(() => parseJsonc('{"a": 1 /* unclosed'));
+  assert.throws(() => parseJsonc('{"a": }'));
+});
+
+test('Copilot is not used while hooks are set up that it would run, its configuration cannot be read, or it lacks an option', async (t) => {
+  const ws = await workspace(t);
+  const home = path.join(ws, 'copilot-home');
+  const env = { COPILOT_HOME: home };
+  const help = REQUIRED_HELP;
+  const scan = () => copilotScan(env, ws);
+  assert.deepEqual(scan(), { servers: [], hooks: [], unreadable: [] });
+  assert.equal(copilotLockdownProblem(help, scan(), ws), null);
+  assert.match(copilotLockdownProblem(help.replace('--available-tools', ''), scan(), ws)!, /cannot be limited to reading files/);
+  assert.match(copilotLockdownProblem(null, scan(), ws)!, /cannot be limited to reading files/, 'a version whose options cannot be read is not used');
+  // Each place Copilot reads hooks from; a settings file that turns its hooks off does not count.
+  const hook = { hooks: { sessionStart: [{ type: 'command', bash: 'true' }] } };
+  await fsp.mkdir(path.join(home, 'hooks'), { recursive: true });
+  for (const dir of [['.github', 'hooks'], ['.github', 'copilot'], ['.claude']]) await fsp.mkdir(path.join(ws, ...dir), { recursive: true });
+  await fsp.writeFile(path.join(home, 'settings.json'), JSON.stringify({ ...hook, disableAllHooks: true }));
+  await fsp.writeFile(path.join(home, 'hooks', 'empty.json'), JSON.stringify({ version: 1, hooks: {} }));
+  await fsp.writeFile(path.join(ws, '.github', 'copilot', 'settings.json'), '{\n  // the repository turns its own hooks off\n  "disableAllHooks": true,\n  "hooks": {"sessionStart": [{"type": "command", "bash": "true"}]},\n}\n');
+  await fsp.writeFile(path.join(ws, '.claude', 'settings.local.json'), JSON.stringify({ ...hook, disableAllHooks: true }));
+  assert.deepEqual(scan().hooks, [], 'hooks a file turns off itself, and an empty hooks file, do not count');
+  // Settings with comments are read the way Copilot reads them: the hook is found.
+  await fsp.writeFile(path.join(home, 'settings.json'), '{\n  // personal settings\n  "hooks": {"sessionStart": [{"type": "command", "bash": "true"}]},\n}\n');
+  await fsp.writeFile(path.join(home, 'hooks', 'user.json'), JSON.stringify({ version: 1, ...hook }));
+  await fsp.writeFile(path.join(ws, '.github', 'hooks', 'repo.json'), JSON.stringify({ version: 1, ...hook }));
+  await fsp.writeFile(path.join(ws, '.github', 'copilot', 'settings.local.json'), JSON.stringify(hook));
+  await fsp.writeFile(path.join(ws, '.claude', 'settings.json'), JSON.stringify({ permissions: {}, hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'true' }] }] } }));
+  assert.deepEqual(scan().hooks.map((f) => path.relative(ws, f)), [
+    path.join('copilot-home', 'settings.json'), path.join('copilot-home', 'hooks', 'user.json'),
+    path.join('.github', 'hooks', 'repo.json'), path.join('.github', 'copilot', 'settings.local.json'), path.join('.claude', 'settings.json'),
+  ]);
+  assert.match(copilotLockdownProblem(help, scan(), ws)!, /would run the hooks set up in .*\.github[\\/]hooks[\\/]repo\.json/);
+  // A file that exists but cannot be read: what it sets up is unknown, so Copilot is not used.
+  await fsp.writeFile(path.join(ws, '.mcp.json'), '{ "mcpServers": { broken');
+  assert.deepEqual(scan().unreadable, [path.join(ws, '.mcp.json')]);
+  assert.match(copilotLockdownProblem(help, scan(), ws)!, /configuration in \.mcp\.json could not be read/);
+  // A server name no command line can carry is refused, not left out.
+  assert.match(copilotLockdownProblem(help, { servers: ['bad\nname'], hooks: [], unreadable: [] }, ws)!, /cannot be passed to it/);
+  assert.match(copilotLockdownProblem(help, { servers: ['50%'], hooks: [], unreadable: [] }, ws, true)!, /cannot be passed to it/, 'through cmd.exe on Windows');
+  assert.equal(copilotLockdownProblem(help, { servers: ['50%'], hooks: [], unreadable: [] }, ws, false), null);
+});
+
+test('Copilot\'s inline hooks are judged as Copilot runs them: a trusted workspace\'s disableAllHooks covers personal hooks too', async (t) => {
+  const ws = await workspace(t);
+  const home = path.join(ws, 'copilot-home');
+  const env = { COPILOT_HOME: home };
+  const hook = { hooks: { sessionStart: [{ type: 'command', bash: 'true' }] } };
+  await fsp.mkdir(path.join(ws, '.github', 'copilot'), { recursive: true });
+  await fsp.mkdir(home, { recursive: true });
+  const personal = path.join(home, 'settings.json');
+  const repo = path.join(ws, '.github', 'copilot', 'settings.json');
+  const trust = (on: boolean) => fsp.writeFile(path.join(home, 'config.json'), on ? `// managed by Copilot\n{"trustedFolders": [${JSON.stringify(path.dirname(ws))}],}` : '{}');
+  await fsp.writeFile(personal, JSON.stringify(hook));
+  await fsp.writeFile(repo, '{\n  // the repository turns hooks off\n  "disableAllHooks": true,\n}\n');
+  await trust(true);
+  assert.deepEqual(copilotScan(env, ws).hooks, [], 'trusted (here through a parent folder): the repository setting turns the personal hooks off');
+  await trust(false);
+  assert.deepEqual(copilotScan(env, ws).hooks, [personal], 'not trusted: Copilot does not read the repository settings, so the personal hook runs');
+  await trust(true);
+  await fsp.writeFile(path.join(ws, '.github', 'copilot', 'settings.local.json'), JSON.stringify({ disableAllHooks: false }));
+  assert.deepEqual(copilotScan(env, ws).hooks, [personal], 'a repository file that turns hooks back on: not counted as off');
+  await fsp.rm(path.join(ws, '.github', 'copilot', 'settings.local.json'));
+  // A personal disableAllHooks turns off only the personal settings' hooks.
+  await fsp.writeFile(personal, JSON.stringify({ ...hook, disableAllHooks: true }));
+  await fsp.writeFile(repo, JSON.stringify(hook));
+  assert.deepEqual(copilotScan(env, ws).hooks, [repo]);
+  // Hook files run whatever the settings say.
+  await fsp.writeFile(repo, JSON.stringify({ disableAllHooks: true }));
+  await fsp.mkdir(path.join(home, 'hooks'), { recursive: true });
+  await fsp.writeFile(path.join(home, 'hooks', 'h.json'), JSON.stringify({ version: 1, ...hook }));
+  assert.deepEqual(copilotScan(env, ws).hooks, [path.join(home, 'hooks', 'h.json')]);
+});
+
+test('Copilot reads a workspace\'s configuration up to its repository root, however deep the workspace is', async (t) => {
+  const ws = await workspace(t);
+  let deep = ws;
+  for (let i = 0; i < 70; i++) deep = path.join(deep, `d${i}`);
+  await fsp.mkdir(path.join(ws, '.git'), { recursive: true });
+  await fsp.mkdir(deep, { recursive: true });
+  await fsp.writeFile(path.join(ws, '.mcp.json'), JSON.stringify({ mcpServers: { 'repo-root-server': {} } }));
+  assert.deepEqual(copilotScan({ COPILOT_HOME: path.join(ws, 'none') }, deep).servers, ['repo-root-server']);
 });
 
 test('prompts carry the page and, when no session has them, the earlier messages, newest kept', () => {
@@ -157,7 +268,8 @@ test('a conversation saved while it streamed is read back as stopped; anything u
 const FAKE_CLAUDE = String.raw`
 const args = process.argv.slice(2);
 if (args[0] === 'auth') { process.stdout.write(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', subscriptionType: 'pro', email: 'someone@example.com' })); process.exit(0); }
-seen({ args, cwd: process.cwd(), apiKey: process.env.ANTHROPIC_API_KEY ?? null });
+const si = args.indexOf('--settings');
+seen({ args, cwd: process.cwd(), apiKey: process.env.ANTHROPIC_API_KEY ?? null, settings: si >= 0 ? fs.readFileSync(args[si + 1], 'utf-8') : null });
 const ri = args.indexOf('--resume');
 if (ri >= 0 && args[ri + 1] === 'missing') { process.stderr.write('No conversation found with session ID: missing\n'); process.exit(1); }
 const out = (m) => process.stdout.write(JSON.stringify(m) + '\n');
@@ -221,7 +333,52 @@ test('Claude Code chats read-only, on the plan only, with no MCP servers, and st
   assert.ok(!args.includes('--resume'));
   const instructions = args[args.indexOf('--append-system-prompt-file') + 1]!;
   assert.equal(await fsp.readFile(instructions, 'utf-8'), CHAT_INSTRUCTIONS, 'instructions go in a file, never through a command line');
+  assert.deepEqual(args, conversationArgs(runnerSettingsFile(ws), instructions, { model: 'haiku', effort: 'low', resume: null }));
+  assert.deepEqual(JSON.parse(launched['settings'] as string), { disableAllHooks: true }, 'no hooks run in the chat');
   await session.close();
+  const resumed = track(await adapter.open(open(ws, { resume: 'sess-1' })));
+  assert.deepEqual((await ask(resumed, 'hello')).outcome, { status: 'done' });
+  await resumed.close();
+  const again = (await seenOf(ws, 'claude')).filter((s) => Array.isArray(s['args']) && (s['args'] as string[]).includes('--resume'));
+  assert.deepEqual(again.map((s) => s['args']), [conversationArgs(runnerSettingsFile(ws), instructions, { model: null, effort: null, resume: 'sess-1' })], 'a resumed conversation is locked down the same way');
+  assert.deepEqual(JSON.parse(again[0]!['settings'] as string), { disableAllHooks: true });
+});
+
+test('Claude Code\'s model check runs no hooks and no MCP servers, in an empty folder of its own that is removed after', posix, async (t) => {
+  const ws = await workspace(t);
+  const adapter = claude(ws, await script(ws, 'claude', FAKE_CLAUDE));
+  assert.deepEqual((await adapter.status(ws)).models.map((m) => m.id), ['default', 'haiku']);
+  const probes = (await seenOf(ws, 'claude')).filter((s) => Array.isArray(s['args']) && !(s['args'] as string[]).includes('--include-partial-messages'));
+  assert.equal(probes.length, 1);
+  const probe = probes[0]!;
+  const args = probe['args'] as string[];
+  const settings = args[args.indexOf('--settings') + 1]!;
+  assert.deepEqual(args, modelProbeArgs(settings), 'the same lock-down as a conversation: read tools only, strict MCP, hook-free settings');
+  assert.deepEqual(JSON.parse(probe['settings'] as string), { disableAllHooks: true });
+  const cwd = probe['cwd'] as string;
+  assert.notEqual(cwd, ws, 'not the workspace');
+  assert.notEqual(cwd, os.homedir(), 'not the home folder, whose personal settings would count as the folder\'s');
+  assert.equal(path.basename(path.dirname(settings)), path.basename(cwd), 'its settings file is in that folder');
+  assert.equal(existsSync(cwd), false, 'and the folder is gone afterwards');
+});
+
+test('Claude Code\'s model check removes its folder even when its settings cannot be written', posix, async (t) => {
+  const ws = await workspace(t);
+  const adapter = claude(ws, await script(ws, 'claude', FAKE_CLAUDE));
+  const made: string[] = [];
+  // The fs/promises module object itself, which the adapter reads its functions from.
+  const real = promises;
+  const mkdtemp = real.mkdtemp.bind(real);
+  t.mock.method(real, 'mkdtemp', async (prefix: string) => { const dir = await mkdtemp(prefix); made.push(dir); return dir; });
+  const writeFile = real.writeFile.bind(real);
+  t.mock.method(real, 'writeFile', async (file: unknown, ...rest: unknown[]) => {
+    if (typeof file === 'string' && made.some((d) => file.startsWith(d))) throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    return (writeFile as (...a: unknown[]) => Promise<void>)(file, ...rest);
+  });
+  assert.deepEqual((await adapter.status(ws)).models, [], 'no models without the hook-free settings');
+  assert.ok(made.some((d) => path.basename(d).startsWith('gtd-chat-models-')), 'the probe folder was made');
+  for (const dir of made) assert.equal(existsSync(dir), false, `removed: ${dir}`);
+  assert.deepEqual((await seenOf(ws, 'claude')).filter((s) => Array.isArray(s['args']) && !(s['args'] as string[]).includes('--include-partial-messages')), [], 'and Claude Code was never started without them');
 });
 
 test('Claude Code: an expired sign-in, a plan limit, an API key and Stop each end the answer in their own way', posix, async (t) => {
@@ -244,21 +401,48 @@ test('Claude Code: an expired sign-in, a plan limit, an API key and Stop each en
 // ---------------------------------------------------------------- Codex, with a fake `codex app-server`
 
 const FAKE_CODEX = String.raw`
-seen({ args: process.argv.slice(2), apiKey: process.env.OPENAI_API_KEY ?? null });
+const argv = process.argv.slice(2);
+seen({ args: argv, apiKey: process.env.OPENAI_API_KEY ?? null });
 const out = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
 const account = process.env.FAKE_ACCOUNT || 'chatgpt';
+const mode = process.env.FAKE_MODE || '';
+// Like Codex: the configured MCP servers start as soon as a thread starts, unless the process was launched with
+// them off (\`-c mcp_servers={...}\`); a thread's own overrides only change what it reports afterwards, so an adapter
+// that relied on them would leave a marker file. Hooks are on unless the process was started with them off.
+const late = mode === 'late' && argv.some((a) => a.startsWith('mcp_servers='));
+const SERVERS = ['fictional-crm', 'project-notes', 'fictional/search', 'notes.v2', ...(late ? ['late-server'] : [])];
+const hooksOff = argv.includes('features.hooks=false') && mode !== 'hooks-stay';
+const launchOff = new Set();
+for (const a of argv.filter((x) => x.startsWith('mcp_servers={'))) {
+  for (const k of a.matchAll(/(?:"((?:[^"\\]|\\.)*)"|([A-Za-z0-9_-]+))=\{enabled=false\}/g)) launchOff.add(k[1] !== undefined ? JSON.parse('"' + k[1] + '"') : k[2]);
+}
+if (mode === 'ignore-launch') launchOff.clear();
+const marker = (name) => fs.writeFileSync(require('path').join(require('path').dirname(SEEN), 'mcp-started-' + encodeURIComponent(name)), '1');
+let disabled = new Set();
 let slow = null;
 require('readline').createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line);
   if (m.id === 99) { seen({ approval: m.result }); out({ method: 'turn/completed', params: { threadId: 'thr-1', turn: { id: 'turn-1', status: 'completed' } } }); return; }
   const reply = (result) => out({ id: m.id, result });
+  const startThread = (params) => {
+    for (const name of SERVERS) if (!launchOff.has(name)) marker(name);
+    const servers = (params.config && params.config.mcp_servers) || {};
+    disabled = mode === 'keep-server' ? new Set() : new Set([...launchOff, ...Object.keys(servers).filter((n) => servers[n].enabled === false)]);
+  };
+  if (mode === 'old' && (m.method === 'hooks/list' || m.method === 'mcpServerStatus/list')) return out({ id: m.id, error: { code: -32601, message: 'unknown method' } });
   switch (m.method) {
     case 'initialize': return reply({});
+    case 'config/read': seen({ configRead: m.params }); return reply({ config: { mcp_servers: Object.fromEntries(SERVERS.map((n) => [n, { command: 'fictional', enabled: !launchOff.has(n) }])), features: { hooks: !hooksOff } } });
+    case 'hooks/list': seen({ hooksList: m.params }); return reply({ data: [{ cwd: m.params.cwds ? m.params.cwds[0] : null, hooks: hooksOff ? [] : [{ key: 'h', eventName: 'sessionStart', enabled: true }] }] });
+    case 'mcpServerStatus/list':
+      seen({ mcpStatus: m.params });
+      if (!m.params.threadId) { for (const name of SERVERS) marker(name); return reply({ data: SERVERS.map((name) => ({ name, runtimeStatus: 'connected' })), nextCursor: null }); }
+      return reply({ data: SERVERS.map((name) => ({ name, runtimeStatus: disabled.has(name) ? 'disabled' : 'connected' })), nextCursor: null });
     case 'account/read': return reply(account === 'none' ? { account: null, requiresOpenaiAuth: true } : { account: { type: account, planType: 'plus', email: 'someone@example.com' }, requiresOpenaiAuth: true });
     case 'model/list': return reply({ data: [{ model: 'gpt-fictional', displayName: 'GPT Fictional', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }, { model: 'hidden-one', hidden: true }] });
     case 'account/rateLimits/read': return reply({ rateLimits: { primary: { usedPercent: 5, windowDurationMins: 300, resetsAt: 1795001148 } } });
-    case 'thread/start': seen({ start: m.params }); return reply({ thread: { id: 'thr-1' } });
-    case 'thread/resume': seen({ resume: m.params }); return m.params.threadId === 'missing' ? out({ id: m.id, error: { code: -32600, message: 'no rollout found for thread id missing' } }) : reply({ thread: { id: m.params.threadId } });
+    case 'thread/start': seen({ start: m.params }); startThread(m.params); return reply({ thread: { id: 'thr-1' } });
+    case 'thread/resume': seen({ resume: m.params }); if (m.params.threadId === 'missing') return out({ id: m.id, error: { code: -32600, message: 'no rollout found for thread id missing' } }); startThread(m.params); return reply({ thread: { id: m.params.threadId } });
     case 'turn/interrupt': out({ method: 'turn/completed', params: { threadId: 'thr-1', turn: { id: 'turn-1', status: 'interrupted' } } }); return reply({});
     case 'turn/start': {
       const text = m.params.input[0].text;
@@ -279,9 +463,10 @@ require('readline').createInterface({ input: process.stdin }).on('line', (line) 
 });
 `;
 
-function codex(ws: string, bin: string, account = 'chatgpt'): CodexChatAdapter {
-  return new CodexChatAdapter(() => bin, () => codexEnv({ PATH: process.env.PATH, HOME: ws, OPENAI_API_KEY: 'should-be-removed', FAKE_ACCOUNT: account }));
+function codex(ws: string, bin: string, account = 'chatgpt', mode = ''): CodexChatAdapter {
+  return new CodexChatAdapter(() => bin, () => codexEnv({ PATH: process.env.PATH, HOME: ws, OPENAI_API_KEY: 'should-be-removed', FAKE_ACCOUNT: account, FAKE_MODE: mode }));
 }
+const markers = async (dir: string) => (await fsp.readdir(dir)).filter((f) => f.startsWith('mcp-started-'));
 
 test('Codex: only a ChatGPT sign-in counts; models and plan usage come from Codex itself', posix, async (t) => {
   const ws = await workspace(t);
@@ -332,7 +517,7 @@ test('Codex threads are read-only without network or approvals, new or resumed, 
   for (const settings of [start, resume]) {
     assert.equal(settings['sandbox'], 'read-only');
     assert.equal(settings['approvalPolicy'], 'never');
-    assert.deepEqual(settings['config'], { web_search: 'disabled' });
+    assert.deepEqual(settings['config'], { web_search: 'disabled', mcp_servers: { 'fictional-crm': { enabled: false }, 'project-notes': { enabled: false }, 'fictional/search': { enabled: false }, 'notes.v2': { enabled: false } } });
     assert.equal(settings['developerInstructions'], CHAT_INSTRUCTIONS);
   }
   assert.equal(start['model'], 'gpt-fictional');
@@ -340,10 +525,75 @@ test('Codex threads are read-only without network or approvals, new or resumed, 
   assert.deepEqual(seen.find((s) => s['approval'])!['approval'], { decision: 'decline' });
 });
 
+test('Codex starts with hooks, apps, plugins and extra tools off, and every configured MCP server off from launch, new or resumed', posix, async (t) => {
+  const ws = await workspace(t);
+  const bin = await script(ws, 'codex', FAKE_CODEX);
+  const adapter = codex(ws, bin);
+  assert.equal((await adapter.status(ws)).ready, true);
+  await (track(await adapter.open(open(ws, { model: 'gpt-fictional' })))).close();
+  await (track(await adapter.open(open(ws, { resume: 'thr-1' })))).close();
+  const seen = await seenOf(ws, 'codex');
+  const names = ['fictional-crm', 'project-notes', 'fictional/search', 'notes.v2'];
+  const launches = seen.filter((s) => s['args']).map((s) => s['args']);
+  // The status check; then for each open, a process that only reads the configuration, and the chat's own process
+  // started with every configured server off.
+  assert.deepEqual(launches, [codexLaunchArgs(), codexLaunchArgs(), codexLaunchArgs(names), codexLaunchArgs(), codexLaunchArgs(names)]);
+  assert.deepEqual(codexLaunchArgs(names).slice(-2), ['-c', 'mcp_servers={fictional-crm={enabled=false},project-notes={enabled=false},"fictional/search"={enabled=false},"notes.v2"={enabled=false}}'], 'one inline table: a dotted -c path cannot name a server with a dot or slash');
+  const launch = codexLaunchArgs();
+  for (const feature of ['hooks', 'apps', 'plugins', 'memories', 'multi_agent']) assert.ok(launch.includes(`features.${feature}=false`), feature);
+  assert.ok(!codexLaunchArgs(['plain_name', 'other-name']).some((a) => a.includes('"')), 'plain names need no quotes, which a Windows .cmd launch refuses');
+  assert.deepEqual(seen.filter((s) => s['configRead']).map((s) => s['configRead']), Array(4).fill({ cwd: ws, includeLayers: false }), 'the servers Codex would load for this workspace, read before and checked after the launch');
+  const start = seen.find((s) => s['start'])!['start'] as Record<string, unknown>;
+  const resume = seen.find((s) => s['resume'])!['resume'] as Record<string, unknown>;
+  const settings = codexThreadSettings(open(ws, { model: 'gpt-fictional' }), names);
+  assert.deepEqual(start, { ...settings, ephemeral: false });
+  const { model: _model, ...resumeSettings } = settings;
+  assert.deepEqual(resume, { threadId: 'thr-1', ...resumeSettings });
+  // Checked as Codex reports the thread, and never without one (Codex would then start the servers to list them).
+  const status = seen.filter((s) => s['mcpStatus']).map((s) => s['mcpStatus'] as Record<string, unknown>);
+  assert.equal(status.length, 2);
+  assert.ok(status.every((p) => p['threadId'] === 'thr-1'));
+  assert.deepEqual(seen.filter((s) => s['hooksList']).map((s) => s['hooksList']), [{ cwds: [ws] }, { threadId: 'thr-1' }, { threadId: 'thr-1' }]);
+  assert.deepEqual(await markers(ws), [], 'no MCP server was started');
+});
+
+test('Codex is not used when it keeps an MCP server or a hook on, or cannot say', posix, async (t) => {
+  const ws = await workspace(t);
+  const bin = await script(ws, 'codex', FAKE_CODEX);
+  const refused = (fragment: RegExp) => (err: Error & { turnError?: { code: string; detail: string | null } }) => err.turnError?.code === 'provider' && fragment.test(err.turnError.detail ?? '');
+  await assert.rejects(codex(ws, bin, 'chatgpt', 'keep-server').open(open(ws)), refused(/kept MCP servers on .*fictional-crm/));
+  await assert.rejects(codex(ws, bin, 'chatgpt', 'keep-server').open(open(ws, { resume: 'thr-1' })), refused(/kept MCP servers on/), 'a resumed thread too');
+  await assert.rejects(codex(ws, bin, 'chatgpt', 'hooks-stay').open(open(ws)), refused(/would run hooks/));
+  assert.deepEqual(await markers(ws), [], 'refused after the thread started, but no server had started');
+  // Checked before any thread starts: an override Codex did not take, or a server added since it was read.
+  for (const mode of ['ignore-launch', 'late']) {
+    const before = (await seenOf(ws, 'codex')).filter((s) => s['start'] || s['resume']).length;
+    await assert.rejects(codex(ws, bin, 'chatgpt', mode).open(open(ws)), refused(/would start MCP servers in the chat/), mode);
+    await assert.rejects(codex(ws, bin, 'chatgpt', mode).open(open(ws, { resume: 'thr-1' })), refused(/would start MCP servers/), `${mode}, resumed`);
+    assert.equal((await seenOf(ws, 'codex')).filter((s) => s['start'] || s['resume']).length, before, `${mode}: no thread was started`);
+    assert.deepEqual(await markers(ws), [], `${mode}: no server was started`);
+  }
+  await assert.rejects(codex(ws, bin, 'chatgpt', 'old').open(open(ws)), refused(/cannot be limited to reading files/));
+  const hooks = await codex(ws, bin, 'chatgpt', 'hooks-stay').status(ws);
+  assert.equal(hooks.ready, false);
+  assert.deepEqual(hooks.problems.map((p) => p.code), ['not_read_only']);
+  assert.deepEqual(hooks.models.map((m) => m.id), ['gpt-fictional'], 'signed in all the same: the models still show');
+  assert.deepEqual((await codex(ws, bin, 'chatgpt', 'old').status(ws)).problems.map((p) => p.code), ['not_read_only'], 'a version that cannot list hooks');
+  assert.ok((await seenOf(ws, 'codex')).filter((s) => s['mcpStatus']).every((s) => (s['mcpStatus'] as Record<string, unknown>)['threadId']));
+  assert.ok(codexHooksProblem({ data: [{ hooks: [{ enabled: false }] }] }) === null, 'a hook Codex reports as off is fine');
+  assert.deepEqual(codexServersOn({ data: [{ name: 'a', runtimeStatus: 'disabled' }, { name: 'b', runtimeStatus: 'starting' }] }), ['b']);
+  assert.equal(codexServersOn({ data: [] }), null);
+});
+
 // ---------------------------------------------------------------- Copilot, with a fake `copilot --acp`
 
 const FAKE_COPILOT = String.raw`
-seen({ args: process.argv.slice(2), byok: process.env.COPILOT_PROVIDER_BASE_URL ?? null });
+if (process.argv[2] === '--help') {
+  seen({ help: true });
+  process.stdout.write('Usage: copilot [OPTIONS]\n' + (process.env.FAKE_OLD === 'yes' ? '' : '  --available-tools [<tools>...]\n') + '  --deny-tool\n  --disable-builtin-mcps\n  --disable-mcp-server\n  --no-experimental\n  --no-ask-user\n');
+  process.exit(0);
+}
+seen({ args: process.argv.slice(2), cwd: process.cwd(), byok: process.env.COPILOT_PROVIDER_BASE_URL ?? null, pluginDirOnly: process.env.COPILOT_PLUGIN_DIR_ONLY ?? null });
 const out = (m) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n');
 let pending = null;
 require('readline').createInterface({ input: process.stdin }).on('line', (line) => {
@@ -352,7 +602,7 @@ require('readline').createInterface({ input: process.stdin }).on('line', (line) 
   const reply = (result) => out({ id: m.id, result });
   switch (m.method) {
     case 'initialize': return reply({ agentCapabilities: { loadSession: true, sessionCapabilities: { close: {} } }, authMethods: [] });
-    case 'session/new': return process.env.FAKE_AUTH === 'no' ? out({ id: m.id, error: { code: -32000, message: 'Authentication required' } }) : reply({ sessionId: 'cp-1', models: { availableModels: [{ modelId: 'gpt-x', name: 'GPT X' }], currentModelId: 'gpt-x' } });
+    case 'session/new': seen({ newSession: m.params.cwd }); return process.env.FAKE_AUTH === 'no' ? out({ id: m.id, error: { code: -32000, message: 'Authentication required' } }) : reply({ sessionId: 'cp-1', models: { availableModels: [{ modelId: 'gpt-x', name: 'GPT X' }], currentModelId: 'gpt-x' } });
     case 'session/close': return reply({});
     case 'session/load': seen({ load: m.params.sessionId }); out({ method: 'session/update', params: { sessionId: m.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'REPLAYED HISTORY' } } } }); return reply({});
     case 'session/cancel': return out({ id: pending, result: { stopReason: 'cancelled' } });
@@ -360,8 +610,16 @@ require('readline').createInterface({ input: process.stdin }).on('line', (line) 
       const text = m.params.prompt[0].text;
       seen({ prompt: text });
       pending = m.id;
-      const say = (t) => out({ method: 'session/update', params: { sessionId: m.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: t } } } });
+      const say = (t) => out({ method: 'session/update', params: { sessionId: m.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', messageId: 'msg-1', content: { type: 'text', text: t } } } });
+      // What Copilot says when the allow-list hid tools: before the answer, without a message id.
+      out({ method: 'session/update', params: { sessionId: m.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Info: Disabled tools: bash, create, edit, task' } } } });
       if (text.endsWith('permission')) return out({ id: 77, method: 'session/request_permission', params: { sessionId: 'cp-1', options: [{ optionId: 'ok', kind: 'allow_always' }, { optionId: 'no', kind: 'reject_once' }] } });
+      if (text.endsWith('quote')) {
+        say('The notice reads: ');
+        // An unnumbered chunk after the answer began, quoting the notice: part of the answer.
+        out({ method: 'session/update', params: { sessionId: m.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Info: Disabled tools: bash\nThat is what Copilot prints.' } } } });
+        return reply({ stopReason: 'end_turn' });
+      }
       say('Due ');
       if (text.endsWith('slow')) return;
       out({ method: 'session/update', params: { sessionId: m.params.sessionId, update: { sessionUpdate: 'tool_call', kind: 'read', title: 'Read task' } } });
@@ -372,8 +630,8 @@ require('readline').createInterface({ input: process.stdin }).on('line', (line) 
 });
 `;
 
-function copilot(ws: string, bin: string, auth = 'yes'): CopilotChatAdapter {
-  return new CopilotChatAdapter(() => bin, () => copilotEnv({ PATH: process.env.PATH, HOME: ws, COPILOT_HOME: path.join(ws, 'copilot-home'), COPILOT_PROVIDER_BASE_URL: 'http://byok.example', FAKE_AUTH: auth }));
+function copilot(ws: string, bin: string, auth = 'yes', old = 'no'): CopilotChatAdapter {
+  return new CopilotChatAdapter(() => bin, () => copilotEnv({ PATH: process.env.PATH, HOME: ws, COPILOT_HOME: path.join(ws, 'copilot-home'), COPILOT_PROVIDER_BASE_URL: 'http://byok.example', FAKE_AUTH: auth, FAKE_OLD: old }));
 }
 
 test('Copilot: signed out is told apart, models come from the session, and usage is said to be unreported', posix, async (t) => {
@@ -394,6 +652,7 @@ test('Copilot gets the instructions once, refuses permissions, and continues a s
   const r = await ask(session, 'hello');
   assert.equal(r.text, 'Due Friday.');
   assert.deepEqual((await ask(session, 'permission')).outcome, { status: 'done' });
+  assert.equal((await ask(session, 'quote')).text, 'The notice reads: Info: Disabled tools: bash\nThat is what Copilot prints.', 'only the notice before any answer text is dropped');
   const slow = new Promise<TurnOutcome>((resolve) => session.send('slow', (e) => { if (e.type === 'end') resolve(e.outcome); }));
   await new Promise((r) => setTimeout(r, 100));
   await session.interrupt();
@@ -408,10 +667,59 @@ test('Copilot gets the instructions once, refuses permissions, and continues a s
   const prompts = seen.filter((s) => s['prompt']).map((s) => s['prompt'] as string);
   assert.ok(prompts[0]!.startsWith(CHAT_INSTRUCTIONS), 'a new session gets the instructions with its first message');
   assert.equal(prompts[1], 'permission', 'and only with the first');
-  assert.equal(prompts[3], 'hello', 'a resumed session already has them');
+  assert.equal(prompts[4], 'hello', 'a resumed session already has them');
   assert.deepEqual(seen.find((s) => s['permission'])!['permission'], { outcome: { outcome: 'selected', optionId: 'no' } });
   assert.ok(seen.filter((s) => s['args']).every((s) => s['byok'] === null), 'a custom provider (BYOK) never reaches Copilot');
   assert.equal(seen.find((s) => s['load'])!['load'], 'cp-1');
+  const launches = seen.filter((s) => s['args']);
+  assert.deepEqual(launches.map((s) => s['args']), [copilotArgs({ COPILOT_HOME: path.join(ws, 'copilot-home') }, ws, 'gpt-x', null), copilotArgs({ COPILOT_HOME: path.join(ws, 'copilot-home') }, ws, null, null)], 'a new and a resumed session start locked down the same way');
+  assert.ok(launches.every((s) => s['pluginDirOnly'] === 'true' && s['cwd'] === ws));
+});
+
+test('Copilot\'s sign-in check opens its session in an empty folder of its own, never in the workspace', posix, async (t) => {
+  const ws = await workspace(t);
+  const bin = await script(ws, 'copilot', FAKE_COPILOT);
+  assert.equal((await copilot(ws, bin).status(ws)).ready, true);
+  const seen = await seenOf(ws, 'copilot');
+  const launch = seen.find((s) => s['args'])!;
+  const cwd = seen.find((s) => s['newSession'])!['newSession'] as string;
+  assert.notEqual(cwd, ws);
+  assert.equal(path.basename(launch['cwd'] as string), path.basename(cwd), 'the process starts there too, so no workspace hook or MCP file is read');
+  assert.deepEqual(launch['args'], copilotArgs({ COPILOT_HOME: path.join(ws, 'copilot-home') }, null, null, null));
+  assert.equal(existsSync(cwd), false, 'and the folder is removed afterwards');
+});
+
+test('Copilot is not used while a hook is set up, or when its version lacks the lock-down options; nothing is started', posix, async (t) => {
+  const ws = await workspace(t);
+  const bin = await script(ws, 'copilot', FAKE_COPILOT);
+  const old = await copilot(ws, bin, 'yes', 'yes').status(ws);
+  assert.deepEqual([old.ready, old.problems.map((p) => p.code)], [false, ['not_read_only']]);
+  await assert.rejects(copilot(ws, bin, 'yes', 'yes').open(open(ws)), (err: Error & { turnError?: { code: string } }) => err.turnError?.code === 'provider');
+  await fsp.mkdir(path.join(ws, '.github', 'hooks'), { recursive: true });
+  await fsp.writeFile(path.join(ws, '.github', 'hooks', 'notify.json'), JSON.stringify({ version: 1, hooks: { sessionStart: [{ type: 'command', bash: 'true' }] } }));
+  const adapter = copilot(ws, bin);
+  const hooked = await adapter.status(ws);
+  assert.equal(hooked.ready, false);
+  assert.match(hooked.problems[0]!.message, /hooks set up in \.github[\\/]hooks[\\/]notify\.json/);
+  await assert.rejects(adapter.open(open(ws)), (err: Error & { turnError?: { code: string; detail: string | null } }) => err.turnError?.code === 'provider' && /hooks/.test(err.turnError.detail ?? ''));
+  assert.deepEqual((await seenOf(ws, 'copilot')).filter((s) => s['args']), [], 'no ACP process was started for an old version or a hook (only --help ran)');
+  // Hook-free settings saved with a byte order mark, or with a comment and CR line endings, are read, not refused.
+  await fsp.rm(path.join(ws, '.github', 'hooks', 'notify.json'));
+  await fsp.mkdir(path.join(ws, 'copilot-home'), { recursive: true });
+  for (const text of ['\ufeff{"disableAllHooks": true}\n', '{\r  // personal\r  "disableAllHooks": true,\r}\r']) {
+    await fsp.writeFile(path.join(ws, 'copilot-home', 'settings.json'), text);
+    assert.equal((await copilot(ws, bin).status(ws)).ready, true, JSON.stringify(text));
+    await (track(await copilot(ws, bin).open(open(ws)))).close();
+  }
+  await fsp.writeFile(path.join(ws, 'copilot-home', 'settings.json'), '{}');
+  const before = (await seenOf(ws, 'copilot')).filter((s) => s['args']).length;
+  // Settings that cannot be read are refused the same way, at the check and when a chat opens.
+  await fsp.writeFile(path.join(ws, 'copilot-home', 'settings.json'), '{ "hooks": { // unfinished');
+  const unreadable = await copilot(ws, bin).status(ws);
+  assert.deepEqual([unreadable.ready, unreadable.problems.map((p) => p.code)], [false, ['not_read_only']]);
+  assert.match(unreadable.problems[0]!.message, /could not be read/);
+  await assert.rejects(copilot(ws, bin).open(open(ws)), (err: Error & { turnError?: { detail: string | null } }) => /could not be read/.test(err.turnError?.detail ?? ''));
+  assert.equal((await seenOf(ws, 'copilot')).filter((s) => s['args']).length, before, 'no ACP process was started for it');
 });
 
 // ---------------------------------------------------------------- the conversation service, with fake tools

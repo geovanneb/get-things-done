@@ -11,7 +11,9 @@ export type ChatProviderId = 'claude-code' | 'codex' | 'copilot';
 export const CHAT_PROVIDERS: ChatProviderId[] = ['claude-code', 'codex', 'copilot'];
 
 export type ChatProblemCode =
-  | 'not_installed' | 'not_signed_in' | 'not_subscription' | 'check_failed' | 'not_trusted' | 'workspace_auth' | 'billing_env';
+  | 'not_installed' | 'not_signed_in' | 'not_subscription' | 'check_failed' | 'not_trusted' | 'workspace_auth' | 'billing_env'
+  /** The tool cannot be limited to reading files here (a hook it would run, or a version without the needed option). */
+  | 'not_read_only';
 
 export interface ChatProblem { code: ChatProblemCode; message: string }
 

@@ -81,6 +81,28 @@ export function claudeModels(raw: unknown): ChatModel[] {
   });
 }
 
+/** The model check: the same lock-down as a conversation (read tools only, no hooks, no MCP servers), nothing saved. */
+export function modelProbeArgs(settingsFile: string): string[] {
+  return [
+    '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    '--setting-sources', 'project', '--strict-mcp-config', '--settings', settingsFile,
+    '--permission-mode', 'dontAsk', '--tools', TOOLS, '--no-session-persistence',
+  ];
+}
+
+/** A conversation's process, new or resumed: the same lock-down either way. */
+export function conversationArgs(settingsFile: string, instructionsFile: string, options: Pick<ChatOpenOptions, 'model' | 'effort' | 'resume'>): string[] {
+  return [
+    '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--setting-sources', 'project', '--strict-mcp-config', '--settings', settingsFile,
+    '--permission-mode', 'dontAsk', '--tools', TOOLS, '--max-turns', String(MAX_TURNS_PER_MESSAGE),
+    '--append-system-prompt-file', instructionsFile,
+    ...(options.model ? ['--model', options.model] : []),
+    ...(options.effort ? ['--effort', options.effort] : []),
+    ...(options.resume ? ['--resume', options.resume] : []),
+  ];
+}
+
 const lastLimits = new Map<string, UsageWindow[]>();
 
 export class ClaudeChatAdapter implements ChatAdapter {
@@ -120,33 +142,49 @@ export class ClaudeChatAdapter implements ChatAdapter {
     };
   }
 
-  /** The models this sign-in offers, from Claude Code itself (`initialize`): no message is sent, nothing is used. */
+  /**
+   * The models this sign-in offers, from Claude Code itself (`initialize`): no message is sent, nothing is used.
+   * Locked down like a conversation: no hooks (Claude Code runs SessionStart hooks even for this), no MCP servers,
+   * only the read tools. It starts in an empty folder of its own, so no folder's settings apply (in the home folder,
+   * the personal settings would count as that folder's), and the folder is removed afterwards.
+   */
   private listModels(bin: string, fresh: boolean): Promise<ChatModel[]> {
     if (!fresh && this.models && this.models.bin === bin && Date.now() - this.models.at < MODELS_TTL_MS) return this.models.list;
-    const list = new Promise<ChatModel[]>((resolve) => {
-      let child: ChildProcess;
-      const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--setting-sources', 'project', '--strict-mcp-config', '--tools', TOOLS, '--permission-mode', 'dontAsk', '--no-session-persistence'];
-      try { child = launch(bin, args, os.homedir(), this.env(), 'pipe'); } catch { resolve([]); return; }
-      let settled = false;
-      const settle = (value: ChatModel[]) => { if (settled) return; settled = true; clearTimeout(timer); killTree(child, true); resolve(value); };
-      const timer = setTimeout(() => settle([]), PROBE_TIMEOUT_MS);
-      const reader = lineReader((line) => {
-        const m = parseLine(line);
-        if (m?.['type'] !== 'control_response') return;
-        const response = isObject(m['response']) && isObject(m['response']['response']) ? m['response']['response'] : {};
-        settle(claudeModels(response['models']));
-      });
-      child.stdout?.setEncoding('utf-8');
-      child.stdout?.on('data', (c: string) => reader.push(c));
-      child.on('error', () => settle([]));
-      child.on('exit', () => settle([]));
-      child.stdin?.on('error', () => settle([]));
-      child.stdin?.write(JSON.stringify({ type: 'control_request', request_id: 'gtd-models', request: { subtype: 'initialize' } }) + '\n');
-    });
+    const list = this.probeModels(bin);
     this.models = { at: Date.now(), bin, list };
     // A failed probe is not cached for long: the next status check tries again.
     void list.then((l) => { if (!l.length && this.models?.list === list) this.models = null; });
     return list;
+  }
+
+  private async probeModels(bin: string): Promise<ChatModel[]> {
+    let dir: string;
+    try { dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-chat-models-')); } catch { return []; }
+    try {
+      // Inside the cleanup: a folder whose settings could not be written is removed too.
+      try { await fsp.writeFile(path.join(dir, 'settings.json'), RUNNER_SETTINGS); } catch { return []; }
+      return await new Promise<ChatModel[]>((resolve) => {
+        let child: ChildProcess;
+        try { child = launch(bin, modelProbeArgs(path.join(dir, 'settings.json')), dir, this.env(), 'pipe'); } catch { resolve([]); return; }
+        let settled = false;
+        const settle = (value: ChatModel[]) => { if (settled) return; settled = true; clearTimeout(timer); killTree(child, true); resolve(value); };
+        const timer = setTimeout(() => settle([]), PROBE_TIMEOUT_MS);
+        const reader = lineReader((line) => {
+          const m = parseLine(line);
+          if (m?.['type'] !== 'control_response') return;
+          const response = isObject(m['response']) && isObject(m['response']['response']) ? m['response']['response'] : {};
+          settle(claudeModels(response['models']));
+        });
+        child.stdout?.setEncoding('utf-8');
+        child.stdout?.on('data', (c: string) => reader.push(c));
+        child.on('error', () => settle([]));
+        child.on('exit', () => settle([]));
+        child.stdin?.on('error', () => settle([]));
+        child.stdin?.write(JSON.stringify({ type: 'control_request', request_id: 'gtd-models', request: { subtype: 'initialize' } }) + '\n');
+      });
+    } finally {
+      await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   async open(options: ChatOpenOptions): Promise<ChatSession> {
@@ -158,15 +196,7 @@ export class ClaudeChatAdapter implements ChatAdapter {
     // A workspace that never ran an analysis has no runs folder yet.
     await fsp.mkdir(path.dirname(runnerSettingsFile(options.workspace)), { recursive: true });
     await atomicWrite(runnerSettingsFile(options.workspace), RUNNER_SETTINGS);
-    const args = [
-      '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-      '--setting-sources', 'project', '--strict-mcp-config', '--settings', runnerSettingsFile(options.workspace),
-      '--permission-mode', 'dontAsk', '--tools', TOOLS, '--max-turns', String(MAX_TURNS_PER_MESSAGE),
-      '--append-system-prompt-file', instructions,
-      ...(options.model ? ['--model', options.model] : []),
-      ...(options.effort ? ['--effort', options.effort] : []),
-      ...(options.resume ? ['--resume', options.resume] : []),
-    ];
+    const args = conversationArgs(runnerSettingsFile(options.workspace), instructions, options);
     return new ClaudeSession(launch(bin, args, options.workspace, this.env(), 'pipe'), options, (w) => lastLimits.set(this.id, w));
   }
 }
