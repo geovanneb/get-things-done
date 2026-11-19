@@ -7,7 +7,7 @@ import { WorkspaceService } from './workspace';
 import { lock, unlock } from '../utils/fileLock';
 import { titleSlug } from '../utils/slug';
 import { requireText, textList, textOf } from '../utils/loose';
-import { categoryIds } from './contextCategories';
+import { categoryIds, withCategoryKept } from './contextCategories';
 
 const TEXT_FIELDS = ['title', 'slug', 'body', 'content', 'relevance'] as const;
 /** A timestamp as text: YAML reads an unquoted `updated_at: 2026-11-08` as a date, which cannot be sorted as text. */
@@ -39,6 +39,12 @@ function requestedSensitivity(value: unknown): Sensitivity | null | undefined {
 }
 const workspaceService = new WorkspaceService();
 
+/**
+ * Test seam for races with category removal: awaited after a request's category was checked (`checked`) and again
+ * once the category is held for the save (`held`). Never set outside tests.
+ */
+export const contextSaveHooks: { pause?: (phase: 'checked' | 'held', category: string) => Promise<void> } = {};
+
 /** The built-in categories and the workspace's own (context/categories.md); a note anywhere else is never listed, read or deleted. */
 const categories = (): Promise<string[]> => categoryIds(workspaceService.getWorkspacePath());
 
@@ -56,7 +62,9 @@ async function requestedCategory(value: unknown): Promise<ContextCategory> {
  */
 function lockName(id: string): string {
   try {
-    if (Buffer.byteLength(id) <= 200) return topLevelName(id);
+    // A leading underscore is kept for the workspace's own locks (`_categories.lock`): such an id is hashed, so a
+    // note's lock never is the registry's and a move into a custom category never waits on itself.
+    if (Buffer.byteLength(id) <= 200 && !id.startsWith('_')) return topLevelName(id);
   } catch { /* not a file name */ }
   return `id-${createHash('sha256').update(id).digest('hex').slice(0, 32)}`;
 }
@@ -182,51 +190,65 @@ export class ContextService {
     requireText(data, TEXT_FIELDS);
     const now = new Date().toISOString();
     const category = await requestedCategory(data.category || 'situation');
+    await contextSaveHooks.pause?.('checked', category);
     const slug = data.slug || titleSlug(data.title || 'untitled', 'note');
     const sensitivity = requestedSensitivity(data.sensitivity);
     const id = `CTX-${slug}`;
-    const noteDir = this.getNoteDir(category, slug);
-    const filePath = this.getNoteFile(category, slug);
 
     // The id is shared across categories: check and create under one cross-process lock.
     const held = await this.lockNote(id, 'This context note is being created elsewhere. Try again.');
     try {
-      // Never replace another note (and its sharing label) by creating one with the same title.
-      if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
-      // Ids are CTX-<slug> in every category: a second note with the same id would be edited, relabelled or deleted
-      // through the first one's id.
-      const sameId = await this.findContextFile(id);
-      if (sameId) throw httpError(409, `A context note named "${slug}" already exists in ${sameId.category}. Edit it, or choose another title.`);
-      await fileService.ensureDir(noteDir);
-
-      const note: ContextNote = {
-        id,
-        category,
-        title: data.title || 'Untitled',
-        slug,
-        tags: [],
-        relevance: data.relevance,
-        ...(sensitivity ? { sensitivity } : {}),
-        created_at: now,
-        updated_at: now,
-      };
-
-      const { content: _c, body: _b, path: _path, ...frontmatter } = note;
-      const bodyContent = data.body || data.content || '';
-      await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);
-      return { ...note, body: bodyContent, path: filePath };
+      // A custom category could be removed between the check above and the save: hold it until the note is on disk.
+      return await withCategoryKept(workspaceService.getWorkspacePath(), category, () => this.createLocked(id, category, slug, data, sensitivity, now));
     } finally {
       await unlock(held);
     }
+  }
+
+  private async createLocked(id: string, category: ContextCategory, slug: string, data: Partial<ContextNote>, sensitivity: Sensitivity | null | undefined, now: string): Promise<ContextNote> {
+    await contextSaveHooks.pause?.('held', category);
+    const noteDir = this.getNoteDir(category, slug);
+    const filePath = this.getNoteFile(category, slug);
+    // Never replace another note (and its sharing label) by creating one with the same title.
+    if (await fileService.exists(filePath)) throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
+    // Ids are CTX-<slug> in every category: a second note with the same id would be edited, relabelled or deleted
+    // through the first one's id.
+    const sameId = await this.findContextFile(id);
+    if (sameId) throw httpError(409, `A context note named "${slug}" already exists in ${sameId.category}. Edit it, or choose another title.`);
+    await fileService.ensureDir(noteDir);
+
+    const note: ContextNote = {
+      id,
+      category,
+      title: data.title || 'Untitled',
+      slug,
+      tags: [],
+      relevance: data.relevance,
+      ...(sensitivity ? { sensitivity } : {}),
+      created_at: now,
+      updated_at: now,
+    };
+
+    const { content: _c, body: _b, path: _path, ...frontmatter } = note;
+    const bodyContent = data.body || data.content || '';
+    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);
+    return { ...note, body: bodyContent, path: filePath };
   }
 
   async updateContextNote(id: string, data: Partial<ContextNote>): Promise<ContextNote> {
     requireText(data, TEXT_FIELDS);
     const sensitivity = requestedSensitivity(data.sensitivity);
     const requested = data.category ? await requestedCategory(data.category) : undefined;
+    if (requested) await contextSaveHooks.pause?.('checked', requested);
     const held = await this.lockNote(id, 'This context note is being changed elsewhere. Try again.');
     try {
-      return await this.updateLocked(id, data, sensitivity, requested);
+      if (!requested) return await this.updateLocked(id, data, sensitivity, requested);
+      // A move (or a save naming the note's own category) holds that category until the note is in it, so removing
+      // the category waits and then finds the note, or happens first and the save is refused.
+      return await withCategoryKept(workspaceService.getWorkspacePath(), requested, async () => {
+        await contextSaveHooks.pause?.('held', requested);
+        return this.updateLocked(id, data, sensitivity, requested);
+      });
     } finally {
       await unlock(held);
     }

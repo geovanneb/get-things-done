@@ -274,8 +274,25 @@ The workspace's own categories are kept in `context/categories.md` (frontmatter 
 each with `id`, `label` and an optional `description`). A label is 1 to 40 characters and unique
 without case among all categories; a description is up to 300 characters. Built-in categories
 cannot be changed or removed (`400`), and a workspace has up to 30 of its own (`409`). An entry
-written by hand that is not valid is skipped. Notes in a folder that is not a category are not
-listed, as before; adding a category with that folder's id shows them.
+written by hand that is not valid, or repeats an earlier entry's id, is skipped. Every other id
+is listed, up to the 30: entries with a label no earlier entry has come first, and the others fill
+any room left. A label taken by a built-in category or an entry listed before is shown as the id,
+or as `label (id)` when the id is taken as a name too. Notes in a
+folder that is not a category are not listed, as before; adding a category with that folder's id
+shows them.
+
+A change rewrites `context/categories.md` only from a complete read and keeps what the dashboard
+does not use: other frontmatter fields, entries it skips, an entry's own extra fields and the text
+below the frontmatter, byte for byte. When the file exists but cannot be read that way (not
+valid or not closed frontmatter, `categories` not a list, not UTF-8, over 1 MB, a link or folder,
+or unreadable), or the change would make it larger than 1 MB, add, rename and remove answer `409`
+with `details.code` `category_registry_unreadable` and change nothing; listing still shows what it
+can read. A change that would hide another listed category (at the 30-category limit, a rename can
+let an entry skipped for a repeated label take its place) answers `409` with `details.code`
+`category_would_hide`. Removing a category whose folder cannot be scanned answers
+`409` with `details.code` `category_scan_failed` and keeps the category. A note saved or moved into
+a category removed meanwhile is refused with `400` (`details.code` `category_gone`), never written
+where it would be hidden.
 
 ```text
 POST /api/context/categories
