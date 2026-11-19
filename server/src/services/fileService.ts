@@ -1,9 +1,11 @@
-import { atomicWrite } from '../utils/atomicWrite';
+import { atomicCreate, atomicWrite } from '../utils/atomicWrite';
 import * as fsp from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { WorkspaceService } from './workspace';
+import { trashDir as workspaceTrash } from './trash';
+import { workspaceEntry } from '../utils/files';
 
 const workspaceService = new WorkspaceService();
 
@@ -14,13 +16,15 @@ export class FileService {
     return { data: parsed.data as T, content: parsed.content.trim() };
   }
 
+  /** `backup: false` when the caller already saved the previous version with `backup()` (for example before a move). */
   async writeMarkdown<T extends Record<string, unknown>>(
     filePath: string,
     frontmatter: T,
-    content: string
+    content: string,
+    options: { backup?: boolean } = {},
   ): Promise<void> {
     await this.ensureDir(path.dirname(filePath));
-    await this.backupFile(filePath);
+    if (options.backup !== false) await this.backupFile(filePath);
 
     // js-yaml cannot serialize undefined — strip those keys before dumping
     const clean: Record<string, unknown> = {};
@@ -32,25 +36,41 @@ export class FileService {
     await atomicWrite(filePath, body);
   }
 
-  /** Writes a new Markdown file and fails with EEXIST when the name is taken, so two writers can never share it. */
+  /**
+   * Writes a new Markdown file and fails with EEXIST when the name is taken, so two writers can never share it. The
+   * file appears only once it is complete (see atomicCreate), so a failed write never blocks the name.
+   */
   async createMarkdown(filePath: string, frontmatter: Record<string, unknown>, content: string): Promise<void> {
     await this.ensureDir(path.dirname(filePath));
     const clean = Object.fromEntries(Object.entries(frontmatter).filter(([, v]) => v !== undefined));
-    await fsp.writeFile(filePath, stringifyMarkdown(content, clean), { flag: 'wx', mode: 0o600 });
+    await atomicCreate(filePath, stringifyMarkdown(content, clean), await this.staging());
+  }
+
+  /**
+   * Where a new file is written before it is published: `.situation-board/tmp`, checked like the trash, so owner
+   * folders never hold (or lose) staging files. Null without a workspace (staged beside the file, never swept).
+   */
+  private async staging(): Promise<string | null> {
+    let workspacePath: string;
+    try { workspacePath = workspaceService.getWorkspacePath(); } catch { return null; }
+    const dir = path.join(workspacePath, '.situation-board', 'tmp');
+    await this.appFolderReady(workspacePath, dir);
+    return dir;
   }
 
   async deleteFile(filePath: string): Promise<void> {
     if (!(await this.exists(filePath))) return;
 
     let trashDir: string;
+    let workspacePath: string | null = null;
     try {
-      const workspacePath = workspaceService.getWorkspacePath();
-      trashDir = path.join(workspacePath, '.situation-board', 'trash');
+      workspacePath = workspaceService.getWorkspacePath();
+      trashDir = workspaceTrash(workspacePath);
     } catch {
       trashDir = path.join(path.dirname(filePath), '.trash');
     }
 
-    await fsp.mkdir(trashDir, { recursive: true });
+    await this.appFolderReady(workspacePath, trashDir);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const basename = path.basename(filePath);
     const trashPath = path.join(trashDir, `${timestamp}-${crypto.randomUUID()}-${basename}`);
@@ -94,22 +114,43 @@ export class FileService {
     return { size: stat.size, mtime: stat.mtime, hash };
   }
 
+  /**
+   * Saves the current version of `filePath` to the trash, as every Markdown write does first. For a caller that must
+   * know the backup worked before it changes anything else (it then writes with `backup: false`).
+   */
+  backup(filePath: string): Promise<void> {
+    return this.backupFile(filePath);
+  }
+
   private async backupFile(filePath: string): Promise<void> {
     if (!(await this.exists(filePath))) return;
 
     let trashDir: string;
+    let workspacePath: string;
     try {
-      const workspacePath = workspaceService.getWorkspacePath();
-      trashDir = path.join(workspacePath, '.situation-board', 'trash');
+      workspacePath = workspaceService.getWorkspacePath();
+      trashDir = workspaceTrash(workspacePath);
     } catch {
       return;
     }
 
-    await fsp.mkdir(trashDir, { recursive: true });
+    await this.appFolderReady(workspacePath, trashDir);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const basename = path.basename(filePath);
     const backupPath = path.join(trashDir, `${timestamp}-${crypto.randomUUID()}-${basename}`);
-    await fsp.copyFile(filePath, backupPath);
+    await fsp.copyFile(filePath, backupPath, fsp.constants.COPYFILE_EXCL);
+  }
+
+  /**
+   * Makes one of the app's folders (the trash, the staging folder), refusing (before and after making it) a
+   * `.situation-board` or that folder when it is a link, so a deleted file, a previous version or a new file being
+   * written never leaves the workspace. Without a workspace (`null`), the
+   * fallback `.trash` beside the file is used as before.
+   */
+  private async appFolderReady(workspacePath: string | null, dir: string): Promise<void> {
+    if (workspacePath) await workspaceEntry(workspacePath, dir, true);
+    await fsp.mkdir(dir, { recursive: true });
+    if (workspacePath) await workspaceEntry(workspacePath, dir);
   }
 
   private async walkDir(dir: string, results: string[], pattern: string): Promise<void> {

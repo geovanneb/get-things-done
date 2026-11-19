@@ -4,9 +4,8 @@ import { randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 import { WorkspaceService } from '../workspace';
 import { refuseWhileUpdating } from '../appActivity';
-import { atomicWrite } from '../../utils/atomicWrite';
 import { tryLock, unlock, type HeldLock } from '../../utils/fileLock';
-import { workspaceEntry } from '../../utils/files';
+import { workspaceEntry, writeWorkspaceFile } from '../../utils/files';
 import type { RunStep } from '../runSteps';
 import { ClaudeChatAdapter } from './claude';
 import { CodexChatAdapter } from './codex';
@@ -285,10 +284,12 @@ export class ChatService {
   private async write(workspace: string, conversation: Conversation): Promise<void> {
     const file = await this.file(workspace, conversation.id);
     await fsp.mkdir(chatDir(workspace), { recursive: true });
+    // Checked again once the folder exists: it could have been replaced by a link while it was made.
+    await workspaceEntry(workspace, file, true);
     // Chats can hold anything the user asked: never committed, even where the workspace's .gitignore was customised.
     await fsp.writeFile(path.join(chatDir(workspace), '.gitignore'), '*\n', { flag: 'wx' }).catch(() => {});
     const { busy: _busy, ...saved } = conversation;
-    await atomicWrite(file, JSON.stringify(saved, null, 2) + '\n');
+    await writeWorkspaceFile(workspace, file, JSON.stringify(saved, null, 2) + '\n');
   }
 
   private view(workspace: string, conversation: Conversation): Conversation {

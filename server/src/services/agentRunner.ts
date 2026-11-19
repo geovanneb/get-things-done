@@ -13,7 +13,7 @@ import { processAlive, setAnalysisRunning } from './runState';
 import { refuseWhileUpdating } from './appActivity';
 import { stepsFromMessage, type RunStep } from './runSteps';
 import { parseMarkdown } from '../utils/markdown';
-import { atomicWrite } from '../utils/atomicWrite';
+import { workspaceEntry, writeWorkspaceFile } from '../utils/files';
 
 /**
  * Runs the workspace's own agent commands without a window, with the AI tool the user already has.
@@ -292,6 +292,15 @@ export const RUNNER_SETTINGS = JSON.stringify({ disableAllHooks: true }, null, 2
 
 export function runnerSettingsFile(workspace: string): string {
   return path.join(workspace, '.situation-board', 'runs', 'runner-settings.json');
+}
+
+/**
+ * Writes the settings both the runner and the chat pass to Claude Code. A `.situation-board` or `runs` folder that is
+ * a link is refused before anything is made or written there (a workspace that never ran an analysis has no runs
+ * folder yet: it is made here).
+ */
+export function writeRunnerSettings(workspace: string): Promise<string> {
+  return writeWorkspaceFile(workspace, runnerSettingsFile(workspace), RUNNER_SETTINGS);
 }
 
 /** Windows starts .cmd and .bat programs only through cmd.exe. */
@@ -625,8 +634,7 @@ export class AgentRunnerService {
   }
 
   private async save(workspace: string, run: AgentRun): Promise<void> {
-    await fsp.mkdir(this.runDir(workspace), { recursive: true });
-    await atomicWrite(this.runFile(workspace, run.update_id), JSON.stringify(run, null, 2) + '\n');
+    await writeWorkspaceFile(workspace, this.runFile(workspace, run.update_id), JSON.stringify(run, null, 2) + '\n');
   }
 
   /** Queues a write of the run's record; a "running" record is skipped once the run has ended. */
@@ -639,7 +647,8 @@ export class AgentRunnerService {
   }
 
   private async readRecord(workspace: string, id: string): Promise<AgentRun | null> {
-    try { return JSON.parse(await fsp.readFile(this.runFile(workspace, id), 'utf-8')) as AgentRun; } catch { return null; }
+    // A linked runs folder is never read through: no record there (saving one is refused the same way).
+    try { return JSON.parse(await fsp.readFile(await workspaceEntry(workspace, this.runFile(workspace, id)), 'utf-8')) as AgentRun; } catch { return null; }
   }
 
   /** The update's status; null when it does not exist. An update.md that cannot be read is an error, not "not found". */
@@ -658,7 +667,8 @@ export class AgentRunnerService {
 
   /** A run recorded as going whose process still exists: from before a restart of the dashboard. */
   private async orphan(workspace: string): Promise<AgentRun | null> {
-    const names = await fsp.readdir(this.runDir(workspace)).catch(() => [] as string[]);
+    const dir = await workspaceEntry(workspace, this.runDir(workspace), true).catch(() => null);
+    const names = dir ? await fsp.readdir(dir).catch(() => [] as string[]) : [];
     for (const name of names) {
       if (!/^CU-\d{4}-\d{4}\.json$/.test(name)) continue; // not runner-settings.json, gate files
       const run = await this.readRecord(workspace, name.slice(0, -5));
@@ -869,7 +879,7 @@ export class AgentRunnerService {
       const now = await this.updateStatus(workspace, uid);
       if (now === null || !allowedStatus.includes(now)) throw httpError(409, now === null ? `Context update not found: ${uid}` : `Cannot ${command} while the update is "${now}"`);
       await this.record(current);
-      await atomicWrite(runnerSettingsFile(workspace), RUNNER_SETTINGS);
+      await writeRunnerSettings(workspace);
       const gate = command === 'apply' ? await writeApprovalGate(workspace, uid, targets.map((t) => t.target)) : undefined;
       current.gate = gate ?? null;
       current.accepted = targets;

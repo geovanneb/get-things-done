@@ -7,6 +7,16 @@ import { buildZip } from './zip';
 import { checkOfficeFile, OfficeCheck } from './officeEncryption';
 
 /**
+ * Whether `full` is strictly below `base`, spelled exactly (never case-folded: two folders that differ only in case
+ * can be different folders). A base that already ends in a separator (a filesystem root such as `/` or `C:\`) works
+ * too, and `base-other` is never taken for a child of `base`. Both must be resolved. `p` is for tests (path.win32).
+ */
+export function isBelow(base: string, full: string, p: path.PlatformPath = path): boolean {
+  const prefix = base.endsWith(p.sep) ? base : base + p.sep;
+  return full.length > prefix.length && full.startsWith(prefix);
+}
+
+/**
  * Resolves `relative` inside `dir` and returns the absolute path of an existing file.
  * Throws "Invalid path traversal" (400) for anything that escapes `dir`, and "File not found" (404)
  * when there is no such regular file.
@@ -14,10 +24,10 @@ import { checkOfficeFile, OfficeCheck } from './officeEncryption';
 export async function fileInside(dir: string, relative: string): Promise<string> {
   const base = path.resolve(dir);
   const full = path.resolve(base, relative);
-  if (!full.startsWith(base + path.sep)) throw new Error('Invalid path traversal');
+  if (!isBelow(base, full)) throw new Error('Invalid path traversal');
   const realBase = await fsp.realpath(base);
   const realFull = await fsp.realpath(full).catch(() => null);
-  if (realFull && !realFull.startsWith(realBase + path.sep)) throw new Error('Invalid path traversal');
+  if (realFull && !isBelow(realBase, realFull)) throw new Error('Invalid path traversal');
   const stat = realFull ? await fsp.stat(realFull) : null;
   if (!stat?.isFile()) throw new Error(`File not found: ${relative}`);
   return realFull!;
@@ -31,18 +41,33 @@ export async function fileInside(dir: string, relative: string): Promise<string>
 export async function workspaceEntry(workspace: string, target: string, allowMissing = false): Promise<string> {
   const base = path.resolve(workspace);
   const full = path.resolve(target);
-  if (!full.startsWith(base + path.sep)) throw new Error('Invalid path traversal');
+  if (!isBelow(base, full)) throw new Error('Invalid path traversal');
   let current = base;
   for (const part of path.relative(base, full).split(path.sep)) {
     current = path.join(current, part);
     try {
-      if ((await fsp.lstat(current)).isSymbolicLink()) throw new Error('Invalid path traversal: symbolic link');
+      if ((await fsp.lstat(current)).isSymbolicLink()) {
+        throw new Error(`Invalid path traversal: symbolic link at ${path.relative(base, current).split(path.sep).join('/')}; replace the link with a real folder inside the workspace`);
+      }
     } catch (err) {
       if (allowMissing && (err as NodeJS.ErrnoException).code === 'ENOENT') return full;
       throw err;
     }
   }
   return full;
+}
+
+/**
+ * Writes `file`, the app's own record somewhere below the workspace (such as `.situation-board/...`), atomically. No
+ * folder on its way below the workspace may be a link: one is refused before its folder is made or anything written.
+ * Checked again right before the write, since a folder could be replaced while it is made.
+ */
+export async function writeWorkspaceFile(workspace: string, file: string, content: string | Buffer): Promise<string> {
+  await workspaceEntry(workspace, file, true);
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  await workspaceEntry(workspace, file, true);
+  await atomicWrite(file, content);
+  return file;
 }
 
 /** Sends a file to open in the browser, or as a download when `download` is true. */
@@ -208,8 +233,11 @@ export function safeFileName(name: string, maxBytes = 200): string {
 /**
  * Remove one attachment. A file that is already gone (removed in another tab, or by an agent) is a
  * "File not found" (404) like every other missing file, not a server error.
+ * With `workspace`, the owner's folder is checked again right before the rename (see workspaceEntry), so a folder
+ * swapped for a link after the caller's own check is refused too. The final name is never followed: rename and
+ * unlink act on a link itself, not on its target.
  */
-export async function deleteAttachment(dir: string, name: string): Promise<void> {
+export async function deleteAttachment(dir: string, name: string, workspace?: string): Promise<void> {
   const target = path.join(dir, name);
   // ENOTDIR: the owner's "folder" is a file, so it has no attachments either.
   const gone = (err: NodeJS.ErrnoException): never => {
@@ -223,17 +251,22 @@ export async function deleteAttachment(dir: string, name: string): Promise<void>
   // macOS (APFS), so the file is first moved to a hidden name of this request's own: only one rename can take it,
   // the other is told it is gone. Listings skip hidden names, so the moved file is never shown.
   const moved = path.join(dir, `.${name}.${randomUUID()}.deleting`);
+  if (workspace) await workspaceEntry(workspace, dir);
   await fsp.rename(target, moved).catch(gone);
   await fsp.unlink(moved);
 }
 
-/** Save attachments without following an existing file symlink or replacing entity metadata. */
-export async function saveAttachment(dir: string, originalName: string, buffer: Buffer, reserved: string): Promise<FolderFile> {
+/**
+ * Save attachments without following an existing file symlink or replacing entity metadata. With `workspace`, the
+ * owner's folder is checked again right before the write (see deleteAttachment).
+ */
+export async function saveAttachment(dir: string, originalName: string, buffer: Buffer, reserved: string, workspace?: string): Promise<FolderFile> {
   const name = topLevelName(safeFileName(originalName));
   if (name.startsWith('.') || name.toLowerCase() === reserved.toLowerCase()) {
     throw new Error('Invalid attachment name: reserved file');
   }
   const target = path.join(dir, name);
+  if (workspace) await workspaceEntry(workspace, dir);
   await atomicWrite(target, buffer);
   const stat = await fsp.stat(target);
   return withOfficeCheck({ name, size: stat.size, modified: stat.mtime.toISOString(), type: path.extname(name).slice(1).toLowerCase() || 'file' }, target);
