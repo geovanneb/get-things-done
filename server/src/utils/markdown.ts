@@ -66,3 +66,13 @@ export function parseMarkdown(raw: string) {
 export function stringifyMarkdown(content: string, data: Record<string, unknown>): string {
   return matter.stringify(content, data, options);
 }
+
+/**
+ * Just the frontmatter block (`---`, the YAML, `---` and its line break), for a file whose body must be kept byte for
+ * byte: append the body as read (`parseMarkdown(raw).content`). gray-matter ends its output with one line break added
+ * after an empty body; that is the one character removed here.
+ */
+export function stringifyFrontmatter(data: Record<string, unknown>): string {
+  const text = matter.stringify('', data, options);
+  return text.endsWith('\n') ? text.slice(0, -1) : text;
+}

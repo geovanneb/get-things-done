@@ -462,6 +462,18 @@ try {
     check('an empty custom category is removed with its folder',
       removed.status === 204 && !fs.existsSync(path.join(ws, 'context', 'smoke-vendors'))
         && (await (await fetch(`${base}/api/context/categories`)).json()).length === 8, `status=${removed.status}`);
+    // A categories.md that cannot be read completely is never rewritten: the change is refused and the file kept.
+    const registry = path.join(ws, 'context', 'categories.md');
+    const kept = fs.readFileSync(registry);
+    fs.writeFileSync(registry, '---\ncategories: [unclosed\n---\nHand-written notes.\n');
+    const broken = fs.readFileSync(registry);
+    const refused = await json('POST', '/api/context/categories', { label: 'Smoke budgets' });
+    const refusal = await refused.json();
+    check('a change to an unreadable categories.md answers 409 with its code and leaves the file as it is',
+      refused.status === 409 && refusal.details?.code === 'category_registry_unreadable' && fs.readFileSync(registry).equals(broken)
+        && !fs.existsSync(path.join(ws, 'context', 'smoke-budgets')),
+      JSON.stringify({ status: refused.status, refusal }));
+    fs.writeFileSync(registry, kept);
   }
 
   // Share context notes as one Markdown file (#107): only shareable notes, the download is the preview, a change refuses it.
