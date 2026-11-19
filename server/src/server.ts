@@ -19,6 +19,7 @@ import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 import { AgentRunnerService, runEvents, type RunFinished } from './services/agentRunner';
 import { ChatService } from './services/chat/chatService';
+import { endChatStreams } from './routes/chat';
 import { transcriptionEvents } from './services/transcriptionModels';
 import { meetingTranscriptionEvents } from './services/meetingTranscription';
 import { voiceprintEvents } from './services/voiceprints/service';
@@ -124,6 +125,8 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       client.end();
     }
     sseClients.clear();
+    // A chat's own stream too: an open chat panel must not keep the server from closing.
+    endChatStreams();
 
     watcherService.off('change', broadcastEvent);
     watcherService.off('add', broadcastEvent);

@@ -2,7 +2,7 @@
  * Unit tests for the workspace chat helpers. Run with `npm run test:chat --workspace=ui`.
  */
 import {
-  applyStreamEvent, composerKey, contextPercent, defaultProvider, effortOptions, errorActions, modelOptions, pageContext,
+  newerOf, applyStreamEvent, chatError, checkEnded, composerKey, contextPercent, defaultProvider, effortOptions, errorActions, modelOptions, pageContext,
   safeMarkdown, tightestWindow, untilText, type Conversation, type ProviderStatus,
 } from './chat';
 
@@ -32,6 +32,49 @@ const whole = { ...conversation, title: 'From the server' };
 check('the whole conversation always wins', applyStreamEvent(stepped, { type: 'conversation', conversation: whole }) === whole);
 check('a deleted conversation is gone', applyStreamEvent(conversation, { type: 'deleted' }) === null);
 check('usage is replaced', applyStreamEvent(conversation, { type: 'usage', usage: { context_used: 1, context_window: 2 } })?.usage?.context_window === 2);
+
+// A send answered (HTTP 202) after the stream already finished the answer: the finished answer stays.
+const question = { id: 'm3', role: 'user' as const, text: 'And next week?', created_at: '' };
+const accepted: Conversation = { ...conversation, busy: true, messages: [...conversation.messages, question, { id: 'm4', role: 'assistant', text: '', created_at: '', status: 'streaming', steps: 0 }] };
+const finished: Conversation = { ...accepted, busy: false, messages: [...conversation.messages, question, { id: 'm4', role: 'assistant', text: 'Nothing is due.', created_at: '', status: 'done', steps: 1 }] };
+check('a late send answer never undoes an answer the stream finished', newerOf(finished, accepted) === finished);
+const streaming = applyStreamEvent(accepted, { type: 'text', message_id: 'm4', text: 'Nothing' })!;
+check('nor the words streamed so far', newerOf(streaming, accepted) === streaming);
+check('a page that has not seen the new message yet takes the answer', newerOf(conversation, accepted) === accepted);
+check('the answer for another chat is not merged into this one', newerOf({ ...finished, id: 'chat-other00001' }, accepted) === accepted);
+check('nothing shown yet: the answer', newerOf(null, accepted) === accepted);
+
+// Refused because the server has another workspace open: the chat says it in its own words, not the update's.
+const refused = Object.assign(new Error('This update is in another workspace. Switch to it, then open the update.'), { status: 409, code: 'other_workspace' });
+const said = chatError(refused, () => 'This chat belongs to another workspace.') as Error & { status?: number; code?: string };
+check('another workspace: the chat\'s own text, status and code kept', said.message === 'This chat belongs to another workspace.' && said.status === 409 && said.code === 'other_workspace');
+const busy = Object.assign(new Error('The assistant is still answering.'), { status: 409, code: 'busy' });
+check('other refusals pass as they came', chatError(busy, () => 'x') === busy && chatError('oops', () => 'x') === 'oops');
+
+// The whole conversation read again (words for an answer not shown yet) arrives after the stream's final snapshot.
+const resynced = { ...accepted, messages: accepted.messages.map((m) => (m.id === 'm4' ? { ...m, text: 'Nothing' } : m)) };
+check('a late read-again never rolls back the final answer', newerOf(finished, resynced) === finished);
+
+// Words the page missed while it did not have the answer yet, read again while the answer goes on, in either order.
+const live: Conversation = { ...accepted, messages: accepted.messages.map((m) => (m.id === 'm4' ? { ...m, text: 'second' } : m)) };
+const prefix: Conversation = { ...accepted, messages: accepted.messages.map((m) => (m.id === 'm4' ? { ...m, text: 'first ' } : m)) };
+const answerText = (c: Conversation | null) => c?.messages.find((m) => m.id === 'm4')?.text;
+check('read after the 202 and newer words: the missed beginning goes in front', answerText(newerOf(live, prefix)) === 'first second', answerText(newerOf(live, prefix)));
+const readFirst = newerOf(null, prefix);
+const thenSent = newerOf(readFirst, accepted);
+check('read before the 202: the 202\'s empty answer does not wipe the words', answerText(thenSent) === 'first ');
+check('and the next words follow them', answerText(applyStreamEvent(thenSent, { type: 'text', message_id: 'm4', text: 'second' })) === 'first second');
+const overlapping: Conversation = { ...accepted, messages: accepted.messages.map((m) => (m.id === 'm4' ? { ...m, text: 'first second' } : m)) };
+check('a read that already has the newer words is not doubled', answerText(newerOf(live, overlapping)) === 'first second');
+check('longer streamed text stays', newerOf(overlapping, prefix) === overlapping);
+const ready = (status: 'streaming' | 'done'): Conversation => ({ ...accepted, busy: status === 'streaming', messages: accepted.messages.map((m) => (m.id === 'm4' ? { ...m, text: 'Ready', status } : m)) });
+const tie = newerOf(ready('streaming'), ready('done'));
+check('the same words read again as ended take the ended status, and the chat is no longer busy', tie.messages.find((m) => m.id === 'm4')?.status === 'done' && tie.busy === false);
+check('an ended answer read again wins over words still streaming', answerText(newerOf(live, finished)) === 'Nothing is due.');
+
+// Switching workspace while the tools of the first are checked: the new one gets its own check.
+check('a check ending for the workspace checked clears it', checkEnded('/ws/a', '/ws/a') === null);
+check('a check of the old workspace ending leaves the new one\'s going', checkEnded('/ws/b', '/ws/a') === '/ws/b');
 
 check('context: a share of the window', contextPercent({ context_used: 50_000, context_window: 200_000 }) === 25);
 check('context: unknown when the tool has not said', contextPercent({ context_used: 10, context_window: null }) === null && contextPercent(null) === null);

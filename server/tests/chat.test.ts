@@ -10,6 +10,8 @@ import { CopilotChatAdapter, copilotArgs, copilotEnv, copilotLockdownProblem, co
 import { ChatService, CHAT_INSTRUCTIONS, carryOverText, composePrompt, normalize, titleFrom, type Conversation } from '../src/services/chat/chatService';
 import { classifyError, type ChatAdapter, type ChatEvent, type ChatOpenOptions, type ChatProviderId, type ChatSession, type ProviderStatus, type TurnOutcome } from '../src/services/chat/types';
 import { childEnv, runnerSettingsFile } from '../src/services/agentRunner';
+import { errorHandler } from '../src/middleware/errorHandler';
+import { applyStreamEvent, newerOf } from '../../ui/src/utils/chat';
 
 /** A throwaway fictional workspace; the services read its path from ESB_WORKSPACE_PATH. */
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -738,14 +740,27 @@ class FakeSession implements ChatSession {
   async close(): Promise<void> { this.alive = false; this.closed = true; }
 }
 
-function fakeTool(id: ChatProviderId, options: { problems?: ProviderStatus['problems']; autoStop?: boolean; failOpen?: (o: ChatOpenOptions) => Error | null } = {}) {
+/** A barrier a test opens when it chooses: `reached` resolves once something waits at it. */
+function barrier() {
+  let open!: () => void;
+  let arrive!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const reached = new Promise<void>((r) => { arrive = r; });
+  return { open, reached, wait: () => { arrive(); return gate; } };
+}
+
+function fakeTool(id: ChatProviderId, options: { problems?: ProviderStatus['problems']; autoStop?: boolean; failOpen?: (o: ChatOpenOptions) => Error | null; holdStatus?: () => Promise<void>; holdOpen?: () => Promise<void> } = {}) {
   const sessions: FakeSession[] = [];
   const opened: ChatOpenOptions[] = [];
   const adapter: ChatAdapter = {
     id, label: `Fake ${id}`,
-    status: async () => ({ id, label: `Fake ${id}`, installed: true, ready: !(options.problems?.length), problems: options.problems ?? [], plan: 'pro', models: [], limits: null, notes: [] }),
+    status: async () => {
+      await options.holdStatus?.();
+      return { id, label: `Fake ${id}`, installed: true, ready: !(options.problems?.length), problems: options.problems ?? [], plan: 'pro', models: [], limits: null, notes: [] };
+    },
     open: async (o) => {
       opened.push(o);
+      await options.holdOpen?.();
       const err = options.failOpen?.(o);
       if (err) throw err;
       const s = new FakeSession(o.resume ?? `${id}-session-${sessions.length + 1}`, options.autoStop ?? true);
@@ -1063,4 +1078,314 @@ test('deleting a chat while it answers: the answer\'s last save never brings the
   assert.equal(existsSync(path.join(ws, '.situation-board', 'chat', `${c.id}.json`)), false, 'still deleted after the answer ended');
   await assert.rejects(chat.get(c.id), /Conversation not found/);
   assert.deepEqual(await chat.list(), []);
+});
+
+// ---------------------------------------------------------------- races: delete, stop, starting processes, other dashboards
+
+const chatFile = (ws: string, id: string) => path.join(ws, '.situation-board', 'chat', `${id}.json`);
+const statusOf = (e: Error & { statusCode?: number; details?: { code: string } }) => e.statusCode;
+
+test('deleting a chat while a message to it is being set up: it stays deleted and no tool starts', async (t) => {
+  const ws = await workspace(t);
+  const checking = barrier();
+  const tool = fakeTool('claude-code', { holdStatus: checking.wait });
+  const chat = service({ 'claude-code': tool.adapter });
+  const c = await chat.create({ provider: 'claude-code' });
+  const sending = chat.send(c.id, { text: 'hello' });
+  await checking.reached;
+  const removed = chat.remove(c.id);
+  checking.open();
+  await assert.rejects(sending, (e: Error & { statusCode?: number }) => statusOf(e) === 404);
+  await removed;
+  assert.equal(existsSync(chatFile(ws, c.id)), false, 'the send did not bring the file back');
+  await assert.rejects(chat.get(c.id), /Conversation not found/);
+  assert.deepEqual(await chat.list(), []);
+  assert.equal(tool.opened.length, 0, 'no tool was started for a deleted chat');
+});
+
+test('Stop, then a new message at once: the first answer\'s fallback never ends the next answer', async (t) => {
+  await workspace(t);
+  // Stops at once: the end arrives while Stop is still asking.
+  const tool = fakeTool('claude-code');
+  const chat = service({ 'claude-code': tool.adapter }, { stopGraceMs: 5000 });
+  const c = await chat.create({ provider: 'claude-code' });
+  await chat.send(c.id, { text: 'first' });
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.last().on !== null));
+  const s = tool.last();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    assert.equal(answerOf(await chat.stop(c.id)).status, 'stopped');
+    await chat.send(c.id, { text: 'second' });
+    for (let i = 0; i < 20 && s.prompts.length < 2; i++) await new Promise((r) => setImmediate(r));
+    assert.equal(s.prompts.length, 2, 'the same process answers the next message');
+    t.mock.timers.tick(5000);
+    assert.equal(s.closed, false, 'the next answer\'s process is not ended');
+    assert.equal((await chat.get(c.id)).busy, true, 'and it is still answering');
+  } finally {
+    t.mock.timers.reset();
+  }
+  s.emit({ type: 'end', outcome: { status: 'done' } });
+  assert.ok(await eventually(async () => !(await chat.get(c.id)).busy));
+  assert.equal(answerOf(await chat.get(c.id)).status, 'done');
+});
+
+test('processes still starting count against the limit of three', async (t) => {
+  await workspace(t);
+  const starting = [barrier(), barrier(), barrier()];
+  let n = 0;
+  const tool = fakeTool('claude-code', { holdOpen: () => starting[n++]!.wait() });
+  const chat = service({ 'claude-code': tool.adapter });
+  for (let i = 0; i < 3; i++) {
+    const c = await chat.create({ provider: 'claude-code' });
+    await chat.send(c.id, { text: `question ${i}` });
+    await starting[i]!.reached;
+  }
+  assert.equal(ChatService.liveCount(), 0, 'none has started yet');
+  const fourth = await chat.create({ provider: 'claude-code' });
+  await assert.rejects(chat.send(fourth.id, { text: 'hello' }), (e: Error & { details?: { code: string } }) => e.details?.code === 'too_many');
+  for (const b of starting) b.open();
+  assert.ok(await eventually(() => tool.sessions.length === 3 && tool.sessions.every((s) => s.on !== null)));
+  for (const s of tool.sessions) s.emit({ type: 'end', outcome: { status: 'done' } });
+});
+
+test('a process that starts after its answer timed out is ended, not left running', async (t) => {
+  await workspace(t);
+  const starting = barrier();
+  const tool = fakeTool('claude-code', { holdOpen: starting.wait });
+  const chat = service({ 'claude-code': tool.adapter }, { turnTimeoutMs: 50 });
+  const c = await chat.create({ provider: 'claude-code' });
+  await chat.send(c.id, { text: 'hello' });
+  await starting.reached;
+  assert.ok(await eventually(async () => !(await chat.get(c.id)).busy), 'the answer timed out while the tool was starting');
+  assert.equal(answerOf(await chat.get(c.id)).error?.code, 'timeout');
+  starting.open();
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.last().closed));
+  assert.equal(ChatService.liveCount(), 0);
+  assert.deepEqual(tool.last().prompts, [], 'nothing was asked of it');
+});
+
+test('when the dashboard stops while a tool is starting, that process is ended too', async (t) => {
+  await workspace(t);
+  const starting = barrier();
+  const tool = fakeTool('claude-code', { holdOpen: starting.wait });
+  const chat = service({ 'claude-code': tool.adapter });
+  const c = await chat.create({ provider: 'claude-code' });
+  await chat.send(c.id, { text: 'hello' });
+  await starting.reached;
+  const stopping = ChatService.stopAll();
+  // The tool finishes starting only after the shutdown has ended every process it knew of.
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  starting.open();
+  await stopping;
+  assert.equal(tool.sessions.length, 1);
+  assert.equal(tool.last().closed, true);
+  assert.equal(ChatService.liveCount(), 0);
+  assert.equal(answerOf(await chat.get(c.id)).status, 'stopped');
+});
+
+test('a chat another dashboard is answering in is not sent to, changed or deleted here; its own answer holds it until saved', async (t) => {
+  const ws = await workspace(t);
+  const tool = fakeTool('claude-code');
+  const chat = service({ 'claude-code': tool.adapter });
+  const c = await chat.create({ provider: 'claude-code' });
+  const lockFile = `${chatFile(ws, c.id)}.lock`;
+  // Another dashboard (a live process that is not this one) holds the conversation.
+  await fsp.writeFile(lockFile, JSON.stringify({ pid: process.ppid, token: 'other-dashboard', at: new Date().toISOString() }));
+  const busy = (e: Error & { statusCode?: number; details?: { code: string } }) => e.statusCode === 409 && e.details?.code === 'busy';
+  await assert.rejects(chat.send(c.id, { text: 'hello' }), busy);
+  await assert.rejects(chat.update(c.id, { title: 'Renamed' }), busy);
+  await assert.rejects(chat.remove(c.id), busy);
+  assert.equal(tool.opened.length, 0);
+  assert.equal((await chat.get(c.id)).title, 'New chat');
+  assert.ok(existsSync(chatFile(ws, c.id)));
+  await fsp.rm(lockFile);
+
+  await chat.send(c.id, { text: 'hello' });
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.last().on !== null));
+  const holder = JSON.parse(await fsp.readFile(lockFile, 'utf-8')) as { pid: number };
+  assert.equal(holder.pid, process.pid, 'while this dashboard answers, another one would be refused');
+  tool.last().emit({ type: 'text', text: 'Nothing is due.' });
+  tool.last().emit({ type: 'end', outcome: { status: 'done' } });
+  assert.ok(await eventually(async () => !(await chat.get(c.id)).busy));
+  assert.equal(existsSync(lockFile), false, 'released once the answer is saved');
+  const saved = JSON.parse(await fsp.readFile(chatFile(ws, c.id), 'utf-8')) as Conversation;
+  assert.equal(answerOf(saved).text, 'Nothing is due.');
+  await chat.update(c.id, { title: 'Renamed' });
+  await chat.remove(c.id);
+  assert.deepEqual((await fsp.readdir(path.join(ws, '.situation-board', 'chat'))).filter((n) => n !== '.gitignore'), [], 'no lock is left behind');
+});
+
+test('a chat answering again after its timeout counts both of its starting processes against the limit', async (t) => {
+  await workspace(t);
+  const starts: ReturnType<typeof barrier>[] = [];
+  const tool = fakeTool('claude-code', { holdOpen: () => { const b = barrier(); starts.push(b); return b.wait(); } });
+  // The same processes and limits for both: one service whose answers time out at once, one whose do not.
+  const quick = service({ 'claude-code': tool.adapter }, { turnTimeoutMs: 50 });
+  const chat = service({ 'claude-code': tool.adapter });
+  const a = await quick.create({ provider: 'claude-code' });
+  await quick.send(a.id, { text: 'first try' });
+  assert.ok(await eventually(async () => !(await chat.get(a.id)).busy), 'timed out while its tool was starting');
+  await chat.send(a.id, { text: 'second try' });
+  assert.ok(await eventually(() => starts.length === 2));
+  const b = await chat.create({ provider: 'claude-code' });
+  await chat.send(b.id, { text: 'hello' });
+  assert.ok(await eventually(() => starts.length === 3));
+  const c = await chat.create({ provider: 'claude-code' });
+  await assert.rejects(chat.send(c.id, { text: 'hello' }), (e: Error & { details?: { code: string } }) => e.details?.code === 'too_many', 'three processes are starting already');
+  for (const s of starts) s.open();
+  assert.ok(await eventually(() => tool.sessions.length === 3 && tool.sessions[0]!.closed));
+  for (const s of tool.sessions.slice(1)) s.emit({ type: 'end', outcome: { status: 'done' } });
+});
+
+test('a message being set up when the dashboard stops never starts its tool, and the shutdown waits for it', async (t) => {
+  await workspace(t);
+  const checking = barrier();
+  const tool = fakeTool('claude-code', { holdStatus: checking.wait });
+  const chat = service({ 'claude-code': tool.adapter });
+  const c = await chat.create({ provider: 'claude-code' });
+  const sending = chat.send(c.id, { text: 'hello' });
+  await checking.reached;
+  let stopped = false;
+  const stopping = ChatService.stopAll().then(() => { stopped = true; });
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(stopped, false, 'the shutdown waits for the send being set up');
+  const isStopping = (e: Error & { statusCode?: number; details?: { code: string } }) => e.statusCode === 409 && e.details?.code === 'stopping';
+  let refused: Error | null = null;
+  await assert.rejects(chat.send(c.id, { text: 'another' }).catch((e: Error) => { refused = e; throw e; }), isStopping, 'no new message while it stops');
+  checking.open();
+  await assert.rejects(sending, isStopping);
+  await stopping;
+  assert.equal(tool.opened.length, 0, 'no tool started after the shutdown');
+  // The page gets the words, not the generic text of a server error.
+  let sent: { status?: number; body?: { message?: string; details?: { code?: string } } } = {};
+  const res = { status(code: number) { sent.status = code; return res; }, json(body: typeof sent.body) { sent.body = body; return res; } };
+  errorHandler(refused!, { method: 'POST', path: '/api/chat/conversations/x/messages', socket: {} } as never, res as never, () => {});
+  assert.equal(sent.status, 409);
+  assert.match(sent.body?.message ?? '', /^The dashboard is stopping\./);
+  assert.equal(sent.body?.details?.code, 'stopping');
+  sent = {};
+  assert.equal(ChatService.liveCount(), 0);
+  // The next start of the dashboard sends again.
+  await chat.send(c.id, { text: 'hello again' });
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.last().on !== null));
+  tool.last().emit({ type: 'end', outcome: { status: 'done' } });
+});
+
+test('Stop while the tool is still starting ends the answer at once; the process is closed when it arrives', async (t) => {
+  const ws = await workspace(t);
+  const starts: ReturnType<typeof barrier>[] = [];
+  const tool = fakeTool('claude-code', { holdOpen: () => { const b = barrier(); starts.push(b); return b.wait(); } });
+  const chat = service({ 'claude-code': tool.adapter }, { stopGraceMs: 60_000 });
+  const c = await chat.create({ provider: 'claude-code' });
+  await chat.send(c.id, { text: 'hello' });
+  assert.ok(await eventually(() => starts.length === 1));
+  const stopped = await chat.stop(c.id);
+  assert.equal(stopped.busy, false, 'not left answering until the tool has started');
+  assert.equal(answerOf(stopped).status, 'stopped');
+  assert.equal(existsSync(`${chatFile(ws, c.id)}.lock`), false, 'and the chat is free for another dashboard');
+  await chat.send(c.id, { text: 'again' });
+  assert.ok(await eventually(() => starts.length === 2));
+  starts[0]!.open();
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.sessions[0]!.closed), 'the late process is closed');
+  starts[1]!.open();
+  assert.ok(await eventually(() => tool.sessions.length === 2 && tool.last().on !== null));
+  assert.equal(tool.last().closed, false, 'the next answer\'s process is not');
+  tool.last().emit({ type: 'end', outcome: { status: 'done' } });
+  assert.ok(await eventually(async () => !(await chat.get(c.id)).busy));
+});
+
+test('deleting a chat while it answers keeps its lock until the file is gone', async (t) => {
+  const ws = await workspace(t);
+  const tool = fakeTool('claude-code');
+  const chat = service({ 'claude-code': tool.adapter });
+  const c = await chat.create({ provider: 'claude-code' });
+  const lockFile = `${chatFile(ws, c.id)}.lock`;
+  await chat.send(c.id, { text: 'hello' });
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.last().on !== null));
+  const s = tool.last();
+  const closing = barrier();
+  s.close = async () => { await closing.wait(); s.alive = false; s.closed = true; };
+  const removed = chat.remove(c.id);
+  // The answer has ended and the delete is ending its process: another dashboard must still be kept out.
+  await closing.reached;
+  assert.ok(existsSync(chatFile(ws, c.id)), 'not unlinked yet');
+  const holder = JSON.parse(await fsp.readFile(lockFile, 'utf-8')) as { pid: number };
+  assert.equal(holder.pid, process.pid, 'the lock is still this dashboard\'s');
+  closing.open();
+  await removed;
+  assert.equal(existsSync(chatFile(ws, c.id)), false);
+  assert.equal(existsSync(lockFile), false, 'released after the unlink');
+});
+
+test('a delete that comes just as the answer ends still deletes, and leaves the chat free', async (t) => {
+  const ws = await workspace(t);
+  const tool = fakeTool('claude-code');
+  const chat = service({ 'claude-code': tool.adapter });
+  const c = await chat.create({ provider: 'claude-code' });
+  const lockFile = `${chatFile(ws, c.id)}.lock`;
+  await chat.send(c.id, { text: 'hello' });
+  assert.ok(await eventually(() => tool.sessions.length === 1 && tool.last().on !== null));
+  // The delete is held while it finds the file; meanwhile the answer ends and lets its lock go.
+  const finding = barrier();
+  const internals = chat as unknown as { file: (ws: string, id: string) => Promise<string> };
+  const file = internals.file.bind(chat);
+  let held = false;
+  internals.file = async (w, i) => { if (!held) { held = true; await finding.wait(); } return file(w, i); };
+  const removed = chat.remove(c.id);
+  await finding.reached;
+  tool.last().emit({ type: 'end', outcome: { status: 'done' } });
+  assert.ok(await eventually(async () => !(await chat.get(c.id)).busy), 'the answer ended first');
+  finding.open();
+  await removed;
+  assert.equal(existsSync(chatFile(ws, c.id)), false, 'deleted');
+  assert.equal(existsSync(lockFile), false, 'and no lock is left to block the chat');
+  // A new chat in its place works as usual.
+  const next = await chat.create({ provider: 'claude-code' });
+  await chat.update(next.id, { title: 'Renamed' });
+  await chat.remove(next.id);
+});
+
+test('reading a chat while it answers gives the answer so far, still going: the panel never loses words or shows it stopped', async (t) => {
+  const ws = await workspace(t);
+  const tool = fakeTool('claude-code');
+  const chat = service({ 'claude-code': tool.adapter });
+  type Shown = Parameters<typeof newerOf>[0];
+  for (const saved of [false, true]) {
+    for (const order of ['202 first', 'read first'] as const) {
+      const created = await chat.create({ provider: 'claude-code' });
+      const sent = await chat.send(created.id, { text: 'hello' });
+      assert.ok(await eventually(() => tool.last()?.on !== null && tool.last()?.prompts.length === 1 && tool.opened.length === tool.sessions.length));
+      const s = tool.last();
+      const answerId = answerOf(sent).id;
+      // The first words come before the page has the answer: it reads the whole conversation again.
+      s.emit({ type: 'text', text: 'first ' });
+      if (saved) {
+        assert.ok(await eventually(async () => answerOf(JSON.parse(await fsp.readFile(chatFile(ws, created.id), 'utf-8')) as Conversation).text === 'first ', 3000));
+      }
+      const read = await chat.get(created.id);
+      const label = `${order}, ${saved ? 'after' : 'before'} the first save`;
+      assert.deepEqual([answerOf(read).text, answerOf(read).status, read.busy], ['first ', 'streaming', true], label);
+      const ui = (c: unknown) => c as Shown & object;
+      let shown: Shown = ui(created);
+      if (order === '202 first') {
+        shown = newerOf(shown, ui(sent));
+        shown = applyStreamEvent(shown, { type: 'text', message_id: answerId, text: 'second' });
+        shown = newerOf(shown, ui(read));
+      } else {
+        shown = newerOf(shown, ui(read));
+        shown = newerOf(shown, ui(sent));
+        shown = applyStreamEvent(shown, { type: 'text', message_id: answerId, text: 'second' });
+      }
+      const answer = shown!.messages.find((m) => m.id === answerId)!;
+      assert.deepEqual([answer.text, answer.status, shown!.busy], ['first second', 'streaming', true], label);
+      s.emit({ type: 'end', outcome: { status: 'done' } });
+      assert.ok(await eventually(async () => !(await chat.get(created.id)).busy));
+    }
+  }
+  // An answer no dashboard is giving any more (one that stopped) still reads back as stopped.
+  const c = await chat.create({ provider: 'claude-code' });
+  const file = chatFile(ws, c.id);
+  const saved = JSON.parse(await fsp.readFile(file, 'utf-8')) as Conversation;
+  await fsp.writeFile(file, JSON.stringify({ ...saved, messages: [{ id: 'msg-a', role: 'assistant', text: 'half', created_at: '', status: 'streaming' }] }));
+  assert.equal(answerOf(await chat.get(c.id)).status, 'stopped');
 });

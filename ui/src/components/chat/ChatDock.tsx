@@ -110,7 +110,7 @@ export default function ChatDock() {
           </div>
           {view === 'history' && <ChatHistory chat={chat} onOpen={() => setView('chat')} />}
           {view === 'settings' && <ChatSettings chat={chat} onDone={() => setView('chat')} />}
-          {view === 'chat' && <ChatConversation chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} />}
+          {view === 'chat' && <ChatConversation key={chat.workspace ?? ''} chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} />}
         </section>
       )}
       <IconButton

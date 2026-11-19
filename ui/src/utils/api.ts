@@ -21,13 +21,19 @@ async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const fallback = `HTTP ${res.status}: ${res.statusText}`;
     let message = fallback;
+    let code: string | undefined;
     try {
-      message = errorMessage(await res.json(), fallback);
+      const body: unknown = await res.json();
+      message = errorMessage(body, fallback);
+      const details = body && typeof body === 'object' ? (body as { details?: unknown }).details : undefined;
+      const said = details && typeof details === 'object' ? (details as { code?: unknown }).code : undefined;
+      if (typeof said === 'string') code = said;
     } catch {
       // ignore parse error
     }
-    // The status rides along, so a caller can tell a conflict (409) from other failures.
-    throw Object.assign(new Error(message), { status: res.status });
+    // The status (and the server's code, when it gives one) ride along, so a caller can tell a conflict (409) from
+    // other failures, and which conflict.
+    throw Object.assign(new Error(message), { status: res.status, ...(code ? { code } : {}) });
   }
   if (res.status === 204) return undefined as T;
   return res.json();
