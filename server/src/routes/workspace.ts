@@ -1,3 +1,4 @@
+import { assistantCommand } from '../utils/assistantCommand';
 import * as path from 'path';
 import { beginStart } from '../services/appActivity';
 import { execFile } from 'child_process';
@@ -52,7 +53,7 @@ function appleScriptQuote(value: string): string {
 export const ASSISTANTS: readonly AiTool[] = ['claude-code', 'codex', 'copilot'];
 
 /** How the dashboard opens an assistant at the workspace: its program in a terminal, or an editor window. */
-export type AssistantLaunch = { via: 'terminal'; program: string } | { via: 'editor'; program: string | null };
+export type AssistantLaunch = { via: 'terminal'; program: 'claude' | 'codex' | 'copilot' } | { via: 'editor'; program: string | null };
 
 /**
  * What opens each assistant. Copilot opens in a terminal when its CLI is installed; otherwise in VS Code, where most
@@ -427,7 +428,7 @@ router.post('/open-assistant', async (req: Request, res: Response) => {
   }
   const tool = (requested as AiTool | undefined) ?? workspaceAssistants(workspacePath)[0];
   const launch = assistantLaunch(tool);
-  const command = launch.via === 'terminal' ? `cd "${workspacePath}" && ${launch.program}` : `code "${workspacePath}"`;
+  const command = assistantCommand(workspacePath, launch.via === 'terminal' ? launch.program : 'code', process.platform === 'win32');
 
   try {
     if (launch.via === 'terminal') await openInTerminal(workspacePath, launch.program);

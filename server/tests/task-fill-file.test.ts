@@ -84,3 +84,41 @@ test('the workspace task schema takes any file type for an attached file, and on
   assert.equal(validate(task({ template_ref: 'executive-document', format: 'csv' })), false, 'a template deliverable keeps the output formats');
   assert.equal(validate(task({ fill_file: 'answers.csv', format: 'CSV file' })), false);
 });
+
+
+test('file deliverables use the upload normalization for spaces, Unicode and long names', async (t) => {
+  await workspace(t);
+  const service = new TaskService();
+  for (const name of [' Supplier.xlsx', 'Cafe\u0301.xlsx', '会'.repeat(100) + '.xlsx']) {
+    const task = await service.createTask({ title: 'Answer the fictional form', deliverables: [{ id: 'DEL-01', fill_file: name, status: 'pending' }] } as never);
+    const saved = await service.saveTaskFile(task.id, name, Buffer.from('fictional sheet'));
+    const deliverable = (await service.getTask(task.id)).deliverables[0] as unknown as { fill_file: string };
+    assert.equal(deliverable.fill_file, saved.name, name);
+  }
+});
+
+test('task attachments never list, write or delete through a linked folder or ancestor', async (t) => {
+  const ws = await workspace(t);
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-attachment-outside-'));
+  t.after(() => fsp.rm(outside, { recursive: true, force: true }));
+  const service = new TaskService();
+  const id = 'TASK-2026-0900';
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+  for (const relative of ['tasks/active/' + id, 'tasks/active', 'tasks']) {
+    const link = path.join(ws, relative);
+    const tail = path.relative(link, path.join(ws, 'tasks/active', id));
+    const target = path.join(outside, tail);
+    await fsp.mkdir(target, { recursive: true });
+    await fsp.writeFile(path.join(target, 'form.txt'), 'original');
+    await fsp.rm(link, { recursive: true, force: true });
+    await fsp.symlink(outside, link, linkType);
+    try {
+      await assert.rejects(service.listTaskFiles(id), /Invalid path traversal/);
+      await assert.rejects(service.saveTaskFile(id, 'form.txt', Buffer.from('changed')), /Invalid path traversal/);
+      await assert.rejects(service.deleteTaskFile(id, 'form.txt'), /Invalid path traversal/);
+      assert.equal(await fsp.readFile(path.join(target, 'form.txt'), 'utf8'), 'original');
+    } finally {
+      await fsp.unlink(link);
+    }
+  }
+});

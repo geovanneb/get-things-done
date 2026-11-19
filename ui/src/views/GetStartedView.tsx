@@ -93,7 +93,7 @@ export default function GetStartedView() {
         setAnswers(loaded.answers);
         latest.current = loaded.answers;
         // Coming back to a draft: the review shows what is there and leads to any step in one click.
-        if (loaded.status === 'in_progress' && canSend(loaded.answers, ownFiles(loaded.update).length)) setStep('review');
+        if (loaded.status === 'in_progress' && canSend(loaded.answers, ownFiles(loaded.update, loaded.interview_file).length)) setStep('review');
       })
       .catch(() => setLoadError(true));
   }, []);
@@ -187,7 +187,7 @@ export default function GetStartedView() {
     }
   };
 
-  const files = ownFiles(state?.update ?? null);
+  const files = ownFiles(state?.update ?? null, state?.interview_file);
 
   const addFiles = async (picked: File[]) => {
     if (!picked.length) return;

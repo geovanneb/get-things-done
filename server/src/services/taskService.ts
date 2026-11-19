@@ -117,7 +117,7 @@ function checkFillFiles(data: Record<string, unknown>): void {
     const id = typeof item['id'] === 'string' ? item['id'] : 'A deliverable';
     if (typeof raw !== 'string' || !raw.trim()) throw httpError(400, `${id}: pick the attached file to answer in.`);
     let name = '';
-    try { name = topLevelName(safeFileName(raw.trim())); } catch { /* refused below */ }
+    try { name = topLevelName(safeFileName(raw)); } catch { /* refused below */ }
     const ext = path.extname(name).slice(1).toLowerCase();
     if (!name || name.startsWith('.') || name.toLowerCase() === 'task.md' || !/^[a-z0-9]{1,10}$/.test(ext)) {
       throw httpError(400, `${id}: ${raw} cannot be answered in. Pick a file with a type, such as .xlsx or .docx.`);
@@ -733,8 +733,14 @@ If the executive comes back with feedback on a task that is already \`in_review\
     throw Object.assign(new Error('Could not reserve a new task id; try again'), { statusCode: 409 });
   }
 
+  private async attachmentDirectory(id: string): Promise<string> {
+    const dir = path.join(this.getActiveDir(), topLevelName(id));
+    // Check every ancestor: an atomic attachment write only protects the final file, not linked folders.
+    return workspaceEntry(workspaceService.getWorkspacePath(), dir, true);
+  }
+
   async listTaskFiles(id: string): Promise<FolderFile[]> {
-    const taskDir = path.join(this.getActiveDir(), topLevelName(id));
+    const taskDir = await this.attachmentDirectory(id);
     if (!(await fileService.exists(taskDir))) throw new Error(`Task not found: ${id}`);
 
     const entries = await fsp.readdir(taskDir, { withFileTypes: true });
@@ -755,7 +761,7 @@ If the executive comes back with feedback on a task that is already \`in_review\
   }
 
   async saveTaskFile(id: string, originalName: string, buffer: Buffer): Promise<FolderFile> {
-    const taskDir = path.join(this.getActiveDir(), topLevelName(id));
+    const taskDir = await this.attachmentDirectory(id);
     if (!(await fileService.exists(taskDir))) throw new Error(`Task not found: ${id}`);
 
     return saveAttachment(taskDir, originalName, buffer, 'task.md');
@@ -764,6 +770,6 @@ If the executive comes back with feedback on a task that is already \`in_review\
   async deleteTaskFile(id: string, filename: string): Promise<void> {
     const safe = topLevelName(filename);
     if (safe.toLowerCase() === 'task.md') throw new Error('Invalid file name: cannot delete task.md');
-    await deleteAttachment(path.join(this.getActiveDir(), topLevelName(id)), safe);
+    await deleteAttachment(await this.attachmentDirectory(id), safe);
   }
 }

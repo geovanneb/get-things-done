@@ -19,6 +19,7 @@
  *
  *   npm run test:visual                 run every check
  *   npm run test:visual -- --update     rewrite the screenshot baselines for this platform
+ *   npm run test:visual -- --screenshots-only  compare only the stable screenshots
  *
  * Screenshots differ between operating systems (font rendering), so baselines are kept per
  * platform. With no baseline for this platform, screenshots are written to .visual-output/
@@ -29,9 +30,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkFirstContext } from './first-context-browser-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const update = process.argv.includes('--update');
+const screenshotsOnly = process.argv.includes('--screenshots-only');
 const outDir = path.join(root, '.visual-output');
 const baselineDir = path.join(root, 'ui/visual-baselines', process.platform);
 // A screenshot may differ by this share of pixels (anti-aliasing) before it counts as changed.
@@ -52,6 +55,7 @@ if (!fs.existsSync(path.join(root, 'dist/ui/index.html'))) {
 // Every routed page. `compare` marks the ones whose content does not depend on today's date or the temp folder.
 const PAGES = [
   { path: '/design-system', compare: true },
+  { path: '/get-started' },
   { path: '/situation' },
   { path: '/board' },
   { path: '/board/task/TASK-2026-0001' },
@@ -128,6 +132,8 @@ try {
 
   const open = async (width, theme = 'light') => {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 844 : 900 }, reducedMotion: 'reduce' });
+    // Exercise the offline fallback consistently; remote font availability must not change the baselines.
+    await context.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, route => route.abort());
     await context.addInitScript((t) => { try { localStorage.setItem('gtd:theme', t); } catch { /* storage blocked */ } }, theme);
     const page = await context.newPage();
     const errors = [];
@@ -149,6 +155,29 @@ try {
     });
     await page.waitForTimeout(300);
   };
+
+  if (!screenshotsOnly) {
+  await checkFirstContext({ open, base, check, settle, outDir });
+
+  // At the end of a page the floating chat launcher must not cover the last action.
+  for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
+    const { context, page } = await open(width, theme);
+    await page.goto(base + '/outputs');
+    await settle(page);
+    const lastAction = page.getByRole('button', { name: 'Delete Plain text message', exact: true });
+    await page.locator('#main-content').evaluate(el => { el.scrollTop = el.scrollHeight; });
+    check(`chat launcher: the last page action remains reachable @${width} ${theme}`, await lastAction.evaluate(el => {
+      const rect = el.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+    }));
+    await lastAction.focus();
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('alertdialog');
+    await dialog.waitFor();
+    check(`chat launcher: the last action opens by keyboard @${width} ${theme}`, await dialog.isVisible());
+    await page.keyboard.press('Escape');
+    await context.close();
+  }
 
   // Selecting Archived is still an unsaved edit; only a saved archived task is read-only.
   for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
@@ -400,8 +429,11 @@ try {
     await context.close();
   }
 
+  }
+
   // ---- Behaviour on every page and width ----------------------------------
   if (!process.argv.includes('--language-only')) {
+  if (!screenshotsOnly) {
   for (const theme of ['light', 'dark']) {
     for (const width of WIDTHS) {
       const { context, page, errors } = await open(width, theme);
@@ -606,6 +638,8 @@ try {
     await context.close();
   }
 
+  }
+
   // ---- Visual: screenshots of stable screens -------------------------------
   const haveBaselines = fs.existsSync(baselineDir) && fs.readdirSync(baselineDir).some((f) => f.endsWith('.png'));
   if (!haveBaselines && !update) {
@@ -647,6 +681,7 @@ try {
     }
   }
   }
+  if (!screenshotsOnly) {
   // Personal interface language: real browser detection, native bridge precedence, keyboard override,
   // persistence and failed saves. Each case uses the fictional workspace above.
   const setLanguage = async (language) => {
@@ -707,6 +742,7 @@ try {
     check('language: Spanish applies without restart', await page.locator('h1').textContent() === 'Configuración');
     await context.close();
     await setLanguage('auto');
+  }
   }
   if (update) console.log(`Baselines written to ${path.relative(root, baselineDir)}/`);
 } catch (err) {

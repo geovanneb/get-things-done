@@ -1,3 +1,4 @@
+import { assistantCommand } from '../../../../server/src/utils/assistantCommand';
 import { useLanguage } from '../../i18n/LanguageProvider';
 import type { PlainMessageKey, Translate } from '../../../../server/src/i18n/messages';
 import { useState } from 'react';
@@ -60,7 +61,7 @@ export default function Header() {
       });
     } catch {
       // The launch failed: fall back to handing the user the command.
-      const command = `cd "${workspace?.path ?? '.'}" && ${assistant.tool === 'claude-code' ? 'claude' : assistant.tool}`;
+      const command = assistantCommand(workspace?.path ?? '.', assistant.tool === 'claude-code' ? 'claude' : assistant.tool, navigator.platform.toLowerCase().startsWith('win'));
       let copied = false;
       try {
         await navigator.clipboard.writeText(command);

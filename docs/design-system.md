@@ -56,6 +56,8 @@ Every routed view renders inside `<Page>` (`components/common/Page.tsx`):
 | `full` (+ `flush`) | none | boards, split views and canvases that own their padding |
 
 The gutter is `--page-gutter` (24px, 16px on a phone). Sections are 24px apart.
+Standard pages add `--chat-launcher-space` to their bottom padding while the chat dock is mounted,
+so the last action can scroll above the launcher. Full-bleed pages still own their padding.
 
 **The app header is the page title and the only `h1`.** A view never repeats the title. It starts
 with `<PageHeader>`: a one-line description of what the page is for, the page actions on the right
@@ -205,6 +207,11 @@ from code, the Setup flow (outside the app shell), the Context split view and th
 | `npm run design:baseline` | Records the ratchet counts after you remove legacy patterns. Never run it to make room for new ones. | by hand |
 
 `test:visual` needs a build and Playwright: `npm i --no-save playwright && npx playwright install chromium`.
+The standard page matrix and screenshots block Google Fonts and use the app's system-font fallback,
+so an offline or partially loaded remote font cannot change a baseline. Primary web-font appearance
+still needs a separate online check. Use `npm run test:visual -- --screenshots-only` for a focused
+comparison after the full behavior suite passes; combine it with `--update` only for intended changes.
+
 Screenshots differ by operating system, so baselines are per platform; where none exist yet (CI on
 Linux, until a maintainer records them with `--update` on that platform), the screenshots are kept
 as a CI artifact for review and only the behaviour checks decide.
