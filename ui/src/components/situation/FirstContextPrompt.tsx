@@ -37,16 +37,14 @@ export default function FirstContextPrompt() {
       tone="info"
       title={t('getStarted.giveAHeadStart', { assistant: assistant.label })}
       style={{ marginBottom: 'var(--space-5)' }}
-      action={(
-        <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Button size="sm" variant="primary" onClick={() => navigate('/get-started')}>
-            {resuming ? t('getStarted.continueWhereYouLeftOff') : t('getStarted.getStarted')}
-          </Button>
-          <Button size="sm" variant="ghost" loading={busy} disabled={busy} onClick={() => void dismiss()}>{t('getStarted.notNow')}</Button>
-        </span>
-      )}
     >
       {resuming ? t('getStarted.promptResume') : t('getStarted.prompt', { assistant: assistant.label })}
+      <span style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-3)' }}>
+        <Button size="sm" variant="primary" onClick={() => navigate('/get-started')}>
+          {resuming ? t('getStarted.continueWhereYouLeftOff') : t('getStarted.getStarted')}
+        </Button>
+        <Button size="sm" variant="ghost" loading={busy} disabled={busy} onClick={() => void dismiss()}>{t('getStarted.notNow')}</Button>
+      </span>
     </Notice>
   );
 }

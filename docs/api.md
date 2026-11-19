@@ -772,7 +772,7 @@ is selected.
 | `POST` | `/api/workspace/pick-folder` | Open the system folder picker on the machine running the server. Returns `{ "path": null }` on cancel and `501` where there is no picker |
 | `POST` | `/api/workspace/reinitialize` | Re-run the scaffold on the current workspace to add missing files |
 | `POST` | `/api/workspace/open` | Open the workspace folder in Finder, Explorer or the file manager |
-| `POST` | `/api/workspace/open-assistant` | Open the workspace's assistant. Body: optional `tool` (`claude-code`, `codex` or `copilot`; default the first in `ai_tools`). Claude Code and Codex open in a new terminal window at the workspace; Copilot does too with its CLI installed, otherwise VS Code opens the workspace (`via: "editor"`) |
+| `POST` | `/api/workspace/open-assistant` | Open the workspace's assistant. Body: optional `tool` (`claude-code`, `codex` or `copilot`; default the first in `ai_tools`). Claude Code and Codex open in a new terminal window at the workspace; Copilot does too with its CLI installed, otherwise VS Code opens the workspace (`via: "editor"`). Returned `command` quotes the workspace literally (an encoded PowerShell invocation safe to paste into cmd or PowerShell on Windows, POSIX shell otherwise) |
 | `GET` | `/api/workspace/validate` | Validate every workspace file against its schema |
 | `GET` | `/api/workspace/validation/count` | The number of validation errors and warnings |
 | `GET` | `/api/workspace/git/status` | Git status of the workspace |
@@ -962,7 +962,7 @@ steps.
 
 | Method | Path | What it does |
 | --- | --- | --- |
-| `GET` | `/api/first-context` | The draft (`status`, `answers`), its update (or `null`), `memory_empty`, and `suggested`: whether the dashboard should offer it |
+| `GET` | `/api/first-context` | The draft (`status`, `answers`), its update (or `null`), `interview_file` (the generated material name, or `null`; never infer ownership from a filename), `memory_empty`, and `suggested`: whether the dashboard should offer it |
 | `PUT` | `/api/first-context` | `{ answers }`: save the draft. Fields over their limits are shortened, not refused. `409` once sent |
 | `POST` | `/api/first-context/update` | `{ title }`: the update the files go into, made on the first file; files are then added with `POST /api/context-updates/:id/materials` |
 | `POST` | `/api/first-context/submit` | `{ answers, title }`: write the interview to the update as `first-context-interview.md`, fill the empty profile sections it answers, and mark the draft sent. `400` with no answer and no file |

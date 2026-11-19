@@ -202,7 +202,7 @@ try {
   const retriedInterview = await retriedInterviewResponse.json();
   check('retrying the first-context submission reuses the update and saves one interview',
     retriedInterviewResponse.ok && retriedInterview.status === 'submitted' &&
-    retriedInterview.update?.id === interruptedInterview.update?.id && retriedInterview.update?.materials.length === 1);
+    retriedInterview.update?.id === interruptedInterview.update?.id && retriedInterview.update?.materials.length === 1 && retriedInterview.interview_file === 'first-context-interview.md');
   // Restore the empty onboarding fixture before the demo and later cleanup checks.
   fs.rmSync(path.join(ws, 'context-updates', retriedInterview.update.id), { recursive: true });
   fs.unlinkSync(path.join(ws, '.situation-board', 'first-context.json'));
@@ -633,11 +633,11 @@ try {
   {
     const res = await fetch(`${base}/api/tasks`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Fill the fictional form', deliverables: [{ id: 'DEL-01', fill_file: 'Fictional form (v1).docx', status: 'pending' }] }),
+      body: JSON.stringify({ title: 'Fill the fictional form', deliverables: [{ id: 'DEL-01', fill_file: ' Fictional form (v1).docx', status: 'pending' }] }),
     });
     const task = await res.json();
     const form = new FormData();
-    form.append('file', new Blob(['fictional form']), 'Fictional form (v1).docx');
+    form.append('file', new Blob(['fictional form']), ' Fictional form (v1).docx');
     const saved = await (await fetch(`${base}/api/tasks/${task.id}/files`, { method: 'POST', body: form })).json();
     const deliverable = (await (await fetch(`${base}/api/tasks/${task.id}`)).json()).deliverables?.[0];
     const unpicked = await fetch(`${base}/api/tasks/${task.id}`, {
@@ -648,6 +648,25 @@ try {
       res.status === 201 && deliverable?.fill_file === saved.name && deliverable?.format === 'docx' && !('template_ref' in deliverable)
         && unpicked.status === 400,
       JSON.stringify({ status: res.status, saved: saved.name, deliverable, unpicked: unpicked.status }));
+    const taskDir = path.join(ws, 'tasks', 'active', task.id);
+    const linkedDir = path.join(tmp, 'linked-task-attachments');
+    fs.mkdirSync(linkedDir);
+    fs.writeFileSync(path.join(linkedDir, 'form.txt'), 'original');
+    fs.renameSync(taskDir, `${taskDir}.held`);
+    fs.symlinkSync(linkedDir, taskDir, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const listing = await fetch(`${base}/api/tasks/${task.id}/files`);
+      const upload = new FormData();
+      upload.append('file', new Blob(['changed']), 'form.txt');
+      const writing = await fetch(`${base}/api/tasks/${task.id}/files`, { method: 'POST', body: upload });
+      const deleting = await fetch(`${base}/api/tasks/${task.id}/files/form.txt`, { method: 'DELETE' });
+      check('task attachment operations refuse linked folders without changing their targets',
+        listing.status === 400 && writing.status === 400 && deleting.status === 400
+          && fs.readFileSync(path.join(linkedDir, 'form.txt'), 'utf8') === 'original');
+    } finally {
+      fs.unlinkSync(taskDir);
+      fs.renameSync(`${taskDir}.held`, taskDir);
+    }
     await fetch(`${base}/api/tasks/${task.id}`, { method: 'DELETE' });
   }
 

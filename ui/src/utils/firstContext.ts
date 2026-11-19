@@ -22,6 +22,7 @@ export interface FirstContextState {
   status: FirstContextStatus;
   answers: FirstContextAnswers;
   update: ContextUpdate | null;
+  interview_file: string | null;
   suggested: boolean;
   memory_empty: boolean;
 }
@@ -55,8 +56,8 @@ export const emptyOrganization = (): FirstContextOrganization => ({ name: '', re
 const filled = (...values: string[]) => values.some((value) => value.trim() !== '');
 
 /** The executive's own files in the update, without the interview the dashboard wrote. */
-export function ownFiles(update: Pick<ContextUpdate, 'materials'> | null): ContextUpdate['materials'] {
-  return (update?.materials ?? []).filter((m) => m.name !== INTERVIEW_FILE);
+export function ownFiles(update: Pick<ContextUpdate, 'materials'> | null, interviewFile: string | null = null): ContextUpdate['materials'] {
+  return (update?.materials ?? []).filter((m) => m.name !== interviewFile);
 }
 
 /** Whether a step has anything in it, so the review can say honestly which ones were skipped. */

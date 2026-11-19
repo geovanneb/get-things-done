@@ -90,6 +90,7 @@ test('the draft is saved, files go into one first-context update, and sending wr
   assert.equal(start.status, 'not_started');
   assert.equal(start.suggested, true, 'an empty memory is offered the first context');
   assert.equal(start.update, null);
+  assert.equal(start.interview_file, null);
 
   // Nothing to organize yet: refused, and nothing is made.
   await assert.rejects(service.submit({ answers: emptyAnswers() }), /Answer a question or add a file/);
@@ -113,6 +114,7 @@ test('the draft is saved, files go into one first-context update, and sending wr
   assert.equal(sent.status, 'submitted');
   assert.equal(sent.suggested, false);
   assert.equal(sent.update?.id, update.id);
+  assert.equal(sent.interview_file, INTERVIEW_FILE);
   assert.deepEqual(sent.update?.materials.map((m) => m.name).sort(), [INTERVIEW_FILE, 'strategy.md']);
   const interview = await fsp.readFile(path.join(ws, 'context-updates', update.id, 'materials', INTERVIEW_FILE), 'utf-8');
   assert.match(interview, /Northwind Labs builds logistics software/);
@@ -165,11 +167,14 @@ test('an own file named like the interview stays, and starting over after sendin
   const update = await service.ensureUpdate('First context');
   // The executive's own file happens to share the interview's name: it is theirs, and stays.
   await updates.addMaterial(update.id, INTERVIEW_FILE, Buffer.from('My own notes\n'));
-  await service.submit({ answers: answers() });
+  assert.equal((await service.get()).interview_file, null, 'the user upload is not a generated interview');
+  const sent = await service.submit({ answers: answers() });
   const files = (await updates.get(update.id)).materials.map((m) => m.name).sort();
   assert.equal(files.length, 2);
   assert.ok(files.includes(INTERVIEW_FILE));
   const written = files.find((name) => name !== INTERVIEW_FILE)!;
+  assert.equal(sent.interview_file, written);
+  assert.equal((await new FirstContextService().get()).interview_file, written);
   assert.match(await fsp.readFile(path.join(ws, 'context-updates', update.id, 'materials', written), 'utf-8'), /First context interview/);
 
   // The update was never analyzed: starting over is a fresh update, and the sent one is left as it is.

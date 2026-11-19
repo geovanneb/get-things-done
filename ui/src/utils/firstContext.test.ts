@@ -38,7 +38,9 @@ check('next and previous stop at the ends', nextStep('review') === 'review' && p
 check('the steps run from the intro to the review', STEPS[0] === 'intro' && STEPS[STEPS.length - 1] === 'review');
 
 const update = { materials: [{ name: INTERVIEW_FILE, size: 10, type: 'text/markdown' }, { name: 'org-chart.pdf', size: 99, type: 'application/pdf' }] };
-check('the interview the dashboard wrote is not one of the executive files', ownFiles(update).map((m) => m.name).join() === 'org-chart.pdf');
+check('the interview the dashboard wrote is not one of the executive files', ownFiles(update, INTERVIEW_FILE).map((m) => m.name).join() === 'org-chart.pdf');
+check('a user file with the interview name is visible before submission', ownFiles(update).length === 2);
+check('only the actual generated interview is hidden after a name collision', ownFiles({ materials: [...update.materials, { name: 'first-context-interview-2.md', size: 20, type: 'text/markdown' }] }, 'first-context-interview-2.md').map((m) => m.name).join() === update.materials.map((m) => m.name).join());
 check('no update: no files', ownFiles(null).length === 0);
 
 if (failures > 0) {

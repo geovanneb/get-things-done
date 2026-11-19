@@ -53,7 +53,7 @@ export default function DesignSystemView() {
   return (
     <Page width="default">
       <PageHeader
-        description="Every shared component with its variants and states. Change a shared standard here first, then check the pages that use it."
+        description="Every shared component with its variants and states. Change a shared standard here first, then check the pages that use it. Standard pages leave scroll room below their last action for the chat launcher."
         actions={<Button variant="primary" icon={icons.plus} onClick={() => notify.success('This is a toast.')}>Primary action</Button>}
       />
 

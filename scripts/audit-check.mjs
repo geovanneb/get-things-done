@@ -16,15 +16,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Per folder: advisory URL -> where it may appear and why it is accepted. Keep each one until a fixed version lands. */
 const EXCEPTIONS = {
-  desktop: {
-    'https://github.com/advisories/GHSA-fc5q-39xc-vjpf': {
-      packages: ['picomatch'],
-      added: '2026-11-18',
-      reason: 'ReDoS in picomatch <= 4.0.7, with no fixed release yet. It reaches desktop/ only through electron-builder '
-        + '(@electron/rebuild -> node-gyp -> tinyglobby), which runs on the build machine when the app is packaged, '
-        + 'over our own file patterns. It is not in the packaged app. Remove this once picomatch > 4.0.7 is in the lockfile.',
-    },
-  },
+  desktop: {},
 };
 
 const RANK = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };

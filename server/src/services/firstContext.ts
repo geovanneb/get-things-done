@@ -62,6 +62,8 @@ export interface FirstContextState {
   status: FirstContextStatus;
   answers: FirstContextAnswers;
   update: ContextUpdate | null;
+  /** The generated interview, distinct from a user upload with the same original name. */
+  interview_file: string | null;
   /** True when the dashboard should offer the first context: not done or skipped, and the memory is still empty. */
   suggested: boolean;
   /** The workspace has no context notes and no people yet. */
@@ -317,6 +319,7 @@ export class FirstContextService {
       status,
       answers: stored?.answers ?? emptyAnswers(),
       update,
+      interview_file: update ? stored?.interview_file ?? null : null,
       memory_empty: memoryEmpty,
       // A draft in progress is offered back whatever the memory holds; a new start only to an empty memory, so a
       // workspace that is already in use is never asked to "get started".
