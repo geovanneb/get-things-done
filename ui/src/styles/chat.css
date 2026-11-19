@@ -42,6 +42,9 @@
   overflow: hidden;
 }
 
+/* Stepped aside while a dialog opened from an answer is open; it comes back as it was. */
+.gtd-chat-panel[hidden] { display: none; }
+
 .gtd-chat-header {
   display: flex;
   align-items: center;
@@ -89,3 +92,6 @@
   .gtd-chat-panel { inset: 0; width: auto; height: auto; border-radius: 0; border: none; }
   .gtd-chat-launcher--open.gtd-icon-btn { display: none; }
 }
+
+/* A long path in an answer wraps inside its chip instead of running out of the panel. */
+.gtd-chat-msg--assistant .markdown-view a.mention-chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }

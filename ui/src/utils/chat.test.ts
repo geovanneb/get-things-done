@@ -2,6 +2,7 @@
  * Unit tests for the workspace chat helpers. Run with `npm run test:chat --workspace=ui`.
  */
 import {
+  conversationIdentity, referenceWorkspace,
   newerOf, applyStreamEvent, chatError, checkEnded, composerKey, contextPercent, defaultProvider, effortOptions, errorActions, modelOptions, pageContext,
   safeMarkdown, tightestWindow, untilText, type Conversation, type ProviderStatus,
 } from './chat';
@@ -122,6 +123,26 @@ check('models: the tool\'s default first', modelOptions(claude)[0]?.id === 'defa
 check('efforts: of the chosen model', same(effortOptions(claude, 'haiku'), ['low', 'high']));
 check('efforts: of the default when none is chosen', same(effortOptions(claude, null), ['low', 'medium', 'high']));
 check('efforts: none for a tool that lists no models', same(effortOptions(p('copilot', true), 'x'), []));
+
+// What an answer names is looked up only in its conversation's own workspace (see ChatDock).
+{
+  const at = (text: string, created: string) => ({ id: 'chat-same000001', created_at: created, messages: [{ id: `u-${created}`, role: 'user' as const, text, created_at: created }] });
+  const fromA = at('A', '2026-11-01T00:00:00.000Z');
+  const fromB = at('B', '2026-11-02T00:00:00.000Z');
+  const confirmedB = { identity: conversationIdentity(fromB), workspace: '/ws/B' };
+  check('references: the same id in two workspaces is not the same conversation', conversationIdentity(fromA) !== conversationIdentity(fromB));
+  check('references: a confirmed conversation of the open workspace is looked up there',
+    referenceWorkspace({ shown: fromB, chatWorkspace: '/ws/B', openWorkspace: '/ws/B', confirmed: confirmedB }) === '/ws/B');
+  check('references: A\'s conversation late in B, B lacking it, is never looked up (nothing confirmed)',
+    referenceWorkspace({ shown: fromA, chatWorkspace: '/ws/B', openWorkspace: '/ws/B', confirmed: null }) === undefined);
+  check('references: A\'s conversation late in B, B having the same id, is never looked up (B confirmed its own)',
+    referenceWorkspace({ shown: fromA, chatWorkspace: '/ws/B', openWorkspace: '/ws/B', confirmed: confirmedB }) === undefined);
+  check('references: a chat of a workspace that is no longer open is never looked up',
+    referenceWorkspace({ shown: fromB, chatWorkspace: '/ws/B', openWorkspace: '/ws/A', confirmed: confirmedB }) === undefined);
+  check('references: a confirmation for another workspace does not count',
+    referenceWorkspace({ shown: fromB, chatWorkspace: '/ws/B', openWorkspace: '/ws/B', confirmed: { ...confirmedB, workspace: '/ws/A' } }) === undefined);
+  check('references: nothing shown, nothing looked up', referenceWorkspace({ shown: null, chatWorkspace: '/ws/B', openWorkspace: '/ws/B', confirmed: confirmedB }) === undefined);
+}
 
 if (failures) {
   console.error(`${failures} chat check(s) failed`);
