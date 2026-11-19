@@ -65,7 +65,7 @@ The workspace and offline transcription need no Get Things Done account. AI anal
 
 The dashboard is available in English, Japanese, Portuguese (Brazil) and Spanish. It follows your system language; change it in **Settings → Appearance → Language**.
 
-> **New in 0.16:** a short get-started interview builds a new workspace's first context, Codex and Copilot get the same procedures and skills as Claude Code, and a task can be answered in a file you attached. [See what changed](CHANGELOG.md).
+> **New in 0.17:** ask the assistant about your workspace from any page, on your own Claude Code, Codex or Copilot plan, and add your own context categories when the built-in ones do not fit. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 

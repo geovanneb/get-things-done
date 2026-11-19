@@ -8,6 +8,73 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-19
+
+**Ask your workspace, and file it your way.** A chat button on every page lets you **ask the
+assistant about your workspace**: Claude Code, Codex or Copilot reads your files and answers on your
+own plan, and it cannot change anything from the chat. You can also **add your own context
+categories** when the eight built-in ones do not fit how you work. A task moved to Done after its due
+date no longer shows up as a validation error, and this release closes a few gaps in how task
+attachments and assistant commands handle unusual folders and names.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.17.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.17.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.17.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.17.0`, or **Update and restart** in Settings. The context
+and context update schemas accept a workspace's own categories, and the agent instructions for
+Claude Code, Codex and Copilot learn how to use them. The dashboard brings these up to date when it
+opens a workspace, or run `gtd upgrade`. If you changed your instructions file, it is kept:
+**Settings > Instruction updates** shows the new version to merge.
+
+### Added
+
+- **Ask the assistant from any page.** A chat button in the bottom-right corner opens a panel that
+  talks to the AI tool you already signed in to: Claude Code, OpenAI Codex or GitHub Copilot CLI, on
+  your own plan. The dashboard never holds a password, token or API key, and API-key sign-ins are
+  refused. The chat is read-only: the tool can read and search your workspace files, but it cannot
+  write, run commands or reach the network. Pick the model and effort from the lists each tool
+  offers, and see how much of the context and your plan is used, with the reset time. A clear message
+  and a next step cover an expired sign-in, a plan limit, a full context, a lost session, a crash and
+  a timeout. Conversations survive restarts, switching tools carries the earlier messages along, and
+  you can dictate offline. Chats are saved in `.situation-board/chat/` and kept out of git. (#453)
+- **Your own context categories.** When company, organization, strategy and the other built-in
+  categories do not fit (vendors, regulators, board matters, a product line), click **Add category**
+  on the Context page. Give it a name and, optionally, a description of what belongs there, which your
+  AI tool reads when it decides where a new note goes. It gets its own folder, is listed in
+  `context/categories.md`, and works like a built-in one everywhere: notes, search, `@` mentions,
+  sharing, context updates and the memory review. Renaming keeps the folder and its notes; a
+  category can be deleted only when it holds no notes. (#450)
+- **API:** `GET`, `POST`, `PUT` and `DELETE` on `/api/context/categories`, and the chat endpoints
+  under `/api/chat`. See [docs/api.md](docs/api.md). (#450, #453)
+
+### Fixed
+
+- **A task finished late is late, not invalid.** Moving a task to Done or In progress after its due
+  date stamps today as its start date, and Settings > Validation then listed "due_date must be after
+  start_date" as an error you could not clear without changing a true date. That rule is gone. An
+  open task past its due date still gets the `overdue` warning. (#451)
+- **Task attachments stay inside the workspace.** Listing, adding and deleting a task's files now
+  refuse a task folder, or a folder above it, that is a link to somewhere outside the workspace. (#454)
+- **Answer in an attached file with an unusual name.** A file whose name started with a space could
+  not be picked as the file to answer in, because the task and the upload saw two different names.
+  (#454)
+- **Get started keeps your own files.** A file of yours named like the generated interview was
+  hidden, and a draft with files but no answers could not be sent. (#454)
+- **Safer commands to paste.** When the dashboard cannot open your assistant and copies the command
+  for you instead, the workspace path is now quoted so nothing in a folder name can run as a command.
+  On Windows it works pasted into cmd or PowerShell, including names with accents or non-Latin
+  characters. (#454)
+- **Phone layout.** The Get started reminder on the Situation page no longer squeezes its message
+  into a thin column, and the chat button no longer covers the last button on a page. (#454)
+
+### Changed
+
+- Dependency updates: TypeScript ESLint 8.73.0 with a patched `minimatch` in the development tools.
+  (#454)
+
 ## [0.16.0] - 2026-11-17
 
 **Get started, with any assistant.** A new workspace now offers **Get started**: a short interview
@@ -1445,7 +1512,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/geovanneb/get-things-done/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/geovanneb/get-things-done/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/geovanneb/get-things-done/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/geovanneb/get-things-done/compare/v0.13.1...v0.14.0
