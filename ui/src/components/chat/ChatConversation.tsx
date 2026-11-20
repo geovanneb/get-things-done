@@ -8,6 +8,8 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import MarkdownView from '../common/MarkdownView';
 import { Checkbox, Textarea } from '../common/Input';
 import DictateButton from '../common/DictateButton';
+import ChatHandoff, { type HandoffDraft } from './ChatHandoff';
+import { handoffDraftKey } from '../../utils/chatHandoff';
 import { withDictation } from '../../utils/dictation';
 import { useNotify } from '../../hooks/useNotify';
 import type { ChatState } from '../../hooks/useChat';
@@ -37,7 +39,7 @@ const stopIcon = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1.5" /></svg>
 );
 
-export default function ChatConversation({ chat, composerRef, pathname, onSettings, onHistory, onReferenceOpened, references = true }: {
+export default function ChatConversation({ chat, composerRef, pathname, onSettings, onHistory, onReferenceOpened, references = true, handoffDrafts }: {
   chat: ChatState;
   composerRef: RefObject<HTMLTextAreaElement>;
   pathname: string;
@@ -48,6 +50,8 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
   onReferenceOpened?: (route: string) => void;
   /** Whether what answers name may be looked up and linked (the conversation is known to be the open workspace's). */
   references?: boolean;
+  /** Handoff drafts, kept by the dock so they outlive this view. */
+  handoffDrafts: Map<string, HandoffDraft>;
 }) {
   const { t, locale } = useLanguage();
   const notify = useNotify();
@@ -55,6 +59,7 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
   const [sendError, setSendError] = useState<string | null>(null);
   const [withPage, setWithPage] = useState(true);
   const [announcement, setAnnouncement] = useState('');
+  const [handoff, setHandoff] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
 
@@ -68,6 +73,8 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
   // An empty chat says where the earlier ones are: the header's list icon is easy to miss. A chat opened with no
   // messages (its first send failed) is empty too.
   const earlier = messages.length ? [] : pastChats(chat.list, conversation?.id);
+  const lastAnswer = [...messages].reverse().find((m) => m.role === 'assistant');
+  const draftKey = handoffDraftKey(chat.workspace, conversation?.id, lastAnswer?.id);
 
   // New words keep the newest in view, unless the user scrolled up to read.
   useLayoutEffect(() => {
@@ -156,6 +163,7 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
             onCopy={() => {
               void navigator.clipboard?.writeText(m.text).then(() => notify.success(t('chat.copied')), () => undefined);
             }}
+            onHandoff={m === lastAnswer ? () => setHandoff(true) : undefined}
             actions={m.status === 'error' && m.error && m === messages[messages.length - 1] ? (
               <ErrorActions
                 answer={m}
@@ -171,6 +179,16 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
         ))}
         <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
       </div>
+      {/* One draft per workspace, chat and latest answer: a new answer starts a new handoff. */}
+      <ChatHandoff
+        key={draftKey}
+        isOpen={handoff}
+        onClose={() => setHandoff(false)}
+        messages={messages}
+        workspace={chat.workspace ?? undefined}
+        draft={handoffDrafts.get(draftKey)}
+        onDraft={(d) => handoffDrafts.set(draftKey, d)}
+      />
 
       <div className="gtd-chat-footer">
         {problem && (
@@ -245,12 +263,14 @@ function stepText(step: RunStepLike | null | undefined, t: ReturnType<typeof use
   return t('chat.step.other');
 }
 
-function Message({ message: m, tool, locale, onCopy, actions, onReferenceOpened, references }: {
+function Message({ message: m, tool, locale, onCopy, onHandoff, actions, onReferenceOpened, references }: {
   message: ChatMessage;
   tool: string;
   locale: string;
   onReferenceOpened?: (route: string) => void;
   onCopy: () => void;
+  /** On the latest answer only: carry the chat into the user's own assistant. */
+  onHandoff?: () => void;
   actions: React.ReactNode;
   references: boolean;
 }) {
@@ -288,9 +308,10 @@ function Message({ message: m, tool, locale, onCopy, actions, onReferenceOpened,
       {m.status === 'stopped' && <div className="gtd-chat-meta">{t('chat.stopped')}</div>}
       {m.status === 'error' && m.error && <ErrorText answer={m} tool={tool} locale={locale} />}
       {actions}
-      {!streaming && m.text && (
+      {!streaming && (m.text || onHandoff) && (
         <div className="gtd-chat-meta">
-          <IconButton label={t('chat.copy')} icon={icons.copy} onClick={onCopy} />
+          {m.text && <IconButton label={t('chat.copy')} icon={icons.copy} onClick={onCopy} />}
+          {onHandoff && <Button size="sm" variant="ghost" onClick={onHandoff}>{t('chat.handoff.open')}</Button>}
           {m.model && <span>{m.model}</span>}
         </div>
       )}

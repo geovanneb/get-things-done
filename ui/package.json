@@ -29,6 +29,8 @@
     "test:assistant": "tsx src/utils/assistant.test.ts",
     "test:chat": "tsx src/utils/chat.test.ts",
     "test:references": "tsx src/utils/references.test.ts && tsx src/components/common/MarkdownRenderer.test.tsx",
+    "test:chat-handoff": "tsx src/utils/chatHandoff.test.ts",
+    "test:open-assistant": "tsx src/utils/openAssistant.test.ts",
     "test:nav": "tsx src/components/layout/navGroups.test.ts",
     "test:search-results": "tsx src/utils/searchResults.test.ts",
     "test:context-sensitivity": "tsx src/utils/contextSensitivity.test.ts",
