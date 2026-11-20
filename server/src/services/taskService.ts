@@ -735,7 +735,8 @@ If the executive comes back with feedback on a task that is already \`in_review\
 
   private async attachmentDirectory(id: string): Promise<string> {
     const dir = path.join(this.getActiveDir(), topLevelName(id));
-    // Check every ancestor: an atomic attachment write only protects the final file, not linked folders.
+    // Check every ancestor: an atomic attachment write only protects the final file, not linked folders. Save and
+    // delete check again right before they change anything, since the folder could be replaced after this check.
     return workspaceEntry(workspaceService.getWorkspacePath(), dir, true);
   }
 
@@ -764,12 +765,12 @@ If the executive comes back with feedback on a task that is already \`in_review\
     const taskDir = await this.attachmentDirectory(id);
     if (!(await fileService.exists(taskDir))) throw new Error(`Task not found: ${id}`);
 
-    return saveAttachment(taskDir, originalName, buffer, 'task.md');
+    return saveAttachment(taskDir, originalName, buffer, 'task.md', workspaceService.getWorkspacePath());
   }
 
   async deleteTaskFile(id: string, filename: string): Promise<void> {
     const safe = topLevelName(filename);
     if (safe.toLowerCase() === 'task.md') throw new Error('Invalid file name: cannot delete task.md');
-    await deleteAttachment(await this.attachmentDirectory(id), safe);
+    await deleteAttachment(await this.attachmentDirectory(id), safe, workspaceService.getWorkspacePath());
   }
 }

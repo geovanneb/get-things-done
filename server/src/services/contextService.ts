@@ -96,10 +96,52 @@ export class ContextService {
     return path.join(this.getNoteDir(category, slug), 'note.md');
   }
 
+  /**
+   * `dir` (a category's or a note's folder), checked to stay inside the workspace: no part of it below the workspace
+   * may be a link, so a linked folder is refused before anything is read, migrated or written through it. A missing
+   * tail is allowed (it is about to be made). Run again right before a change, since a folder can be swapped later.
+   */
+  private async contained(dir: string): Promise<string> {
+    return workspaceEntry(workspaceService.getWorkspacePath(), dir, true);
+  }
+
+  /**
+   * The note files in a category, one at a time and in the folder's order, each old single file migrated when it is
+   * reached (a lookup by id stops at its note, as it always has). The category folder is checked before it is
+   * created, listed or migrated into. Links inside it (a linked note folder or note.md) are skipped, never followed.
+   */
+  private async *noteFiles(cat: ContextCategory): AsyncGenerator<{ filePath: string; name: string }> {
+    const dir = await this.contained(this.getContextDir(cat));
+    await fileService.ensureDir(dir);
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        // New structure: category/slug/note.md
+        const noteFile = path.join(dir, entry.name, 'note.md');
+        if (!(await fsp.lstat(noteFile).catch(() => null))?.isFile()) continue;
+        yield { filePath: noteFile, name: entry.name };
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        // Old structure: migrate to new
+        yield { filePath: await this.migrateOldFile(path.join(dir, entry.name), cat), name: entry.name };
+      }
+    }
+  }
+
+  /** The folder of a note found by id, checked again (see contained): 404 when there is no such note. */
+  private async noteFolder(id: string): Promise<string> {
+    const result = await this.findContextFile(id);
+    if (!result) throw new Error(`Context note not found: ${id}`);
+    return workspaceEntry(workspaceService.getWorkspacePath(), path.dirname(result.filePath)).catch((err: NodeJS.ErrnoException) => {
+      // Removed by something that does not take the lock (an agent or the file manager) since it was found.
+      if (err.code === 'ENOENT') throw new Error(`Context note not found: ${id}`);
+      throw err;
+    });
+  }
+
   // Migrate old-style file to new folder structure
   private async migrateOldFile(oldPath: string, category: ContextCategory): Promise<string> {
     const slug = path.basename(oldPath, '.md');
-    const noteDir = this.getNoteDir(category, slug);
+    const noteDir = await this.contained(this.getNoteDir(category, slug));
     const noteFile = this.getNoteFile(category, slug);
     await fileService.ensureDir(noteDir);
     await fsp.rename(oldPath, noteFile);
@@ -113,31 +155,12 @@ export class ContextService {
     const results: ContextNote[] = [];
 
     for (const cat of wanted) {
-      const dir = this.getContextDir(cat);
-      await fileService.ensureDir(dir);
-
-      const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        let filePath: string;
-
-        if (entry.isDirectory()) {
-          // New structure: category/slug/note.md
-          const noteFile = path.join(dir, entry.name, 'note.md');
-          if (!(await fileService.exists(noteFile))) continue;
-          filePath = noteFile;
-        } else if (entry.isFile() && entry.name.endsWith('.md')) {
-          // Old structure: migrate to new
-          const oldPath = path.join(dir, entry.name);
-          filePath = await this.migrateOldFile(oldPath, cat);
-        } else {
-          continue;
-        }
-
+      for await (const { filePath, name } of this.noteFiles(cat)) {
         try {
           const { data, content } = await fileService.readMarkdown<ContextNote>(filePath);
           results.push({
             ...data,
-            title: textOf(data.title).trim() || entry.name.replace(/\.md$/, ''),
+            title: textOf(data.title).trim() || name.replace(/\.md$/, ''),
             category: cat,
             tags: textList(data.tags),
             created_at: stamp(data.created_at),
@@ -194,6 +217,7 @@ export class ContextService {
     const slug = data.slug || titleSlug(data.title || 'untitled', 'note');
     const sensitivity = requestedSensitivity(data.sensitivity);
     const id = `CTX-${slug}`;
+    await this.contained(this.getNoteDir(category, slug));
 
     // The id is shared across categories: check and create under one cross-process lock.
     const held = await this.lockNote(id, 'This context note is being created elsewhere. Try again.');
@@ -215,7 +239,7 @@ export class ContextService {
     // through the first one's id.
     const sameId = await this.findContextFile(id);
     if (sameId) throw httpError(409, `A context note named "${slug}" already exists in ${sameId.category}. Edit it, or choose another title.`);
-    await fileService.ensureDir(noteDir);
+    await fileService.ensureDir(await this.contained(noteDir));
 
     const note: ContextNote = {
       id,
@@ -231,7 +255,11 @@ export class ContextService {
 
     const { content: _c, body: _b, path: _path, ...frontmatter } = note;
     const bodyContent = data.body || data.content || '';
-    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);
+    // Written only if the name is still free: the id check above can migrate an old <slug>.md into this very folder.
+    await fileService.createMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'EEXIST') throw httpError(409, `A context note named "${slug}" already exists in ${category}. Edit it, or choose another title.`);
+      throw err;
+    });
     return { ...note, body: bodyContent, path: filePath };
   }
 
@@ -263,18 +291,24 @@ export class ContextService {
     const bodyContent = data.body ?? data.content ?? existing.body ?? existing.content ?? '';
 
     let filePath = existing.path!;
+    let backedUp = false;
 
     // If category changed, move the entire slug directory
     if (incomingCategory !== existing.category) {
       const slug = path.basename(path.dirname(existing.path!));
-      const newNoteDir = this.getNoteDir(incomingCategory, slug);
+      const newNoteDir = await this.contained(this.getNoteDir(incomingCategory, slug));
       // Never onto another note: its folder would be overwritten.
       if (await fileService.exists(newNoteDir)) throw httpError(409, `A context note named "${slug}" already exists in ${incomingCategory}. Rename one of them first.`);
       const newFilePath = this.getNoteFile(incomingCategory, slug);
       // Rename the folder itself so subfolders move too (moving files one by one and then
       // removing the old folder deleted them). Only the parent is created: Windows will not
       // rename onto an existing folder, even an empty one.
-      await fileService.ensureDir(this.getContextDir(incomingCategory));
+      await fileService.ensureDir(await this.contained(this.getContextDir(incomingCategory)));
+      // The previous version goes to the trash before the folder moves, not in the write after it: a backup that fails
+      // (a linked or full trash) leaves the note and its files where they were. The write below then skips it.
+      await fileService.backup(existing.path!);
+      backedUp = true;
+      await this.contained(path.dirname(existing.path!));
       await fsp.rename(path.dirname(existing.path!), newNoteDir).catch((err: NodeJS.ErrnoException) => {
         // Removed by something that does not take the lock (an agent or the file manager): the note is gone, not broken.
         if (err.code === 'ENOENT') throw new Error(`Context note not found: ${id}`);
@@ -297,7 +331,7 @@ export class ContextService {
     else if (existing.sensitivity == null || existing.sensitivity === '') delete updated.sensitivity;
 
     const { content: _c, body: _b, path: _path, ...frontmatter } = updated;
-    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent);
+    await fileService.writeMarkdown(filePath, frontmatter as Record<string, unknown>, bodyContent, { backup: !backedUp });
     return { ...updated, body: bodyContent, path: filePath };
   }
 
@@ -318,68 +352,41 @@ export class ContextService {
     const noteDirName = path.basename(noteDir);
     const catDir = this.getContextDir(result.category);
     if (noteDir !== catDir && noteDirName !== result.category) {
-      // New structure - delete whole dir
-      await fsp.rm(noteDir, { recursive: true, force: true });
+      // New structure - delete whole dir (checked again just before: fs.rm never follows links inside it)
+      await fsp.rm(await this.contained(noteDir), { recursive: true, force: true });
     } else {
       await fileService.deleteFile(result.filePath);
     }
   }
 
   async listContextFiles(id: string): Promise<FolderFile[]> {
-    const result = await this.findContextFile(id);
-    if (!result) throw new Error(`Context note not found: ${id}`);
-    return listFolderFiles(path.dirname(result.filePath), ['note.md']);
+    return listFolderFiles(await this.noteFolder(id), ['note.md']);
   }
 
   /** The note's whole folder (note.md and every attached file) as one ZIP. */
   async contextArchive(id: string): Promise<{ name: string; data: Buffer }> {
-    const result = await this.findContextFile(id);
-    if (!result) throw new Error(`Context note not found: ${id}`);
-    return zipFolder(path.dirname(result.filePath), 'note.md');
+    return zipFolder(await this.noteFolder(id), 'note.md');
   }
 
   /** Absolute path of one file attached to the note (404 if missing, 400 if outside the note's folder). */
   async contextFilePath(id: string, name: string): Promise<string> {
-    const result = await this.findContextFile(id);
-    if (!result) throw new Error(`Context note not found: ${id}`);
-    return fileInside(path.dirname(result.filePath), name);
+    return fileInside(await this.noteFolder(id), name);
   }
 
   async saveContextFile(id: string, originalName: string, buffer: Buffer): Promise<{ name: string; size: number; modified: string; type: string }> {
-    const result = await this.findContextFile(id);
-    if (!result) throw new Error(`Context note not found: ${id}`);
-    const noteDir = path.dirname(result.filePath);
-    return saveAttachment(noteDir, originalName, buffer, 'note.md');
+    return saveAttachment(await this.noteFolder(id), originalName, buffer, 'note.md', workspaceService.getWorkspacePath());
   }
 
   async deleteContextFile(id: string, filename: string): Promise<void> {
-    const result = await this.findContextFile(id);
-    if (!result) throw new Error(`Context note not found: ${id}`);
+    const noteDir = await this.noteFolder(id);
     const safe = topLevelName(filename);
     if (safe.toLowerCase() === 'note.md') throw new Error('Invalid file name: cannot delete note.md');
-    await deleteAttachment(path.dirname(result.filePath), safe);
+    await deleteAttachment(noteDir, safe, workspaceService.getWorkspacePath());
   }
 
   private async findContextFile(id: string): Promise<{ filePath: string; category: ContextCategory } | null> {
     for (const cat of await categories()) {
-      const dir = this.getContextDir(cat);
-      await fileService.ensureDir(dir);
-
-      const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        let filePath: string;
-        if (entry.isDirectory()) {
-          const noteFile = path.join(dir, entry.name, 'note.md');
-          if (!(await fileService.exists(noteFile))) continue;
-          filePath = noteFile;
-        } else if (entry.isFile() && entry.name.endsWith('.md')) {
-          // Old file - migrate before checking
-          const oldPath = path.join(dir, entry.name);
-          filePath = await this.migrateOldFile(oldPath, cat);
-        } else {
-          continue;
-        }
-
+      for await (const { filePath } of this.noteFiles(cat)) {
         try {
           const { data } = await fileService.readMarkdown<{ id?: string }>(filePath);
           if (data.id === id) return { filePath, category: cat };

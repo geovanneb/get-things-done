@@ -4,9 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ChildProcess } from 'child_process';
 import { findCommand } from '../aiToolDetection';
-import { ClaudeCodeAdapter, RUNNER_SETTINGS, childEnv, killTree, launch, runnerSettingsFile, stopTree } from '../agentRunner';
+import { ClaudeCodeAdapter, RUNNER_SETTINGS, childEnv, killTree, launch, stopTree, writeRunnerSettings } from '../agentRunner';
 import { stepsFromMessage } from '../runSteps';
-import { atomicWrite } from '../../utils/atomicWrite';
+import { writeWorkspaceFile } from '../../utils/files';
 import {
   isObject, isoFromEpoch, lineReader, parseLine, shortDetail, turnError,
   type ChatAdapter, type ChatEvent, type ChatModel, type ChatOpenOptions, type ChatProblem, type ChatSession, type ProviderStatus, type TurnOutcome, type UsageWindow,
@@ -190,13 +190,10 @@ export class ClaudeChatAdapter implements ChatAdapter {
   async open(options: ChatOpenOptions): Promise<ChatSession> {
     const bin = this.binary();
     if (!bin) throw Object.assign(new Error('Claude Code is not installed on this computer.'), { statusCode: 409 });
-    const instructions = chatInstructionsFile(options.workspace);
-    await fsp.mkdir(path.dirname(instructions), { recursive: true });
-    await atomicWrite(instructions, options.instructions);
-    // A workspace that never ran an analysis has no runs folder yet.
-    await fsp.mkdir(path.dirname(runnerSettingsFile(options.workspace)), { recursive: true });
-    await atomicWrite(runnerSettingsFile(options.workspace), RUNNER_SETTINGS);
-    const args = conversationArgs(runnerSettingsFile(options.workspace), instructions, options);
+    // Both files are checked like the conversation's own: a linked metadata folder is refused before anything is written.
+    const instructions = await writeWorkspaceFile(options.workspace, chatInstructionsFile(options.workspace), options.instructions);
+    const settings = await writeRunnerSettings(options.workspace);
+    const args = conversationArgs(settings, instructions, options);
     return new ClaudeSession(launch(bin, args, options.workspace, this.env(), 'pipe'), options, (w) => lastLimits.set(this.id, w));
   }
 }

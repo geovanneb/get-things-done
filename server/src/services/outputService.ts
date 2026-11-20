@@ -26,12 +26,27 @@ function httpError(status: number, message: string): Error {
 }
 
 export class OutputService {
-  private getTemplatesDir(): string {
-    return path.join(workspaceService.getWorkspacePath(), 'outputs', 'templates');
+  /**
+   * outputs/templates, checked to stay inside the workspace: neither it nor `outputs` may be a link, so templates (and
+   * their attached files) are never read or written through a linked folder. Links below it are skipped by listFiles.
+   */
+  private async getTemplatesDir(): Promise<string> {
+    const ws = workspaceService.getWorkspacePath();
+    return workspaceEntry(ws, path.join(ws, 'outputs', 'templates'), true);
+  }
+
+  /** The folder of a template found by id, checked again right before it is used: 404 when there is no such template. */
+  private async templateFolder(id: string): Promise<string> {
+    const filePath = await this.findTemplateFile(id);
+    if (!filePath) throw new Error(`Output template not found: ${id}`);
+    return workspaceEntry(workspaceService.getWorkspacePath(), path.dirname(filePath)).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') throw new Error(`Output template not found: ${id}`);
+      throw err;
+    });
   }
 
   async listTemplates(): Promise<OutputTemplate[]> {
-    const templatesDir = this.getTemplatesDir();
+    const templatesDir = await this.getTemplatesDir();
     await fileService.ensureDir(templatesDir);
 
     const files = await fileService.listFiles(templatesDir, 'output.md');
@@ -83,7 +98,7 @@ export class OutputService {
     const now = new Date().toISOString();
     const slug = data.slug || titleSlug(data.name || 'untitled', 'template');
     const id = `OUT-${slug}`;
-    const templateDir = path.join(this.getTemplatesDir(), topLevelName(slug));
+    const templateDir = await workspaceEntry(workspaceService.getWorkspacePath(), path.join(await this.getTemplatesDir(), topLevelName(slug)), true);
     const filePath = path.join(templateDir, 'output.md');
 
     // Names that differ only in case or punctuation share a slug: check and create under one cross-process lock.
@@ -95,7 +110,7 @@ export class OutputService {
     try {
       // Never replace another template (and take over its uploaded files) by creating one with a similar name.
       if (await fileService.exists(filePath)) throw httpError(409, `An output template named "${slug}" already exists. Edit it, or choose another name.`);
-      await fileService.ensureDir(templateDir);
+      await fileService.ensureDir(await workspaceEntry(ws, templateDir, true));
 
       const template: OutputTemplate = {
         id,
@@ -143,50 +158,37 @@ export class OutputService {
   }
 
   async deleteTemplate(id: string): Promise<void> {
-    const filePath = await this.findTemplateFile(id);
-    if (!filePath) throw new Error(`Output template not found: ${id}`);
-    // Delete the whole template directory
-    const templateDir = path.dirname(filePath);
-    await fsp.rm(templateDir, { recursive: true, force: true });
+    // Delete the whole template directory (fs.rm never follows links inside it)
+    await fsp.rm(await this.templateFolder(id), { recursive: true, force: true });
   }
 
   async listTemplateFiles(id: string): Promise<FolderFile[]> {
-    const filePath = await this.findTemplateFile(id);
-    if (!filePath) throw new Error(`Output template not found: ${id}`);
-    return listFolderFiles(path.dirname(filePath), ['output.md']);
+    return listFolderFiles(await this.templateFolder(id), ['output.md']);
   }
 
   /** The template's whole folder (output.md and every file) as one ZIP. */
   async templateArchive(id: string): Promise<{ name: string; data: Buffer }> {
-    const filePath = await this.findTemplateFile(id);
-    if (!filePath) throw new Error(`Output template not found: ${id}`);
-    return zipFolder(path.dirname(filePath), 'output.md');
+    return zipFolder(await this.templateFolder(id), 'output.md');
   }
 
   /** Absolute path of one file in the template's folder (404 if missing, 400 if outside the folder). */
   async templateFilePath(id: string, name: string): Promise<string> {
-    const filePath = await this.findTemplateFile(id);
-    if (!filePath) throw new Error(`Output template not found: ${id}`);
-    return fileInside(path.dirname(filePath), name);
+    return fileInside(await this.templateFolder(id), name);
   }
 
   async saveTemplateFile(id: string, originalName: string, buffer: Buffer): Promise<{ name: string; size: number; modified: string; type: string }> {
-    const filePath = await this.findTemplateFile(id);
-    if (!filePath) throw new Error(`Output template not found: ${id}`);
-    const templateDir = path.dirname(filePath);
-    return saveAttachment(templateDir, originalName, buffer, 'output.md');
+    return saveAttachment(await this.templateFolder(id), originalName, buffer, 'output.md', workspaceService.getWorkspacePath());
   }
 
   async deleteTemplateFile(id: string, filename: string): Promise<void> {
-    const filePath = await this.findTemplateFile(id);
-    if (!filePath) throw new Error(`Output template not found: ${id}`);
+    const templateDir = await this.templateFolder(id);
     const safe = topLevelName(filename);
     if (safe.toLowerCase() === 'output.md') throw new Error('Invalid file name: cannot delete output.md');
-    await deleteAttachment(path.dirname(filePath), safe);
+    await deleteAttachment(templateDir, safe, workspaceService.getWorkspacePath());
   }
 
   private async findTemplateFile(id: string): Promise<string | null> {
-    const files = await fileService.listFiles(this.getTemplatesDir(), 'output.md');
+    const files = await fileService.listFiles(await this.getTemplatesDir(), 'output.md');
     for (const filePath of files) {
       try {
         const { data } = await fileService.readMarkdown<{ id?: string }>(filePath);
