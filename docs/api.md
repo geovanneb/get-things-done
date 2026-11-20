@@ -648,7 +648,8 @@ GET /api/agent-activity
 |---|---|---|
 | `GET` | `/api/search` | Full-text search. `q` is required; `types` limits the result types (comma-separated, for example `task,context`) |
 | `GET` | `/api/mentions` | Suggestions for the `@` picker in a task's objective. `q` and `limit` (1 to 50, default 8). Type `meeting` lists meetings in the queue and meetings an update holds whose id is final, linked as `/meetings/<id>` |
-| `GET` | `/api/mentions/resolve` | Check that a mentioned file, or meeting, still exists. `href` is the link to check. A meeting whose review is still open counts as missing until its update is done |
+| `GET` | `/api/mentions/resolve` | Where one mentioned item opens, and whether it still exists. `href` is the link (or id) to check, as a mention writes it: its URL syntax is decoded once into the literal path. Answers exactly as one reference of the batch below: `exists`, `route`, `label`, `type`. A meeting whose review is still open counts as missing until its update is done, and so does a file of a task that is gone (even while the task exists) |
+| `POST` | `/api/mentions/resolve` | Where references open in the app, many at once (`{ "refs": [...] }`, at most 50). A reference is a workspace path (`/tasks/<active|archive>/<TASK-id>/…`, `/context/…`, `/stakeholders/…`, `/outputs/…`, `/meetings/<id>`, `/context-updates/<CU-id>` or its `update.md`, `/routines/<RT-id>.md`, with or without the leading slash) or a bare id (`TASK-…`, `STK-…`, `GRP-…`, `ORG-…`, `CTX-…`, `CU-…`, `MQ-…`, `RT-…`). References are literal workspace paths, never decoded (a folder may be named `phase%2Done`). Answers `targets`, one per reference: `exists`, `route` (an in-app address: a task's page, or its Files tab for an attachment; a stakeholder or group page; `/context?note=<id>` for a note; an update's or meeting's page; `/outputs`; `/routines`), `label` and `type` when known (an item that is missing answers only `exists: false, route: null`). Read-only: nothing is created or changed, and only exact entries are read (a path with `..`, outside those folders, or with a link anywhere in it, even one that stays in the workspace, is `exists: false`). A meeting's files and an update's materials are never looked up |
 
 ```text
 GET /api/search?q=carrier
@@ -663,7 +664,12 @@ GET /api/mentions?q=pri&limit=2
         "detail":"blocked","href":"/tasks/active/TASK-2026-0004/task.md"}]
 
 GET /api/mentions/resolve?href=/stakeholders/people/stk-0001.md
-→ 200 {"exists":true}
+→ 200 {"exists":true,"route":"/stakeholders/STK-0001","label":"Priya Natarajan","type":"stakeholder"}
+
+POST /api/mentions/resolve  {"refs":["TASK-2026-0004","context/risks/single-carrier/note.md"]}
+→ 200 {"targets":{
+        "TASK-2026-0004":{"exists":true,"route":"/board/task/TASK-2026-0004","label":"Churn deep dive: enterprise accounts","type":"task"},
+        "context/risks/single-carrier/note.md":{"exists":true,"route":"/context?note=CTX-single-freight-carrier-dependency","label":"Single freight carrier dependency","type":"context"}}}
 ```
 
 ---

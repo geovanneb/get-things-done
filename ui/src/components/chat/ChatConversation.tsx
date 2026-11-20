@@ -32,11 +32,15 @@ const stopIcon = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1.5" /></svg>
 );
 
-export default function ChatConversation({ chat, composerRef, pathname, onSettings }: {
+export default function ChatConversation({ chat, composerRef, pathname, onSettings, onReferenceOpened, references = true }: {
   chat: ChatState;
   composerRef: RefObject<HTMLTextAreaElement>;
   pathname: string;
   onSettings: () => void;
+  /** An item named in an answer was opened from its chip, at this address. */
+  onReferenceOpened?: (route: string) => void;
+  /** Whether what answers name may be looked up and linked (the conversation is known to be the open workspace's). */
+  references?: boolean;
 }) {
   const { t, locale } = useLanguage();
   const notify = useNotify();
@@ -131,6 +135,8 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
             message={m}
             tool={label(m.provider ?? conversation?.provider)}
             locale={locale}
+            onReferenceOpened={onReferenceOpened}
+            references={references}
             onCopy={() => {
               void navigator.clipboard?.writeText(m.text).then(() => notify.success(t('chat.copied')), () => undefined);
             }}
@@ -223,12 +229,14 @@ function stepText(step: RunStepLike | null | undefined, t: ReturnType<typeof use
   return t('chat.step.other');
 }
 
-function Message({ message: m, tool, locale, onCopy, actions }: {
+function Message({ message: m, tool, locale, onCopy, actions, onReferenceOpened, references }: {
   message: ChatMessage;
   tool: string;
   locale: string;
+  onReferenceOpened?: (route: string) => void;
   onCopy: () => void;
   actions: React.ReactNode;
+  references: boolean;
 }) {
   const { t } = useLanguage();
   if (m.role === 'notice') {
@@ -250,7 +258,8 @@ function Message({ message: m, tool, locale, onCopy, actions }: {
       <span className="sr-only">{tool}</span>
       {m.text && (
         <div className="gtd-chat-bubble">
-          <MarkdownView content={safeMarkdown(m.text)} compact />
+          {/* Tasks, people and files it names open in one click, once the answer is complete (not on every word). */}
+          <MarkdownView content={safeMarkdown(m.text)} compact references settled={!streaming && references} onReferenceOpened={onReferenceOpened} />
         </div>
       )}
       {streaming && (

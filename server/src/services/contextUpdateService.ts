@@ -1043,6 +1043,12 @@ export function hasConfirmedRecord(meetingRecords: unknown): boolean {
   return normalizeRecords(meetingRecords).some((r) => r.confirmation === 'confirmed');
 }
 
+/** An update as its update.md text says, read the same way as the service reads it (for callers that read it themselves). */
+export function updateFromText(raw: string, folderId: string): ContextUpdate {
+  const parsed = parseMarkdown(raw);
+  return normalize((parsed.data ?? {}) as Record<string, unknown>, parsed.content.trim(), folderId);
+}
+
 function normalize(data: Record<string, unknown>, body: string, folderId: string): ContextUpdate {
   const status = UPDATE_STATUSES.includes(data['status'] as UpdateStatus) ? data['status'] as UpdateStatus : 'ready';
   const materials = Array.isArray(data['materials'])

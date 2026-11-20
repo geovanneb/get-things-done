@@ -10,6 +10,12 @@ interface MarkdownViewProps {
   emptyText?: string;
   /** Smaller type for secondary content (cards, side panels). */
   compact?: boolean;
+  /** Bare ids and workspace paths in the text become chips that open the item (the chat's answers). */
+  references?: boolean;
+  /** False while the text is still being written (a streaming answer): mentions wait, as plain text. */
+  settled?: boolean;
+  /** Called after a chip opened its item, with its address. */
+  onReferenceOpened?: (route: string) => void;
 }
 
 /**
@@ -18,7 +24,7 @@ interface MarkdownViewProps {
  *
  * The renderer is loaded on first use; until then the raw text is shown, as before.
  */
-export default function MarkdownView({ content, emptyText, compact = false }: MarkdownViewProps) {
+export default function MarkdownView({ content, emptyText, compact = false, references = false, settled = true, onReferenceOpened }: MarkdownViewProps) {
   const { t } = useLanguage();
   if (!content || !content.trim()) {
     return <span style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>{emptyText ?? t('noContent')}</span>;
@@ -26,7 +32,7 @@ export default function MarkdownView({ content, emptyText, compact = false }: Ma
   return (
     <div className={compact ? 'markdown-view markdown-view--compact' : 'markdown-view'}>
       <Suspense fallback={<div style={{ whiteSpace: 'pre-wrap' }}>{content}</div>}>
-        <MarkdownRenderer content={content} />
+        <MarkdownRenderer content={content} references={references} settled={settled} onReferenceOpened={onReferenceOpened} />
       </Suspense>
     </div>
   );

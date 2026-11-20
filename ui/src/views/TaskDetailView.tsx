@@ -15,7 +15,7 @@ import { useNotify } from '@/hooks/useNotify';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import React, { useState, useEffect, useCallback, useReducer } from 'react';
 import ReactDOM from 'react-dom';
-import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
+import { useParams, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { useDataVersion } from '../store';
 import { Task, Stakeholder, OfficeCheck } from '../types';
@@ -349,6 +349,15 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
   const navigate = useNavigate();
   const { refetchTasks } = useOutletContext<{ refetchTasks: () => void }>();
   const [tab, setTab] = useState<TaskTab>('work');
+  // A link to the task's files (`?tab=files`, from a chip for one of its attachments) opens that tab, then leaves the
+  // address as the task's own, so a later link to the same files opens them again.
+  const [params, setParams] = useSearchParams();
+  const wantedTab = params.get('tab');
+  useEffect(() => {
+    if (!wantedTab) return;
+    if (wantedTab === 'files' || wantedTab === 'work') setTab(wantedTab);
+    setParams((p) => { p.delete('tab'); return p; }, { replace: true });
+  }, [wantedTab, setParams]);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [savedCount, setSavedCount] = useState(0);

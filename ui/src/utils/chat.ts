@@ -196,6 +196,29 @@ export function defaultProvider(providers: ProviderStatus[], workspaceTools: str
  * in a meeting transcript, for example) into an image whose address carries workspace data, and the browser would
  * fetch it without a click. The page's security policy blocks that too; this keeps it from even being tried.
  */
+/**
+ * What tells one conversation from another with the same id (a workspace copied with its chats, say): its id, when
+ * it was created and its first message. The same in two workspaces only for a true copy of the same conversation.
+ */
+export function conversationIdentity(c: Pick<Conversation, 'id' | 'created_at' | 'messages'>): string {
+  return JSON.stringify([c.id, c.created_at, c.messages[0]?.id ?? null, c.messages[0]?.created_at ?? null]);
+}
+
+/**
+ * The workspace in which what a conversation's answers name may be looked up, or undefined (they stay plain text).
+ * Only the workspace the chat shows, while it is still the open one, and only once the server gave back, for that
+ * workspace, the very conversation on screen (`confirmed`, by identity).
+ */
+export function referenceWorkspace({ shown, chatWorkspace, openWorkspace, confirmed }: {
+  shown: Pick<Conversation, 'id' | 'created_at' | 'messages'> | null;
+  chatWorkspace: string | null;
+  openWorkspace: string | null;
+  confirmed: { identity: string; workspace: string } | null;
+}): string | undefined {
+  if (!shown || !chatWorkspace || chatWorkspace !== openWorkspace || !confirmed) return undefined;
+  return confirmed.identity === conversationIdentity(shown) && confirmed.workspace === chatWorkspace ? chatWorkspace : undefined;
+}
+
 export function safeMarkdown(text: string): string {
   return text.replace(/!\[/g, '[');
 }

@@ -9,6 +9,7 @@ import { FileService } from './fileService';
 import { WorkspaceService } from './workspace';
 import { MeetingHistoryService } from './meetingHistoryService';
 import { MeetingDigestService } from './meetingDigestService';
+import { resolveReferences, type MentionTarget } from './referenceTargets';
 import { meetingIdOf, resolveMeeting } from './meetingSources';
 
 const taskService = new TaskService();
@@ -33,6 +34,8 @@ export interface MentionCandidate {
   /** Set for tasks marked confidential or restricted, so the picker can warn. */
   confidentiality?: string;
 }
+
+export { MAX_RESOLVE_BATCH, REFERENCE_ID, REFERENCE_ROOTS, referenceSegments, type MentionTarget } from './referenceTargets';
 
 export interface ParsedMention {
   label: string;
@@ -119,6 +122,14 @@ export class MentionService {
       }
     }
     return null;
+  }
+
+  /**
+   * Where each reference opens, by bare id or workspace path, read from the open workspace only (fixed once for the
+   * batch, never written). See referenceTargets.
+   */
+  async targets(refs: string[]): Promise<Record<string, MentionTarget>> {
+    return resolveReferences(workspaceService.getWorkspacePath(), refs);
   }
 
   /** Picker search across stakeholders, output templates, context notes and tasks (incl. archived). */
