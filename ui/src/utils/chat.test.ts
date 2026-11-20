@@ -3,8 +3,8 @@
  */
 import {
   conversationIdentity, referenceWorkspace,
-  newerOf, applyStreamEvent, chatError, checkEnded, composerKey, contextPercent, defaultProvider, effortOptions, errorActions, modelOptions, pageContext,
-  safeMarkdown, tightestWindow, untilText, type Conversation, type ProviderStatus,
+  newerOf, applyStreamEvent, canRename, chatError, chatName, checkEnded, composerKey, contextPercent, defaultProvider, effortOptions, errorActions, modelOptions,
+  nameEnter, nameKey, pageContext, pastChats, renameProblem, safeMarkdown, tightestWindow, untilText, CHAT_NAME_MAX, type Conversation, type ConversationSummary, type ProviderStatus,
 } from './chat';
 
 let failures = 0;
@@ -143,6 +143,45 @@ check('efforts: none for a tool that lists no models', same(effortOptions(p('cop
     referenceWorkspace({ shown: fromB, chatWorkspace: '/ws/B', openWorkspace: '/ws/B', confirmed: { ...confirmedB, workspace: '/ws/A' } }) === undefined);
   check('references: nothing shown, nothing looked up', referenceWorkspace({ shown: null, chatWorkspace: '/ws/B', openWorkspace: '/ws/B', confirmed: confirmedB }) === undefined);
 }
+
+// Renaming a chat from the panel header.
+check('a name is kept as one line', chatName('  Budget\n  review  ') === 'Budget review');
+check('an empty name is refused before it is sent', chatName('') === null && chatName(' \n\t ') === null);
+check('a long name is kept to what the server keeps whole', chatName('x'.repeat(100))?.length === CHAT_NAME_MAX);
+check('Enter saves the name', nameKey({ key: 'Enter' }) === 'save');
+check('Escape cancels the rename', nameKey({ key: 'Escape' }) === 'cancel');
+check('other keys only type', nameKey({ key: 'a' }) === null);
+check('Enter while composing confirms the text, not the name', nameKey({ key: 'Enter', isComposing: true }) === null);
+check('Escape while composing drops the composition, not the rename', nameKey({ key: 'Escape', isComposing: true }) === null);
+check('a Safari composing key never saves', nameKey({ key: 'Enter', keyCode: 229 }) === null);
+check('a chat with no messages cannot be renamed yet: its first message would name it', !canRename({ messages: [] }) && !canRename(null));
+check('a chat with only a notice cannot be renamed yet', !canRename({ messages: [{ id: 'n', role: 'notice', text: '', created_at: '' }] }));
+check('a chat with a message from the user can be renamed', canRename(conversation));
+
+// The name box's Enter handler, as the box calls it.
+const enter = (init: { key?: string; isComposing?: boolean; keyCode?: number }) => {
+  const event = { key: 'Enter', ...init, prevented: false, preventDefault() { this.prevented = true; } };
+  let saves = 0;
+  nameEnter(event, () => { saves++; });
+  return { prevented: event.prevented, saves };
+};
+check('a composing Enter is left to the input method and does not save', same(enter({ isComposing: true }), { prevented: false, saves: 0 }));
+check('a Safari composing Enter (keyCode 229) is left to the input method and does not save', same(enter({ keyCode: 229 }), { prevented: false, saves: 0 }));
+check('an ordinary Enter saves once and takes the key', same(enter({}), { prevented: true, saves: 1 }));
+check('other keys are left alone', same(enter({ key: 'a' }), { prevented: false, saves: 0 }) && same(enter({ key: 'Escape' }), { prevented: false, saves: 0 }));
+
+const failure = (status: number, code?: string) => Object.assign(new Error('x'), { status, ...(code ? { code } : {}) });
+check('a rename while the assistant answers says to wait', renameProblem(failure(409)) === 'busy');
+check('a rename refused for another workspace says so', renameProblem(failure(409, 'other_workspace')) === 'other_workspace');
+check('any other failed rename is a plain failure', renameProblem(failure(500)) === 'failed' && renameProblem(new TypeError('Failed to fetch')) === 'failed' && renameProblem(null) === 'failed');
+
+// The past chats the empty panel offers.
+const summary = (id: string, messages: number): ConversationSummary => ({ id, title: id, provider: 'claude-code', updated_at: '', messages, busy: false });
+const chats = [summary('chat-a', 4), summary('chat-b', 0), summary('chat-c', 2)];
+check('past chats: every chat with messages', same(pastChats(chats, null).map((c) => c.id), ['chat-a', 'chat-c']));
+check('past chats: not the one shown', same(pastChats(chats, 'chat-a').map((c) => c.id), ['chat-c']));
+check('past chats: an opened chat with no messages still offers the others', same(pastChats(chats, 'chat-b').map((c) => c.id), ['chat-a', 'chat-c']));
+check('past chats: none in a new workspace', pastChats([], null).length === 0);
 
 if (failures) {
   console.error(`${failures} chat check(s) failed`);

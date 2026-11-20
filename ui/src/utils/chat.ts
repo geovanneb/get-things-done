@@ -254,3 +254,60 @@ export function effortOptions(provider: ProviderStatus | undefined, model: strin
   const chosen = (model ? list.find((m) => m.id === model) : null) ?? list.find((m) => m.is_default) ?? null;
   return chosen?.efforts ?? [];
 }
+
+/** The longest chat name the server keeps whole; a longer one it cuts short with "…". */
+export const CHAT_NAME_MAX = 60;
+
+/** A chat name as the server keeps it: one line, spaces collapsed. Null when nothing is left, which the server refuses. */
+export function chatName(text: string): string | null {
+  const name = text.replace(/\s+/g, ' ').trim();
+  return name ? name.slice(0, CHAT_NAME_MAX) : null;
+}
+
+/**
+ * What a key press in the chat name box does: Enter saves and Escape cancels. While an input method is composing
+ * (Japanese, Chinese, Korean), Enter confirms the text and Escape drops it, so neither ends the rename.
+ */
+export function nameKey(e: { key: string; isComposing?: boolean; keyCode?: number }): 'save' | 'cancel' | null {
+  if (e.isComposing || e.keyCode === 229) return null;
+  if (e.key === 'Enter') return 'save';
+  if (e.key === 'Escape') return 'cancel';
+  return null;
+}
+
+/**
+ * The name box's Enter: saves once, and only then takes the key from the browser. An Enter an input method uses to
+ * confirm its text keeps its default action, so the text is committed and nothing is saved.
+ */
+export function nameEnter(
+  e: { key: string; isComposing?: boolean; keyCode?: number; preventDefault: () => void },
+  save: () => void,
+): void {
+  if (nameKey(e) !== 'save') return;
+  e.preventDefault();
+  save();
+}
+
+/**
+ * Whether the chat shown can be renamed: only once it has a message from the user. Until then the server names the
+ * chat after its first message when it is sent, which would replace a name given before.
+ */
+export function canRename(conversation: Pick<Conversation, 'messages'> | null | undefined): boolean {
+  return Boolean(conversation?.messages.some((m) => m.role === 'user'));
+}
+
+/** The earlier chats of this workspace the empty panel offers to continue: every chat with messages, but the one shown. */
+export function pastChats(list: ConversationSummary[], shownId: string | null | undefined): ConversationSummary[] {
+  return list.filter((c) => c.id !== shownId && c.messages > 0);
+}
+
+/**
+ * Why a rename failed, for the panel to say: the assistant is answering (the server refuses a change then), the chat
+ * belongs to another workspace (the message already says so), or anything else.
+ */
+export function renameProblem(err: unknown): 'busy' | 'other_workspace' | 'failed' {
+  const e = err as (Error & { status?: number; code?: string }) | null;
+  if (e?.code === 'other_workspace') return 'other_workspace';
+  if (e?.status === 409) return 'busy';
+  return 'failed';
+}
