@@ -5,6 +5,7 @@ import { EventEmitter } from 'events';
 import { WorkspaceService } from '../workspace';
 import { refuseWhileUpdating } from '../appActivity';
 import { atomicWrite } from '../../utils/atomicWrite';
+import { tryLock, unlock, type HeldLock } from '../../utils/fileLock';
 import { workspaceEntry } from '../../utils/files';
 import type { RunStep } from '../runSteps';
 import { ClaudeChatAdapter } from './claude';
@@ -200,12 +201,30 @@ interface Live {
   lastUsed: number;
 }
 
-interface Turn { stop: () => Promise<void>; done: Promise<void> }
+/**
+ * An answer going now. `lock` is the conversation's lock, held until its last save. A delete that finds the answer
+ * still holding it takes it over (`handedOver`), and the answer then leaves it alone; once the answer has begun to
+ * let it go (`released`), a delete waits for that and takes the lock itself.
+ */
+interface Turn { stop: () => Promise<void>; done: Promise<void>; lock: HeldLock; handedOver: boolean; released: Promise<void> | null; conversation: Conversation }
+
+/** A tool process still starting, for the answer that asked for it; `settled` once it is live or closed again. */
+interface Opening { key: string; owner: Turn; settled: Promise<void> }
 
 const live = new Map<string, Live>();
 const turns = new Map<string, Turn>();
-/** Conversations being changed right now (a send being set up, a model change), so two changes never overlap. */
-const reserved = new Set<string>();
+/**
+ * Conversations being changed right now (a send being set up, a model change), so two changes never overlap; a
+ * delete waits for the change to end first. Taken before the first await.
+ */
+const reserved = new Map<string, Promise<void>>();
+/** Conversations whose send was given a process slot and has not started its turn yet. */
+const admitted = new Set<string>();
+/** Tool processes still starting: counted against the limit until they are live or closed. */
+const opening = new Map<symbol, Opening>();
+/** Raised when the dashboard starts stopping: a send set up before then never starts its tool. */
+let shutdowns = 0;
+let stopping = false;
 /** Conversations being deleted: an answer still ending saves nothing, so a deleted chat never comes back. */
 const removing = new Set<string>();
 const streams = new EventEmitter();
@@ -276,13 +295,32 @@ export class ChatService {
     return { ...conversation, busy: turns.has(keyOf(workspace, conversation.id)) };
   }
 
+  /** Marks the conversation as being changed until `release` is called; nothing may await before this. */
+  private reserve(key: string): () => void {
+    let release!: () => void;
+    reserved.set(key, new Promise<void>((r) => { release = r; }));
+    return () => { reserved.delete(key); release(); };
+  }
+
+  /**
+   * The conversation's lock, shared with every dashboard on this computer: one change at a time to its file, from
+   * a send's setup through its answer's last save, and for a change of tool or a delete. Busy is a 409.
+   */
+  private async lockConversation(workspace: string, id: string): Promise<HeldLock> {
+    const file = await this.file(workspace, id);
+    await fsp.mkdir(chatDir(workspace), { recursive: true });
+    const held = await tryLock(`${file}.lock`);
+    if (typeof held === 'string') throw httpError(409, 'The assistant is answering in this chat in another dashboard window. Wait for it, or stop it there.', 'busy');
+    return held;
+  }
+
   private publish(workspace: string, id: string, event: ChatStreamEvent): void {
     streams.emit(keyOf(workspace, id), event);
   }
 
-  /** Follows one conversation; returns the function that stops following. */
-  subscribe(id: string, listener: (event: ChatStreamEvent) => void): () => void {
-    const key = keyOf(this.workspace(), conversationId(id));
+  /** Follows one conversation (of `workspace`, by default the open one); returns the function that stops following. */
+  subscribe(id: string, listener: (event: ChatStreamEvent) => void, workspace = this.workspace()): () => void {
+    const key = keyOf(workspace, conversationId(id));
     streams.on(key, listener);
     return () => streams.off(key, listener);
   }
@@ -298,9 +336,18 @@ export class ChatService {
     return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, MAX_CONVERSATIONS);
   }
 
-  async get(id: string): Promise<Conversation> {
-    const workspace = this.workspace();
-    return this.view(workspace, await this.read(workspace, conversationId(id)));
+  /**
+   * The conversation as it is now. While this dashboard answers in it, that is the answer in memory, still streaming
+   * with every word so far: the file is saved only now and then, and read back it would look stopped.
+   */
+  async get(id: string, workspace = this.workspace()): Promise<Conversation> {
+    const key = keyOf(workspace, conversationId(id));
+    const turn = turns.get(key);
+    if (turn && !removing.has(key)) {
+      await this.file(workspace, id);
+      return this.view(workspace, structuredClone(turn.conversation));
+    }
+    return this.view(workspace, await this.read(workspace, id));
   }
 
   async create(body: Record<string, unknown>): Promise<Conversation> {
@@ -319,9 +366,11 @@ export class ChatService {
   async update(id: string, body: Record<string, unknown>): Promise<Conversation> {
     const workspace = this.workspace();
     const key = keyOf(workspace, conversationId(id));
-    if (turns.has(key) || reserved.has(key)) throw httpError(409, 'The assistant is still answering. Wait for it, or stop it first.');
-    reserved.add(key);
+    if (turns.has(key) || reserved.has(key) || removing.has(key)) throw httpError(409, 'The assistant is still answering. Wait for it, or stop it first.');
+    const release = this.reserve(key);
+    let held: HeldLock | null = null;
     try {
+      held = await this.lockConversation(workspace, id);
       const c = await this.read(workspace, id);
       const before = { provider: c.provider, model: c.model, effort: c.effort };
       if ('provider' in body) c.provider = providerId(body['provider']);
@@ -344,24 +393,38 @@ export class ChatService {
       this.publish(workspace, c.id, { type: 'conversation', conversation: view });
       return view;
     } finally {
-      reserved.delete(key);
+      if (held) await unlock(held).catch(() => {});
+      release();
     }
   }
 
   async remove(id: string): Promise<void> {
     const workspace = this.workspace();
     const key = keyOf(workspace, conversationId(id));
-    const file = await this.file(workspace, id);
+    if (removing.has(key)) throw httpError(409, 'This chat is being deleted.');
+    // Before anything else: a send or change being set up now sees it, and is waited for.
     removing.add(key);
-    const turn = turns.get(key);
+    let turn: Turn | undefined;
+    let held: HeldLock | null = null;
     try {
-      if (turn) {
+      await reserved.get(key);
+      const file = await this.file(workspace, id);
+      turn = turns.get(key);
+      if (turn && !turn.released) {
+        // The answer's lock passes to this delete (it saves nothing more), so no other dashboard gets in before the unlink.
+        turn.handedOver = true;
+        held = turn.lock;
         await turn.stop();
         await Promise.race([turn.done, new Promise((r) => setTimeout(r, this.limits.stopGraceMs + 2000))]);
+      } else {
+        // The answer ended meanwhile and is letting its lock go; or another dashboard's answer must end first.
+        if (turn?.released) await turn.released;
+        held = await this.lockConversation(workspace, id);
       }
       await this.closeLive(key);
       await fsp.rm(file, { force: true });
     } finally {
+      if (held) await unlock(held).catch(() => {});
       // Kept until the answer has really ended, however long that takes, so its last save is skipped too.
       if (turn) void turn.done.then(() => removing.delete(key)); else removing.delete(key);
     }
@@ -388,15 +451,21 @@ export class ChatService {
     const page = typeof body['page'] === 'string' && PAGE.test(body['page']) && !/\.\./.test(body['page']) ? body['page'] : null;
     const workspace = this.workspace();
     const key = keyOf(workspace, conversationId(id));
+    if (stopping) throw httpError(409, 'The dashboard is stopping. Send the message again once it has started.', 'stopping');
     if (turns.has(key) || reserved.has(key) || removing.has(key)) throw httpError(409, 'The assistant is still answering. Wait for it, or stop it first.', 'busy');
-    reserved.add(key);
+    const epoch = shutdowns;
+    const release = this.reserve(key);
+    let held: HeldLock | null = null;
     try {
+      held = await this.lockConversation(workspace, id);
       const c = await this.read(workspace, id);
       const status = await this.adapters[c.provider].status(workspace);
       const problem = status.problems[0];
       if (problem) throw httpError(409, problem.message, problem.code);
       if (!status.ready) throw httpError(409, `${status.label} is not ready.`, 'check_failed');
       await this.makeRoom(workspace, key);
+      // Deleted while this was set up: nothing is saved and no tool starts.
+      if (removing.has(key)) throw httpError(404, 'Conversation not found');
       const at = now();
       if (!c.messages.some((m) => m.role === 'user')) c.title = titleFrom(text);
       const question: ChatMessage = { id: newId('msg'), role: 'user', text, created_at: at, page };
@@ -406,32 +475,57 @@ export class ChatService {
       if (c.messages.length > MAX_MESSAGES) c.messages = c.messages.slice(-MAX_MESSAGES);
       c.updated_at = at;
       await this.write(workspace, c);
-      this.startTurn(workspace, key, c, question, answer, page);
+      if (shutdowns !== epoch) {
+        // The dashboard stopped while this was set up: the message stays, its answer is marked as stopped.
+        answer.status = 'stopped';
+        await this.write(workspace, c);
+        throw httpError(409, 'The dashboard is stopping. Send the message again once it has started.', 'stopping');
+      }
+      this.startTurn(workspace, key, c, question, answer, page, held);
+      held = null;
       return this.view(workspace, c);
     } finally {
-      reserved.delete(key);
+      admitted.delete(key);
+      if (held) await unlock(held).catch(() => {});
+      release();
     }
   }
 
   /** Frees a process slot for a new one: ends idle processes of other workspaces, then the one idle longest. */
   private async makeRoom(workspace: string, key: string): Promise<void> {
     for (const [k, l] of live) if (l.workspace !== workspace && !turns.has(k)) await this.closeLive(k);
-    if (live.has(key) || live.size < MAX_LIVE) return;
-    const idle = [...live.entries()].filter(([k]) => !turns.has(k)).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-    if (!idle) throw httpError(409, `${MAX_LIVE} chats are answering at once. Wait for one of them, or stop it, then send again.`, 'too_many');
-    await this.closeLive(idle[0]);
+    for (;;) {
+      // Decided and taken with no await in between, so two sends never take the last slot together.
+      if (live.has(key) || ChatService.slotsTaken() < MAX_LIVE) { admitted.add(key); return; }
+      const idle = [...live.entries()].filter(([k]) => !turns.has(k) && !admitted.has(k)).sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+      if (!idle) throw httpError(409, `${MAX_LIVE} chats are answering at once. Wait for one of them, or stop it, then send again.`, 'too_many');
+      await this.closeLive(idle[0]);
+    }
   }
 
-  private async closeLive(key: string): Promise<void> {
+  /** Processes running or about to: live ones, answers (a process may still be starting), sends given a slot, and starts whose answer already ended. */
+  private static slotsTaken(): number {
+    const keys = new Set([...live.keys(), ...turns.keys(), ...admitted]);
+    let taken = keys.size;
+    // A start counts with its conversation only while it belongs to that conversation's answer going now; one left
+    // by an answer that ended (a timeout, a Stop) is a process of its own, even when the chat answers again.
+    for (const o of opening.values()) if (turns.get(o.key) !== o.owner) taken++;
+    return taken;
+  }
+
+
+  /** Ends the conversation's process; with `only`, just when that is still the conversation's process. */
+  private async closeLive(key: string, only?: ChatSession): Promise<void> {
     const l = live.get(key);
-    if (!l) return;
+    if (!l || (only && l.session !== only)) return;
     live.delete(key);
     if (l.idle) clearTimeout(l.idle);
     await l.session.close().catch(() => {});
   }
 
   /** The live process for this conversation with its current tool and model, started (or resumed) when needed. */
-  private async session(workspace: string, key: string, c: Conversation): Promise<ChatSession> {
+  /** Null when the answer ended while the process started: that process is closed again, never kept. */
+  private async session(workspace: string, key: string, c: Conversation, owner: Turn, ended: () => boolean): Promise<ChatSession | null> {
     const current = live.get(key);
     if (current && current.session.alive && current.provider === c.provider && current.model === c.model && current.effort === c.effort) {
       if (current.idle) { clearTimeout(current.idle); current.idle = null; }
@@ -440,12 +534,26 @@ export class ChatService {
     }
     await this.closeLive(key);
     const resume = c.provider_session?.provider === c.provider ? c.provider_session.id : null;
-    const session = await this.adapters[c.provider].open({ workspace, model: c.model, effort: c.effort, resume, instructions: CHAT_INSTRUCTIONS });
+    const start = Symbol(key);
+    const started = (async () => {
+      const s = await this.adapters[c.provider].open({ workspace, model: c.model, effort: c.effort, resume, instructions: CHAT_INSTRUCTIONS });
+      // A timeout, Stop or the dashboard stopping came first: nobody is waiting for this process.
+      if (ended()) { await s.close().catch(() => {}); return null; }
+      return s;
+    })();
+    opening.set(start, { key, owner, settled: started.then(() => undefined, () => undefined) });
+    let session: ChatSession | null;
+    try {
+      session = await started;
+    } finally {
+      opening.delete(start);
+    }
+    if (!session) return null;
     live.set(key, { workspace, conversation: c.id, provider: c.provider, model: c.model, effort: c.effort, session, idle: null, lastUsed: Date.now() });
     return session;
   }
 
-  private startTurn(workspace: string, key: string, c: Conversation, question: ChatMessage, answer: ChatMessage, page: string | null): void {
+  private startTurn(workspace: string, key: string, c: Conversation, question: ChatMessage, answer: ChatMessage, page: string | null, held: HeldLock): void {
     let resolveDone!: () => void;
     const done = new Promise<void>((r) => { resolveDone = r; });
     let session: ChatSession | null = null;
@@ -482,6 +590,11 @@ export class ChatService {
       // The tool lost the earlier session: it no longer counts, and the next message brings the conversation along.
       if (outcome.error?.code === 'resume_failed') { c.provider_session = null; c.carry_over = true; }
       await save();
+      // Only now may another dashboard change the file. Unless a delete took the lock over: it holds it until its unlink.
+      if (!turn.handedOver) {
+        turn.released = unlock(held).catch(() => {});
+        await turn.released;
+      }
       turns.delete(key);
       if (!removing.has(key)) this.publish(workspace, c.id, { type: 'conversation', conversation: this.view(workspace, c) });
       resolveDone();
@@ -545,13 +658,13 @@ export class ChatService {
 
     const run = async () => {
       try {
-        session = await this.session(workspace, key, c);
+        session = await this.session(workspace, key, c, turn, () => finished || stopped);
       } catch (err) {
         const e = err as Error & { turnError?: TurnError };
         onEvent({ type: 'end', outcome: { status: 'error', error: e.turnError ?? { code: 'crashed', detail: shortDetail(e.message) } } });
         return;
       }
-      if (stopped) { void finish({ status: 'stopped' }); return; }
+      if (!session || stopped) { void finish({ status: 'stopped' }); return; }
       // Codex and Copilot know their session id once it is open; Claude Code says it with its first message.
       if (session.sessionId && c.provider_session?.id !== session.sessionId) c.provider_session = { provider: c.provider, id: session.sessionId };
       // Only the messages before this question: the question is the prompt itself.
@@ -567,25 +680,32 @@ export class ChatService {
 
     const stop = async () => {
       stopped = true;
-      if (!session) return;
-      await session.interrupt().catch(() => {});
-      // A tool that does not stop when asked is ended; what it wrote so far stays.
+      const mine = session;
+      // Still starting: the answer ends now, and the process is closed when it arrives (counted until then).
+      if (!mine) { await finish({ status: 'stopped' }); return; }
+      // A tool that does not stop when asked is ended; what it wrote so far stays. Armed before asking, so a tool
+      // that stops at once clears it; and it only ever ends this answer's own process, never the next answer's.
       hardStop ??= setTimeout(() => {
-        void this.closeLive(key).then(() => finish({ status: 'stopped' }));
+        if (finished) return;
+        void this.closeLive(key, mine).then(() => finish({ status: 'stopped' }));
       }, this.limits.stopGraceMs);
+      await mine.interrupt().catch(() => {});
     };
 
     const timeout = setTimeout(() => {
       timedOut = true;
       void (async () => {
+        const mine = session;
         await stop();
-        await this.closeLive(key);
+        if (finished) return;
+        if (mine) await this.closeLive(key, mine);
         await finish({ status: 'error', error: { code: 'timeout', detail: null } });
       })();
     }, this.limits.turnTimeoutMs);
     timeout.unref?.();
 
-    turns.set(key, { stop, done });
+    const turn: Turn = { stop, done, lock: held, handedOver: false, released: null, conversation: c };
+    turns.set(key, turn);
     void run();
   }
 
@@ -595,15 +715,31 @@ export class ChatService {
   }
 
   /** Ends every chat process when the dashboard stops, and waits (bounded) for the answers to be saved. */
+  /**
+   * Ends every chat process when the dashboard stops, and waits for the answers to be saved, for sends being set up
+   * and for processes still starting (closed when they arrive). All of it within three seconds.
+   */
   static async stopAll(): Promise<void> {
-    const pending = [...turns.values()];
-    await Promise.all(pending.map((t) => t.stop().catch(() => {})));
-    await Promise.all([...live.keys()].map(async (k) => {
-      const l = live.get(k);
-      live.delete(k);
-      if (l?.idle) clearTimeout(l.idle);
-      await l?.session.close().catch(() => {});
-    }));
-    await Promise.race([Promise.all(pending.map((t) => t.done)), new Promise((r) => setTimeout(r, 3000))]);
+    // No new send from here; one being set up now never starts its tool.
+    stopping = true;
+    shutdowns++;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<void>((r) => { timer = setTimeout(r, 3000); });
+    try {
+      await Promise.race([deadline, (async () => {
+        const pending = [...turns.values()];
+        await Promise.all(pending.map((t) => t.stop().catch(() => {})));
+        await Promise.all([...live.keys()].map(async (k) => {
+          const l = live.get(k);
+          live.delete(k);
+          if (l?.idle) clearTimeout(l.idle);
+          await l?.session.close().catch(() => {});
+        }));
+        await Promise.all([...pending.map((t) => t.done), ...reserved.values(), ...[...opening.values()].map((o) => o.settled)]);
+      })()]);
+    } finally {
+      clearTimeout(timer);
+      stopping = false;
+    }
   }
 }

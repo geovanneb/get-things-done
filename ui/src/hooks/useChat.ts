@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiDelete, apiGet, apiPatch, apiPost } from '../utils/api';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { apiFor, type WorkspaceApi } from '../utils/api';
+import { tr } from '../i18n/current';
 import { useAppState } from '../store';
 import {
-  applyStreamEvent, defaultProvider,
+  applyStreamEvent, chatError, checkEnded, defaultProvider, newerOf,
   type ChatProviderId, type ChatStreamEvent, type Conversation, type ConversationSummary, type ProviderStatus, type UsageWindow,
 } from '../utils/chat';
 
@@ -37,15 +38,35 @@ function saveChoice(choice: ChatChoice): void {
   try { localStorage.setItem(CHOICE_KEY, JSON.stringify(choice)); } catch { /* a convenience only */ }
 }
 
+/** Requests of the chat panel: a refusal because another workspace is open is said in the chat's own words. */
+function chatApi(api: WorkspaceApi): WorkspaceApi {
+  const said = <T,>(request: Promise<T>): Promise<T> => request.catch((err: unknown) => { throw chatError(err, () => tr('chat.otherWorkspace')); });
+  return {
+    ...api,
+    get: (path) => said(api.get(path)),
+    post: (path, body) => said(api.post(path, body)),
+    put: (path, body) => said(api.put(path, body)),
+    patch: (path, body) => said(api.patch(path, body)),
+    del: (path) => said(api.del(path)),
+  };
+}
+
 /**
  * The workspace chat's state: the tools and their readiness, the chats of the open workspace, the chat shown and
  * its live stream. Only the chat shown is followed; the others are read again when opened.
+ *
+ * Every request and the stream say which workspace the panel shows, so the server refuses them when another one is
+ * open (another tab switched it). An answer that arrives after the panel moved on (another workspace, another chat)
+ * is dropped.
  */
 export function useChat(active: boolean) {
   const { workspace } = useAppState();
   const workspacePath = workspace?.path ?? null;
+  const api = useMemo(() => chatApi(apiFor(workspacePath ?? undefined)), [workspacePath]);
   const [providers, setProviders] = useState<ProviderStatus[] | null>(null);
-  const [checking, setChecking] = useState(false);
+  /** The workspace whose tools are being checked: a check started for another one never counts for this one. */
+  const [checkingFor, setCheckingFor] = useState<string | null>(null);
+  const checking = checkingFor !== null && checkingFor === workspacePath;
   const [providersError, setProvidersError] = useState(false);
   const [list, setList] = useState<ConversationSummary[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -55,36 +76,55 @@ export function useChat(active: boolean) {
   const [sending, setSending] = useState(false);
   const [answered, setAnswered] = useState<{ id: string; ok: boolean } | null>(null);
   const current = useRef<Conversation | null>(null);
+  /** The workspace and the chat selection the panel shows now; a response for an earlier one is dropped. */
+  const scope = useRef({ workspace: workspacePath, selection: 0 });
+  const still = useCallback((ws: string | null, selection?: number) =>
+    scope.current.workspace === ws && (selection === undefined || scope.current.selection === selection), []);
+
+  // Another workspace: its own chats, and the tools checked again for it. Reset while rendering, so nothing of the
+  // previous workspace is shown, followed or remembered under the new one, not even for one render.
+  const [shownFor, setShownFor] = useState(workspacePath);
+  if (shownFor !== workspacePath) {
+    setShownFor(workspacePath);
+    setConversation(null);
+    setList([]);
+    setProviders(null);
+    setProvidersError(false);
+    setLimits({});
+    setLoadError(false);
+  }
+  useLayoutEffect(() => {
+    scope.current = { workspace: workspacePath, selection: scope.current.selection + 1 };
+    current.current = null;
+  }, [workspacePath]);
 
   const refreshProviders = useCallback(async (fresh = false) => {
-    setChecking(true);
+    const ws = api.workspace ?? null;
+    setCheckingFor(ws);
     try {
-      const { providers: next } = await apiGet<{ providers: ProviderStatus[] }>(`/api/chat/providers${fresh ? '?fresh=1' : ''}`);
+      const { providers: next } = await api.get<{ providers: ProviderStatus[] }>(`/api/chat/providers${fresh ? '?fresh=1' : ''}`);
+      if (!still(ws)) return;
       setProviders(next);
       setProvidersError(false);
       setLimits((current) => ({ ...current, ...Object.fromEntries(next.filter((p) => p.limits).map((p) => [p.id, p.limits!])) }));
     } catch {
-      setProvidersError(true);
+      if (still(ws)) setProvidersError(true);
     } finally {
-      setChecking(false);
+      setCheckingFor((c) => checkEnded(c, ws));
     }
-  }, []);
+  }, [api, still]);
 
   const refreshList = useCallback(async () => {
+    const ws = api.workspace ?? null;
     try {
-      setList((await apiGet<{ conversations: ConversationSummary[] }>('/api/chat/conversations')).conversations);
+      const { conversations } = await api.get<{ conversations: ConversationSummary[] }>('/api/chat/conversations');
+      if (!still(ws)) return;
+      setList(conversations);
       setLoadError(false);
     } catch {
-      setLoadError(true);
+      if (still(ws)) setLoadError(true);
     }
-  }, []);
-
-  // Another workspace: its own chats, and the tools checked again for it.
-  useEffect(() => {
-    setConversation(null);
-    setList([]);
-    setProviders(null);
-  }, [workspacePath]);
+  }, [api, still]);
 
   useEffect(() => {
     if (!active || !workspacePath) return;
@@ -92,10 +132,12 @@ export function useChat(active: boolean) {
     void refreshList();
     const shown = readShown(workspacePath);
     if (shown && !current.current) {
-      apiGet<Conversation>(`/api/chat/conversations/${shown}`)
-        .then((c) => { if (!current.current) { setConversation(c); setChoiceState({ provider: c.provider, model: c.model, effort: c.effort }); } })
+      const ws = workspacePath;
+      const selection = scope.current.selection;
+      api.get<Conversation>(`/api/chat/conversations/${shown}`)
+        .then((c) => { if (still(ws, selection) && !current.current) { setConversation(c); setChoiceState({ provider: c.provider, model: c.model, effort: c.effort }); } })
         // Deleted meanwhile, or another dashboard: a new chat it is.
-        .catch(() => saveShown(workspacePath, null));
+        .catch(() => { if (still(ws)) saveShown(ws, null); });
     }
     // Only when the panel opens or the workspace changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -123,13 +165,13 @@ export function useChat(active: boolean) {
     const resync = () => {
       if (resyncing) return;
       resyncing = true;
-      apiGet<Conversation>(`/api/chat/conversations/${conversationId}`)
-        .then((whole) => { if (!stopped) setConversation((c) => (c?.id === conversationId ? whole : c)); })
+      api.get<Conversation>(`/api/chat/conversations/${conversationId}`)
+        .then((whole) => { if (!stopped) setConversation((c) => (c?.id === conversationId ? newerOf(c, whole) : c)); })
         .catch(() => undefined)
         .finally(() => { resyncing = false; });
     };
     const connect = () => {
-      source = new EventSource(`/api/chat/conversations/${conversationId}/stream`);
+      source = new EventSource(api.link(`/api/chat/conversations/${conversationId}/stream`));
       source.onmessage = (message) => {
         let event: ChatStreamEvent;
         try { event = JSON.parse(message.data as string) as ChatStreamEvent; } catch { return; }
@@ -159,28 +201,35 @@ export function useChat(active: boolean) {
       if (retry) clearTimeout(retry);
       source?.close();
     };
-  }, [active, conversationId, refreshList]);
+  }, [active, conversationId, refreshList, api]);
 
   const setChoice = useCallback(async (next: ChatChoice) => {
     setChoiceState(next);
     saveChoice(next);
     if (conversation && next.provider) {
-      setConversation(await apiPatch<Conversation>(`/api/chat/conversations/${conversation.id}`, next));
+      const ws = api.workspace ?? null;
+      const selection = scope.current.selection;
+      const changed = await api.patch<Conversation>(`/api/chat/conversations/${conversation.id}`, next);
+      if (still(ws, selection)) setConversation(changed);
     }
-  }, [conversation]);
+  }, [conversation, api, still]);
 
   const open = useCallback(async (id: string) => {
+    const ws = api.workspace ?? null;
+    const selection = ++scope.current.selection;
     try {
-      const next = await apiGet<Conversation>(`/api/chat/conversations/${id}`);
+      const next = await api.get<Conversation>(`/api/chat/conversations/${id}`);
+      if (!still(ws, selection)) return;
       setConversation(next);
       setChoiceState({ provider: next.provider, model: next.model, effort: next.effort });
       setLoadError(false);
     } catch {
-      setLoadError(true);
+      if (still(ws, selection)) setLoadError(true);
     }
-  }, []);
+  }, [api, still]);
 
   const startNew = useCallback(() => {
+    scope.current.selection++;
     setConversation(null);
     if (workspacePath) saveShown(workspacePath, null);
   }, [workspacePath]);
@@ -188,32 +237,49 @@ export function useChat(active: boolean) {
   /** Sends a message; a chat is created on its first message. Throws what the server said, for the page to show. */
   const send = useCallback(async (text: string, page: string | null) => {
     if (!choice.provider) return;
+    const ws = api.workspace ?? null;
+    const selection = scope.current.selection;
     setSending(true);
     try {
       let target = conversation;
-      if (!target) target = await apiPost<Conversation>('/api/chat/conversations', choice);
-      setConversation(target);
-      const sent = await apiPost<Conversation>(`/api/chat/conversations/${target.id}/messages`, { text, ...(page ? { page } : {}) });
-      // The stream may already be ahead of this answer: what it has is kept.
-      setConversation((c) => (c?.id === sent.id && c.messages.length > sent.messages.length ? c : sent));
+      if (!target) {
+        target = await api.post<Conversation>('/api/chat/conversations', choice);
+        // Another workspace meanwhile: the message is not sent to a chat the panel no longer shows.
+        if (!still(ws)) return;
+        if (still(ws, selection)) setConversation(target);
+      }
+      const sent = await api.post<Conversation>(`/api/chat/conversations/${target.id}/messages`, { text, ...(page ? { page } : {}) });
+      if (!still(ws)) return;
+      // The stream may already be ahead of this answer, even finished: what it has is kept.
+      if (still(ws, selection)) setConversation((c) => newerOf(c, sent));
       void refreshList();
     } finally {
       setSending(false);
     }
-  }, [choice, conversation, refreshList]);
+  }, [choice, conversation, refreshList, api, still]);
 
   const stop = useCallback(async () => {
     if (!conversation) return;
-    setConversation(await apiPost<Conversation>(`/api/chat/conversations/${conversation.id}/stop`));
-  }, [conversation]);
+    const ws = api.workspace ?? null;
+    const selection = scope.current.selection;
+    const stopped = await api.post<Conversation>(`/api/chat/conversations/${conversation.id}/stop`);
+    if (still(ws, selection)) setConversation(stopped);
+  }, [conversation, api, still]);
 
   const remove = useCallback(async (id: string) => {
-    await apiDelete(`/api/chat/conversations/${id}`);
-    if (conversation?.id === id) { setConversation(null); if (workspacePath) saveShown(workspacePath, null); }
+    const ws = api.workspace ?? null;
+    await api.del(`/api/chat/conversations/${id}`);
+    if (!still(ws)) return;
+    if (current.current?.id === id) {
+      scope.current.selection++;
+      setConversation(null);
+      if (ws) saveShown(ws, null);
+    }
     await refreshList();
-  }, [conversation, refreshList, workspacePath]);
+  }, [refreshList, api, still]);
 
   return {
+    workspace: workspacePath,
     providers, checking, providersError, refreshProviders,
     list, refreshList, loadError,
     conversation, open, startNew, send, stop, remove, sending,

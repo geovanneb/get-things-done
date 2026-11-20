@@ -48,6 +48,10 @@ const sent: { url: string; header: string | null }[] = [];
   (globalThis as { fetch: unknown }).fetch = async () => new Response(JSON.stringify({ error: 'Error', message: 'The task changed.' }), { status: 409, statusText: 'Conflict' });
   const failed = await apiFor().put('/api/tasks/T', {}).then(() => null, (err: Error & { status?: number }) => err);
   check('a failed request carries its status', failed?.status === 409 && failed.message === 'The task changed.', String(failed?.status));
+  (globalThis as { fetch: unknown }).fetch = async () => new Response(JSON.stringify({ error: 'Conflict', message: 'Elsewhere.', details: { code: 'other_workspace' } }), { status: 409, statusText: 'Conflict' });
+  const coded = await apiFor().get('/api/chat/conversations').then(() => null, (err: Error & { code?: string }) => err);
+  check('and the server\'s code, when it gives one', coded?.code === 'other_workspace' && coded.message === 'Elsewhere.', String(coded?.code));
+  check('no code, none made up', !('code' in (failed ?? {})));
 
   if (failures > 0) {
     console.error(`\n${failures} check(s) failed.`);

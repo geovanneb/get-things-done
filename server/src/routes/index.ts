@@ -45,7 +45,7 @@ export function registerRoutes(app: Express): void {
     let open: string | null;
     try { open = new WorkspaceService().getWorkspacePath(); } catch { open = null; }
     if (expected === null || expected !== open) {
-      res.status(409).json({ error: 'Conflict', message: 'This update is in another workspace. Switch to it, then open the update.' });
+      res.status(409).json({ error: 'Conflict', message: 'This update is in another workspace. Switch to it, then open the update.', details: { code: 'other_workspace' } });
       return;
     }
     next();

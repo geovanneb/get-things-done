@@ -1,9 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
+import { WorkspaceService } from '../services/workspace';
 import { ChatService, type ChatStreamEvent } from '../services/chat/chatService';
 
 const router = Router();
 const service = new ChatService();
+/** The open conversation streams, ended when the dashboard stops so they never hold its shutdown open. */
+const streams = new Set<Response>();
+
+export function endChatStreams(): void {
+  for (const res of streams) res.end();
+  streams.clear();
+}
 const body = (req: Request): Record<string, unknown> =>
   (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
 
@@ -49,8 +57,26 @@ router.post('/conversations/:id/stop', async (req: Request, res: Response) => {
  * whole conversation is sent again when the answer ends, so it always ends right.
  */
 router.get('/conversations/:id/stream', async (req: Request, res: Response) => {
+  // The workspace this stream is for, taken once: the conversation read and the events followed are both of it.
+  const workspace = new WorkspaceService().getWorkspacePath();
+  // ?workspace=…  the workspace the page shows (a stream sends no header): refused when another is open.
+  const expected = req.query['workspace'];
+  if (expected !== undefined && (typeof expected !== 'string' || expected !== workspace)) {
+    res.status(409).json({ error: 'Conflict', message: 'This chat is in another workspace. Switch to it, then open the chat again.', details: { code: 'other_workspace' } });
+    return;
+  }
   const id = param(req, 'id');
-  const conversation = await service.get(id);
+  // Known to the shutdown before the read, so a stream that starts while the dashboard stops is ended too.
+  streams.add(res);
+  let conversation;
+  try {
+    conversation = await service.get(id, workspace);
+  } catch (err) {
+    streams.delete(res);
+    throw err;
+  }
+  // Ended by the shutdown during the read: nothing more is started for it.
+  if (!streams.has(res) || res.writableEnded) return;
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -62,12 +88,15 @@ router.get('/conversations/:id/stream', async (req: Request, res: Response) => {
     if (event.type === 'deleted') res.end();
   };
   send({ type: 'conversation', conversation });
-  const unsubscribe = service.subscribe(id, send);
+  const unsubscribe = service.subscribe(id, send, workspace);
   const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 25_000);
-  req.on('close', () => {
+  const stop = () => {
     clearInterval(heartbeat);
     unsubscribe();
-  });
+    streams.delete(res);
+  };
+  req.on('close', stop);
+  res.on('finish', stop);
 });
 
 export default router;

@@ -124,9 +124,14 @@ dashboard never holds a password, token or API key. What each tool may do:
 A conversation is `.situation-board/chat/<id>.json` (git-ignored by the template and by a `.gitignore` inside the
 folder; the watcher skips it). It keeps the tool's own session id, so a conversation resumes after its process
 ends; when the tool lost that session or the user switched tools, the next message carries the earlier messages
-as bounded text and the chat says so. One turn per conversation, at most three tool processes, ten idle minutes,
-ten minutes per answer; Stop, a timeout and shutdown keep what was written. Answers stream on a per-conversation
-SSE stream (`/api/chat/conversations/:id/stream`), never on the shared `/api/events`. Errors are classified for
+as bounded text and the chat says so. One turn per conversation, at most three tool processes (a process still
+starting counts, and one that starts after its answer ended is closed), ten idle minutes, ten minutes per answer;
+Stop, a timeout and shutdown keep what was written. A send's setup, a change of tool and a delete hold the
+conversation's lock (`<id>.json.lock`, `utils/fileLock`) through the answer's last save, so two dashboards on one
+workspace never save the same conversation over each other. Answers stream on a per-conversation SSE stream
+(`/api/chat/conversations/:id/stream`), never on the shared `/api/events`; shutdown ends these streams too. The
+panel's requests carry the workspace it shows (`X-GTD-Workspace`, `?workspace=` for the stream) and it drops a
+response that arrives after it moved to another workspace or chat. Errors are classified for
 what the user can do (sign in again, wait for the plan reset, start a new chat, use another tool); plan usage and
 context use come from the tools' own reports. Tests: `server/tests/chat.test.ts` (fake CLIs for all three tools),
 `ui/src/utils/chat.test.ts`, and the chat block of the smoke test. Copilot's ACP adapter is tested against a fake

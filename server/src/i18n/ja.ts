@@ -158,6 +158,7 @@ export default {
   "chat.answerFailed": "回答が完了しませんでした。",
   "chat.loadFailed": "チャットを読み込めませんでした。ダッシュボードが起動しているか確認してから、もう一度お試しください。",
   "chat.sendFailed": "メッセージを送信できませんでした。もう一度お試しください。",
+  "chat.otherWorkspace": "このチャットは別のワークスペースのものです。そのワークスペースに戻るか、ここで新しいチャットを始めてください。",
   "chat.settings": "チャットの設定",
   "chat.backToChat": "チャットに戻る",
   "chat.you": "あなた",

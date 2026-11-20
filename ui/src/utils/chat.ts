@@ -81,6 +81,63 @@ export function applyStreamEvent(current: Conversation | null, event: ChatStream
   return { ...current, messages };
 }
 
+/**
+ * A failed chat request in the chat's own words: refused because the server has another workspace open (the shared
+ * text speaks of an update), it says so for the chat. Anything else is passed on as it came.
+ */
+export function chatError(err: unknown, otherWorkspace: () => string): unknown {
+  if (!(err instanceof Error) || (err as Error & { code?: string }).code !== 'other_workspace') return err;
+  return Object.assign(new Error(otherWorkspace()), { status: (err as Error & { status?: number }).status, code: 'other_workspace' });
+}
+
+/**
+ * The conversation to show once a request for it is answered: a send's HTTP 202, or the whole conversation read again.
+ * The stream can be ahead of that answer, even finished, with the same messages: what is shown is kept when it
+ * already has every message the answer has, taking from the answer only progress within a message the page missed.
+ */
+export function newerOf(current: Conversation | null, fetched: Conversation): Conversation {
+  if (current?.id !== fetched.id) return fetched;
+  const read = new Map(fetched.messages.map((m) => [m.id, m]));
+  const shown = new Set(current.messages.map((m) => m.id));
+  if (!fetched.messages.every((m) => shown.has(m.id))) return fetched;
+  let changed = false;
+  let ended = false;
+  const messages = current.messages.map((m) => {
+    const f = read.get(m.id);
+    const next = f ? furtherOf(m, f) : m;
+    if (next !== m) changed = true;
+    if (next === f && m.status === 'streaming' && f.status !== 'streaming') ended = true;
+    return next;
+  });
+  // An answer that ended in what was read: the conversation is no longer busy with it either, when it says so.
+  return changed ? { ...current, messages, ...(ended ? { busy: fetched.busy } : {}) } : current;
+}
+
+/**
+ * One message as shown and as read again: an ended answer wins (the shown one first, and the read one even with the
+ * same words), then the text that has the other in it. Otherwise the read text is a beginning the page missed (words that came before it showed the answer):
+ * it goes in front, without repeating where the two meet. Until the answer ends, then the whole conversation comes.
+ */
+function furtherOf(shown: ChatMessage, read: ChatMessage): ChatMessage {
+  if (shown.status !== 'streaming') return shown;
+  if (read.status !== 'streaming') return read;
+  if (shown.text === read.text) return shown;
+  if (shown.text.includes(read.text)) return shown;
+  const steps = (read.steps ?? 0) > (shown.steps ?? 0) ? { steps: read.steps, last_step: read.last_step } : {};
+  if (read.text.includes(shown.text)) return { ...shown, text: read.text, ...steps };
+  let overlap = Math.min(read.text.length, shown.text.length);
+  while (overlap > 0 && !read.text.endsWith(shown.text.slice(0, overlap))) overlap--;
+  return { ...shown, text: read.text + shown.text.slice(overlap), ...steps };
+}
+
+/**
+ * The workspace whose tools are being checked, once the check for `workspace` ended: a check of another workspace
+ * that is still going stays, so switching while one goes never leaves the new workspace unchecked.
+ */
+export function checkEnded(checkingFor: string | null, workspace: string | null): string | null {
+  return checkingFor === workspace ? null : checkingFor;
+}
+
 /** How full the conversation's context is, 0 to 100, or null when the tool has not said. */
 export function contextPercent(usage: Conversation['usage']): number | null {
   if (!usage || !usage.context_used || !usage.context_window) return null;

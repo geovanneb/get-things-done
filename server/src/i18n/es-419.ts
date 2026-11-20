@@ -160,6 +160,7 @@ export default {
   "chat.answerFailed": "La respuesta no terminó.",
   "chat.loadFailed": "No se pudo cargar la conversación. Comprueba que el panel esté en ejecución e inténtalo de nuevo.",
   "chat.sendFailed": "El mensaje no se envió. Inténtalo de nuevo.",
+  "chat.otherWorkspace": "Esta conversación pertenece a otro espacio de trabajo. Vuelve a ese espacio o empieza una conversación nueva aquí.",
   "chat.settings": "Ajustes de la conversación",
   "chat.backToChat": "Volver a la conversación",
   "chat.you": "Tú",

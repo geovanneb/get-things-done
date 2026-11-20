@@ -159,6 +159,7 @@ export const en = {
   "chat.answerFailed": "The answer did not finish.",
   "chat.loadFailed": "Could not load the chat. Check that the dashboard is running, then try again.",
   "chat.sendFailed": "The message was not sent. Try again.",
+  "chat.otherWorkspace": "This chat belongs to another workspace. Switch back to it, or start a new chat here.",
   "chat.settings": "Chat settings",
   "chat.backToChat": "Back to the chat",
   "chat.you": "You",
