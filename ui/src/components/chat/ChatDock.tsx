@@ -1,8 +1,7 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { opensDialog } from '../../utils/references';
 import { PageWorkspace } from '../../hooks/usePageApi';
-import { useAppState } from '../../store';
 import { apiFor } from '../../utils/api';
 import { canRename, conversationIdentity, referenceWorkspace, type Conversation } from '../../utils/chat';
 import { useLanguage } from '@/i18n/LanguageProvider';
@@ -12,6 +11,11 @@ import ChatConversation, { historyIcon } from './ChatConversation';
 import ChatTitle from './ChatTitle';
 import type { HandoffDraft } from './ChatHandoff';
 import { ChatHistory, ChatSettings } from './ChatSettings';
+import ImportUpdateModal from '../context-updates/ImportUpdateModal';
+import { useAppDispatch, useAppState } from '../../store';
+import type { ContextUpdate } from '../../types';
+import { importedUpdateLocation } from '../../utils/importPlan';
+import { keepDraft, type KeptDraft } from '../../utils/chatDraft';
 import '../../styles/chat.css';
 
 const OPEN_KEY = 'gtd.chat.open';
@@ -30,6 +34,12 @@ const chatIcon = (
 const backIcon = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
     <path d="M8.5 3 4.5 7l4 4" />
+  </svg>
+);
+const importIcon = (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 1.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5L8 1.5Z" />
+    <path d="M8 1.5V5h3.5M7 7v4M5 9h4" />
   </svg>
 );
 const settingsIcon = (
@@ -59,7 +69,10 @@ export default function ChatDock() {
   const titleId = useId();
   const panelId = useId();
   const { pathname } = useLocation();
-  const workspacePath = useAppState().workspace?.path;
+  const navigate = useNavigate();
+  const dispatch = useAppDispatch();
+  const { workspace } = useAppState();
+  const workspacePath = workspace?.path;
   // What an answer names is looked up only in the workspace its conversation belongs to. useChat shows a chat only
   // for the workspace it was loaded for (it drops late answers after a switch); on top of that, the server must give
   // back the very conversation on screen (same id, created at the same time, same first message) for the workspace
@@ -81,6 +94,12 @@ export default function ChatDock() {
   // Handoff drafts outlive the panel (closed, or showing Settings or History), so edits and removals are not lost.
   // Kept in memory only: a reload, or closing the window, drops them.
   const [handoffDrafts] = useState(() => new Map<string, HandoffDraft>());
+  // The existing importer, opened only by the user's click: the chat's tool never starts it.
+  const [importOpen, setImportOpen] = useState(false);
+  // The composer's words, and those kept when the panel closes by itself after an update was made (on a phone).
+  const draftNow = useRef<KeptDraft | null>(null);
+  const [keptDraft, setKeptDraft] = useState<KeptDraft | null>(null);
+  const draftRestored = useCallback(() => setKeptDraft(null), []);
 
   useEffect(() => {
     try { sessionStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch { /* a convenience only */ }
@@ -144,6 +163,24 @@ export default function ChatDock() {
     (to ?? panel)?.focus();
   }, [parked, panelId]);
 
+  /** As the Context page does: the new update's page, where analysis, review and apply happen, and a retry of any file. */
+  const imported = (forWorkspace: string) => (update: ContextUpdate, uploadErrors: string[]) => {
+    setImportOpen(false);
+    dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
+    if (uploadErrors.length) {
+      dispatch({ type: 'ADD_NOTIFICATION', payload: { type: 'warning', message: t('context.savedButSomeFilesDid', { join: uploadErrors.join('; ') }) } });
+    }
+    // Pinned to the workspace it was made in: after a switch in another tab, the page and a retried upload are refused
+    // instead of reaching that workspace's update with the same id.
+    const { to, state } = importedUpdateLocation(update.id, forWorkspace);
+    navigate(to, { state });
+    // On a phone the panel covers the page: step aside so the update shows. The chat and an unsent message are kept.
+    if (typeof window !== 'undefined' && window.matchMedia?.(PHONE).matches) {
+      setKeptDraft(keepDraft(draftNow.current));
+      close();
+    }
+  };
+
   const busy = Boolean(chat.conversation?.busy);
   return (
     <>
@@ -174,6 +211,7 @@ export default function ChatDock() {
               {view === 'chat' ? (
                 <>
                   <IconButton label={t('chat.history')} icon={historyIcon} onClick={() => setView('history')} />
+                  <IconButton label={t('chat.createUpdate')} icon={importIcon} onClick={() => setImportOpen(true)} disabled={!workspace} />
                   <IconButton label={t('chat.settings')} icon={settingsIcon} onClick={() => setView('settings')} />
                   <IconButton label={t('chat.newChat')} icon={icons.plus} onClick={() => { chat.startNew(); composer.current?.focus(); }} disabled={!chat.conversation} />
                 </>
@@ -188,7 +226,8 @@ export default function ChatDock() {
           {view === 'chat' && (
             // What its answers name is looked up in the conversation's own workspace and nowhere else.
             <PageWorkspace.Provider value={lookupsIn}>
-              <ChatConversation key={chat.workspace ?? ''} chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} onHistory={() => setView('history')} onReferenceOpened={stepAside} references={Boolean(lookupsIn)} handoffDrafts={handoffDrafts} />
+              <ChatConversation key={chat.workspace ?? ''} chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} onHistory={() => setView('history')} onReferenceOpened={stepAside} references={Boolean(lookupsIn)} handoffDrafts={handoffDrafts}
+                draftRef={draftNow} keptDraft={keptDraft} onDraftRestored={draftRestored} />
             </PageWorkspace.Provider>
           )}
         </section>
@@ -203,6 +242,16 @@ export default function ChatDock() {
         aria-controls={open ? panelId : undefined}
         onClick={() => { if (parked) setParked(false); else if (open) close(); else setOpen(true); }}
       />
+      {/* Outside the panel, so its Escape and focus belong to the dialog, not the chat. Mounted only while open, so
+          Cancel leaves nothing behind for the next time. */}
+      {workspace && importOpen && (
+        <ImportUpdateModal
+          isOpen
+          onClose={() => setImportOpen(false)}
+          onCreated={imported(workspace.path)}
+          workspace={{ path: workspace.path, name: workspace.name }}
+        />
+      )}
     </>
   );
 }

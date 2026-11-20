@@ -987,3 +987,22 @@ test('an update can keep an existing shareable label without loosening it', asyn
   await service.saveDecisions(id, { 'P-01': { decision: 'accepted' } });
   await service.approve(id);
 });
+
+test('the importer shows the title the service saves (ui/src/utils/importPlan.ts mirrors create)', async (t) => {
+  await workspace(t);
+  const { savedTitle, importTitle } = await import('../../ui/src/utils/importPlan');
+  const service = new ContextUpdateService();
+  const now = new Date();
+  const cases: { title: string; files: { name: string }[]; date: string; text?: string }[] = [
+    { title: 'x'.repeat(201), files: [], date: '2026-11-19', text: 'notes' },
+    { title: `  ${'z'.repeat(199)} tail  `, files: [], date: '2026-11-19' },
+    { title: '', files: [{ name: `${'y'.repeat(250)}.pdf` }], date: '2026-11-19' },
+    { title: '   ', files: [], date: '2026-11-19', text: 'only pasted text' },
+    { title: '', files: [{ name: '.vtt' }], date: '' },
+    { title: 'Weekly sync', files: [], date: '' },
+  ];
+  for (const c of cases) {
+    const saved = await service.create({ title: importTitle(c.title, c.files), source_date: c.date, notes: '', text: c.text ?? '' });
+    assert.equal(saved.title, savedTitle(c.title, c.files, c.date, now), JSON.stringify(c).slice(0, 80));
+  }
+});

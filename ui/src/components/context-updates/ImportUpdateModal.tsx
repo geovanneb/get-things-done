@@ -3,7 +3,7 @@ import { useAssistant } from '@/hooks/useAssistant';
 import { tr } from '@/i18n/current';
 import { serverText } from '@/i18n/serverText';
 import { rich } from '@/i18n/rich';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
 import Input, { Textarea } from '@/components/common/Input';
@@ -13,6 +13,7 @@ import type { ContextUpdate, MeetingParticipant, QueuedMeeting } from '@/types';
 import { HelpBox, formatBytes, hardToRead } from './shared';
 import DictateButton from '@/components/common/DictateButton';
 import { withDictation } from '@/utils/dictation';
+import { importPlan, importTitle, type ImportPlan } from '@/utils/importPlan';
 
 const MAX_FILE = 50 * 1024 * 1024;
 /** A meeting recording, queued for transcription: up to 4 GB (decimal), as the server accepts. */
@@ -95,15 +96,45 @@ export function DropZone({ onFiles, compact = false }: { onFiles: (files: File[]
   );
 }
 
+/** Before Save: the workspace, the update and the files that will be written there. */
+export function ImportSummary({ workspace, plan }: { workspace: { path: string; name: string }; plan: ImportPlan }) {
+  const { t } = useLanguage();
+  const id = useId();
+  const items = [...plan.files, ...(plan.pastedText ? [t('importUpdateModal.summaryPastedText')] : [])];
+  const term: React.CSSProperties = { color: 'var(--color-text-muted)' };
+  return (
+    <section aria-labelledby={id} style={{ padding: '10px 14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: 'var(--text-sm)', lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+      <h3 id={id} style={{ margin: '0 0 6px', fontSize: 'var(--text-sm)', fontWeight: 600 }}>{t('importUpdateModal.whatWillBeSaved')}</h3>
+      <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '2px 12px' }}>
+        <dt style={term}>{t('importUpdateModal.summaryWorkspace')}</dt>
+        <dd style={{ margin: 0 }} title={workspace.path}>{workspace.name}</dd>
+        <dt style={term}>{t('importUpdateModal.summaryWhere')}</dt>
+        <dd style={{ margin: 0 }}>{t('importUpdateModal.summaryNewUpdateNamed', { title: plan.title })}</dd>
+        <dt style={term}>{t('importUpdateModal.summaryFiles')}</dt>
+        <dd style={{ margin: 0 }}>{items.length ? items.join(', ') : t('importUpdateModal.summaryNoFilesYet')}</dd>
+      </dl>
+      <p style={{ ...hintStyle, margin: '6px 0 0' }}>{t('importUpdateModal.summaryNothingRuns')}</p>
+    </section>
+  );
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onCreated: (update: ContextUpdate, uploadErrors: string[]) => void;
-  /** A meeting went into the digest queue instead of becoming an update now. */
-  onQueued: (meeting: QueuedMeeting) => void;
+  /**
+   * A meeting went into the digest queue instead of becoming an update now. Without it the importer only makes a
+   * context update: the choice of the meeting digest is not offered.
+   */
+  onQueued?: (meeting: QueuedMeeting) => void;
+  /**
+   * The workspace the update is for. Given, the importer shows what will be saved where before Save, and every request
+   * names this workspace, so the server refuses it when another one was opened meanwhile (another tab switched it).
+   */
+  workspace?: { path: string; name: string };
 }
 
-export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued }: Props) {
+export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued, workspace }: Props) {
   const { t } = useLanguage();
   const assistant = useAssistant();
   const [mode, setMode] = useState<'update' | 'meeting'>('update');
@@ -126,6 +157,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
   };
 
   const hasContent = files.length > 0 || text.trim().length > 0;
+  const plan = importPlan(title, files, text, sourceDate);
   const tooBig = files.filter((f) => f.size > limitFor(f, mode === 'meeting'));
   // A recording in a meeting for the digest is transcribed first, so the agent reads its transcript.
   const risky = files.filter((f) => hardToRead(f.name) && !(mode === 'meeting' && TRANSCRIBED.test(f.name)));
@@ -156,7 +188,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
         setSaving(null);
         return;
       }
-      onQueued(await apiPost<QueuedMeeting>(`/api/meeting-queue/${meeting.id}/queue`));
+      onQueued?.(await apiPost<QueuedMeeting>(`/api/meeting-queue/${meeting.id}/queue`));
     } catch (err) {
       if (meetingId) await fetch(`/api/meeting-queue/${meetingId}`, { method: 'DELETE' }).catch(() => {});
       setError(err instanceof Error ? err.message : t('importUpdateModal.couldNotQueueTheMeeting'));
@@ -172,13 +204,13 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
     setSaving(t('importUpdateModal.saving'));
     try {
       const update = await apiPost<ContextUpdate>('/api/context-updates', {
-        title: title.trim() || (files[0] ? files[0].name.replace(/\.[^.]+$/, '') : ''),
+        title: importTitle(title, files),
         source_date: sourceDate, notes, text,
-      });
+      }, workspace?.path);
       const errors: string[] = [];
       for (let i = 0; i < files.length; i++) {
         setSaving(t('newTaskModal.uploadingOf', { value: i + 1, length: files.length }));
-        const failed = await uploadMaterial(update.id, files[i]!);
+        const failed = await uploadMaterial(update.id, files[i]!, workspace?.path);
         if (failed) errors.push(failed);
       }
       onCreated(update, errors);
@@ -203,7 +235,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
           )}
         </HelpBox>
 
-        <div role="radiogroup" aria-label={t('importUpdateModal.whatToDoWithIt')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {onQueued && <div role="radiogroup" aria-label={t('importUpdateModal.whatToDoWithIt')} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {([
             ['update', t('importUpdateModal.importNow'), t('importUpdateModal.oneContextUpdateForThis')],
             ['meeting', t('importUpdateModal.addToTheMeetingDigest'), t('importUpdateModal.aMeetingForTheQueue')],
@@ -218,7 +250,7 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
               </span>
             </label>
           ))}
-        </div>
+        </div>}
 
         {error && <HelpBox tone="critical">{error}</HelpBox>}
 
@@ -280,6 +312,8 @@ export default function ImportUpdateModal({ isOpen, onClose, onCreated, onQueued
               footer={<DictateButton fieldName={t('importUpdateModal.notesForTheAgent2')} onText={(text) => setNotes((n) => withDictation(n, text))} />} />
           </div>
         )}
+
+        {workspace && mode === 'update' && <ImportSummary workspace={workspace} plan={plan} />}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, paddingTop: 4 }}>
           {saving && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)', marginRight: 'auto' }}>{saving}</span>}

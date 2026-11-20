@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { serverText } from '@/i18n/serverText';
 import Button from '../common/Button';
@@ -17,6 +17,7 @@ import {
   CONTEXT_WARN_PERCENT, composerKey, contextPercent, errorActions, pageContext, pastChats, safeMarkdown, tightestWindow, untilText,
   type ChatMessage, type ChatProviderId, type ProviderStatus, type RunStepLike,
 } from '../../utils/chat';
+import { draftKey as composerDraftKey, restoreDraft, type KeptDraft } from '../../utils/chatDraft';
 
 const INSTALL_URLS: Record<ChatProviderId, string> = {
   'claude-code': 'https://claude.com/product/claude-code',
@@ -39,7 +40,7 @@ const stopIcon = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1.5" /></svg>
 );
 
-export default function ChatConversation({ chat, composerRef, pathname, onSettings, onHistory, onReferenceOpened, references = true, handoffDrafts }: {
+export default function ChatConversation({ chat, composerRef, pathname, onSettings, onHistory, onReferenceOpened, references = true, handoffDrafts, draftRef, keptDraft, onDraftRestored }: {
   chat: ChatState;
   composerRef: RefObject<HTMLTextAreaElement>;
   pathname: string;
@@ -52,6 +53,11 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
   references?: boolean;
   /** Handoff drafts, kept by the dock so they outlive this view. */
   handoffDrafts: Map<string, HandoffDraft>;
+  /** Always holds the composer's words, so the dock can keep them when it closes the panel by itself. */
+  draftRef?: MutableRefObject<KeptDraft | null>;
+  /** Words kept from such a close: shown again in the same workspace and chat. */
+  keptDraft?: KeptDraft | null;
+  onDraftRestored?: () => void;
 }) {
   const { t, locale } = useLanguage();
   const notify = useNotify();
@@ -75,6 +81,21 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
   const earlier = messages.length ? [] : pastChats(chat.list, conversation?.id);
   const lastAnswer = [...messages].reverse().find((m) => m.role === 'assistant');
   const draftKey = handoffDraftKey(chat.workspace, conversation?.id, lastAnswer?.id);
+  const key = composerDraftKey(chat.workspace, conversation?.id);
+
+  useEffect(() => {
+    if (!draftRef) return;
+    draftRef.current = { key, text: draft };
+    return () => { draftRef.current = null; };
+  }, [draftRef, key, draft]);
+
+  // The chat may load after the panel opens again: the kept words come back once it is the same chat.
+  useEffect(() => {
+    const text = restoreDraft(keptDraft ?? null, key, draft);
+    if (text === null) return;
+    setDraft(text);
+    onDraftRestored?.();
+  }, [keptDraft, key, draft, onDraftRestored]);
 
   // New words keep the newest in view, unless the user scrolled up to read.
   useLayoutEffect(() => {
