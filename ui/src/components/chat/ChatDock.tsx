@@ -4,11 +4,12 @@ import { opensDialog } from '../../utils/references';
 import { PageWorkspace } from '../../hooks/usePageApi';
 import { useAppState } from '../../store';
 import { apiFor } from '../../utils/api';
-import { conversationIdentity, referenceWorkspace, type Conversation } from '../../utils/chat';
+import { canRename, conversationIdentity, referenceWorkspace, type Conversation } from '../../utils/chat';
 import { useLanguage } from '@/i18n/LanguageProvider';
 import IconButton, { icons } from '../common/IconButton';
 import { useChat } from '../../hooks/useChat';
-import ChatConversation from './ChatConversation';
+import ChatConversation, { historyIcon } from './ChatConversation';
+import ChatTitle from './ChatTitle';
 import { ChatHistory, ChatSettings } from './ChatSettings';
 import '../../styles/chat.css';
 
@@ -23,11 +24,6 @@ const chatIcon = (
     <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12Z" />
     {/* The bubble's circle is centred at (13, 12): the dots sit on that centre. */}
     <path d="M9.5 12h.01M13 12h.01M16.5 12h.01" strokeWidth="2.4" />
-  </svg>
-);
-const historyIcon = (
-  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
-    <path d="M2 3.5h10M2 7h10M2 10.5h6" />
   </svg>
 );
 const backIcon = (
@@ -163,18 +159,24 @@ export default function ChatDock() {
           }}
         >
           <div className="gtd-chat-header">
-            <h2 id={titleId} title={chat.conversation?.title}>
-              {view === 'history' ? t('chat.history') : view === 'settings' ? t('chat.settings') : chat.conversation?.title ?? t('chat.title')}
-            </h2>
-            {view === 'chat' ? (
-              <>
-                <IconButton label={t('chat.history')} icon={historyIcon} onClick={() => setView('history')} />
-                <IconButton label={t('chat.settings')} icon={settingsIcon} onClick={() => setView('settings')} />
-                <IconButton label={t('chat.newChat')} icon={icons.plus} onClick={() => { chat.startNew(); composer.current?.focus(); }} disabled={!chat.conversation} />
-              </>
-            ) : (
-              <IconButton label={t('chat.backToChat')} icon={backIcon} onClick={() => setView('chat')} />
-            )}
+            <ChatTitle
+              // A chat opened, deleted or started anew ends a rename that was going.
+              key={chat.conversation?.id ?? ''}
+              chat={chat}
+              titleId={titleId}
+              heading={view === 'history' ? t('chat.history') : view === 'settings' ? t('chat.settings') : chat.conversation?.title ?? t('chat.title')}
+              renamable={view === 'chat' && canRename(chat.conversation)}
+            >
+              {view === 'chat' ? (
+                <>
+                  <IconButton label={t('chat.history')} icon={historyIcon} onClick={() => setView('history')} />
+                  <IconButton label={t('chat.settings')} icon={settingsIcon} onClick={() => setView('settings')} />
+                  <IconButton label={t('chat.newChat')} icon={icons.plus} onClick={() => { chat.startNew(); composer.current?.focus(); }} disabled={!chat.conversation} />
+                </>
+              ) : (
+                <IconButton label={t('chat.backToChat')} icon={backIcon} onClick={() => setView('chat')} />
+              )}
+            </ChatTitle>
             <IconButton label={t('chat.close')} icon={icons.close} onClick={() => { setParked(false); close(); }} />
           </div>
           {view === 'history' && <ChatHistory chat={chat} onOpen={() => setView('chat')} />}
@@ -182,7 +184,7 @@ export default function ChatDock() {
           {view === 'chat' && (
             // What its answers name is looked up in the conversation's own workspace and nowhere else.
             <PageWorkspace.Provider value={lookupsIn}>
-              <ChatConversation key={chat.workspace ?? ''} chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} onReferenceOpened={stepAside} references={Boolean(lookupsIn)} />
+              <ChatConversation key={chat.workspace ?? ''} chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} onHistory={() => setView('history')} onReferenceOpened={stepAside} references={Boolean(lookupsIn)} />
             </PageWorkspace.Provider>
           )}
         </section>

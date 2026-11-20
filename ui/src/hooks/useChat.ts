@@ -214,6 +214,18 @@ export function useChat(active: boolean) {
     }
   }, [conversation, api, still]);
 
+  /** Renames the chat shown. Throws what the server said (busy, gone, another workspace), for the panel to show. */
+  const rename = useCallback(async (title: string) => {
+    if (!conversation) return;
+    const ws = api.workspace ?? null;
+    const selection = scope.current.selection;
+    const renamed = await api.patch<Conversation>(`/api/chat/conversations/${conversation.id}`, { title });
+    if (!still(ws)) return;
+    // The stream may already have brought newer messages: only the name is taken from this answer.
+    if (still(ws, selection)) setConversation((c) => (c?.id === renamed.id ? { ...c, title: renamed.title, updated_at: renamed.updated_at } : c));
+    void refreshList();
+  }, [conversation, api, still, refreshList]);
+
   const open = useCallback(async (id: string) => {
     const ws = api.workspace ?? null;
     const selection = ++scope.current.selection;
@@ -282,7 +294,7 @@ export function useChat(active: boolean) {
     workspace: workspacePath,
     providers, checking, providersError, refreshProviders,
     list, refreshList, loadError,
-    conversation, open, startNew, send, stop, remove, sending,
+    conversation, open, startNew, send, stop, remove, rename, sending,
     choice, setChoice, limits, answered,
   };
 }

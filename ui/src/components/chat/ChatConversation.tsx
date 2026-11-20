@@ -12,7 +12,7 @@ import { withDictation } from '../../utils/dictation';
 import { useNotify } from '../../hooks/useNotify';
 import type { ChatState } from '../../hooks/useChat';
 import {
-  CONTEXT_WARN_PERCENT, composerKey, contextPercent, errorActions, pageContext, safeMarkdown, tightestWindow, untilText,
+  CONTEXT_WARN_PERCENT, composerKey, contextPercent, errorActions, pageContext, pastChats, safeMarkdown, tightestWindow, untilText,
   type ChatMessage, type ChatProviderId, type ProviderStatus, type RunStepLike,
 } from '../../utils/chat';
 
@@ -28,15 +28,22 @@ const sendIcon = (
     <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
   </svg>
 );
+export const historyIcon = (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+    <path d="M2 3.5h10M2 7h10M2 10.5h6" />
+  </svg>
+);
 const stopIcon = (
   <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="1.5" /></svg>
 );
 
-export default function ChatConversation({ chat, composerRef, pathname, onSettings, onReferenceOpened, references = true }: {
+export default function ChatConversation({ chat, composerRef, pathname, onSettings, onHistory, onReferenceOpened, references = true }: {
   chat: ChatState;
   composerRef: RefObject<HTMLTextAreaElement>;
   pathname: string;
   onSettings: () => void;
+  /** Opens the list of this workspace's chats. */
+  onHistory: () => void;
   /** An item named in an answer was opened from its chip, at this address. */
   onReferenceOpened?: (route: string) => void;
   /** Whether what answers name may be looked up and linked (the conversation is known to be the open workspace's). */
@@ -58,6 +65,9 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
   const busy = Boolean(conversation?.busy);
   const page = pageContext(pathname);
   const messages = conversation?.messages ?? [];
+  // An empty chat says where the earlier ones are: the header's list icon is easy to miss. A chat opened with no
+  // messages (its first send failed) is empty too.
+  const earlier = messages.length ? [] : pastChats(chat.list, conversation?.id);
 
   // New words keep the newest in view, unless the user scrolled up to read.
   useLayoutEffect(() => {
@@ -127,6 +137,12 @@ export default function ChatConversation({ chat, composerRef, pathname, onSettin
                 <Button key={s} size="sm" onClick={() => void send(s)} disabled={!provider?.ready || chat.sending}>{s}</Button>
               ))}
             </div>
+            {earlier.length > 0 && (
+              <div className="gtd-chat-past">
+                <span>{t('chat.pastChatsHint')}</span>
+                <Button size="sm" variant="ghost" icon={historyIcon} onClick={onHistory}>{t('chat.pastChats', { count: earlier.length })}</Button>
+              </div>
+            )}
           </div>
         )}
         {messages.map((m) => (
