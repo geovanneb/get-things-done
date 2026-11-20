@@ -70,19 +70,19 @@ test('an unquoted due_date (a YAML date) reads as the day, passes validation and
   const file = created.path!;
   const due = async () => (await fsp.readFile(file, 'utf-8')).match(/^due_date: .*$/m)?.[0];
   const text = (await fsp.readFile(file, 'utf-8')).replace(/^(due_date|start_date): .*\n/gm, '');
-  await fsp.writeFile(file, text.replace(/^title: /m, 'due_date: 2026-11-20\nstart_date: 2026-11-10T09:00:00.000Z\ntitle: '));
+  await fsp.writeFile(file, text.replace(/^title: /m, 'due_date: 2099-11-20\nstart_date: 2026-11-10T09:00:00.000Z\ntitle: '));
 
   let task = await tasks.getTask(created.id);
-  assert.equal(task.due_date, '2026-11-20');
-  assert.equal((await tasks.listTasks()).find((x) => x.id === created.id)!.due_date, '2026-11-20');
+  assert.equal(task.due_date, '2099-11-20');
+  assert.equal((await tasks.listTasks()).find((x) => x.id === created.id)!.due_date, '2099-11-20');
   assert.doesNotThrow(() => new ValidationService().validateTask(task));
   assert.ok(!(await new ValidationService().validateWorkspace()).some((r) => r.path?.startsWith(`${created.id}: due_date`)));
 
   task = await tasks.updateTask(created.id, { priority: 'high', expected_updated_at: task.updated_at } as never);
-  assert.equal(task.due_date, '2026-11-20');
-  assert.match((await due())!, /^due_date: '?2026-11-20'?$/, 'still a day in task.md');
+  assert.equal(task.due_date, '2099-11-20');
+  assert.match((await due())!, /^due_date: '?2099-11-20'?$/, 'still a day in task.md');
 
   // A file an earlier save already rewrote as a timestamp reads as its day again.
-  await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace(/^due_date: .*$/m, 'due_date: 2026-11-20T00:00:00.000Z'));
-  assert.equal((await tasks.getTask(created.id)).due_date, '2026-11-20');
+  await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace(/^due_date: .*$/m, 'due_date: 2099-11-20T00:00:00.000Z'));
+  assert.equal((await tasks.getTask(created.id)).due_date, '2099-11-20');
 });
