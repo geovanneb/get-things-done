@@ -2,7 +2,7 @@ import { interfaceLanguage, setInterfaceLanguage } from '../services/interfaceLa
 import { Router, Request, Response } from 'express';
 import { cancelDesktopRestart, checkNow, dismiss, install, prepareDesktopRestart, setAutoCheck, updateHandoffFailed, updateStatus } from '../services/appUpdates';
 import { WorkspaceService } from '../services/workspace';
-import { acknowledgeInstructionUpdate, compareInstructionUpdate, listInstructionUpdates } from '../services/instructionUpdates';
+import { acknowledgeInstructionUpdate, compareInstructionUpdate, listInstructionUpdates, useAppVersion } from '../services/instructionUpdates';
 
 /** The workspace this request is about, or none yet (the update state itself is the user's, not a workspace's). */
 const workspace = (): string | null => { try { return new WorkspaceService().getWorkspacePath(); } catch { return null; } };
@@ -29,14 +29,19 @@ router.get('/instruction-updates', async (_req: Request, res: Response) => {
   res.json(await listInstructionUpdates(openWorkspace()));
 });
 
-// GET /api/app/instruction-updates/compare?path=  yours and the app's, as text
+// GET /api/app/instruction-updates/compare?path=  yours, the app's, and the version yours was based on, as text
 router.get('/instruction-updates/compare', async (req: Request, res: Response) => {
   res.json(await compareInstructionUpdate(openWorkspace(), req.query['path']));
 });
 
-// POST /api/app/instruction-updates/merged  { path, mine_sha256, app_sha256 }  "I merged it"
+// POST /api/app/instruction-updates/merged  { path, mine_sha256, app_sha256 }  "Keep my version"
 router.post('/instruction-updates/merged', async (req: Request, res: Response) => {
   res.json(await acknowledgeInstructionUpdate(openWorkspace(), req.body));
+});
+
+// POST /api/app/instruction-updates/use-app  { path, mine_sha256, app_sha256, state }  "Use the app's version"
+router.post('/instruction-updates/use-app', async (req: Request, res: Response) => {
+  res.json(await useAppVersion(openWorkspace(), req.body));
 });
 
 // POST /api/app/update/check  asks for the newest version now

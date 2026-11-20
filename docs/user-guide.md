@@ -1075,10 +1075,23 @@ still works, ranking is just simpler. The log line starting `[search]` confirms 
 
 **I edited `CLAUDE.md` and now there is a `CLAUDE.md.new` next to it.**
 Working as intended. A new version shipped, but your edits were kept. **Settings >
-Instruction updates** lists each such file: **Compare** shows yours against the app's,
-merge whatever you want into your own file, then choose **I merged it**. The app removes
-its `.new` and writes no new one until a later release changes that file again (deleting
-the `.new` by hand is not enough: the next start writes it again).
+Instruction updates** lists each such file. **Compare** shows **What the app changed**: the
+app version your file was based on against the new one, so you see only the release's own
+changes, however much you customised the file. **Your file and the app version** shows your
+whole file against the new one. A workspace set up by an older version of the app does not
+know which app version your file started from yet, so it shows only your file against the
+app version (resolving the file once fixes that for later releases). Then choose:
+
+- **Keep my version**: your file stays as it is (take what you want from the comparison
+  into it yourself first). The app removes its `.new` and writes no new one until a later
+  release changes that file again; that release then shows only its own changes.
+- **Use the app's version**: shows what your file would lose, then replaces it with the
+  app's version. Your file is moved to the workspace trash first
+  (`.situation-board/trash/`), so you can copy it back.
+
+Files that decide what agents may do, such as `.claude/settings.json`, offer only **Keep my
+version**: copy any rule you want into them yourself. Deleting the `.new` by hand is not
+enough: the next start writes it again.
 
 **I upgraded from the old `esb` command.**
 `gtd` is the command now. `esb` still works as an alias, and your old `~/.esb/config.json`

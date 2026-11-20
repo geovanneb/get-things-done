@@ -67,6 +67,12 @@ are not an OS sandbox against another process swapping directories during a requ
 Atomic replacement avoids partial files and temporary-file collisions, but concurrent
 read-modify-write operations can still lose updates. Keep workspace backups.
 
+**Settings > Instruction updates** writes only files the app itself ships to the open workspace, never a path taken
+from a request or the manifest alone, and never through a link. "Use the app's version" runs under the same lock as
+upgrades, is refused while an agent runs or when the file, its `.new` or the app version changed since the preview,
+and saves and checks a copy of the user's file in the workspace trash before replacing it whole. Files that allow or
+deny what agents may do (such as `.claude/settings.json`) are never replaced from the dashboard: the server refuses it.
+
 ## Remembered voices (biometric data)
 
 **Recognize known voices** (off by default, [docs/voiceprints.md](docs/voiceprints.md)) keeps a voiceprint of

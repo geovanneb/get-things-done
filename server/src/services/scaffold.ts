@@ -109,6 +109,13 @@ export interface ManifestEntry {
    * version, their file is not a conflict and no `.new` is written; a later version clears it and the `.new` comes back.
    */
   merged_sha256?: string;
+  /**
+   * The app version this file was based on: the one the user last had untouched (installed, updated, or equal to it)
+   * or resolved in Settings ("Keep my version", "Use the app's version"). Its exact bytes are kept under
+   * `.situation-board/app-files/<sha256>`, so the dashboard can show what a later release changed. A skipped release or
+   * an unresolved update keeps the old pointer. Absent: not known (an older app did not record it); never guessed.
+   */
+  base_sha256?: string;
 }
 
 export interface AppManifest {
@@ -120,6 +127,126 @@ export interface AppManifest {
 }
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/** Where the exact bytes the app shipped for a file are kept, named by their SHA-256. */
+export const APP_FILES_RELATIVE_PATH = path.join('.situation-board', 'app-files');
+
+/**
+ * The record of a "Use the app's version" in progress (see instructionReplace). While it names an app version, that
+ * version's kept text is never pruned: it is what finishing the replace needs.
+ */
+export const REPLACE_JOURNAL_RELATIVE_PATH = path.join('.situation-board', 'instruction-replace.json');
+
+/**
+ * The app version an unfinished replace names: null only when there is no journal (confirmed absent), or 'unknown' when
+ * something is there that cannot be read or understood (a link, a folder, an error, not a journal): pruning then waits.
+ */
+function journalPin(workspacePath: string): string | null | 'unknown' {
+  const file = path.join(workspacePath, REPLACE_JOURNAL_RELATIVE_PATH);
+  try {
+    const st = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (!st) return null;
+    if (!noLinkBelow(workspacePath, file) || !st.isFile()) return 'unknown';
+    const hash = (JSON.parse(fs.readFileSync(file, 'utf-8')) as { app_sha256?: unknown }).app_sha256;
+    return typeof hash === 'string' && SHA256_HEX.test(hash) ? hash : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** A copy being written to the app files folder: `.<sha256>.<pid>-<random>.tmp`. */
+const APP_FILE_TEMP = /^\.([0-9a-f]{64})\.(\d+)-[0-9a-f]{8}\.tmp$/;
+
+/** A folder below the workspace that is a real folder (no link), made when missing. False when it cannot be. */
+function plainFolder(workspacePath: string, relDir: string): boolean {
+  let current = path.resolve(workspacePath);
+  for (const part of relDir.split(path.sep)) {
+    current = path.join(current, part);
+    try {
+      const st = fs.lstatSync(current);
+      if (st.isSymbolicLink() || !st.isDirectory()) return false;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+      try { fs.mkdirSync(current); } catch { return false; }
+    }
+  }
+  return true;
+}
+
+/**
+ * Keeps the exact bytes of an app version under `.situation-board/app-files/<sha256>`, written whole (a reader sees
+ * the complete copy or none). An existing copy is kept when it still has exactly those bytes. Never through a link;
+ * true only when the copy is there and verified.
+ */
+export function storeAppFile(workspacePath: string, content: Buffer): boolean {
+  const hash = sha256(content);
+  try {
+    if (!plainFolder(workspacePath, APP_FILES_RELATIVE_PATH)) return false;
+    const dest = path.join(workspacePath, APP_FILES_RELATIVE_PATH, hash);
+    const existing = fs.lstatSync(dest, { throwIfNoEntry: false });
+    if (existing && !existing.isFile()) return false;
+    if (existing && sha256(fs.readFileSync(dest)) === hash) return true;
+    const temp = path.join(path.dirname(dest), `.${hash}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`);
+    try {
+      fs.writeFileSync(temp, content, { flag: 'wx', mode: 0o644 });
+      fs.renameSync(temp, dest);
+    } finally {
+      fs.rmSync(temp, { force: true });
+    }
+    return sha256(fs.readFileSync(dest)) === hash;
+  } catch {
+    return false;
+  }
+}
+
+/** The versions the app files folder must keep: every base a file points to, and every current app version. */
+export function appFilesInUse(files: ManifestEntry[]): Set<string> {
+  const keep = new Set<string>();
+  for (const f of files) {
+    if (SHA256_HEX.test(f.sha256)) keep.add(f.sha256);
+    if (typeof f.base_sha256 === 'string' && SHA256_HEX.test(f.base_sha256)) keep.add(f.base_sha256);
+  }
+  return keep;
+}
+
+/**
+ * Removes kept app versions nothing points to any more, so the folder holds at most a base and the current version per
+ * file. Only plain files named exactly like a kept version (or a copy left by a writer that is gone) are removed;
+ * anything else there is left alone. Call it after the manifest that points to the versions to keep is written, so an
+ * interruption leaves an extra copy, never a missing one. Never stops the caller.
+ */
+export function pruneAppFiles(workspacePath: string, keep: Set<string>): void {
+  try {
+    for (const part of ['.situation-board', APP_FILES_RELATIVE_PATH]) {
+      const st = fs.lstatSync(path.join(workspacePath, part), { throwIfNoEntry: false });
+      if (!st || st.isSymbolicLink() || !st.isDirectory()) return;
+    }
+    const dir = path.join(workspacePath, APP_FILES_RELATIVE_PATH);
+    const pinned = journalPin(workspacePath);
+    // What an unfinished replace needs cannot be told: nothing is removed until it can.
+    if (pinned === 'unknown') return;
+    if (pinned) keep = new Set([...keep, pinned]);
+    for (const name of fs.readdirSync(dir)) {
+      const temp = APP_FILE_TEMP.exec(name);
+      const stale = SHA256_HEX.test(name) ? !keep.has(name) : temp !== null && !processAlive(Number(temp[2]));
+      if (!stale) continue;
+      const file = path.join(dir, name);
+      try { if (fs.lstatSync(file).isFile()) fs.rmSync(file); } catch { /* left for the next time */ }
+    }
+  } catch {
+    // Pruning is housekeeping: the next upgrade tries again.
+  }
+}
+
+function processAlive(pid: number): boolean {
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 function sha256(buf: Buffer | string): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
@@ -135,9 +262,32 @@ export function appNewCopyHash(newPath: string): string | null {
   }
 }
 
-/** Removes the app's own `.new` when it still has exactly `expected`; anything else is left. Never stops the upgrade. */
-export function removeNewCopy(newPath: string, expected: string): boolean {
+/**
+ * Whether every folder from the workspace down to `target` (and `target` itself, when there) is a real entry, not a
+ * link, and `target` is below the workspace. What is removed or replaced in the workspace is never reached through one.
+ */
+export function noLinkBelow(workspacePath: string, target: string): boolean {
+  const base = path.resolve(workspacePath);
+  const full = path.resolve(target);
+  const rel = path.relative(base, full);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+  let current = base;
+  for (const part of rel.split(path.sep)) {
+    current = path.join(current, part);
+    const st = fs.lstatSync(current, { throwIfNoEntry: false });
+    if (!st) return current === full;
+    if (st.isSymbolicLink()) return false;
+  }
+  return true;
+}
+
+/**
+ * Removes the app's own `.new` when it still has exactly `expected`; anything else is left. With `workspacePath`, only
+ * when no folder on its way below the workspace is a link. Never stops the upgrade.
+ */
+export function removeNewCopy(newPath: string, expected: string, workspacePath?: string): boolean {
   try {
+    if (workspacePath !== undefined && !noLinkBelow(workspacePath, newPath)) return false;
     if (appNewCopyHash(newPath) !== expected) return false;
     fs.rmSync(newPath);
     return true;
@@ -444,7 +594,14 @@ export function writeManifest(workspacePath: string, files: ManifestEntry[]): vo
   const manifestPath = path.join(workspacePath, MANIFEST_RELATIVE_PATH);
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
   // Nothing changed: the file stays as it is, so an opening leaves a git workspace clean.
-  const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path));
+  // One key order, whoever built the entries, so the same record is the same text.
+  const sorted = [...files].sort((a, b) => a.path.localeCompare(b.path)).map((f): ManifestEntry => ({
+    path: f.path,
+    sha256: f.sha256,
+    ...(f.base_sha256 !== undefined ? { base_sha256: f.base_sha256 } : {}),
+    ...(f.new_sha256 !== undefined ? { new_sha256: f.new_sha256 } : {}),
+    ...(f.merged_sha256 !== undefined ? { merged_sha256: f.merged_sha256 } : {}),
+  }));
   const previous = readManifest(workspacePath);
   if (previous?.appVersion === getAppVersion() && previous.newCopiesTracked && JSON.stringify(previous.files) === JSON.stringify(sorted)) return;
 
@@ -475,15 +632,23 @@ export function scaffoldWorkspace(workspacePath: string, opts: ScaffoldOptions):
     const content = renderTemplate(srcPath, profile, transform);
 
     // Record provenance even when skipping, so upgrade can still reason about the file.
-    manifestEntries.push({ path: relPath, sha256: sha256(content) });
+    const entry: ManifestEntry = { path: relPath, sha256: sha256(content) };
+    manifestEntries.push(entry);
+    // Every version the app ships is kept, so a later release can be compared from it.
+    const stored = storeAppFile(workspacePath, content);
 
     if (fs.existsSync(destPath)) {
       skipped.push(relPath);
+      // A file that was there already is the user's: its base is known only when it is exactly this version.
+      try {
+        if (fs.lstatSync(destPath).isFile() && sha256(fs.readFileSync(destPath)) === entry.sha256 && stored) entry.base_sha256 = entry.sha256;
+      } catch { /* no base */ }
       continue;
     }
 
     fs.mkdirSync(path.dirname(destPath), { recursive: true });
     fs.writeFileSync(destPath, content);
+    if (stored) entry.base_sha256 = entry.sha256;
     created.push(relPath);
   }
 
@@ -492,6 +657,7 @@ export function scaffoldWorkspace(workspacePath: string, opts: ScaffoldOptions):
   writeUiPreferences(workspacePath);
 
   writeManifest(workspacePath, manifestEntries);
+  pruneAppFiles(workspacePath, appFilesInUse(manifestEntries));
 
   return { created, skipped };
 }
@@ -515,6 +681,9 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
   // What the user acknowledged merging, only from a manifest that records `.new` copies (an older one never wrote it).
   const mergedVersion = new Map((previous?.newCopiesTracked ? previous.files : []).flatMap((f) =>
     (typeof f.merged_sha256 === 'string' && SHA256_HEX.test(f.merged_sha256) ? [[f.path, f.merged_sha256] as const] : [])));
+  // The version each file was based on. Only a pointer is carried over; an older manifest has none and none is guessed.
+  const previousBase = new Map((previous?.files ?? []).flatMap((f) =>
+    (typeof f.base_sha256 === 'string' && SHA256_HEX.test(f.base_sha256) ? [[f.path, f.base_sha256] as const] : [])));
   const appNewCopy = new Map((previous?.files ?? []).flatMap((f) => {
     const hash = previous?.newCopiesTracked ? f.new_sha256 : f.sha256;
     return hash ? [[f.path, hash] as const] : [];
@@ -541,6 +710,18 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
 
     const entry: ManifestEntry = { path: relPath, sha256: nextHash };
     manifestEntries.push(entry);
+    // Until it is known that the user has this version (below), the file keeps the base it had: a skipped release or
+    // an unresolved update compares from the version they last had.
+    const keptBase = previousBase.get(relPath);
+    if (keptBase) entry.base_sha256 = keptBase;
+    // Every version the app ships is kept (best effort: a failure never stops the upgrade; that version then compares
+    // as unknown), whether or not the base moves to it: an unresolved update is compared from
+    // its base to exactly this text, and resolving it later makes this the base.
+    const stored = storeAppFile(workspacePath, nextContent);
+    const baseIsThisVersion = () => {
+      if (stored) entry.base_sha256 = nextHash;
+      else delete entry.base_sha256;
+    };
     // The app's own `.new` from before stays recorded while it is unchanged, whatever happens to the file this time:
     // a conflict that comes back in a later release still finds it.
     const newPath = `${destPath}.new`;
@@ -551,11 +732,12 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
     if (mergedVersion.get(relPath) === nextHash) entry.merged_sha256 = nextHash;
     // An "I merged it" interrupted before its `.new` was removed: the app's own unchanged copy of this exact version goes
     // now, whatever the file looks like since. Any other `.new` is the user's and stays.
-    if (entry.merged_sha256 && entry.new_sha256 === nextHash && existingNew === nextHash && removeNewCopy(newPath, nextHash)) delete entry.new_sha256;
+    if (entry.merged_sha256 && entry.new_sha256 === nextHash && existingNew === nextHash && removeNewCopy(newPath, nextHash, workspacePath)) delete entry.new_sha256;
 
     if (!fs.existsSync(destPath)) {
       fs.mkdirSync(path.dirname(destPath), { recursive: true });
       replaceFile(destPath, nextContent, null);
+      baseIsThisVersion();
       result.added.push(relPath);
       continue;
     }
@@ -563,6 +745,7 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
     const currentContent = fs.readFileSync(destPath);
     const currentHash = sha256(currentContent);
     if (currentHash === nextHash || isEquivalentJson(relPath, currentContent, nextContent)) {
+      baseIsThisVersion();
       result.unchanged.push(relPath);
       continue;
     }
@@ -570,10 +753,15 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
     const recordedHash = previousByPath.get(relPath);
     if (recordedHash && recordedHash === currentHash) {
       // Untouched since we wrote it, so replacing it loses nothing; unless it changes while this runs.
-      if (replaceFile(destPath, nextContent, currentHash)) result.updated.push(relPath);
-      else result.conflicted.push(relPath);
+      if (replaceFile(destPath, nextContent, currentHash)) {
+        baseIsThisVersion();
+        result.updated.push(relPath);
+      } else {
+        result.conflicted.push(relPath);
+      }
     } else if (entry.merged_sha256) {
       // The user merged this exact version into their own file: not a conflict, and no `.new` for it.
+      baseIsThisVersion();
       result.merged.push(relPath);
     } else {
       // Either user-edited, or predates the manifest. Never clobber it, nor a `.new` someone may be merging. A new one
@@ -611,6 +799,7 @@ export function upgradeWorkspace(workspacePath: string, opts: ScaffoldOptions): 
   }
 
   writeManifest(workspacePath, manifestEntries);
+  pruneAppFiles(workspacePath, appFilesInUse(manifestEntries));
 
   return result;
 }
@@ -655,6 +844,18 @@ export function appFileVersions(workspacePath: string, profile = readWorkspacePr
     versions.set(relPath, { content, sha256: sha256(content) });
   }
   return versions;
+}
+
+/**
+ * The app's current version of one file it ships to this workspace, rendered as `appFileVersions` renders it, without
+ * reading any other template. Undefined when the app does not ship that path here.
+ */
+export function appFileVersion(workspacePath: string, relPath: string, profile = readWorkspaceProfile(workspacePath)): { content: Buffer; sha256: string } | undefined {
+  // The last one wins, as in `appFileVersions`.
+  const found = collectAppFiles(detectAiTools(workspacePath)).filter(([, rel]) => rel === relPath).pop();
+  if (!found) return undefined;
+  const content = renderTemplate(found[0], profile, found[2]);
+  return { content, sha256: sha256(content) };
 }
 
 /** Whether two versions of an app file mean the same (equal bytes, or JSON that only differs in order). */
