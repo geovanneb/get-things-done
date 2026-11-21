@@ -10,6 +10,7 @@ import IconButton, { icons } from '../common/IconButton';
 import { useChat } from '../../hooks/useChat';
 import ChatConversation, { historyIcon } from './ChatConversation';
 import ChatTitle from './ChatTitle';
+import type { HandoffDraft } from './ChatHandoff';
 import { ChatHistory, ChatSettings } from './ChatSettings';
 import '../../styles/chat.css';
 
@@ -77,6 +78,9 @@ export default function ChatDock() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, chatWorkspace]);
   const lookupsIn = referenceWorkspace({ shown, chatWorkspace, openWorkspace: workspacePath ?? null, confirmed: owner });
+  // Handoff drafts outlive the panel (closed, or showing Settings or History), so edits and removals are not lost.
+  // Kept in memory only: a reload, or closing the window, drops them.
+  const [handoffDrafts] = useState(() => new Map<string, HandoffDraft>());
 
   useEffect(() => {
     try { sessionStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch { /* a convenience only */ }
@@ -184,7 +188,7 @@ export default function ChatDock() {
           {view === 'chat' && (
             // What its answers name is looked up in the conversation's own workspace and nowhere else.
             <PageWorkspace.Provider value={lookupsIn}>
-              <ChatConversation key={chat.workspace ?? ''} chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} onHistory={() => setView('history')} onReferenceOpened={stepAside} references={Boolean(lookupsIn)} />
+              <ChatConversation key={chat.workspace ?? ''} chat={chat} composerRef={composer} pathname={pathname} onSettings={() => setView('settings')} onHistory={() => setView('history')} onReferenceOpened={stepAside} references={Boolean(lookupsIn)} handoffDrafts={handoffDrafts} />
             </PageWorkspace.Provider>
           )}
         </section>

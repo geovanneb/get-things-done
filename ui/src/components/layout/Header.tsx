@@ -1,14 +1,11 @@
-import { assistantCommand } from '../../../../server/src/utils/assistantCommand';
 import { useLanguage } from '../../i18n/LanguageProvider';
 import type { PlainMessageKey, Translate } from '../../../../server/src/i18n/messages';
-import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../../store';
 import Button from '../common/Button';
 import GitIndicator from '../common/GitIndicator';
-import { apiPost } from '../../utils/api';
 import { RecordButton } from '@/components/recording/RecordButton';
-import { useAssistant } from '../../hooks/useAssistant';
+import { useOpenAssistant } from '../../hooks/useOpenAssistant';
 
 const VIEW_LABELS: Record<string, PlainMessageKey> = {
   '/situation': 'situation',
@@ -42,46 +39,14 @@ function getBreadcrumb(pathname: string, t: Translate): { label: string; sub?: s
 
 export default function Header() {
   const location = useLocation();
-  const { isSearchOpen, workspace, validationCount } = useAppState();
+  const { isSearchOpen, validationCount } = useAppState();
   const dispatch = useAppDispatch();
   const { t } = useLanguage();
   const crumb = getBreadcrumb(location.pathname, t);
   const isMac = navigator.platform.toLowerCase().includes('mac');
 
-  const assistant = useAssistant();
-  const [openingAssistant, setOpeningAssistant] = useState(false);
-
-  const handleOpenAssistant = async () => {
-    setOpeningAssistant(true);
-    try {
-      const opened = await apiPost<{ opened: boolean; via: 'terminal' | 'editor'; command: string }>('/api/workspace/open-assistant', { tool: assistant.tool });
-      dispatch({
-        type: 'ADD_NOTIFICATION',
-        payload: { type: 'success', message: opened.via === 'editor' ? t('assistantOpenedInEditor') : t('assistantOpened', { label: assistant.label }) },
-      });
-    } catch {
-      // The launch failed: fall back to handing the user the command.
-      const command = assistantCommand(workspace?.path ?? '.', assistant.tool === 'claude-code' ? 'claude' : assistant.tool, navigator.platform.toLowerCase().startsWith('win'));
-      let copied = false;
-      try {
-        await navigator.clipboard.writeText(command);
-        copied = true;
-      } catch {
-        // clipboard unavailable
-      }
-      dispatch({
-        type: 'ADD_NOTIFICATION',
-        payload: {
-          type: 'warning',
-          message: copied
-            ? t('terminalCopied', { command })
-            : t('terminalRun', { command }),
-        },
-      });
-    } finally {
-      setOpeningAssistant(false);
-    }
-  };
+  const assistant = useOpenAssistant();
+  const handleOpenAssistant = () => { void assistant.open(); };
 
   const handleNewTask = () => {
     dispatch({ type: 'OPEN_NEW_TASK_MODAL' });
@@ -211,7 +176,7 @@ export default function Header() {
           </button>
         )}
 
-        <Button variant="secondary" size="sm" onClick={handleOpenAssistant} loading={openingAssistant}
+        <Button variant="secondary" size="sm" onClick={handleOpenAssistant} loading={assistant.opening}
           aria-label={t('openAssistant', { label: assistant.label })} title={t('openAssistant', { label: assistant.label })}>
           <span className="app-header__compact-icon" aria-hidden="true">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none">

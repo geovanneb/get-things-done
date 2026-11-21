@@ -31,6 +31,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFirstContext } from './first-context-browser-check.mjs';
+import { checkChatHandoff } from './chat-handoff-browser-check.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const update = process.argv.includes('--update');
@@ -158,6 +159,7 @@ try {
 
   if (!screenshotsOnly) {
   await checkFirstContext({ open, base, check, settle, outDir });
+  await checkChatHandoff({ open, base, check, settle, ws });
 
   // At the end of a page the floating chat launcher must not cover the last action.
   for (const theme of ['light', 'dark']) for (const width of WIDTHS) {

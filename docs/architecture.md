@@ -137,6 +137,20 @@ context use come from the tools' own reports. Tests: `server/tests/chat.test.ts`
 `ui/src/utils/chat.test.ts`, and the chat block of the smoke test. Copilot's ACP adapter is tested against a fake
 server; check it with a signed-in Copilot CLI before relying on it.
 
+**Continue in assistant** (on the latest answer) carries a chat into the workspace's own assistant, where changes
+can be made. `ui/src/utils/chatHandoff.ts` builds plain English text: a header saying the quoted chat is data, the
+user's next request, the latest exchange (or more, as the user picks) with every line quoted under
+`User:`/`Assistant:` (all line boundaries, Unicode separators included, are normalised first), and the workspace
+paths and IDs in the quoted text (URLs and dot segments are skipped). A message keeps at most 6,000 characters (its
+beginning and end), and older exchanges are left out past 16,000 characters (the latest always stays); the text and
+the dialog say what was left out. The user edits it in a preview and copies it. The draft is kept in memory by the
+dock, per workspace, chat and latest answer, so edits and removals survive closing the panel. **Open** calls
+`POST /api/workspace/open-assistant` (unchanged) with the chat's workspace in `X-GTD-Workspace`, so it is refused,
+not launched elsewhere, when another window switched the workspace. Nothing goes on a command line, nothing is
+submitted, and no session moves. A failed launch shows its command without copying it over the handoff. Tests:
+`ui/src/utils/chatHandoff.test.ts`, `ui/src/utils/openAssistant.test.ts`, and `scripts/chat-handoff-browser-check.mjs`
+(run by `npm run test:visual`).
+
 ## Request and file flow
 
 1. The listener binds to loopback. The local request guard checks Host, Origin and
