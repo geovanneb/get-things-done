@@ -143,6 +143,48 @@ export interface DigestState {
 /** What the digest needs from the dashboard runner. */
 export type DigestRunner = Pick<AgentRunnerService, 'startAnalysis' | 'get'>;
 
+/** Automatic analysis may start anything now: on, and the job on (or the user's own "Make digest now"). */
+function autoAnalysisOn(settings: Pick<DigestSettings, 'enabled' | 'auto_analyze'>, manual: boolean): boolean {
+  return settings.auto_analyze && (settings.enabled || manual);
+}
+
+/**
+ * Whether the digest's automatic analysis starts `update` on a check: it is the digest, ready, has never had a run
+ * (`hadRun`: even a failed or removed one), and its last attempt, if any, only waited for another run. The scheduler and
+ * the updates list (what waits on the agent) both use this, so they cannot disagree.
+ */
+export function autoAnalysisDue(
+  settings: Pick<DigestSettings, 'enabled' | 'auto_analyze'>, analysis: DigestState['analysis'],
+  update: { id: string; status: string; origin: string | null; kind: string | null }, hadRun: boolean, manual = false,
+): boolean {
+  if (!autoAnalysisOn(settings, manual)) return false;
+  if (update.origin !== DIGEST_ORIGIN || update.kind !== DIGEST_KIND || update.status !== 'ready') return false;
+  const before = analysis?.update_id === update.id ? analysis : null;
+  if (before && before.status !== 'waiting') return false;
+  return !hadRun;
+}
+
+/**
+ * The updates list with `waits_on_agent: true` on each `ready` update that is not the user's move: its analysis is
+ * queued or running in this dashboard (or a saved run's process is alive), or the meeting digest is waiting to start
+ * it by itself on its next check (`autoAnalysisDue`, with a `waiting` note). Only `ready` updates are looked up.
+ * A queued run lives in the dashboard that queued it: another dashboard on the same workspace does not see it.
+ */
+export async function withWaitsOnAgent<T extends { id: string; status: string; origin: string | null; kind: string | null }>(
+  updates: T[], runner: DigestRunner = new AgentRunnerService(), digest = new MeetingDigestService(runner),
+): Promise<(T & { waits_on_agent?: true })[]> {
+  if (!updates.some((u) => u.status === 'ready')) return updates;
+  const settings = await digest.readSettings().catch(() => null);
+  const { analysis } = await digest.readState();
+  return Promise.all(updates.map(async (u) => {
+    if (u.status !== 'ready') return u;
+    const run = await runner.get(u.id).catch(() => null);
+    const live = run?.status === 'queued' || run?.status === 'running';
+    const auto = Boolean(settings) && analysis?.update_id === u.id && analysis.status === 'waiting' && autoAnalysisDue(settings!, analysis, u, run !== null);
+    return live || auto ? { ...u, waits_on_agent: true as const } : u;
+  }));
+}
+
 export interface QueuedFile {
   name: string;
   size: number;
@@ -1249,15 +1291,14 @@ export class MeetingDigestService {
    */
   private async analyzeIfWanted(now: Date, manual: boolean): Promise<DigestRunResult | null> {
     const settings = await this.readSettings().catch(() => null);
-    if (!settings?.auto_analyze || (!settings.enabled && !manual)) return null;
+    if (!settings || !autoAnalysisOn(settings, manual)) return null;
     if (await this.readBatch().catch(() => true)) return null; // a digest is still being handed over, or the batch is damaged
     const updates = await contextUpdateService.list().catch(() => []);
     const open = updates.find((u) => u.origin === DIGEST_ORIGIN && u.kind === DIGEST_KIND && u.status !== 'done');
     if (!open || open.status !== 'ready') return null;
     const state = await this.readState();
     const before = state.analysis?.update_id === open.id ? state.analysis : null;
-    if (before && before.status !== 'waiting') return null;
-    if (await this.runner.get(open.id)) return null;
+    if (!autoAnalysisDue(settings, state.analysis, open, (await this.runner.get(open.id)) !== null, manual)) return null;
     let analysis: NonNullable<DigestState['analysis']>;
     try {
       await this.runner.startAnalysis(open.id, { queue: false });

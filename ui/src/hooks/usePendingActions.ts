@@ -3,7 +3,7 @@ import { useLanguage } from '@/i18n/LanguageProvider';
 import { useAppState, useDataVersion } from '../store';
 import { useApi } from './useApi';
 import type { ContextUpdate, MeetingDigest, Routine, SystemCleanup, Task } from '../types';
-import { waitingCounts, waitingLabel } from '../utils/updateTypes';
+import { waitingLabel, waitingOnUser } from '../utils/updateTypes';
 import { meetingCounts } from '../utils/meetingHistory';
 import { RECORDING_REFRESH_MS, hasOpenRecording, recheckIn, recordingElsewhere } from '../utils/meetingQueue';
 import { useRecorder } from '../components/recording/RecordingProvider';
@@ -33,23 +33,26 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * Everything that waits on the user, one entry per area with a non-zero count. Shared by the nav
  * dots and the "Waiting on you" panel on Situation, so the two always agree. Meetings has at most one entry: the
  * meetings that need you, or else a quiet `activity` marker for the meetings in progress.
- * Context counts only the updates ready for you (review or apply), as the "Ready for you" group of the updates list, so
- * its dot goes up when a run finishes; material waiting for an analysis shows on Import & review instead.
+ * Context counts the updates ready for you (review or apply), so its dot goes up when a run finishes, and the material
+ * waiting for an analysis that is not the agent's move (the server's `waits_on_agent`: a queued or running analysis,
+ * or one the meeting digest will start by itself). The list is read again when a run is queued, starts or ends
+ * (`run-change`) and when the digest's settings or state change, so the dot follows both.
  */
 export function usePendingActions(): PendingAction[] {
   const { t } = useLanguage();
   const { validationCount } = useAppState();
   const recorder = useRecorder();
   const { data: tasks } = useApi<Task[]>('/api/tasks', [useDataVersion('tasks')]);
-  const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [useDataVersion('context-updates')]);
   const routinesVersion = useDataVersion('routines');
+  // Read again when the digest's settings or state change too: they decide `waits_on_agent`.
+  const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [useDataVersion('context-updates'), routinesVersion]);
   const { data: routines } = useApi<Routine[]>('/api/routines', [routinesVersion]);
   const { data: cleanup, error: cleanupError } = useApi<SystemCleanup>('/api/routines/system-cleanup', [routinesVersion]);
   // The queue lives with the context updates, and model downloads are announced as transcription: as on the Meetings page.
   const { data: digest, error: digestError, refetch: refetchDigest } = useApi<MeetingDigest>('/api/routines/meeting-digest', [routinesVersion, useDataVersion('context-updates'), useDataVersion('transcription')]);
 
   const toReview = (tasks ?? []).filter((t) => t.status === 'in_review').length;
-  const waiting = waitingCounts(updates ?? []);
+  const waiting = waitingOnUser(updates ?? []);
   const routineProblems = (routines ?? []).filter((r) => r.problem || r.state?.last_status === 'error').length
     + (cleanupError || cleanup?.state.last_status === 'error' ? 1 : 0)
     + (digestError || digest?.state.last_status === 'error' ? 1 : 0);
@@ -82,7 +85,7 @@ export function usePendingActions(): PendingAction[] {
 
   const all: PendingAction[] = [
     { navPath: '/board', to: '/board', count: toReview, tone: 'attention', label: t('usePendingActions.waitingForYourReview', { plural: t('common.taskCount', { count: toReview }) }) },
-    { navPath: '/context', to: '/context/updates', count: waiting.ready, tone: 'attention', label: waitingLabel(waiting) },
+    { navPath: '/context', to: '/context/updates', count: waiting.ready + waiting.toAnalyze, tone: 'attention', label: waitingLabel(waiting) },
     meetingAction,
     { navPath: '/routines', to: '/routines', count: routineProblems, tone: 'problem', label: t('usePendingActions.attention', { plural: plural(routineProblems, t('usePendingActions.routineNeeds'), t('usePendingActions.routinesNeed')) }) },
     { navPath: '/settings', to: '/settings', count: validationCount.errors, tone: 'problem', label: t('usePendingActions.toFix', { plural: plural(validationCount.errors, t('usePendingActions.workspaceValidationError'), t('usePendingActions.workspaceValidationErrors')) }) },

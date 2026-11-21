@@ -63,11 +63,13 @@ export class WatcherService {
         if (IGNORED_PATH.test(filePath)) return true;
         if (skipDirs.some((dir) => filePath === dir || filePath.startsWith(dir + path.sep))) return true;
         if (stats?.isDirectory() && isLinkLoop(filePath)) return true;
-        // Only Markdown files matter, plus the routine, system cleanup and meeting digest run state: a failed run writes no task, and the
+        // Only Markdown files matter, plus the routine, system cleanup and meeting digest run state (and the digest's settings): a failed run writes no task, and the
         // dashboard must still show it; a meeting's meeting.json; and a run's record. Directories must pass so their contents are watched.
         const routineState = filePath.endsWith(path.join('.situation-board', 'routines', 'state.json'))
           || filePath.endsWith(path.join('.situation-board', 'routines', 'system-cleanup-state.json'))
-          || filePath.endsWith(path.join('.situation-board', 'routines', 'meeting-digest-state.json'));
+          || filePath.endsWith(path.join('.situation-board', 'routines', 'meeting-digest-state.json'))
+          // Its settings too: Analyze automatically switched off changes what waits on the user (the Context dot).
+          || filePath.endsWith(path.join('.situation-board', 'routines', 'meeting-digest.json'));
         return Boolean(stats?.isFile()) && !filePath.endsWith('.md') && !routineState && !MEETING_MANIFEST.test(filePath) && !RUN_RECORD.test(filePath);
       },
       persistent: true,

@@ -398,6 +398,8 @@ export interface ContextUpdate {
   transcript_version: { from: string; to: string; changes: TranscriptWordChange[] } | null;
   /** A `correction-follow-up` only: the correction it follows up. Written by the dashboard; null otherwise. */
   follows: string | null;
+  /** List only (GET /api/context-updates), on a `ready` update: a run covers it or the digest will start one (withWaitsOnAgent). */
+  waits_on_agent?: true;
   /** For a meeting digest: which queued meeting each file came from. Written by the dashboard only; kept after the materials go. */
   digest_meetings: DigestMeeting[];
   /** For a Kaizen: the root cause analysis. Null for every other kind. */

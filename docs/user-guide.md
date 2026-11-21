@@ -576,8 +576,12 @@ can be continued with **Continue applying**.
 Next to the title of the updates list, two counts say whose move it is: **ready for you**
 (amber: proposals to review, or an approved update to apply) and **to analyze** (material
 waiting for an analysis). The list groups them the same way. The dot on **Context** in the main
-navigation, and the count on **Import & review**, count only what is ready for you, so they go
-up exactly when an analysis finishes.
+navigation counts what is ready for you, so it goes up when an analysis finishes, and the
+material waiting for an analysis that nothing is running or about to start: for example a new
+meeting digest with **Analyze automatically** off, an update you imported, or an analysis that
+failed or was stopped. An update whose analysis is running or waiting in line is left out, as that
+is the agent's move, not yours, and so is a digest the meeting digest will analyze by itself once
+the current run ends (while the meeting digest is on).
 
 When an analysis or apply you started from the dashboard finishes while you are in another app
 or tab, the dashboard tells you: the desktop app with a system notification, a browser once you

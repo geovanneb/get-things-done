@@ -68,6 +68,10 @@ export function useLiveEvents(): void {
       try { window.dispatchEvent(new CustomEvent(RUN_FINISHED_EVENT, { detail: JSON.parse(e.data) as unknown })); } catch { /* malformed: nothing to say */ }
     };
 
+    // A run was queued, started, ended or left the line (a queued run is never saved, so no file says so): what waits on
+    // the user, such as the Context dot, is read again.
+    const handleRunChange = () => dispatch({ type: 'DATA_CHANGED', payload: 'context-updates' });
+
     // The browser retries a dropped stream by itself, but gives up for good on some errors (a failed restart,
     // for example). Then open a new one after a short wait.
     const handleError = () => {
@@ -92,6 +96,7 @@ export function useLiveEvents(): void {
       source.addEventListener('live-transcript', handleLive);
       source.addEventListener('voiceprints', handleVoiceprints);
       source.addEventListener('run-finished', handleRunFinished as EventListener);
+      source.addEventListener('run-change', handleRunChange);
       source.addEventListener('error', handleError);
     };
 
