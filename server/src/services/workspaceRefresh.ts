@@ -2,6 +2,7 @@ import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { refreshAppFiles, type UpgradeResult } from './scaffold';
 import { isAnalysisRunning } from './runState';
+import { recoverInstructionReplace } from './instructionReplace';
 import { tryLock, unlock } from '../utils/fileLock';
 
 export type RefreshOutcome =
@@ -27,6 +28,13 @@ export async function refreshWorkspace(workspacePath: string): Promise<RefreshOu
   if (typeof held === 'string') return { status: 'skipped', reason: 'another dashboard or gtd upgrade is bringing the files up to date' };
   try {
     if (await agentRunning(workspacePath)) return { status: 'skipped', reason: 'an agent is working in the workspace' };
+    // A "Use the app's version" interrupted after it replaced the file is acknowledged before the upgrade reads it.
+    // Never upgraded or pruned past an unfinished one: its base and its release text must stay as they are until it is.
+    try {
+      await recoverInstructionReplace(workspacePath);
+    } catch {
+      return { status: 'skipped', reason: 'an earlier "Use the app\'s version" could not be settled yet (.situation-board/instruction-replace.json); it is tried again next time' };
+    }
     const result = refreshAppFiles(workspacePath);
     return result ? { status: 'done', result } : { status: 'skipped', reason: 'a newer version of the app last upgraded this workspace' };
   } finally {

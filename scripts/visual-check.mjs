@@ -395,6 +395,89 @@ try {
     await context.close();
   }
 
+  // What the app changed, Keep my version and Use the app's version: a preview reached and confirmed by keyboard, and a
+  // permission file offering no replace.
+  for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
+    const { context, page } = await open(width, theme);
+    const rows = [
+      { path: '.claude/settings.json', state: 'ready', mine_sha256: 'mine', app_sha256: 'app', permission_file: true, installed: true, workspace: '/fictional/workspace' },
+      { path: 'AGENTS.md', state: 'ready', mine_sha256: 'mine', app_sha256: 'app', permission_file: false, installed: true, workspace: '/fictional/workspace' },
+    ];
+    let replaced = null;
+    await page.route('**/api/app/instruction-updates', route => route.fulfill({ json: replaced ? [rows[0]] : rows }));
+    await page.route('**/api/app/instruction-updates/compare?*', route => {
+      const file = new URL(route.request().url()).searchParams.get('path');
+      return route.fulfill({ json: { ...rows.find(row => row.path === file), mine: 'Fictional rule\nMy own rule', app: 'Fictional rule\nFictional new app rule', base: 'Fictional rule', base_sha256: 'base', release: 'changed' } });
+    });
+    let replacedFor = null;
+    await page.route('**/api/app/instruction-updates/use-app', route => { replaced = route.request().postDataJSON(); replacedFor = route.request().headers()['x-gtd-workspace']; return route.fulfill({ json: { updates: [rows[0]], backup: '.situation-board/trash/fictional-AGENTS.md' } }); });
+    await page.goto(base + '/settings');
+    await settle(page);
+    const panel = page.locator('#instruction-updates');
+    const agents = panel.getByRole('listitem').filter({ hasText: 'AGENTS.md' });
+    const settingsRow = panel.getByRole('listitem').filter({ hasText: '.claude/settings.json' });
+    check(`instructions: a permission file offers Keep my version, never Use the app's version @${width} ${theme}`,
+      await settingsRow.getByRole('button', { name: 'Keep my version' }).isVisible() && await settingsRow.getByRole('button', { name: "Use the app's version" }).count() === 0);
+    await agents.getByRole('button', { name: 'Compare', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await agents.getByRole('group', { name: 'What to compare' }).waitFor();
+    check(`instructions: the release view is shown first, with what the app changed @${width} ${theme}`,
+      await agents.getByRole('button', { name: 'What the app changed', pressed: true }).isVisible() && !(await agents.getByText('My own rule').isVisible()));
+    await agents.getByRole('button', { name: "Use the app's version" }).focus();
+    await page.keyboard.press('Enter');
+    const heading = agents.getByRole('heading', { name: "Replace AGENTS.md with the app's version?" });
+    await heading.waitFor();
+    check(`instructions: the replace preview takes focus and shows what the file loses @${width} ${theme}`,
+      await heading.evaluate(el => el === document.activeElement) && await agents.getByText('My own rule').isVisible());
+    const sent = page.waitForResponse('**/api/app/instruction-updates/use-app');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter');
+    await sent;
+    check(`instructions: Replace my file sends exactly the previewed versions @${width} ${theme}`,
+      replaced?.path === 'AGENTS.md' && replaced?.mine_sha256 === 'mine' && replaced?.app_sha256 === 'app' && replaced?.state === 'ready'
+      && replaced?.workspace === '/fictional/workspace' && replacedFor === encodeURIComponent('/fictional/workspace'));
+    // Keep my version straight from the list, without a comparison: sent for the workspace the list came from.
+    let kept = null;
+    let keptFor = null;
+    await page.route('**/api/app/instruction-updates/merged', route => { kept = route.request().postDataJSON(); keptFor = route.request().headers()['x-gtd-workspace']; return route.fulfill({ json: [] }); });
+    const keepSent = page.waitForResponse('**/api/app/instruction-updates/merged');
+    await settingsRow.getByRole('button', { name: 'Keep my version' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Keep my version' }).click();
+    await keepSent;
+    check(`instructions: Keep from the list is bound to the list's workspace @${width} ${theme}`,
+      kept?.path === '.claude/settings.json' && kept?.workspace === '/fictional/workspace' && keptFor === encodeURIComponent('/fictional/workspace'));
+    await context.close();
+  }
+
+  // A stale tab: the list was read in one workspace, another was opened elsewhere since. The comparison is asked for the
+  // list's workspace, and an answer for any other workspace is never adopted: no preview, nothing replaced.
+  for (const theme of ['light', 'dark']) for (const width of WIDTHS) {
+    const { context, page } = await open(width, theme);
+    const rows = [{ path: 'AGENTS.md', state: 'ready', mine_sha256: 'mine', app_sha256: 'app', permission_file: false, installed: true, workspace: '/fictional/alpha' }];
+    let askedFor = null;
+    let replaced = false;
+    await page.route('**/api/app/instruction-updates', route => route.fulfill({ json: rows }));
+    await page.route('**/api/app/instruction-updates/compare?*', route => {
+      askedFor = route.request().headers()['x-gtd-workspace'];
+      // A server that answered from the workspace open now.
+      return route.fulfill({ json: { ...rows[0], workspace: '/fictional/beta', mine: 'Fictional beta rule', app: 'Fictional app rule', base: null, base_sha256: null, release: 'unknown' } });
+    });
+    await page.route('**/api/app/instruction-updates/use-app', route => { replaced = true; return route.fulfill({ json: { updates: [], backup: '' } }); });
+    await page.goto(base + '/settings');
+    await settle(page);
+    const panel = page.locator('#instruction-updates');
+    const asked = page.waitForResponse('**/api/app/instruction-updates/compare?*');
+    // Refused, the list is read again: that request is the sign the answer was handled.
+    const reread = page.waitForRequest(request => request.url().endsWith('/api/app/instruction-updates'));
+    await panel.getByRole('button', { name: "Use the app's version" }).click();
+    await asked;
+    await reread;
+    check(`instructions: a stale tab asks for its own workspace and never previews another @${width} ${theme}`,
+      askedFor === encodeURIComponent('/fictional/alpha') && await panel.getByRole('heading', { name: /Replace AGENTS\.md/ }).count() === 0
+      && !(await panel.getByText('Fictional beta rule').isVisible()) && !replaced);
+    await context.close();
+  }
+
   // Clearing a stakeholder's email and notes in the edit form removes them, rather than keeping the old values;
   // fields left as loaded are not sent.
   {

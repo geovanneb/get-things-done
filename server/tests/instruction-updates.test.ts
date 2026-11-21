@@ -39,8 +39,8 @@ test('a changed app file is listed, compared, and "I merged it" stops the .new u
   await assert.rejects(compareInstructionUpdate(dir, '../outside.md'), status(404), 'only listed files');
 
   // What the user compared must still be what is there.
-  await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: 'x', app_sha256: listed[0]!.app_sha256 }), status(409));
-  assert.deepEqual(await acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: listed[0]!.mine_sha256, app_sha256: listed[0]!.app_sha256 }), []);
+  await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: 'x', app_sha256: listed[0]!.app_sha256, workspace: dir }), status(409));
+  assert.deepEqual(await acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: listed[0]!.mine_sha256, app_sha256: listed[0]!.app_sha256, workspace: dir }), []);
   await assert.rejects(fsp.access(`${file}.new`), 'the app\'s own copy is removed');
   assert.match(await fsp.readFile(file, 'utf8'), /My own rule\./, 'the user\'s file is never written');
   assert.equal(readManifest(dir)!.files.find((f) => f.path === 'AGENTS.md')!.merged_sha256, sha(app));
@@ -63,7 +63,7 @@ test('a .new the user changed, or a link in its place, is shown as edited and ne
   await fsp.writeFile(`${file}.new`, `${app}\nHalf merged.\n`);
   const [row] = await listInstructionUpdates(dir);
   assert.equal(row!.state, 'edited');
-  await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256 }), status(409));
+  await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256, workspace: dir }), status(409));
   assert.match(await fsp.readFile(`${file}.new`, 'utf8'), /Half merged\./);
 
   if (process.platform !== 'win32') {
@@ -81,7 +81,7 @@ test('without a .new it can still be marked merged; an interrupted removal is fi
   await fsp.rm(`${file}.new`);
   const [row] = await listInstructionUpdates(dir);
   assert.equal(row!.state, 'no_copy');
-  await acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256 });
+  await acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256, workspace: dir });
   assert.deepEqual(await listInstructionUpdates(dir), []);
 
   // Interrupted after the record, before the removal: the app's own unchanged copy goes on the next start.
@@ -103,7 +103,7 @@ test('"I merged it" waits for an upgrade in progress', async (t) => {
   const held = await tryLock(path.join(dir, '.situation-board', 'upgrade.lock'));
   assert.notEqual(typeof held, 'string');
   try {
-    await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256 }), status(409));
+    await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256, workspace: dir }), status(409));
   } finally {
     await unlock(held as Exclude<typeof held, string>);
   }
@@ -121,7 +121,7 @@ test('a linked .situation-board is refused, and nothing outside the workspace is
   const before = await fsp.readFile(path.join(outside, 'app-manifest.json'), 'utf8');
   // Listing does not follow it either: nothing is the app's copy, so nothing offers to be marked merged.
   assert.deepEqual((await listInstructionUpdates(dir)).map((u) => u.state), ['edited']);
-  await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256 }), status(409));
+  await assert.rejects(acknowledgeInstructionUpdate(dir, { path: 'AGENTS.md', mine_sha256: row!.mine_sha256, app_sha256: row!.app_sha256, workspace: dir }), status(409));
   assert.equal(await fsp.readFile(path.join(outside, 'app-manifest.json'), 'utf8'), before);
   await assert.rejects(fsp.access(path.join(outside, 'upgrade.lock')), 'no lock made outside');
 });

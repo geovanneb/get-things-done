@@ -1509,10 +1509,19 @@ try {
     // Instruction updates: a list of changed app files; anything not listed is refused before a file is read.
     const instructionUpdates = await (await fetch(`${base}/api/app/instruction-updates`)).json();
     const compareOutside = await fetch(`${base}/api/app/instruction-updates/compare?path=${encodeURIComponent('../package.json')}`);
-    const mergedOutside = await json('POST', '/api/app/instruction-updates/merged', { path: 'profile/executive-profile.md', mine_sha256: 'a'.repeat(64), app_sha256: 'b'.repeat(64) });
-    check('instruction updates are listed, and a file the app does not ship is never compared or marked merged',
-      Array.isArray(instructionUpdates) && compareOutside.status === 404 && mergedOutside.status === 404,
-      `list=${JSON.stringify(instructionUpdates).slice(0, 120)} compare=${compareOutside.status} merged=${mergedOutside.status}`);
+    const mergedOutside = await json('POST', '/api/app/instruction-updates/merged', { path: 'profile/executive-profile.md', mine_sha256: 'a'.repeat(64), app_sha256: 'b'.repeat(64), workspace: ws });
+    // A comparison asked for another workspace (a tab left on one while another was opened) is refused.
+    const compareElsewhere = await fetch(`${base}/api/app/instruction-updates/compare?path=AGENTS.md`, { headers: { 'X-GTD-Workspace': encodeURIComponent(path.join(tmp, 'another-workspace')) } });
+    const mergedUnbound = await json('POST', '/api/app/instruction-updates/merged', { path: 'AGENTS.md', mine_sha256: 'a'.repeat(64), app_sha256: 'b'.repeat(64) });
+    const replaceOutside = await json('POST', '/api/app/instruction-updates/use-app', { path: 'profile/executive-profile.md', mine_sha256: 'a'.repeat(64), app_sha256: 'b'.repeat(64), state: 'ready', workspace: ws });
+    // A replace that does not say which workspace it was previewed in is refused before anything is read.
+    const replaceUnbound = await json('POST', '/api/app/instruction-updates/use-app', { path: 'AGENTS.md', mine_sha256: 'a'.repeat(64), app_sha256: 'b'.repeat(64), state: 'ready' });
+    check('instruction updates are listed, and a file the app does not ship is never compared, kept or replaced',
+      Array.isArray(instructionUpdates) && compareOutside.status === 404 && mergedOutside.status === 404 && replaceOutside.status === 404
+        && replaceUnbound.status === 409 && (await replaceUnbound.json()).details?.code === 'other_workspace'
+        && mergedUnbound.status === 409 && (await mergedUnbound.json()).details?.code === 'other_workspace'
+        && compareElsewhere.status === 409 && (await compareElsewhere.json()).details?.code === 'other_workspace',
+      `list=${JSON.stringify(instructionUpdates).slice(0, 120)} compare=${compareOutside.status} merged=${mergedOutside.status} replace=${replaceOutside.status} unbound=${replaceUnbound.status}/${mergedUnbound.status} compareElsewhere=${compareElsewhere.status}`);
     // Recognize known voices (#287): off by default, nothing remembered, and nothing is remembered without the model
     // and a confirmed stakeholder name; requests that could reach a path are refused before anything is read.
     const voices = await (await fetch(`${base}/api/voiceprints`)).json();
