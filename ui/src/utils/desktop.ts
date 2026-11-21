@@ -13,6 +13,12 @@ export interface DesktopBridge {
   pickFolder(): Promise<string | null>;
   /** Opens the current workspace in Finder or Explorer. */
   openWorkspaceFolder(): Promise<{ opened: boolean; error?: string }>;
+  /**
+   * A file or folder of the workspace, by its path relative to the workspace, revealed in Finder or Explorer: a file
+   * selected in its folder, a folder shown from inside with its first entry selected. Nothing is ever opened or
+   * launched. The app checks the path stays inside the workspace.
+   */
+  showInFolder?(relativePath: string): Promise<{ opened: boolean; error?: string }>;
   /** Asks the system for the microphone: `granted`, or what the user should do. */
   microphoneAccess?(): Promise<string>;
   /** `yes` when the computer's own sound can be recorded; otherwise why not. */
@@ -169,4 +175,32 @@ export async function openWorkspaceFolder(): Promise<void> {
     return;
   }
   await apiPost('/api/workspace/open', {});
+}
+
+/** Whether this page can open a folder of the workspace itself (the desktop app); a browser shows the path instead. */
+export function canShowInFolder(): boolean {
+  return typeof desktopBridge()?.showInFolder === 'function';
+}
+
+/**
+ * Opens a folder of the workspace, or shows a file of it selected in its folder, in the desktop app. `relativePath` is
+ * relative to the workspace, with "/". Throws with the reason when it could not, or in a browser.
+ */
+export async function showInFolder(relativePath: string): Promise<void> {
+  const bridge = desktopBridge();
+  if (!bridge?.showInFolder) throw new Error(tr('showInFolder.couldNotOpen'));
+  const result = await bridge.showInFolder(relativePath);
+  if (!result?.opened) throw new Error(result?.error || tr('showInFolder.couldNotOpen'));
+}
+
+/**
+ * The full path on this computer of a workspace-relative path, for a browser to show: in the workspace path's own
+ * style (backslashes for a Windows workspace such as `C:\Users\demo\Northwind`).
+ */
+export function workspaceFullPath(workspace: string, relativePath: string): string {
+  const windows = /^[a-zA-Z]:[\\/]|^\\\\/.test(workspace) && !workspace.startsWith('/');
+  const sep = windows ? '\\' : '/';
+  const base = workspace.replace(/[\\/]+$/, '');
+  const parts = relativePath.split(/[\\/]/).filter((p) => p && p !== '.');
+  return parts.length ? [base || sep, ...parts].join(sep).replace(/^\/\//, '/') : (base || sep);
 }

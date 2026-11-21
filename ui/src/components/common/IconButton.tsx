@@ -52,6 +52,11 @@ export const icons = {
       <path d="M9.5 4.5V3a.5.5 0 00-.5-.5H3a.5.5 0 00-.5.5v6a.5.5 0 00.5.5h1.5" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   ),
+  folder: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M1.5 3.5a1 1 0 011-1h3l1.2 1.5h4.8a1 1 0 011 1v5.5a1 1 0 01-1 1h-9a1 1 0 01-1-1v-7z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  ),
   search: (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
       <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3" />

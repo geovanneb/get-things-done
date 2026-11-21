@@ -37,6 +37,11 @@ router.get('/:id/related-work', async (req: Request, res: Response) => {
   res.json(await relatedWork(meetingId(req)));
 });
 
+// GET /api/meetings/:id/folder  where the meeting's files are on this computer now, for Open folder (read only)
+router.get('/:id/folder', async (req: Request, res: Response) => {
+  res.json(await service.folder(meetingId(req)));
+});
+
 // GET /api/meetings/:id  one meeting held by an update: its record, its files and where it stands
 router.get('/:id', async (req: Request, res: Response) => {
   const id = meetingId(req);

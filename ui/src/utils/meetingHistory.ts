@@ -1,5 +1,5 @@
 import { currentLocale, tr } from '@/i18n/current';
-import type { HistoryMeeting, QueuedMeeting, TranscriptionProgress } from '@/types';
+import type { HistoryMeeting, MeetingFolder, QueuedMeeting, TranscriptionProgress } from '@/types';
 import { meetingPeriod, needsYou } from '@/utils/meetingQueue';
 
 /**
@@ -175,4 +175,20 @@ export function whenLabel(row: MeetingRow, now: Date): string {
   const [y, m, d] = row.date.split('-').map(Number);
   if (!y || !m || !d) return row.date || tr('meetingHistory.noDate');
   return new Date(y, m - 1, d).toLocaleDateString(currentLocale(), { month: 'short', day: 'numeric', ...(y !== now.getFullYear() ? { year: 'numeric' } : {}) });
+}
+
+/** Whether a row offers Open folder: a meeting with its own dialog whose files are still on this computer. */
+export function canOpenFolder(row: MeetingRow): boolean {
+  return row.href.startsWith('/meetings/') && !row.inTrash && !row.textGone;
+}
+
+/**
+ * Where Open folder goes for a meeting: its own folder, or its first file in an update's shared materials/ (shown
+ * selected, so the update's other meetings are not what the user sees first), and what to say about it.
+ */
+export function meetingFolderTarget(f: MeetingFolder): { path: string; note: string | null } {
+  const notes: string[] = [];
+  if (f.shared && f.first_file) notes.push(tr('meetingFolder.sharedFolder', { update: f.path.split('/')[1] ?? '' }));
+  if (f.stage === 'reviewed' && f.recorded && !f.has_audio) notes.push(tr('meetingFolder.recordingNotKept'));
+  return { path: f.shared && f.first_file ? f.first_file : f.path, note: notes.length ? notes.join(' ') : null };
 }
