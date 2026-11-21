@@ -118,10 +118,15 @@ function providerId(value: unknown): ChatProviderId {
   return value as ChatProviderId;
 }
 
-/** A model or effort name as the tools write them; null clears it (the tool's default). */
+/** A model or effort name as the tools write them. It starts with a letter or digit, so it never reads as an option. */
+const OPTION_NAME = /^[A-Za-z0-9][\w.:/\-[\]]{0,79}$/;
+/** A tool's session id (a UUID or a tool's own id): passed as `--resume <id>`, so it never starts with a dash. */
+const SESSION_ID = /^[A-Za-z0-9][\w.:-]{0,199}$/;
+
+/** A model or effort name; null clears it (the tool's default). */
 function optionName(value: unknown, what: string): string | null {
   if (value === null || value === undefined || value === '') return null;
-  if (typeof value !== 'string' || !/^[A-Za-z0-9][\w.:/\-[\]]{0,79}$/.test(value)) throw httpError(400, `Invalid ${what}`);
+  if (typeof value !== 'string' || !OPTION_NAME.test(value)) throw httpError(400, `Invalid ${what}`);
   return value;
 }
 
@@ -159,14 +164,19 @@ export function composePrompt(text: string, options: { page?: string | null; ear
   return parts.join('\n\n');
 }
 
-/** A conversation read from disk, with anything unexpected dropped instead of trusted. */
+/**
+ * A conversation read from disk, with anything unexpected dropped instead of trusted. The model, effort and session id
+ * reach the tool's command line, so they are checked as a request's would be: the file may have been edited by hand.
+ */
 export function normalize(raw: unknown, id: string): Conversation | null {
   if (!isObject(raw)) return null;
   const provider = (CHAT_PROVIDERS as string[]).includes(raw['provider'] as string) ? (raw['provider'] as ChatProviderId) : null;
   if (!provider) return null;
-  const session = isObject(raw['provider_session']) && (CHAT_PROVIDERS as string[]).includes(raw['provider_session']['provider'] as string) && typeof raw['provider_session']['id'] === 'string'
-    ? { provider: raw['provider_session']['provider'] as ChatProviderId, id: raw['provider_session']['id'] }
+  const stored = isObject(raw['provider_session']) ? raw['provider_session'] : null;
+  const session = stored && (CHAT_PROVIDERS as string[]).includes(stored['provider'] as string) && typeof stored['id'] === 'string' && SESSION_ID.test(stored['id'])
+    ? { provider: stored['provider'] as ChatProviderId, id: stored['id'] }
     : null;
+  const option = (v: unknown) => (typeof v === 'string' && OPTION_NAME.test(v) ? v : null);
   const messages = (Array.isArray(raw['messages']) ? raw['messages'] : []).flatMap((m): ChatMessage[] => {
     if (!isObject(m) || typeof m['id'] !== 'string' || typeof m['text'] !== 'string') return [];
     if (m['role'] !== 'user' && m['role'] !== 'assistant' && m['role'] !== 'notice') return [];
@@ -179,8 +189,8 @@ export function normalize(raw: unknown, id: string): Conversation | null {
     id,
     title: str(raw['title']) ?? 'New chat',
     provider,
-    model: str(raw['model']),
-    effort: str(raw['effort']),
+    model: option(raw['model']),
+    effort: option(raw['effort']),
     provider_session: session,
     carry_over: raw['carry_over'] === true,
     created_at: str(raw['created_at']) ?? now(),

@@ -67,7 +67,10 @@ export interface LedgerEntry {
 export interface AcceptedLedger {
   /** Acceptances before this are not gathered: the switch was turned on then. Null: nothing is gathered yet. */
   since: string | null;
-  /** When the last review that gathered was opened: confidential tasks accepted since then are counted in the next. */
+  /**
+   * When the last review that gathered was opened (or the latest acceptance it counted, when that is later):
+   * confidential tasks accepted after it are counted in the next.
+   */
   last_gathered_at: string | null;
   tasks: Record<string, LedgerEntry>;
 }
@@ -255,6 +258,8 @@ export interface Gathering {
   /** Pending tasks past the per-review cap. */
   waiting: number;
   gatheredAt: string;
+  /** Left-out tasks accepted up to this moment are counted: the next review counts only those accepted after it. */
+  countedUntil: string;
 }
 
 /** How many accepted tasks wait now (not counting left-out ones). Null when the record cannot be read. */
@@ -309,12 +314,20 @@ export async function gatherAccepted(ws: string, now: Date, date: string): Promi
   const { ledger, broken } = await readLedger(ws);
   if (broken) throw new Error(`The record of gathered tasks (.situation-board/routines/${LEDGER}) cannot be read, so no accepted task was gathered; fix or remove it`);
   const all = await acceptedTasks(ws);
-  // Left out: counted only, never recorded. Those accepted since the last review that gathered (or since the switch).
-  const countFrom = Math.max(Date.parse(ledger.since ?? ''), Date.parse(ledger.last_gathered_at ?? '') || -Infinity);
-  const leftOut = ledger.since ? all.filter((t) => t.left_out && Date.parse(t.accepted_at) >= countFrom) : [];
+  // Left out: counted only, never recorded. Those accepted since the switch and after the last review that counted:
+  // strictly after, so one accepted at that very moment is never counted by two reviews.
+  const since = Date.parse(ledger.since ?? '');
+  const counted = Date.parse(ledger.last_gathered_at ?? '');
+  const leftOut = ledger.since
+    ? all.filter((t) => t.left_out && Date.parse(t.accepted_at) >= since && !(Date.parse(t.accepted_at) <= counted))
+    : [];
   const toGather = pendingOf(all, ledger).filter((t) => !t.left_out);
   const batch = toGather.slice(0, MAX_TASKS_PER_REVIEW);
   if (batch.length === 0 && leftOut.length === 0) return null;
+
+  // The moment the next review counts from: now, or a counted acceptance stamped later than now (a clock that stepped
+  // back, or a done_date written ahead by hand), so a task counted here is never counted again.
+  const countedUntil = new Date(Math.max(now.getTime(), ...leftOut.map((t) => Date.parse(t.accepted_at)))).toISOString();
 
   const files: { name: string; data: Buffer }[] = [];
   const taken = new Set([ACCEPTED_TASKS_FILE, 'memory-scan.md', 'update.md']);
@@ -392,7 +405,7 @@ export async function gatherAccepted(ws: string, now: Date, date: string): Promi
   const waiting = toGather.length - batch.length;
   if (waiting) lines.push('', '## Waiting', '', `${waiting} more accepted task${waiting === 1 ? ' waits' : 's wait'} for the next memory review (at most ${MAX_TASKS_PER_REVIEW} per review).`);
   files.unshift({ name: ACCEPTED_TASKS_FILE, data: Buffer.from(lines.join('\n') + '\n', 'utf-8') });
-  return { files, entries, gathered, leftOut: leftOut.length, waiting, gatheredAt };
+  return { files, entries, gathered, leftOut: leftOut.length, waiting, gatheredAt, countedUntil };
 }
 
 /**
@@ -408,5 +421,5 @@ export async function recordGathered(ws: string, gathering: Gathering, update: s
     const there = await Promise.all(['active', 'archive'].map((f) => fsp.lstat(path.join(ws, 'tasks', f, id, 'task.md')).then(() => true, () => false)));
     if (there.some(Boolean)) tasks[id] = entry;
   }
-  await writeLedger(ws, { since: ledger.since, last_gathered_at: gathering.gatheredAt, tasks });
+  await writeLedger(ws, { since: ledger.since, last_gathered_at: gathering.countedUntil, tasks });
 }
