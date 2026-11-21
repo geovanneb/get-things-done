@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { matching, meetingPeriod, newestFirst, visibleMeetings } from './meetingQueue';
+import { RECORDING_ELSEWHERE_MS, hasOpenRecording, matching, meetingPeriod, newestFirst, recheckIn, recordingElsewhere, visibleMeetings } from './meetingQueue';
 import type { QueuedMeeting } from '@/types';
 
 const meeting = (id: string, date: string, extra: Partial<QueuedMeeting> = {}) =>
@@ -52,4 +52,30 @@ assert.deepEqual(matching(people, 'kim').map((m) => m.id), ['kim']);
 assert.deepEqual(matching(people, 'BUDGET park').map((m) => m.id), ['kim'], 'every word, any order, any case');
 assert.deepEqual(matching(people, '2026-10-30').length, 2);
 assert.deepEqual(matching(people, '  ').length, 2);
+
+// Audio arrived in the last 30 seconds: some page is recording it. Older, or not recording, it is not.
+const live = (state: 'recording' | 'damaged', secondsAgo: number) => meeting('live', '2026-10-31', { live: { generation: 'g', state, started_at: '', saved_bytes: 0, last_block_at: new Date(Date.now() - secondsAgo * 1000).toISOString() } });
+assert.equal(recordingElsewhere(live('recording', 5)), true);
+assert.equal(recordingElsewhere(live('recording', 60)), false);
+assert.equal(recordingElsewhere(live('damaged', 5)), false);
+assert.equal(recordingElsewhere(meeting('none', '2026-10-31')), false);
+// Judged at the moment given (when the queue was read), not when asked.
+const at = (iso: string) => meeting('at', '2026-10-31', { live: { generation: 'g', state: 'recording', started_at: '', saved_bytes: 0, last_block_at: iso } });
+const t0 = Date.parse('2026-10-31T10:00:00.000Z');
+assert.equal(recordingElsewhere(at('2026-10-31T10:00:00.000Z'), t0 + 29_999), true);
+assert.equal(recordingElsewhere(at('2026-10-31T10:00:00.000Z'), t0 + 30_000), false);
+// A block dated in the future (the clock was set back) is stale, so an interrupted recording still shows.
+assert.equal(recordingElsewhere(at('2026-12-01T10:00:00.000Z'), t0), false, 'a month ahead');
+assert.equal(recordingElsewhere(at('2026-10-31T10:00:01.000Z'), t0), false, 'a second ahead');
+
+// When to look again: just after the soonest recording's newest audio gets too old, never longer than 31 seconds.
+assert.equal(recheckIn([at('2026-10-31T10:00:00.000Z')], t0), RECORDING_ELSEWHERE_MS + 100);
+assert.equal(recheckIn([at('2026-10-31T10:00:00.000Z'), at('2026-10-31T09:59:50.000Z')], t0), 20_100, 'the soonest');
+assert.equal(recheckIn([at('2026-10-31T10:00:00.000Z')], t0 + 29_999), 101);
+assert.ok((recheckIn([at('2026-10-31T10:00:00.000Z')], t0) ?? Infinity) <= RECORDING_ELSEWHERE_MS + 1_000);
+assert.equal(recheckIn([at('2026-12-01T10:00:00.000Z')], t0), null, 'a future block asks for no timer, so no 32-bit overflow or loop');
+assert.equal(recheckIn([at('2026-10-31T10:00:00.000Z')], t0 + 30_000), null, 'expired: the polling goes on, no timer');
+assert.equal(recheckIn([meeting('none', '2026-10-31')], t0), null);
+assert.equal(hasOpenRecording([meeting('none', '2026-10-31')]), false);
+assert.equal(hasOpenRecording([at('2026-12-01T10:00:00.000Z')]), true, 'an interrupted recording is still open: the queue keeps being asked');
 console.log('meeting queue: ok');

@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { canOpenFolder, groupRows, historyReview, inFilter, matchingRows, meetingFolderTarget, meetingRows, queueProcessing, whenLabel, type QueueFacts } from './meetingHistory';
+import { canOpenFolder, filterFromQuery, groupRows, historyReview, inFilter, matchingRows, meetingCounts, meetingFolderTarget, meetingRows, queueProcessing, whenLabel, type QueueFacts } from './meetingHistory';
+import { setCurrentLanguage } from '@/i18n/current';
+import { recheckIn, recordingElsewhere } from './meetingQueue';
+import { translator } from '../../../server/src/i18n/messages';
+import { en } from '../../../server/src/i18n/en';
 import type { HistoryMeeting, MeetingFolder, QueuedMeeting } from '@/types';
 
 const queued = (id: string, date: string, extra: Partial<QueuedMeeting> = {}) =>
@@ -65,4 +69,69 @@ assert.equal(meetingFolderTarget(folder({ has_audio: false, recorded: false })).
 assert.equal(meetingFolderTarget(folder({ stage: 'queued', path: 'context-updates/meeting-queue/MQ-2026-0009', has_audio: false })).note, null, 'only after review');
 const shared = meetingFolderTarget(folder({ stage: 'update', path: 'context-updates/CU-2026-0004/materials', shared: true, first_file: 'context-updates/CU-2026-0004/materials/MQ-2026-0008-call.vtt' }));
 assert.deepEqual(shared, { path: 'context-updates/CU-2026-0004/materials/MQ-2026-0008-call.vtt', note: 'This folder also holds the other meetings of CU-2026-0004, so it points to this meeting\'s first file.' });
+// Every way the processing column says "Needs you" is a meeting needsYou() counts, so a row needs the user by that rule
+// alone, also in a language where the label is not "Needs you".
+const liveAt = (state: 'recording' | 'damaged') => ({ live: { generation: 'g', state, started_at: '', saved_bytes: 0, last_block_at: null } });
+const needing: QueuedMeeting[] = [
+  queued('cut', '2026-10-31', liveAt('recording')),
+  queued('damaged', '2026-10-31', liveAt('damaged')),
+  queued('held', '2026-10-31', { held: 'Waiting for a missing file' }),
+  queued('model', '2026-10-31', { files: recording('pending', { target: { model: 'large', language: 'en' } }) }),
+  queued('failed', '2026-10-31', { files: recording('failed') }),
+  queued('stopped', '2026-10-31', { files: recording('stopped') }),
+  queued('partial', '2026-10-31', { files: recording('partial') }),
+];
+for (const m of needing) assert.equal(queueProcessing(m, facts).label, 'Needs you', m.id);
+const moving: QueuedMeeting[] = [
+  queued('running', '2026-10-31', { files: recording('running') }),
+  queued('pending', '2026-10-31', { files: recording('pending', { target: { model: 'base', language: 'en' } }) }),
+  queued('digest', '2026-10-31'),
+  queued('handed', '2026-10-31', { in_digest: true }),
+  queued('accepted', '2026-10-31', { files: recording('partial', { accepted: true }) }),
+];
+assert.deepEqual(meetingCounts([...needing, ...moving], facts), { needsYou: needing.length, inProgress: moving.length });
+// The label in another language: the row still needs the user.
+setCurrentLanguage(translator({ ...en, 'meetingHistory.needsYou': '対応が必要' }, 'ja'), 'ja');
+try {
+  const translated = meetingRows(needing, [], facts);
+  assert.ok(translated.every((r) => r.processing.label !== 'Needs you' && r.needsYou), 'needs the user in another language too');
+  assert.deepEqual(meetingCounts(needing, facts), { needsYou: needing.length, inProgress: 0 });
+} finally { setCurrentLanguage(translator(en), 'en'); }
+
+// The sidebar counts are the page's tabs: the same rows, the same filters. Held meetings and the trash are never counted.
+const tabs = (r: ReturnType<typeof meetingRows>) => ({ needsYou: r.filter((x) => inFilter(x, 'you')).length, inProgress: r.filter((x) => inFilter(x, 'progress')).length });
+const queue = [queued('MQ-2026-0009', '2026-10-31', { files: recording('partial') }), queued('MQ-2026-0008', '2026-10-30')];
+assert.deepEqual(meetingCounts(queue, facts), tabs(rows));
+assert.deepEqual(meetingCounts(queue, facts), { needsYou: 1, inProgress: 1 });
+assert.deepEqual(meetingCounts([], { ...facts, installed: null }), { needsYou: 0, inProgress: 0 });
+// Models not known yet: a recording waiting for a model is in progress, as on the page, until they are.
+assert.deepEqual(meetingCounts([needing[3]!], { ...facts, installed: null }), { needsYou: 0, inProgress: 1 });
+// A model the recording asks for under another name: the one that runs it counts.
+assert.deepEqual(meetingCounts([needing[3]!], { ...facts, installed: ['large-v3'], runnable: { large: 'large-v3' } }), { needsYou: 0, inProgress: 1 });
+
+// A link opens the list on a filter: the sidebar's Needs you item asks for ?show=you.
+assert.equal(filterFromQuery('you'), 'you');
+assert.equal(filterFromQuery('progress'), 'progress');
+for (const bad of [null, '', 'You', 'trash', 'constructor', 'toString']) assert.equal(filterFromQuery(bad), 'all', String(bad));
+
+// A meeting being recorded right now is in progress, on the page and in the sidebar; interrupted or unreadable, it needs you.
+const recordingNow = queued('live', '2026-10-31', liveAt('recording'));
+const [nowRow] = meetingRows([recordingNow], [], facts);
+assert.deepEqual([nowRow!.processing.label, nowRow!.needsYou, inFilter(nowRow!, 'you'), inFilter(nowRow!, 'progress')], ['Recording', false, false, true]);
+assert.deepEqual(meetingCounts([recordingNow], facts), { needsYou: 0, inProgress: 1 }, 'recording now');
+assert.deepEqual(meetingCounts([needing[0]!], facts), { needsYou: 1, inProgress: 0 }, 'interrupted');
+assert.deepEqual(meetingCounts([needing[1]!], facts), { needsYou: 1, inProgress: 0 }, 'damaged');
+// Recorded in another page: the rule MeetingsList and the sidebar pass decides, the same for both.
+const elsewhere = { ...facts, recordingNow: () => true };
+assert.deepEqual(meetingCounts([recordingNow, needing[2]!], elsewhere), { needsYou: 1, inProgress: 1 }, 'only the live meeting is excused, not one on hold');
+
+// The sidebar judges a recording in another page at the moment it read the queue. Timeline: a block at 0 s, the timer
+// asks again at 30.1 s, and a block arrived at 30 s: still in progress. Only fresh data can say the audio stopped.
+const block = (seconds: number) => queued('call', '2026-10-31', { live: { generation: 'g', state: 'recording', started_at: '', saved_bytes: 0, last_block_at: new Date(t0 + seconds * 1000).toISOString() } });
+const t0 = Date.parse('2026-10-31T10:00:00.000Z');
+const sidebar = (q: QueuedMeeting[], readAt: number) => meetingCounts(q, { ...facts, recordingNow: (m) => recordingElsewhere(m, readAt) });
+assert.deepEqual(sidebar([block(0)], t0), { needsYou: 0, inProgress: 1 }, 'read at 0 s');
+assert.equal(recheckIn([block(0)], t0), 30_100, 'asks again at 30.1 s');
+assert.deepEqual(sidebar([block(30)], t0 + 30_100), { needsYou: 0, inProgress: 1 }, 'a block arriving at 30 s keeps it in progress');
+assert.deepEqual(sidebar([block(0)], t0 + 30_100), { needsYou: 1, inProgress: 0 }, 'no block since 0 s: interrupted');
 console.log('meeting history: ok');
