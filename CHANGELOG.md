@@ -8,6 +8,95 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-21
+
+**From answer to action.** The assistant chat now leads somewhere. Tasks, people, notes and files
+it names **open with one click**, a chat can be **continued in your own assistant**, where the
+change it cannot make gets made, and **Create context update** files new material without leaving
+the panel. Every request you used to copy and paste now has a **Run in Claude Code** (or Codex,
+Copilot) button. **Settings > Instruction updates** shows only what a release changed in a file you
+customised, and lets you keep yours or use the app's. Most of the rest keeps the chat strictly
+read-only and every file the dashboard saves inside your workspace.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.18.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.18.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.18.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.18.0`, or **Update and restart** in Settings. No schema or
+agent instruction changes. When the dashboard next opens a workspace, it keeps a copy of the text it
+ships for each of its files in `.situation-board/app-files/`, so later releases can show what they
+changed. If you call the API directly, see Changed.
+
+### Added
+
+- **Open what the chat names.** Tasks, stakeholders, context notes, meetings, context updates,
+  routines and files named in an answer become links that open the item in the dashboard, with its
+  title on hover. Only items the workspace confirms become links, and a mention of something deleted
+  is struck through. (#463)
+- **Continue in your own assistant.** The chat can only read. When an answer says something needs
+  changing, **Continue in assistant** on the latest answer prepares a handoff: your request first,
+  then the latest exchanges quoted as background. You review and edit it, copy it and paste it into
+  Claude Code, Codex or Copilot, where it runs under that tool's usual permission prompts. Nothing
+  is sent for you. (#468)
+- **Create a context update from the chat.** **Create context update** at the top of the chat opens
+  the usual import dialog, which now lists the workspace, the new update and the files it will save
+  before you press Save. The update's page opens beside the chat, which keeps its conversation.
+  (#469)
+- **Past chats and chat names.** A new chat lists your past chats, so you can continue where you
+  left off, and **Rename chat** gives a chat a name of your own. (#467)
+- **Run requests in your assistant with one click.** Wherever the dashboard asked you to copy a
+  request (run a task, analyze or apply a context update), a **Run in Claude Code**, **Run in
+  Codex** or **Run in Copilot** button now opens the assistant in a new terminal window at the
+  workspace with the request already sent. It is your own session, under the tool's own permission
+  prompts. Copilot without its CLI opens VS Code and copies the request for you to paste. The
+  request is still there to copy. (#473)
+- **See what a release changed in a file you customised.** **Settings > Instruction updates** now
+  shows **What the app changed**: the app version your file was based on against the new one, so
+  you see only the release's own changes, however much you customised the file. Then choose **Keep
+  my version**, or **Use the app's version**, which shows what your file would lose and moves it to
+  the workspace trash before replacing it. Files that decide what agents may do, such as
+  `.claude/settings.json`, are never replaced from the dashboard. A workspace set up by an older
+  version learns which version a file started from the first time you resolve it. (#472)
+- **API:** `POST /api/mentions/resolve` resolves up to 50 references at once,
+  `POST /api/workspace/open-assistant` takes an optional `request`, and
+  `POST /api/app/instruction-updates/use-app` is new. See [docs/api.md](docs/api.md). (#463, #472,
+  #473)
+
+### Fixed
+
+- **The chat reads, and nothing more, with every tool.** Claude Code's model check could run a
+  personal start-up hook. Codex started the MCP servers in your configuration and kept hooks, apps
+  and plugins on. Copilot started the workspace's and plugins' servers and hooks, and offered the
+  model tools it then had to refuse. Now Claude Code and Codex start with hooks, MCP servers and
+  plugins off, and Copilot is offered only its read and search tools. When a tool cannot be locked
+  down this way (a hook Copilot cannot turn off, or a version without the options needed), the chat
+  says why and does not use it. (#458)
+- **A chat stays deleted, stopped and in its own workspace.** A chat deleted while it answered could
+  come back, **Stop** while the tool was starting could leave it running, and a chat panel left open
+  while another tab switched workspace could show or save into the wrong one. (#459)
+- **Note, template and chat files stay inside the workspace.** Saving, moving, attaching and
+  deleting now refuse a folder that is a link to somewhere else, and a new file appears only once it
+  is complete. (#460)
+- **Your own categories keep what you wrote.** A change to the categories rewrote a hand-edited
+  `context/categories.md` from a partial read, which could drop every other category. A file the
+  app cannot read in full is now left as it is, and the change is refused with the reason. A note
+  saved into a category while it is being removed no longer ends up hidden. (#457)
+- **Windows commands for folder names with curly quotes.** The copied command that opens your
+  assistant broke for a folder such as `Team’s notes`, and a crafted folder name could run its own
+  PowerShell. (#456)
+- **A confidential task is counted in one memory review only**, also when it was accepted at the
+  moment a review started. A chat file edited by hand can no longer put options on the assistant's
+  command line. (#474)
+
+### Changed
+
+- **API:** `POST /api/app/instruction-updates/merged` now takes the `workspace` from the row or
+  comparison (also sent as `X-GTD-Workspace`), and refuses another or a missing one with `409`
+  (`details.code: other_workspace`). The chat stream takes `?workspace=` and refuses another
+  workspace the same way. (#459, #472)
+
 ## [0.17.0] - 2026-11-19
 
 **Ask your workspace, and file it your way.** A chat button on every page lets you **ask the
@@ -1512,7 +1601,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/geovanneb/get-things-done/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/geovanneb/get-things-done/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/geovanneb/get-things-done/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/geovanneb/get-things-done/compare/v0.14.0...v0.15.0
