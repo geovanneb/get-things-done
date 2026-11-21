@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { groupRows, historyReview, inFilter, matchingRows, meetingRows, queueProcessing, whenLabel, type QueueFacts } from './meetingHistory';
+import { groupRows, historyReview, inFilter, matchingRows, meetingRows, queueProcessing, transcribeChoices, transcribeLine, whenLabel, type QueueFacts } from './meetingHistory';
 import type { HistoryMeeting, QueuedMeeting } from '@/types';
 
 const queued = (id: string, date: string, extra: Partial<QueuedMeeting> = {}) =>
@@ -54,4 +54,28 @@ assert.deepEqual(matchingRows(rows, '', new Set(['MQ-2026-0007'])).length, rows.
 const now = new Date(2026, 9, 31, 15, 0);
 assert.deepEqual(groupRows(rows, now).map((g) => [g.label, g.rows.length]), [['Today', 1], ['Yesterday', 1], ['This week', 1], ['October 2026', 2]]);
 assert.equal(whenLabel(rows[2]!, now), 'Oct 27');
+// Transcribe next: the latest choice first, only meetings that still wait; the row says where each one is in line.
+const line = [
+  queued('MQ-1', '2026-10-28', { files: recording('pending') }),
+  queued('MQ-2', '2026-10-29', { files: recording('pending'), transcribe_first_at: '2026-11-01T10:00:00.000Z' }),
+  queued('MQ-3', '2026-10-30', { files: recording('pending'), transcribe_first_at: '2026-11-01T11:00:00.000Z' }),
+  queued('MQ-4', '2026-10-30', { files: recording('running', { generation: 'gen-4' }), transcribe_first_at: '2026-11-01T12:00:00.000Z' }),
+  queued('MQ-5', '2026-10-31', { files: recording('done'), transcribe_first_at: '2026-11-01T13:00:00.000Z' }),
+  queued('MQ-6', '2026-10-31', { files: recording('pending'), transcribe_first_at: '2026-11-01T14:00:00.000Z', held: 'Its digest was removed' }),
+];
+assert.deepEqual(transcribeLine(line), ['MQ-3', 'MQ-2'], 'running, done and held meetings are not in line');
+const lineRows = meetingRows(line, [], facts);
+const label = (id: string) => lineRows.find((r) => r.id === id)!.processing.label;
+assert.deepEqual(['MQ-3', 'MQ-2', 'MQ-1'].map(label), ['Next', '#2 in line', 'Waiting for transcription']);
+assert.equal(queueProcessing(line[1]!, { ...facts, line: transcribeLine(line) }).label, '#2 in line', 'the dialog gives the line too');
+
+// The choices: Transcribe now names the running job and how far it got; Move back only for a meeting moved forward.
+const progress = { meeting: 'MQ-4', file: 'recording-20261031-1000.wav', done: 34, total: 100, started_at: '' };
+assert.deepEqual(transcribeChoices(line[0]!, line, progress), { next: true, now: { title: 'Fictional MQ-4', percent: 34, generation: 'gen-4' }, moveBack: false });
+assert.deepEqual(transcribeChoices(line[2]!, line, null), { next: false, now: { title: 'Fictional MQ-4', percent: null, generation: 'gen-4' }, moveBack: true }, 'already next; running in another dashboard');
+assert.deepEqual(transcribeChoices(line[1]!, line.filter((m) => m.id !== 'MQ-4'), null), { next: true, now: null, moveBack: true }, 'nothing runs: no Transcribe now');
+assert.deepEqual(transcribeChoices(line[3]!, line, progress), { next: false, now: null, moveBack: false }, 'a meeting being transcribed has no choices');
+assert.deepEqual(transcribeChoices(line[4]!, line, null).next, false, 'nor a transcribed one');
+assert.deepEqual(transcribeChoices(line[0]!, [line[0]!], { ...progress, meeting: 'reviewed-meeting', done: 5, total: 10, generation: 'gen-again' }).now, { title: null, percent: 50, generation: 'gen-again' }, 'a Transcribe again running here gives way too, named by its generation');
+assert.equal(transcribeChoices(line[0]!, [line[0]!], { ...progress, meeting: 'reviewed-meeting' }).now, null, 'never offered for a job the page cannot name');
 console.log('meeting history: ok');

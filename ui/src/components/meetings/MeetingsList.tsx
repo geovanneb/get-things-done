@@ -13,6 +13,7 @@ import { SegmentedControl } from '@/components/common/Tabs';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
+import { TranscribeOrderMenu } from '@/components/meetings/TranscribeOrder';
 import { apiDelete, apiPost } from '@/utils/api';
 import { groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
 import { canMakeDeliverable, deliverableDraft } from '@/utils/meetingDeliverable';
@@ -99,7 +100,7 @@ function Said({ hit, words }: { hit: MeetingSearchHit; words: string[] }) {
   );
 }
 
-function Row({ row, now, selected, onSelect, said, words }: { row: MeetingRow; now: Date; selected: boolean; onSelect: (on: boolean) => void; said?: MeetingSearchHit | undefined; words: string[] }) {
+function Row({ row, now, selected, onSelect, said, words, menu }: { row: MeetingRow; now: Date; selected: boolean; onSelect: (on: boolean) => void; said?: MeetingSearchHit | undefined; words: string[]; menu?: React.ReactNode }) {
   const { t } = useLanguage();
   const selectable = canMakeDeliverable(row);
   // Found by what was said: open the file it was found in, finding the words of the query that place holds.
@@ -123,6 +124,8 @@ function Row({ row, now, selected, onSelect, said, words }: { row: MeetingRow; n
       </div>
       <Status status={row.processing} label={t('meetingsList.processing')} />
       <Status status={row.review} label={t('shared.review')} />
+      {/* The same slot on every row, so the status columns line up whether a row has the menu or not. */}
+      <span style={{ flex: '0 0 28px', display: 'flex', justifyContent: 'flex-end' }}>{menu}</span>
     </li>
   );
 }
@@ -217,7 +220,8 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
             groupRows(limited, now).map((g) => (
               <section key={g.label} aria-label={g.label}>
                 <h3 style={{ margin: 0, padding: 'var(--space-2) var(--space-5)', fontSize: 'var(--text-xs)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)', background: 'var(--color-bg)', borderBottom: '1px solid var(--color-border)' }}>{g.label}</h3>
-                <ul aria-label={t('meetingsList.meetings', { label: g.label })} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} selected={selected.includes(r.id)} onSelect={(on) => select(r.id, on)} said={said.hits?.get(r.id)} words={words} />)}</ul>
+                <ul aria-label={t('meetingsList.meetings', { label: g.label })} className="gtd-list">{g.rows.map((r) => <Row key={r.id} row={r} now={now} selected={selected.includes(r.id)} onSelect={(on) => select(r.id, on)} said={said.hits?.get(r.id)} words={words}
+                  menu={r.queued ? <TranscribeOrderMenu meeting={r.queued} job={job} onChanged={onChanged} /> : undefined} />)}</ul>
               </section>
             ))
           )}

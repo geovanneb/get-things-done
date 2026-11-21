@@ -28,7 +28,8 @@ import { cancelTranscription, claimTranscription, endTranscriptionJob, failTrans
  *
  * A meeting with a recording waits in the queue until its transcript is made. On each routine check (once a
  * minute, also when the digest is switched off) and right after a meeting is queued, the job picks the oldest
- * queued recording that waits and transcribes it with the model chosen in Settings > Transcription:
+ * queued recording that waits and transcribes it with the model chosen in Settings > Transcription. Meetings the user
+ * chose "Transcribe next" for (`transcribe_first_at`) go first, the latest choice first (see `inTranscriptionOrder`):
  *
  * - **Claim**, under the queue lock: the meeting is queued, not on hold and not held by a digest being made; the
  *   recording still has its hash; it becomes `running` with a new generation and this process as its owner.
@@ -40,7 +41,8 @@ import { cancelTranscription, claimTranscription, endTranscriptionJob, failTrans
  *   no speech in more than a minute of audio: a partial transcript waits for "Use this transcript" or "Try again".
  *
  * One job runs across every dashboard on this workspace (`.situation-board/routines/transcription.lock`, held for
- * the whole job). Stop revokes the job's generation, so whatever it finds is never published. A recording left
+ * the whole job). Stop revokes the job's generation, so whatever it finds is never published. "Transcribe now" revokes
+ * it the same way, but puts the recording back to `pending`, in line right after the chosen meeting. A recording left
  * `running` by a dashboard that is gone goes back to `pending`. The recording itself is always kept.
  */
 
@@ -58,7 +60,9 @@ const NOTIFY_MS = 1000;
 /** How often a running job checks it is still wanted: a Stop or a removal from another dashboard ends it. Tests shorten it. */
 export const transcriptionTimings = { ownerCheckMs: 15_000 };
 
-export interface TranscriptionProgress { meeting: string; file: string; done: number; total: number; started_at: string }
+export interface TranscriptionProgress { meeting: string; file: string; done: number; total: number; started_at: string;
+  /** The job's generation, from `progress()`: what "Transcribe now" names as the job it stops. */
+  generation?: string }
 
 /** Notices for the dashboard when a transcription starts, moves or ends. */
 export const meetingTranscriptionEvents = new EventEmitter();
@@ -111,6 +115,35 @@ function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
 }
 
+/** Waits, up to `deadline`, for checks choosing a recording: each either makes its job the running one or gives it back. */
+async function claimsSettled(deadline: number): Promise<void> {
+  while (claiming > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+}
+
+/** Why a queued recording cannot be transcribed as it was added (unreadable, or changed since), or null when it can. */
+async function recordingProblem(folder: string, file: { name: string; sha256: string }): Promise<string | null> {
+  const read = await fileInside(folder, file.name).then(hashFile).catch((err: Error) => err);
+  return read instanceof Error ? `The recording cannot be read (${read.message}); remove the meeting and add it again.`
+    : read.sha256 !== file.sha256 ? 'The recording changed since it was added; remove the meeting and add it again.' : null;
+}
+
+/** A running recording back in line, as it was before it started: no owner, no generation, nothing it found. */
+function backInLine(r: RecordingState): RecordingState {
+  const { owner: _owner, generation: _generation, started_at: _started, ...rest } = r;
+  return { ...rest, status: 'pending' };
+}
+
+/**
+ * The order recordings are taken in: meetings chosen with "Transcribe next" first, the latest choice first (the last
+ * click wins), then the queue's own order, oldest first. A chosen meeting that cannot run now (a model not downloaded,
+ * a result set aside) is skipped by the claim like any other, so it never holds up the rest.
+ */
+export function inTranscriptionOrder<T extends Pick<QueuedMeeting, 'id' | 'transcribe_first_at'>>(meetings: T[]): T[] {
+  const first = meetings.filter((m) => m.transcribe_first_at)
+    .sort((a, b) => b.transcribe_first_at!.localeCompare(a.transcribe_first_at!) || a.id.localeCompare(b.id));
+  return [...first, ...meetings.filter((m) => !m.transcribe_first_at)];
+}
+
 const languageWords = (language: string) => (language === 'auto' ? 'detected for each part' : language);
 /** For example `detected for each part, ja from 00:12:30`. */
 const languageLine = (language: string, changes: LanguageChange[]) =>
@@ -157,7 +190,7 @@ export class MeetingTranscriptionService {
 
   /** The transcription running in this dashboard, with its progress. */
   progress(): TranscriptionProgress | null {
-    return active ? { ...active.progress } : null;
+    return active ? { ...active.progress, generation: active.generation } : null;
   }
 
   /**
@@ -257,9 +290,120 @@ export class MeetingTranscriptionService {
     await withWorkspacePath(job.workspace, () => this.change(job.meeting, job.file, (r) => {
       // Already done, stopped or taken by another job: nothing to give back.
       if (r.status !== 'running' || r.generation !== job.generation || r.owner?.token !== job.token) return r;
-      const { owner: _owner, generation: _generation, started_at: _started, ...rest } = r;
-      return { ...rest, status: 'pending' };
+      return backInLine(r);
     }));
+  }
+
+  /**
+   * "Transcribe next" (`first: true`) or "Move back" (`first: false`) for a queued meeting; with `now: true`, also
+   * "Transcribe now": the transcription running now is given back the way a live transcript takes the engine. Its
+   * generation is revoked under the queue lock, so nothing it finds is published, and its recording goes back to
+   * `pending`, in line right after the chosen meeting, which then starts. It starts again from the beginning.
+   *
+   * `generation` is required with `now`: the running transcription the page showed (a queued recording, or a Transcribe
+   * again running here, from `progress()`). When it is not the one running now, nothing is stopped (409). When the
+   * chosen meeting could not start (its model is not downloaded, its result set aside), it is put first but the running
+   * job goes on (409 with the reason). Two dashboards asking at once are safe: the second finds the chosen meeting
+   * running, or the job it saw already stopped, and changes nothing.
+   */
+  async prioritize(meetingId: string, input: unknown): Promise<QueuedMeeting> {
+    const body = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+    if (typeof body['first'] !== 'boolean') throw httpError(400, 'first must be true or false');
+    if (body['now'] !== undefined && typeof body['now'] !== 'boolean') throw httpError(400, 'now must be true or false');
+    if (body['generation'] !== undefined && typeof body['generation'] !== 'string') throw httpError(400, 'generation must be the running transcription\'s generation');
+    const first = body['first'];
+    const now = body['now'] === true;
+    const seen = body['generation'] as string | undefined;
+    if (now && !first) throw httpError(400, 'Transcribe now also puts the meeting first: send first: true');
+    if (body['now'] === true && typeof body['generation'] !== 'string') throw httpError(409, 'Say which transcription to stop: send the generation of the one the page shows');
+    // A check already choosing a recording either starts it or gives it back: wait for it to say which, as a live
+    // transcript does, so the job to stop is the one that really runs.
+    if (now) await claimsSettled(Date.now() + YIELD_WAIT_MS);
+    const settings = now ? await this.models.readSettings() : null;
+    const revoked: string[] = [];
+    let yielding: Job | null = null;
+    let started = false;
+    const meeting = await this.queue.withQueue(async () => {
+      const reserved = await this.queue.reserved();
+      if (reserved.includes(meetingId)) throw httpError(409, 'A digest is being made from this meeting; try again in a moment');
+      const m = await this.queue.loadMeeting(meetingId);
+      if (!first) {
+        // Moving back a meeting that is not first (any more) changes nothing: asking twice is safe.
+        if (m.transcribe_first_at) {
+          const { transcribe_first_at: _gone, ...rest } = m;
+          await this.queue.saveMeeting(rest);
+        }
+        return this.queue.loadMeeting(meetingId);
+      }
+      started = m.files.some((f) => f.recording?.status === 'running');
+      const waits = m.status === 'queued' && !m.held && m.files.some((f) => f.recording?.status === 'pending');
+      // Already started, by a request from another dashboard: nothing more to do.
+      if (!waits && now && started) return m;
+      if (!waits) throw httpError(409, 'This meeting has no recording waiting for transcription');
+      const at = new Date();
+      let folderJob: Job | null = null;
+      if (now && !started) {
+        // Only the job the page showed is ever stopped: a queued recording (any dashboard), or the Transcribe again of
+        // a reviewed meeting running here. One that ended, or another that started since, is never stopped unseen.
+        const running = (await this.queue.readQueue()).meetings.filter((q) => q.id !== m.id && !reserved.includes(q.id))
+          .flatMap((q) => q.files.filter((f) => f.recording?.status === 'running' && f.recording.generation === seen).map((f) => ({ q, f })));
+        const local = active;
+        folderJob = local?.folder && local.workspace === new WorkspaceService().getWorkspacePath() && local.generation === seen ? local : null;
+        if (!running.length && !folderJob) throw httpError(409, 'The transcription changed meanwhile; look again');
+        // The chosen meeting must be able to start: otherwise the running job would lose its work for nothing. It is
+        // still put first, so it is next once it can run, and the running job goes on.
+        const cannot = await this.cannotStart(m, settings!.model);
+        if (cannot) {
+          await this.queue.saveMeeting({ ...m, transcribe_first_at: at.toISOString() });
+          throw httpError(409, `${cannot} It is next in line; the running transcription goes on.`);
+        }
+        for (const { q, f } of running) {
+          revoked.push(seen!);
+          f.recording = backInLine(f.recording!);
+          // Right after the chosen meeting: just before it in time, so after it and before every earlier choice.
+          q.transcribe_first_at = new Date(at.getTime() - 1).toISOString();
+          await this.queue.saveMeeting(q);
+        }
+      }
+      await this.queue.saveMeeting({ ...m, transcribe_first_at: at.toISOString() });
+      yielding = folderJob;
+      return this.queue.loadMeeting(meetingId);
+    });
+    if (!now || started) return meeting;
+    const job = active;
+    if (job && !job.folder && revoked.includes(job.generation)) {
+      // Its result is dropped when it ends; the next job then starts with the chosen meeting.
+      job.abort.abort();
+    } else if (yielding && active === yielding) {
+      // A Transcribe again of a reviewed meeting runs here: it goes back in line after the queue, as for a recording.
+      await this.yieldTo(yielding);
+    } else {
+      // Nothing runs here: the chosen meeting starts now, or when the job running in another dashboard sees it was
+      // given back (within its owner check) and ends.
+      this.kick();
+    }
+    return meeting;
+  }
+
+  /**
+   * Why no recording of `m` could be taken by the claim now, or null when one can: it waits, is not set aside, the
+   * model it is fixed to (or the one chosen in Settings) runs and is downloaded here, and its file is readable with the
+   * hash it was added with, as `claim` checks it.
+   */
+  private async cannotStart(m: QueuedMeeting, chosen: string): Promise<string | null> {
+    const folder = await this.queue.meetingFolder(m.id).catch(() => null);
+    if (!folder) return 'Its folder cannot be read.';
+    let reason = 'Its model is not downloaded.';
+    for (const f of m.files.filter((x) => x.recording?.status === 'pending')) {
+      if ((setAside.get(path.join(folder, f.name)) ?? 0) > Date.now()) { reason = 'Its last result could not be saved; it waits a few minutes before it is tried again.'; continue; }
+      if (!await this.models.installedPath(await runnableModel(f.recording!.target?.model ?? chosen))) continue;
+      // The file checks the claim makes too, so a recording that would fail at once never costs the running job its
+      // work. Hashed under the lock like the claim does, and only until one recording passes.
+      const problem = await recordingProblem(folder, f);
+      if (!problem) return null;
+      reason = problem;
+    }
+    return reason;
   }
 
   /** Stops a recording's transcription: it is never published, and the recording waits for "Try again". */
@@ -454,11 +598,11 @@ export class MeetingTranscriptionService {
     }
   }
 
-  /** Picks the oldest waiting recording and marks it running for this job, under the queue lock. */
+  /** Picks the next waiting recording (see `inTranscriptionOrder`) and marks it running for this job, under the queue lock. */
   private async claim(model: string, language: string, speakers: boolean, lock: HeldLock): Promise<Job | null> {
     return this.queue.withQueue(async () => {
       const reserved = await this.queue.reserved();
-      for (const meeting of (await this.queue.readQueue()).meetings) {
+      for (const meeting of inTranscriptionOrder((await this.queue.readQueue()).meetings)) {
         if (meeting.status !== 'queued' || meeting.held || reserved.includes(meeting.id)) continue;
         const folder = await this.queue.meetingFolder(meeting.id).catch(() => null);
         if (!folder) continue;
@@ -476,9 +620,7 @@ export class MeetingTranscriptionService {
           if (!await this.models.installedPath(wanted.model)) continue;
           use = { model: wanted.model, ...languagesFor(wanted.model, wanted.language, wanted.changes) };
           wantSpeakers = candidate.recording?.target ? candidate.recording.target.speakers === true : speakers;
-          const read = await fileInside(folder, candidate.name).then(hashFile).catch((err: Error) => err);
-          const problem = read instanceof Error ? `The recording cannot be read (${read.message}); remove the meeting and add it again.`
-            : read.sha256 !== candidate.sha256 ? 'The recording changed since it was added; remove the meeting and add it again.' : null;
+          const problem = await recordingProblem(folder, candidate);
           if (!problem) { entry = candidate; break; }
           candidate.recording = nextRecording(candidate.recording, { status: 'failed', error: problem });
           await this.queue.saveMeeting(meeting);
@@ -813,7 +955,7 @@ setLiveRoomMaker(async () => {
   };
   // A check already choosing a recording either gives it back or makes it the running job: wait for it to say which.
   const deadline = Date.now() + YIELD_WAIT_MS;
-  while (claiming > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  await claimsSettled(deadline);
   const job = active;
   if (job) {
     await new MeetingTranscriptionService().yieldTo(job).catch((err: Error) => console.error(`[transcription] ${job.meeting}/${job.file}: ${err.message}`));
