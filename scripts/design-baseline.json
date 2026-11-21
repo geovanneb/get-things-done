@@ -14,8 +14,8 @@
   "numeric-radius": {
     "components/common/Toggle.tsx": 2,
     "components/context-updates/shared.tsx": 2,
-    "components/layout/NavMore.tsx": 3,
-    "components/layout/NavRail.tsx": 3,
+    "components/layout/NavMore.tsx": 2,
+    "components/layout/NavRail.tsx": 1,
     "components/layout/WorkspaceSwitcher.tsx": 1,
     "components/recording/RecordingBanner.tsx": 1,
     "components/settings/TranscriptionSettings.tsx": 1,

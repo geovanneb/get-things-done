@@ -1,5 +1,36 @@
 import type { QueuedMeeting } from '@/types';
 
+/** How recently audio must have arrived for a recording to count as still going in some page. */
+export const RECORDING_ELSEWHERE_MS = 30_000;
+
+/** How often the queue is asked again while a recording exists: nothing announces audio arriving or a page that crashed. */
+export const RECORDING_REFRESH_MS = 10_000;
+
+/**
+ * Audio arrived a moment before `now`: some page is recording it, even if not this one. A block dated after `now` (the
+ * clock was set back since) is no proof that audio is still arriving, so it counts as stale, not recent: an interrupted
+ * recording then shows as interrupted instead of hiding until the clock catches up.
+ */
+export function recordingElsewhere(m: QueuedMeeting, now = Date.now()): boolean {
+  const last = m.live?.state === 'recording' ? m.live.last_block_at : null;
+  if (!last) return false;
+  const age = now - Date.parse(last);
+  return age >= 0 && age < RECORDING_ELSEWHERE_MS;
+}
+
+/** Some meeting has a recording open (going, or interrupted and not finished yet). */
+export const hasOpenRecording = (queue: QueuedMeeting[]): boolean => queue.some((m) => m.live?.state === 'recording');
+
+/**
+ * When to ask the queue again, so a recording whose audio stopped is seen as interrupted on time: just after the
+ * newest block of the soonest recording gets too old. Never longer than RECORDING_ELSEWHERE_MS and a second, so the
+ * timer stays well within what setTimeout takes. Null when no recording counts as going at `now`.
+ */
+export function recheckIn(queue: QueuedMeeting[], now = Date.now()): number | null {
+  const left = queue.filter((m) => recordingElsewhere(m, now)).map((m) => Date.parse(m.live!.last_block_at!) + RECORDING_ELSEWHERE_MS - now);
+  return left.length ? Math.min(Math.max(0, Math.min(...left)) + 100, RECORDING_ELSEWHERE_MS + 1_000) : null;
+}
+
 /** How many meetings the queue shows before "Show more". */
 export const SHOWN_MEETINGS = 5;
 

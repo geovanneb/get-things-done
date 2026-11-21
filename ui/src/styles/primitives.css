@@ -575,6 +575,14 @@ mark.gtd-mark {
 }
 .gtd-action-tile:hover { background: var(--color-surface-hover); }
 
+/* A sidebar item's mark (PendingMark): a dot in the tone's colour with the count, or a dot in the item's corner when
+   the sidebar is collapsed. The activity mark is a quiet ring with no count: work moving on its own, nothing to do. */
+.gtd-nav-mark { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-xs); font-weight: 600; color: var(--nav-text-active); }
+.gtd-nav-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; }
+.gtd-nav-dot--activity { box-sizing: border-box; border: 1.5px solid var(--nav-text); background: transparent; }
+.gtd-nav-dot--corner { position: absolute; top: 6px; right: 8px; box-shadow: 0 0 0 2px var(--nav-bg); }
+.gtd-nav-dot--corner.gtd-nav-dot--activity { background: var(--nav-bg); }
+
 /* ---- Record detail dialog (task) -------------------------------------- */
 /* A large dialog with content beside a field sidebar. Full screen on a phone, sidebar under the content. */
 .gtd-modal__panel--detail { max-width: 1200px; height: min(92vh, 860px); }

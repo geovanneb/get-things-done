@@ -8,6 +8,7 @@ import Button from '@/components/common/Button';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { apiDelete, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
+import { recordingElsewhere } from '@/utils/meetingQueue';
 import type { MeetingDigest, QueuedMeeting, RecordingState, TranscriptionProgress } from '@/types';
 
 function minutes(seconds: number): string {
@@ -99,11 +100,6 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   );
 }
 
-/** Audio arrived a moment ago: some page is recording it, even if not this one. */
-export function recordingElsewhere(m: QueuedMeeting | MeetingDigest['queue'][number]): boolean {
-  const last = m.live?.state === 'recording' ? m.live.last_block_at : null;
-  return Boolean(last && Date.now() - Date.parse(last) < 30_000);
-}
 
 /**
  * What can be done about one queued meeting: the same actions the queue list had, one meeting at a time. Recording

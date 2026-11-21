@@ -10,7 +10,7 @@ import { useApi } from '../hooks/useApi';
 import { SituationData } from '../types';
 import Avatar from '../components/common/Avatar';
 import { useStakeholderNames } from '../hooks/useStakeholderNames';
-import { usePendingActions, TONE_COLOR, type PendingAction } from '../hooks/usePendingActions';
+import { usePendingActions, TONE_COLOR, waitsOnUser, type PendingAction } from '../hooks/usePendingActions';
 import Badge from '../components/common/Badge';
 import LoadingSpinner from '../components/common/LoadingSpinner';
 import FirstContextPrompt from '../components/situation/FirstContextPrompt';
@@ -259,7 +259,8 @@ export default function SituationView() {
   const { t } = useLanguage();
   const { data, loading } = useApi<SituationData>('/api/situation');
   const navigate = useNavigate();
-  const pending = usePendingActions();
+  // Meetings in progress are a sign in the nav, not a step for the user.
+  const pending = usePendingActions().filter(waitsOnUser);
 
   if (loading) return <LoadingSpinner text={t('situation.loadingYourSituation')} />;
   if (!data) {
