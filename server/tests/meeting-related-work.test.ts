@@ -10,6 +10,8 @@ import { relatedWork } from '../src/services/meetingRelatedWork';
 import { stringifyMarkdown } from '../src/utils/markdown';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { MeetingHistoryService } from '../src/services/meetingHistoryService';
+import { pinTaskMeetings } from '../src/services/taskMeetingPins';
+import { MentionService } from '../src/services/mentionService';
 
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-related-work-'));
@@ -148,6 +150,29 @@ test('a task made from an action item is found through its original record, and 
   assert.equal(failed.state, 'pin_failed');
   assert.deepEqual(failed.findings.map((f) => f.code), ['pin_failed'], 'its reason is not passed on as text; the task page shows it');
   assert.equal(failed.via.latest, false, 'a failed pin is not a pinned source');
+});
+
+test('a new task from an action item pins the meeting its objective mentions, and a retry returns it unchanged', async (t) => {
+  const ws = await workspace(t);
+  await finishedDigest(ws);
+  const updates = new ContextUpdateService();
+  const shown = (await updates.get('CU-2026-0001')).meeting_records[0]!;
+  // The objective the dashboard's "Create task instead" saves for an action text that holds only a plain link
+  // (ui withMeetingMention): the plain link alone is not a mention, so the @-mention is added after it.
+  const plainLink = `Review [Weekly sync](/meetings/${MEETING})`;
+  assert.deepEqual(new MentionService().meetingIds(plainLink), [], 'a plain link pins nothing');
+  const fields = { title: 'Fictional budget task', body: `${plainLink}\n\nFrom this meeting:\n\n- [@Weekly sync · 2026-10-27](/meetings/${MEETING})` };
+  const made = await updates.createActionItemTask('CU-2026-0001', 'M-01', { item: 0, revision: shown.revision, task: fields });
+  assert.equal(made.created, true);
+  assert.deepEqual(await pinTaskMeetings(made.task.id), {});
+  const task = await tasks.getTask(made.task.id);
+  const sheet = JSON.parse(await fsp.readFile(path.join(path.dirname(task.path!), 'sources', 'meetings.json'), 'utf-8')) as { selections: { meetings: { id: string; sources?: unknown[] }[]; problems: unknown[] }[] };
+  const last = sheet.selections.at(-1)!;
+  assert.deepEqual([last.meetings.map((m) => m.id), last.problems], [[MEETING], []], 'the mentioned meeting is pinned, as for any saved task');
+  assert.ok(JSON.stringify(last).includes(sha('Jane Doe: Budget next week.')), 'with the hash of its transcript');
+
+  const retry = await updates.createActionItemTask('CU-2026-0001', 'M-01', { item: 0, revision: shown.revision, task: fields });
+  assert.deepEqual([retry.created, retry.task.id], [false, made.task.id], 'one action, one task');
 });
 
 test('a task that cannot be read, or whose selection is damaged, is reported as not checked', async (t) => {

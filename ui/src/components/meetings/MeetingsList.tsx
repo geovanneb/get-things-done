@@ -17,9 +17,9 @@ import { TranscriptionBar, useTicking } from '@/components/meetings/Transcriptio
 import { apiDelete, apiPost } from '@/utils/api';
 import OpenMeetingFolder from '@/components/meetings/OpenMeetingFolder';
 import { canOpenFolder, filterFromQuery, groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
-import { canMakeDeliverable, deliverableDraft } from '@/utils/meetingDeliverable';
+import { canMakeDeliverable } from '@/utils/meetingDeliverable';
+import { CreateDeliverableButton } from '@/components/meetings/CreateDeliverableButton';
 import { clockLine } from '@/utils/transcriptReading';
-import { useAppDispatch } from '@/store';
 import type { HistoryMeeting, MeetingDigest, MeetingSearchHit } from '@/types';
 
 /** How many rows show before "Show older"; what needs the user is always shown. */
@@ -165,7 +165,6 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   const [notice, setNotice] = React.useState<{ text: string; error?: boolean } | null>(null);
   // Meetings picked for a deliverable, in the order they were picked.
   const [selected, setSelected] = React.useState<string[]>([]);
-  const dispatch = useAppDispatch();
   // A running transcription's step time and time left move on between updates.
   const now = new Date(useTicking(Boolean(job?.queue.some((m) => m.files.some((f) => f.recording?.status === 'running')))));
 
@@ -243,7 +242,7 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
             <div role="region" aria-label={t('meetingsList.selectedMeetings')} style={{ position: 'sticky', bottom: 0, zIndex: 'var(--z-sticky)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)', background: 'var(--color-surface)' }}>
               <span style={{ flex: '1 1 auto', fontSize: 'var(--text-sm)' }}>{picked.length === 1 ? t('meetingsList.1MeetingSelected') : t('meetingsList.meetingsSelected', { length: picked.length })}</span>
               <Button size="sm" variant="ghost" onClick={() => setSelected([])}>{t('updateDetail.clear')}</Button>
-              <Button size="sm" variant="primary" onClick={() => { dispatch({ type: 'OPEN_NEW_TASK_DRAFT', payload: deliverableDraft(picked) }); setSelected([]); }}>{t('meetingsList.createDeliverable')}</Button>
+              <CreateDeliverableButton rows={picked} onDone={() => setSelected([])} />
             </div>
           )}
           {hidden > 0 && <div style={{ padding: 'var(--space-3) var(--space-5)', borderTop: '1px solid var(--color-border)' }}><Button size="sm" variant="ghost" onClick={() => setAll(true)}>{rich(t, 'meetingsList.showOlder', { hidden: hidden })}</Button></div>}

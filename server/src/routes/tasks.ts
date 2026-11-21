@@ -5,7 +5,8 @@ import { TaskService } from '../services/taskService';
 import { ExecutionPackageService } from '../services/executionPackageService';
 import { TaskStatus, Priority, type Task } from '../types';
 import { MentionService } from '../services/mentionService';
-import { checkTaskMeetings, refreshTaskMeetings, syncTaskMeetings } from '../services/meetingSources';
+import { checkTaskMeetings, refreshTaskMeetings } from '../services/meetingSources';
+import { pinTaskMeetings } from '../services/taskMeetingPins';
 import { actionNotice } from '../services/meetingActionNotice';
 import { utf8FileNames } from '../utils/uploadNames';
 import { runNameCheck, setDismissed } from '../services/nameCheckService';
@@ -20,21 +21,7 @@ const mentionService = new MentionService();
 /** The meetings a task's Objective mentions now, read from the task as saved (what createTask returns has no Objective). */
 const mentionedMeetings = (id: string) => async () => mentionService.meetingIds((await taskService.getTask(id)).body);
 
-/**
- * After a task is saved: pins the meetings its Objective newly mentions (see meetingSources). A meeting that cannot be
- * pinned (gone, or its review still open) is noted in the task's sources. The save itself stands either way; when the
- * pinning failed, the response says why in `meeting_sources_error`, so the task page can offer a refresh.
- */
-async function pinMeetings(task: Task): Promise<{ meeting_sources_error?: string }> {
-  try {
-    const saved = await taskService.getTask(task.id);
-    if (saved.path) await syncTaskMeetings(saved.path, mentionedMeetings(task.id));
-    return {};
-  } catch (err) {
-    console.error(`[tasks] Could not pin the meetings of ${task.id}: ${(err as Error).message}`);
-    return { meeting_sources_error: (err as Error).message };
-  }
-}
+const pinMeetings = (task: Task) => pinTaskMeetings(task.id);
 
 // GET /api/tasks
 router.get('/', async (req: Request, res: Response) => {

@@ -9,6 +9,7 @@ import { scheduleKaizenIntake } from '../services/kaizenIntake';
 import { utf8FileNames } from '../utils/uploadNames';
 import { runNoticeData } from '../services/runNotice';
 import { WorkspaceService } from '../services/workspace';
+import { pinTaskMeetings } from '../services/taskMeetingPins';
 
 const router = Router();
 const service = new ContextUpdateService();
@@ -94,7 +95,8 @@ router.put('/:id/meeting-records', async (req: Request, res: Response) => {
 // 201 with the new task, or 200 with the task the action item already has.
 router.post('/:id/meeting-records/:recordId/tasks', async (req: Request, res: Response) => {
   const result = await service.createActionItemTask(param(req, 'id'), param(req, 'recordId'), body(req));
-  res.status(result.created ? 201 : 200).json(result);
+  // A new task pins the meetings its Objective mentions, like any task saved; the one an item already has is left as it is.
+  res.status(result.created ? 201 : 200).json(result.created ? { ...result, ...await pinTaskMeetings(result.task.id) } : result);
 });
 
 // POST /api/context-updates/:id/meeting-records/:recordId/suggestions/:index  { revision, use }  a correction's suggestion

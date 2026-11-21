@@ -81,6 +81,8 @@ export interface NewTaskDraft {
   title?: string;
   objective?: string;
   stakeholders?: Stakeholder[];
+  /** Offered for the user to tick, never added on their own: e.g. the people of the meeting a deliverable comes from. */
+  suggested_stakeholders?: Stakeholder[];
   deliverables?: Array<{ template_ref?: string; format?: string }>;
   preferred_agent?: string;
   due_date?: string;
