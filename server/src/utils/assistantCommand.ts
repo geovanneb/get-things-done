@@ -1,6 +1,16 @@
 type Program = 'claude' | 'codex' | 'copilot' | 'code';
 
 /**
+ * The arguments that start an assistant's interactive session with `prompt` already sent, as if the user typed it:
+ * Claude Code and Codex take it as their first argument, the Copilot CLI after `-i`. The session stays the user's own,
+ * in a window they see, so the tool asks for every permission as usual. VS Code takes none.
+ */
+export function promptArgs(program: Program, prompt: string | undefined): string[] {
+  if (!prompt || program === 'code') return [];
+  return program === 'copilot' ? ['-i', prompt] : [prompt];
+}
+
+/**
  * Every character PowerShell reads as a single quote: ASCII `'` and the typographic U+2018, U+2019, U+201A and U+201B
  * (`CharExtensions.IsSingleQuote`). Inside a single-quoted string any of them ends the string unless it is doubled,
  * and nothing else is special there.
@@ -17,16 +27,20 @@ export function escapeSingleQuoted(text: string): string {
 }
 
 /** The PowerShell script behind the Windows command: the path as one literal, single-quoted string. */
-export function windowsAssistantScript(workspace: string, program: Program): string {
-  return `Set-Location -LiteralPath '${escapeSingleQuoted(workspace)}' -ErrorAction Stop; ${program === 'code' ? 'code .' : program}`;
+export function windowsAssistantScript(workspace: string, program: Program, prompt?: string): string {
+  const args = promptArgs(program, prompt).map((arg) => ` '${escapeSingleQuoted(arg)}'`).join('');
+  return `Set-Location -LiteralPath '${escapeSingleQuoted(workspace)}' -ErrorAction Stop; ${program === 'code' ? 'code .' : program}${args}`;
 }
 
-/** A pasteable assistant command. Windows keeps the path out of the calling shell entirely. */
-export function assistantCommand(workspace: string, program: Program, windows = false): string {
+/**
+ * A pasteable assistant command, with `prompt` sent when it starts. Windows keeps the path and the prompt out of the
+ * calling shell entirely.
+ */
+export function assistantCommand(workspace: string, program: Program, windows = false, prompt?: string): string {
   if (windows) {
     // The launcher opens cmd, but users may paste into PowerShell instead. An ASCII-only invocation is safe in both;
     // PowerShell decodes the UTF-16LE script (code units as they are) and receives the workspace as a literal path.
-    const script = windowsAssistantScript(workspace, program);
+    const script = windowsAssistantScript(workspace, program, prompt);
     let binary = '';
     for (let i = 0; i < script.length; i++) {
       const unit = script.charCodeAt(i);
@@ -34,6 +48,7 @@ export function assistantCommand(workspace: string, program: Program, windows = 
     }
     return `powershell -NoProfile -EncodedCommand ${btoa(binary)}`;
   }
-  const quoted = "'" + workspace.replace(/'/g, "'\\''") + "'";
-  return program === 'code' ? `code ${quoted}` : `cd ${quoted} && ${program}`;
+  const quote = (text: string) => "'" + text.replace(/'/g, "'\\''") + "'";
+  const args = promptArgs(program, prompt).map((arg) => ` ${quote(arg)}`).join('');
+  return program === 'code' ? `code ${quote(workspace)}` : `cd ${quote(workspace)} && ${program}${args}`;
 }

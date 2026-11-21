@@ -34,6 +34,7 @@ import { apiDelete, apiGet, errorMessage } from '../utils/api';
 import { isMeetingPrepTask, recordPrefillFromTask } from '../utils/meetingParticipants';
 import { formatDate, formatPriorityLabel, formatStatusLabel } from '../utils/format';
 import { canSave, emptyDraft, hasEdits, isArchived, taskDraftReducer } from '../utils/taskDraft';
+import RunInAssistant from '../components/assistant/RunInAssistant';
 import { useAssistant } from '../hooks/useAssistant';
 
 /* ---- Tab type ------------------------------------------------------ */
@@ -210,8 +211,12 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
           options={(['critical', 'high', 'medium', 'low'] as Task['priority'][]).map((p) => ({ value: p, label: formatPriorityLabel(p) }))} />
         <Input label={t('newTaskModal.dueDate')} type="date" size="sm" disabled={readOnly} value={task.due_date ? task.due_date.slice(0, 10) : ''}
           onChange={(v) => onFieldChange('due_date', v || null)} />
-        <SidebarField label={t('taskDetail.assistantCommand', { label: assistant.label })}>
-          <AssistantCommandField command={assistant.request('task', task.id)} />
+        <SidebarField label={t('taskDetail.assistantCommand')}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {/* The request sent for the user, or copied to paste: the same text either way. */}
+            {!readOnly && <RunInAssistant request="task" id={task.id} size="sm" hint />}
+            <AssistantCommandField command={assistant.request('task', task.id)} />
+          </div>
         </SidebarField>
         {readOnly ? (
           <SidebarField label={t('stakeholders')}>

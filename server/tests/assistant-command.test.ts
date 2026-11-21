@@ -27,6 +27,30 @@ test(
   },
 );
 
+test(
+  'a command that starts with a request hands it over as literal arguments',
+  { skip: process.platform === 'win32' },
+  async (t) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gtd-command-'));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const workspace = path.join(root, "Fictional $(touch injected) 'quoted'");
+    await fs.mkdir(workspace);
+    for (const [program, args] of [['claude', ['/gtd-task TASK-2026-0001']], ['codex', ['Execute task TASK-2026-0001']], ['copilot', ['-i', 'Execute task TASK-2026-0001']]] as const) {
+      // The stub prints its arguments, one per line, in place of the CLI.
+      const stub = `${program}() { printf '%s\\n' "$@"; }; `;
+      const result = await exec('/bin/sh', ['-c', stub + assistantCommand(workspace, program, false, args.at(-1))], { cwd: root });
+      assert.deepEqual(result.stdout.trimEnd().split('\n'), [...args]);
+    }
+    await assert.rejects(fs.stat(path.join(root, 'injected')), { code: 'ENOENT' });
+  },
+);
+
+test('the Windows command starts with the request as one more single-quoted string', () => {
+  const script = decoded(assistantCommand("C:\\Fictional ’notes", 'copilot', true, 'Execute task TASK-2026-0001'));
+  assert.equal(script, "Set-Location -LiteralPath 'C:\\Fictional ’’notes' -ErrorAction Stop; copilot '-i' 'Execute task TASK-2026-0001'");
+  assert.equal(decoded(assistantCommand('C:\\Fictional', 'code', true, 'Execute task TASK-2026-0001')), "Set-Location -LiteralPath 'C:\\Fictional' -ErrorAction Stop; code .", 'VS Code takes no request');
+});
+
 /** The Windows command as v0.17.0 made it, which doubled only ASCII apostrophes. */
 function v017Command(workspace: string, program: string): string {
   const script = `Set-Location -LiteralPath '${workspace.replace(/'/g, "''")}' -ErrorAction Stop; ${program === 'code' ? 'code .' : program}`;

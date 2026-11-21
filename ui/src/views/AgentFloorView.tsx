@@ -356,7 +356,7 @@ export default function AgentFloorView() {
 
             {hud.agents.length === 0 ? (
               <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>
-                {rich(t, 'agentFloor.nothingIsInProgressMove', { code: <code style={{ fontFamily: 'var(--font-mono)' }}>{assistant.request('task', 'TASK-…')}</code> })}
+                {rich(t, 'agentFloor.nothingIsInProgressMove', { button: <strong>{t('runInAssistant', { label: assistant.label })}</strong> })}
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

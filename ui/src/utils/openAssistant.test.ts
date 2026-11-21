@@ -50,6 +50,25 @@ const run = async () => {
   check('no clipboard: the command is still given, not copied', !noClipboard.opened && noClipboard.reason === 'failed' && !noClipboard.copied && noClipboard.command.length > 0);
   const codex = await openAssistant({ ...base, tool: 'codex', post: broken.post });
   check('the fallback runs the workspace tool', !codex.opened && codex.reason === 'failed' && codex.command.endsWith('codex'));
+
+  // Starting with a request: the server is asked for it, and says whether it typed it.
+  const bodies: unknown[] = [];
+  const typedPost = async (_p: string, body: unknown) => { bodies.push(body); return { via: 'terminal' as const, typed: true, text: '/gtd-task TASK-2026-0001' }; };
+  const before = copies.length;
+  const started = await openAssistant({ ...base, start: { request: 'task', id: 'TASK-2026-0001' }, post: typedPost });
+  check('the request goes to the server with the tool', JSON.stringify(bodies[0]) === JSON.stringify({ tool: 'claude-code', request: { request: 'task', id: 'TASK-2026-0001' } }));
+  check('typed by the assistant: nothing is copied', started.opened && started.typed && started.text === '/gtd-task TASK-2026-0001' && copies.length === before);
+
+  const editorPost = async () => ({ via: 'editor' as const, typed: false, text: 'Execute task TASK-2026-0001' });
+  const vscode = await openAssistant({ ...base, tool: 'copilot', start: { request: 'task', id: 'TASK-2026-0001' }, post: editorPost });
+  check('VS Code cannot be handed the request: it is copied to paste', vscode.opened && !vscode.typed && vscode.copied === true && copies.at(-1) === 'Execute task TASK-2026-0001');
+
+  const olderServer = async () => ({ via: 'terminal' as const });
+  const older = await openAssistant({ ...base, tool: 'codex', start: { request: 'analyze', id: 'CU-2026-0001' }, post: olderServer });
+  check('an older server that ignores the request: the text is copied to paste', older.opened && !older.typed && older.text === 'Analyze context update CU-2026-0001' && copies.at(-1) === 'Analyze context update CU-2026-0001');
+
+  const failedStart = await openAssistant({ ...base, start: { request: 'apply', id: 'CU-2026-0001' }, post: broken.post });
+  check('a failed launch hands over a command that starts with the request', !failedStart.opened && failedStart.reason === 'failed' && failedStart.command.endsWith("claude '/gtd-context-apply CU-2026-0001'") && failedStart.copied);
 };
 
 run().then(() => {
