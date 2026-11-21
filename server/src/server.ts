@@ -17,7 +17,7 @@ import { WorkspaceService } from './services/workspace';
 import { refreshWorkspaceFiles } from './services/workspaceActivation';
 import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
-import { AgentRunnerService, runEvents, type RunFinished } from './services/agentRunner';
+import { AgentRunnerService, runEvents, shownWorkspace, type RunFinished } from './services/agentRunner';
 import { ChatService } from './services/chat/chatService';
 import { endChatStreams } from './routes/chat';
 import { transcriptionEvents } from './services/transcriptionModels';
@@ -103,6 +103,13 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     for (const client of sseClients) client.write(`event: run-finished\ndata: ${data}\n\n`);
   };
 
+  // A run was queued, started, ended or left the line: views showing what waits on the user read the updates again.
+  // Only for the workspace shown now, as the file watcher only reports that one.
+  const broadcastRunChange = (workspace: string): void => {
+    if (!shownWorkspace(workspace)) return;
+    for (const client of sseClients) client.write('event: run-change\ndata: {}\n\n');
+  };
+
   const broadcastTranscription = (): void => {
     for (const client of sseClients) client.write('event: transcription\ndata: {}\n\n');
   };
@@ -117,6 +124,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
   const close = (): Promise<void> => {
     transcriptionEvents.off('change', broadcastTranscription);
     runEvents.off('finished', broadcastRunFinished);
+    runEvents.off('change', broadcastRunChange);
     meetingTranscriptionEvents.off('change', broadcastTranscription);
     voiceprintEvents.off('change', broadcastVoiceprints);
     liveTranscriptEvents.off('change', broadcastLive);
@@ -170,6 +178,7 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
       watcherService.on('change', onKaizenNote);
       transcriptionEvents.on('change', broadcastTranscription);
       runEvents.on('finished', broadcastRunFinished);
+      runEvents.on('change', broadcastRunChange);
       meetingTranscriptionEvents.on('change', broadcastTranscription);
       voiceprintEvents.on('change', broadcastVoiceprints);
       liveTranscriptEvents.on('change', broadcastLive);

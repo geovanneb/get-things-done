@@ -1,7 +1,7 @@
 /**
  * Unit tests for the context update types and filter. Run with `npm run test:update-types --workspace=ui`.
  */
-import { waitingCounts, waitingLabel, filterUpdates, typeCounts, updateType } from './updateTypes';
+import { waitingCounts, waitingLabel, waitingOnUser, filterUpdates, typeCounts, updateType } from './updateTypes';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -45,6 +45,14 @@ check('ready for you: review and apply; to analyze: material only; runs and hist
 check('both counts in words', waitingLabel(waiting) === '2 context updates ready for you, 2 to analyze');
 check('one ready, none to analyze', waitingLabel({ ready: 1, toAnalyze: 0 }) === '1 context update ready for you');
 check('only to analyze', waitingLabel({ ready: 0, toAnalyze: 3 }) === '3 to analyze');
+
+// The sidebar dot: material to analyze waits on the user, unless the server marks it as the agent's move.
+const mixed = [{ id: 'CU-1', status: 'ready' as const }, { id: 'CU-2', status: 'ready' as const }, { id: 'CU-3', status: 'in_review' as const }, { id: 'CU-4', status: 'analyzing' as const }];
+const none = waitingOnUser(mixed);
+check('nothing waiting on the agent: every update to analyze waits on the user', none.ready === 1 && none.toAnalyze === 2);
+const agent = waitingOnUser(mixed.map((u) => (u.id === 'CU-2' ? { ...u, waits_on_agent: true as const } : u)));
+check('an update waiting on the agent is left out', agent.ready === 1 && agent.toAnalyze === 1);
+check('an update in review is counted whatever it says', waitingOnUser([{ status: 'in_review', waits_on_agent: true }]).ready === 1);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);

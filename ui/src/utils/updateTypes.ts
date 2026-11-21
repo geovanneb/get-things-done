@@ -63,7 +63,8 @@ export const HISTORY_PAGE = 20;
 /**
  * Whose move it is (#246). Ready for you: analyzed and waiting for review, or approved and waiting to be applied, so
  * the count goes up exactly when a run finishes. To analyze: material waiting for an analysis, nothing to review yet.
- * The sidebar dot, the list's groups and the counts by the title all read these, so they always agree.
+ * The list's groups and the counts by the title read these; the sidebar dot reads `waitingOnUser`, which also
+ * counts material to analyze unless the server marks it as waiting on the agent (`waits_on_agent`).
  */
 export const READY_FOR_YOU: ContextUpdateStatus[] = ['in_review', 'approved'];
 export const TO_ANALYZE: ContextUpdateStatus[] = ['ready'];
@@ -73,6 +74,16 @@ export function waitingCounts(updates: Pick<ContextUpdate, 'status'>[]): { ready
     ready: updates.filter((u) => READY_FOR_YOU.includes(u.status)).length,
     toAnalyze: updates.filter((u) => TO_ANALYZE.includes(u.status)).length,
   };
+}
+
+/**
+ * What waits on the user alone, for the sidebar dot and Waiting on you: everything ready for you, and the material
+ * waiting for an analysis that is not the agent's move. The server decides that (`waits_on_agent`): a queued or
+ * running analysis, or one the meeting digest will start by itself. A failed or stopped run leaves no mark, so its
+ * update counts again: the user has to start it.
+ */
+export function waitingOnUser(updates: Pick<ContextUpdate, 'status' | 'waits_on_agent'>[]): { ready: number; toAnalyze: number } {
+  return waitingCounts(updates.filter((u) => !(TO_ANALYZE.includes(u.status) && u.waits_on_agent)));
 }
 
 /** Both counts in words, for a tooltip or an accessible name: status never rests on colour alone. */

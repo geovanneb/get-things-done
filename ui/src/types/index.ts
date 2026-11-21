@@ -683,6 +683,8 @@ export interface ContextUpdate {
   correction?: { meeting: string; root: { update_id: string; record_id: string }; base: RecordVersion } | null;
   /** For a follow-up of a correction: the correction it follows. Written by the dashboard. */
   follows?: string | null;
+  /** List only, on a `ready` update: not the user's move, as a run covers it or the meeting digest will start one by itself. */
+  waits_on_agent?: true;
   /** Detail of a follow-up not done yet: why its material no longer describes the meeting's current record, or null. */
   follow_up_problem?: string | null;
   /** Detail of a correction only: the version corrected, whether it is still current, and what changed in it. */

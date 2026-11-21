@@ -5,6 +5,7 @@ import { sendFile } from '../utils/files';
 import { ContextUpdateService } from '../services/contextUpdateService';
 import { startFollowUp } from '../services/meetingCorrectionService';
 import { AgentRunnerService } from '../services/agentRunner';
+import { withWaitsOnAgent } from '../services/meetingDigestService';
 import { scheduleKaizenIntake } from '../services/kaizenIntake';
 import { utf8FileNames } from '../utils/uploadNames';
 import { runNoticeData } from '../services/runNotice';
@@ -23,7 +24,8 @@ router.get('/', async (_req: Request, res: Response) => {
   // A Kaizen note the watcher missed is opened before the list is read, so the user never waits for the next tick.
   // Without notes this is one folder read.
   await scheduleKaizenIntake();
-  res.json(await service.list());
+  // A ready update a run covers, or the digest will start by itself, carries `waits_on_agent`: not the user's move.
+  res.json(await withWaitsOnAgent(await service.list(), runner));
 });
 
 // POST /api/context-updates  { title?, source_date?, notes?, text? }
