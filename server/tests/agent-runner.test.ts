@@ -6,8 +6,9 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { AsyncResource } from 'node:async_hooks';
 import { withWorkspacePath } from '../src/services/workspace';
-import { AgentRunnerService, ClaudeCodeAdapter, childEnv, claudeProjectKey, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
+import { AgentRunnerService, ClaudeCodeAdapter, shownWorkspace, childEnv, claudeProjectKey, explainOutcome, runEvents, workspaceTrusted, type AgentRunnerAdapter, type RunFinished, type RunOutcome, type StopReason } from '../src/services/agentRunner';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
+import { withWaitsOnAgent } from '../src/services/meetingDigestService';
 import { stepsFromMessage, type RunStep } from '../src/services/runSteps';
 import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
 
@@ -345,6 +346,91 @@ test('a second analysis waits in line instead of being refused, and the next one
   fake.runs[4]!.done({ exit_code: 1, result: null, stderr: '' });
   await ended();
   assert.deepEqual(AgentRunnerService.queued(), []);
+});
+
+test('the updates list marks a ready update a live run covers as waiting on the agent; a failed or removed run does not', async (t) => {
+  const ws = await workspace(t);
+  for (const n of [2, 3, 4, 5]) await addUpdate(ws, `CU-2026-000${n}`);
+  await addUpdate(ws, 'CU-2026-0006', 'in_review');
+  const fake = lineAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+  const changes: string[] = [];
+  const onChange = (workspace: string) => changes.push(workspace);
+  runEvents.on('change', onChange);
+  t.after(() => { runEvents.off('change', onChange); });
+  const marked = async () => (await withWaitsOnAgent(await new ContextUpdateService().list(), service)).filter((u) => u.waits_on_agent).map((u) => u.id).sort();
+
+  await service.startAnalysis('CU-2026-0001');
+  await service.startAnalysis('CU-2026-0002');
+  assert.ok(changes.length >= 2 && changes.every((w) => w === ws), 'starting and queueing each say a run changed, in their workspace');
+  // Another dashboard's run, or one from before a restart: a saved "running" record counts only while its process lives.
+  const record = (pid: number) => JSON.stringify({ update_id: 'x', command: 'analyze', runner: 'fake', status: 'running', started_at: new Date().toISOString(), ended_at: null, message: '', refused: 0, turns: null, usage_usd: null, pid });
+  await fsp.mkdir(path.join(ws, '.situation-board', 'runs'), { recursive: true });
+  await fsp.writeFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0003.json'), record(process.pid));
+  await fsp.writeFile(path.join(ws, '.situation-board', 'runs', 'CU-2026-0004.json'), record(2 ** 22 + 12345));
+  assert.deepEqual(await marked(), ['CU-2026-0001', 'CU-2026-0002', 'CU-2026-0003'], 'running, queued, and a live saved run; not a dead one, a new one or one in review');
+
+  const before = changes.length;
+  await service.cancel('CU-2026-0002');
+  assert.equal(changes.length, before + 1, 'leaving the line says a run changed: a queued run is never saved');
+  fake.runs[0]!.done({ exit_code: 1, result: null, stderr: '' });
+  await ended();
+  assert.ok(changes.length >= before + 2, 'the end of a run says it changed');
+  assert.deepEqual(await marked(), ['CU-2026-0003'], 'a failed run and a removed one leave the update to the user');
+});
+
+test('a run change is told only to the pages of the workspace it ran in', async (t) => {
+  const ws = await workspace(t);
+  assert.equal(shownWorkspace(ws), true);
+  assert.equal(shownWorkspace(path.join(ws, 'another')), false, 'a run in another workspace is not announced here');
+});
+
+test('the digest waits on the agent only while the scheduler would start it: on, waiting, and never run', async (t) => {
+  const ws = await workspace(t);
+  const digestUpdate = async (id: string) => {
+    const dir = path.join(ws, 'context-updates', id);
+    await fsp.mkdir(path.join(dir, 'materials'), { recursive: true });
+    await fsp.writeFile(path.join(dir, 'update.md'), stringifyMarkdown('', { id, status: 'ready', origin: 'meetings', kind: 'daily-digest', title: 'Fictional digest', source_date: '2026-10-28', created_at: '2026-10-28T00:00:00.000Z' }));
+  };
+  await digestUpdate('CU-2026-0002');
+  const routines = path.join(ws, '.situation-board', 'routines');
+  await fsp.mkdir(routines, { recursive: true });
+  const digest = async (settings: { enabled: boolean; auto_analyze: boolean }, status: string) => {
+    await fsp.writeFile(path.join(routines, 'meeting-digest.json'), JSON.stringify(settings));
+    await fsp.writeFile(path.join(routines, 'meeting-digest-state.json'), JSON.stringify({ analysis: { update_id: 'CU-2026-0002', status, message: '', at: '2026-10-28T00:00:00.000Z' } }));
+  };
+  const fake = lineAdapter();
+  const service = new AgentRunnerService(fake.adapter);
+  const waits = async () => (await withWaitsOnAgent(await new ContextUpdateService().list(), service)).find((u) => u.id === 'CU-2026-0002')!.waits_on_agent === true;
+
+  await digest({ enabled: true, auto_analyze: true }, 'waiting');
+  assert.equal(await waits(), true, 'on, waiting for another run, never run: the digest starts it by itself');
+  await digest({ enabled: false, auto_analyze: true }, 'waiting');
+  assert.equal(await waits(), false, 'paused: nothing starts it');
+  await digest({ enabled: true, auto_analyze: false }, 'waiting');
+  assert.equal(await waits(), false, 'Analyze automatically off');
+  await digest({ enabled: true, auto_analyze: true }, 'started');
+  assert.equal(await waits(), false, 'a "started" note with no live run (it failed): the user\'s move');
+
+  // The note says waiting, but the user started the digest by hand meanwhile, and that run failed: never retried.
+  await digest({ enabled: true, auto_analyze: true }, 'waiting');
+  await service.startAnalysis('CU-2026-0002');
+  assert.equal(await waits(), true, 'running by hand');
+  fake.runs[0]!.done({ exit_code: 1, result: null, stderr: '' });
+  await ended();
+  assert.equal(await waits(), false, 'a failed run while the note says waiting: the scheduler skips it, so it is counted');
+
+  // Removed from the queue by hand while the note says waiting: the same.
+  await service.startAnalysis('CU-2026-0001');
+  await digestUpdate('CU-2026-0003');
+  await digest({ enabled: true, auto_analyze: true }, 'waiting');
+  await fsp.writeFile(path.join(routines, 'meeting-digest-state.json'), JSON.stringify({ analysis: { update_id: 'CU-2026-0003', status: 'waiting', message: '', at: '2026-10-28T00:00:00.000Z' } }));
+  await service.startAnalysis('CU-2026-0003');
+  await service.cancel('CU-2026-0003');
+  const list = await withWaitsOnAgent(await new ContextUpdateService().list(), service);
+  assert.equal(list.find((u) => u.id === 'CU-2026-0003')!.waits_on_agent, undefined, 'removed from the queue while the note says waiting: counted');
+  fake.runs[1]!.done({ exit_code: 1, result: null, stderr: '' });
+  await ended();
 });
 
 test('a queued analysis starts only in the workspace open now, pinned to its own, whatever request started the run before (#344)', async (t) => {
