@@ -46,6 +46,43 @@ export interface QueueFacts {
   recordingNow: (m: QueuedMeeting) => boolean;
   /** Now, in ms, for how long a transcription step has run and the time left; the current time when absent. */
   now?: number;
+  /** Meetings moved to the front for transcription, next first (`transcribeLine`); worked out from the queue when absent. */
+  line?: string[];
+}
+
+const waitsForTurn = (m: QueuedMeeting) => m.status === 'queued' && !m.held && !m.in_digest && !m.live
+  && m.files.some((f) => f.recording?.status === 'pending') && !m.files.some((f) => f.recording?.status === 'running');
+
+/**
+ * The meetings moved to the front with "Transcribe next" that still wait, in the order the server takes them: the latest
+ * choice first. One being transcribed is no longer in line.
+ */
+export function transcribeLine(queue: QueuedMeeting[]): string[] {
+  return queue.filter((m) => m.transcribe_first_at && waitsForTurn(m))
+    .sort((a, b) => b.transcribe_first_at!.localeCompare(a.transcribe_first_at!) || a.id.localeCompare(b.id))
+    .map((m) => m.id);
+}
+
+/** The transcription running now, as the page can tell: a queued recording (any dashboard), or this dashboard's job. */
+/** `generation` names the job, so a confirmation left open never stops another one that started meanwhile. */
+export interface RunningTranscription { title: string | null; percent: number | null; generation: string }
+
+/** What can be done about a meeting's place in line: Transcribe next, Transcribe now (with what it stops), Move back. */
+export function transcribeChoices(m: QueuedMeeting, queue: QueuedMeeting[], progress: TranscriptionProgress | null):
+  { next: boolean; now: RunningTranscription | null; moveBack: boolean } {
+  if (!waitsForTurn(m)) return { next: false, now: null, moveBack: false };
+  const percent = (p: TranscriptionProgress | null) => (p && p.total > 0 ? Math.min(99, Math.floor((p.done / p.total) * 100)) : null);
+  let now: RunningTranscription | null = null;
+  for (const q of queue) {
+    const f = q.id === m.id ? undefined : q.files.find((x) => x.recording?.status === 'running' && x.recording.generation);
+    if (!f) continue;
+    const mine = progress?.meeting === q.id && progress.file === f.name ? progress : null;
+    now = { title: q.title, percent: percent(mine), generation: f.recording!.generation! };
+    break;
+  }
+  // A Transcribe again of a reviewed meeting runs here: it gives way too.
+  if (!now && progress?.generation && !queue.some((q) => q.id === progress.meeting)) now = { title: null, percent: percent(progress), generation: progress.generation };
+  return { next: transcribeLine(queue)[0] !== m.id, now, moveBack: Boolean(m.transcribe_first_at) };
 }
 
 const people = (m: QueuedMeeting) => (m.participants ?? []).map((p) => p.name);
@@ -73,7 +110,11 @@ export function queueProcessing(m: QueuedMeeting, facts: QueueFacts): RowStatus 
     const view = transcriptionView(facts.progress?.meeting === m.id && facts.progress.file === running.name ? facts.progress : null, facts.now ?? Date.now());
     return { label: view.badge, tone: 'info', ...(view.detail ? { detail: view.detail } : {}), progress: { percent: view.percent, spoken: view.spoken } };
   }
-  if (m.files.some((f) => f.recording?.status === 'pending')) return { label: tr('meetingHistory.waitingForTranscription'), tone: 'info' };
+  if (m.files.some((f) => f.recording?.status === 'pending')) {
+    const place = facts.line?.indexOf(m.id) ?? -1;
+    const label = place === 0 ? tr('meetingHistory.nextInLine') : place > 0 ? tr('meetingHistory.inLine', { n: place + 1 }) : tr('meetingHistory.waitingForTranscription');
+    return { label, tone: 'info' };
+  }
   return { label: tr('meetingHistory.waitingForDigest'), tone: 'accent', ...(facts.nextDigest ? { detail: tr('meetingHistory.nextDigest', { nextDigest: facts.nextDigest }) } : {}) };
 }
 
@@ -101,9 +142,10 @@ export function historyProcessing(h: HistoryMeeting): RowStatus {
 /** Both lists as one, newest first. A meeting being handed to a digest is in both for a moment: the queue shows it. */
 export function meetingRows(queue: QueuedMeeting[], history: HistoryMeeting[], facts: QueueFacts): MeetingRow[] {
   const queued = new Set(queue.map((m) => m.id));
+  const inLine = facts.line ? facts : { ...facts, line: transcribeLine(queue) };
   const rows: MeetingRow[] = [
     ...queue.map((m): MeetingRow => {
-      const processing = queueProcessing(m, facts);
+      const processing = queueProcessing(m, inLine);
       return {
         id: m.id, href: `/meetings/${m.id}`, title: m.title, date: m.meeting_date, time: meetingPeriod(m), people: people(m),
         source: m.files.some((f) => f.recording) ? tr('meetingHistory.recorded') : tr('meetingHistory.uploadedFiles'),

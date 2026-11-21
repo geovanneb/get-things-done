@@ -369,6 +369,11 @@ export interface QueuedMeeting {
   live?: LiveRecording;
   /** Who was expected, entered before or when the meeting was added. */
   participants?: MeetingParticipant[];
+  /**
+   * When "Transcribe next" was chosen for it: its recordings go before the others, the latest choice first. Kept only
+   * while a recording of it waits or runs; written under the queue lock like the rest of the manifest.
+   */
+  transcribe_first_at?: string;
 }
 
 export interface DigestRunResult {
@@ -916,6 +921,7 @@ export class MeetingDigestService {
     }
     const live = parseLive(data['live_recording']);
     const participants = parseParticipants(data['participants']);
+    const first = parseInstant(data['transcribe_first_at']);
     return {
       id: path.basename(dir),
       title: str(data['title']) || 'Meeting',
@@ -929,6 +935,7 @@ export class MeetingDigestService {
       in_digest: false,
       ...(live ? { live } : {}),
       ...(participants.length ? { participants } : {}),
+      ...(first ? { transcribe_first_at: first } : {}),
     };
   }
 
@@ -946,6 +953,8 @@ export class MeetingDigestService {
       ...(m.held ? { held: m.held } : {}),
       ...(m.live ? { live_recording: m.live } : {}),
       ...(m.participants?.length ? { participants: m.participants } : {}),
+      // Its turn is over once no recording of it waits or runs any more (done, partial, failed, stopped).
+      ...(m.transcribe_first_at && waitsForTurn(m) ? { transcribe_first_at: m.transcribe_first_at } : {}),
       files: m.files,
     };
     const body = 'A meeting waiting for the meeting digest. Raw material from a meeting: never a source for tasks.';
@@ -1622,6 +1631,19 @@ export class MeetingDigestService {
 /** A recording whose transcript is done, or partial and accepted as it is. */
 export function transcribed(recording: RecordingState): boolean {
   return recording.status === 'done' || (recording.status === 'partial' && recording.accepted === true);
+}
+
+/** A recording of it waits in line for transcription, or is being transcribed. */
+export function waitsForTurn(meeting: QueuedMeeting): boolean {
+  return meeting.files.some((f) => f.recording?.status === 'pending' || f.recording?.status === 'running');
+}
+
+/** A moment as the manifest holds it: a full UTC timestamp, or nothing. Anything else is ignored, never guessed at. */
+function parseInstant(value: unknown): string | undefined {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value)) return undefined;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) || at.toISOString().slice(0, 19) !== value.slice(0, 19) ? undefined : at.toISOString();
 }
 
 /** A recording without a usable transcript yet: the meeting waits for it. */

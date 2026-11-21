@@ -890,6 +890,14 @@ model is downloaded; the Meetings page shows each one's progress.
   When another dashboard on the workspace (a browser tab next to the desktop app, say)
   runs the job, this one shows the same progress, marked **in another dashboard**. The
   meeting's Files tab and **Transcribe again** use the same wording.
+- **Transcribe next**, in a waiting meeting's **⋯** menu on the Meetings list or in its
+  dialog, moves it to the front of the line; the recording being transcribed finishes
+  first. The meeting moved last goes first, and the row shows **Next** or **#2 in line**.
+  **Move back** undoes it. The order is kept in the workspace, for every dashboard on it.
+- **Transcribe now**, shown while another recording is being transcribed, stops that one
+  and starts this meeting. It asks first and says how far the running one got: that
+  recording goes back in line right after this meeting and starts again from the
+  beginning. Nothing of it is kept.
 
 - The transcript becomes a file of the meeting, `<recording>.transcript.md`: each part
   with speech, with its start and end time. Optional speaker detection labels the voices; you can name them in the dashboard.

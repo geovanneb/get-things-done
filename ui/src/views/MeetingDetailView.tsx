@@ -21,13 +21,14 @@ import { SpeakerNaming } from '@/components/meetings/SpeakerNaming';
 import { TranscribeAgainDialog, TranscriptionNotice, VersionsSection } from '@/components/meetings/MeetingVersions';
 import { QueuedMeetingActions } from '@/components/meetings/QueuedMeetingActions';
 import { recordingElsewhere } from '@/utils/meetingQueue';
+import { TranscribeOrderMenu } from '@/components/meetings/TranscribeOrder';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { useApi } from '@/hooks/useApi';
 import { useNotify } from '@/hooks/useNotify';
 import { useAppDispatch, useDataVersion } from '@/store';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
-import { historyProcessing, historyReview, queueProcessing, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
+import { historyProcessing, historyReview, queueProcessing, transcribeLine, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { joinNames } from '@/utils/meetingParticipants';
 import { meetingPeriod } from '@/utils/meetingQueue';
@@ -174,7 +175,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   const recorder = useRecorder();
   const [tab, setTab] = useState<MeetingTab>('transcript');
   const processing = queueProcessing(m, {
-    installed: job.installed_models ?? null, runnable: job.runnable_models ?? {}, progress: job.transcription ?? null,
+    installed: job.installed_models ?? null, runnable: job.runnable_models ?? {}, progress: job.transcription ?? null, line: transcribeLine(job.queue),
     nextDigest: job.next_run_at && !job.open_digest ? new Date(job.next_run_at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : null,
     recordingNow: (q) => (recorder.active && recorder.meetingId === q.id) || recordingElsewhere(q),
   });
@@ -261,6 +262,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
     <>
       <Header id={m.id} title={m.title} statuses={[processing]} line={`${longDate(m.meeting_date)}${period ? ` · ${period}` : ''}${m.participants?.length ? ` · ${joinNames(m.participants)}` : ''}`}
         actions={<>
+          <TranscribeOrderMenu meeting={m} job={job} onChanged={onChanged} />
           <OpenMeetingFolder id={m.id} />
           <IconButton label={t('meetingDetail.closeMeeting')} icon={icons.close} onClick={onClose} />
         </>} />
