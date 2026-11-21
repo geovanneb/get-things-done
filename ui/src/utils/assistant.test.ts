@@ -23,9 +23,9 @@ check('Codex and Copilot get plain words', requestText('codex', 'task', 'TASK-20
 
 check('one assistant: nothing else to show', same(otherRequests(['codex'], 'task', 'TASK-2026-0001'), []));
 check('the others are grouped by the text they share',
-  same(otherRequests(['claude-code', 'codex', 'copilot'], 'analyze', 'CU-2026-0001'), [{ labels: 'Codex / Copilot', text: 'Analyze context update CU-2026-0001' }]));
+  same(otherRequests(['claude-code', 'codex', 'copilot'], 'analyze', 'CU-2026-0001'), [{ labels: 'Codex / Copilot', text: 'Analyze context update CU-2026-0001', tools: ['codex', 'copilot'] }]));
 check('an other with the same text as the first is left out', same(otherRequests(['codex', 'copilot'], 'apply', 'CU-2026-0001'), []));
-check('Claude Code as the other one', same(otherRequests(['codex', 'claude-code'], 'apply', 'CU-2026-0001'), [{ labels: 'Claude Code', text: '/gtd-context-apply CU-2026-0001' }]));
+check('Claude Code as the other one', same(otherRequests(['codex', 'claude-code'], 'apply', 'CU-2026-0001'), [{ labels: 'Claude Code', text: '/gtd-context-apply CU-2026-0001', tools: ['claude-code'] }]));
 
 if (failures) { console.error(`${failures} failed`); process.exit(1); }
 console.log('ALL PASS');

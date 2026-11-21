@@ -1,4 +1,5 @@
-import { assistantCommand } from '../utils/assistantCommand';
+import { assistantCommand, promptArgs } from '../utils/assistantCommand';
+import { parseAssistantRequest, requestText } from '../utils/assistantRequest';
 import * as path from 'path';
 import { beginStart } from '../services/appActivity';
 import { execFile } from 'child_process';
@@ -73,21 +74,21 @@ export function assistantLaunch(tool: AiTool, find: (command: string) => string 
  * Node escapes quotes in a way cmd does not read, so a `&` or `%` in the path would run as cmd syntax.
  * `start` opens the new window in the current directory.
  */
-export function windowsTerminalLaunch(workspacePath: string, program: string): {
+export function windowsTerminalLaunch(workspacePath: string, program: string, args: readonly string[] = []): {
   file: string;
   args: string[];
   options: { cwd: string };
 } {
-  return { file: 'cmd', args: ['/c', 'start', '', 'cmd', '/k', program], options: { cwd: workspacePath } };
+  return { file: 'cmd', args: ['/c', 'start', '', 'cmd', '/k', program, ...args], options: { cwd: workspacePath } };
 }
 
 /**
- * Launch an assistant's program in a new terminal window at the workspace directory.
- * The command is built entirely from server-side state: nothing from the
- * request body reaches the shell.
+ * Launch an assistant's program in a new terminal window at the workspace directory, with `args` (a prompt to send
+ * when it starts). The command is built from server-side state and a checked request (fixed words and an ID of
+ * letters, digits and dashes, see parseAssistantRequest): no free text from the request body reaches the shell.
  */
-async function openInTerminal(workspacePath: string, program: string): Promise<void> {
-  const shellCommand = `cd ${shellQuote(workspacePath)} && ${program}`;
+async function openInTerminal(workspacePath: string, program: string, args: readonly string[] = []): Promise<void> {
+  const shellCommand = `cd ${shellQuote(workspacePath)} && ${[program, ...args.map(shellQuote)].join(' ')}`;
 
   if (process.platform === 'darwin') {
     const script = [
@@ -101,7 +102,7 @@ async function openInTerminal(workspacePath: string, program: string): Promise<v
   }
 
   if (process.platform === 'win32') {
-    const launch = windowsTerminalLaunch(workspacePath, program);
+    const launch = windowsTerminalLaunch(workspacePath, program, args);
     await execFileAsync(launch.file, launch.args, launch.options);
     return;
   }
@@ -417,23 +418,36 @@ router.post('/open', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/workspace/open-assistant  { tool?: "claude-code" | "codex" | "copilot" }
-// Opens the workspace's assistant: the first one the workspace has when no tool is named.
+// POST /api/workspace/open-assistant  { tool?: "claude-code" | "codex" | "copilot", request?: { request, id } }
+// Opens the workspace's assistant: the first one the workspace has when no tool is named. With `request` (run a task,
+// analyze or apply a context update), the assistant starts with that request already sent, in a window the user
+// sees: the same text they would paste, under the tool's own permission prompts. VS Code cannot be handed a prompt,
+// so there `typed` is false and the dashboard copies the text for the user to paste.
 router.post('/open-assistant', async (req: Request, res: Response) => {
   const workspacePath = workspaceService.getWorkspacePath();
-  const requested = (req.body as Record<string, unknown> | undefined)?.['tool'];
+  const body = req.body as Record<string, unknown> | undefined;
+  const requested = body?.['tool'];
   if (requested !== undefined && !ASSISTANTS.includes(requested as AiTool)) {
     res.status(400).json({ error: `tool must be one of: ${ASSISTANTS.join(', ')}.` });
     return;
   }
+  const asked = body?.['request'];
+  const parsed = asked === undefined ? null : parseAssistantRequest(asked);
+  if (asked !== undefined && !parsed) {
+    res.status(400).json({ error: 'request must be { request: "task" | "analyze" | "apply", id } with a TASK-… or CU-… ID.' });
+    return;
+  }
   const tool = (requested as AiTool | undefined) ?? workspaceAssistants(workspacePath)[0];
   const launch = assistantLaunch(tool);
-  const command = assistantCommand(workspacePath, launch.via === 'terminal' ? launch.program : 'code', process.platform === 'win32');
+  const text = parsed ? requestText(tool, parsed.request, parsed.id) : undefined;
+  const program = launch.via === 'terminal' ? launch.program : 'code';
+  const command = assistantCommand(workspacePath, program, process.platform === 'win32', text);
+  const typed = Boolean(text) && launch.via === 'terminal';
 
   try {
-    if (launch.via === 'terminal') await openInTerminal(workspacePath, launch.program);
+    if (launch.via === 'terminal') await openInTerminal(workspacePath, launch.program, promptArgs(launch.program, text));
     else await openInEditor(workspacePath, launch.program);
-    res.json({ opened: true, tool, via: launch.via, command });
+    res.json({ opened: true, tool, via: launch.via, command, typed, ...(text ? { text } : {}) });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     res.status(500).json({ error: 'Failed to open the assistant', message, tool, via: launch.via, command });

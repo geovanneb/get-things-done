@@ -385,6 +385,18 @@ try {
     dropped.board_column === 'col-smoke1' && /board_column: col-smoke1/.test(fs.readFileSync(path.join(ws, 'tasks', 'active', task.id, 'task.md'), 'utf8')) &&
     badDrop.status === 400 && !droppedValidation.some((r) => r.level === 'error' && JSON.stringify(r).includes('board_column')),
     JSON.stringify(droppedValidation.filter((r) => r.level === 'error')).slice(0, 300));
+  // "Run in Claude Code" on a task: a request the assistant would start with is refused before anything opens unless
+  // it is a known kind with an ID of the shape it takes (no free text reaches a command line).
+  const openWith = (request) => fetch(`${base}/api/workspace/open-assistant`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tool: 'claude-code', request }) });
+  const refusedStarts = await Promise.all([
+    openWith({ request: 'task', id: `${task.id}; touch injected` }),
+    openWith({ request: 'task', id: 'CU-2026-0001' }),
+    openWith({ request: 'deploy', id: task.id }),
+    openWith('task'),
+  ]);
+  check('opening an assistant with a request refuses anything but a known kind and a well-formed ID',
+    refusedStarts.every((r) => r.status === 400) && !fs.existsSync(path.join(ws, 'injected')),
+    refusedStarts.map((r) => r.status).join(','));
   const boardReset = await fetch(`${base}/api/workspace/board`, { method: 'DELETE' });
   check('resetting the board removes the saved columns',
     boardReset.ok && !('board' in JSON.parse(fs.readFileSync(path.join(ws, '.situation-board', 'ui-preferences.json'), 'utf-8'))));

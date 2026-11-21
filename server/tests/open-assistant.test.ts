@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { assistantLaunch, workspaceAssistants } from '../src/routes/workspace';
+import { assistantLaunch, windowsTerminalLaunch, workspaceAssistants } from '../src/routes/workspace';
+import { promptArgs } from '../src/utils/assistantCommand';
+import { parseAssistantRequest, requestText } from '../src/utils/assistantRequest';
 
 const none = () => null;
 
@@ -29,4 +31,30 @@ test('the workspace assistants come from its instruction files, Claude Code when
   await fsp.writeFile(path.join(dir, '.github', 'copilot-instructions.md'), '# Fictional\n');
   await fsp.writeFile(path.join(dir, 'CLAUDE.md'), '# Fictional\n');
   assert.deepEqual(workspaceAssistants(dir), ['claude-code', 'codex', 'copilot']);
+});
+
+test('a request to start with is checked: a known kind and an ID of the shape it takes, nothing else', () => {
+  assert.deepEqual(parseAssistantRequest({ request: 'task', id: 'TASK-2026-0001' }), { request: 'task', id: 'TASK-2026-0001' });
+  assert.deepEqual(parseAssistantRequest({ request: 'analyze', id: 'CU-2026-0001' }), { request: 'analyze', id: 'CU-2026-0001' });
+  assert.deepEqual(parseAssistantRequest({ request: 'apply', id: 'CU-2026-0001' }), { request: 'apply', id: 'CU-2026-0001' });
+  for (const bad of [
+    null, 'task', [], {}, { request: 'task' }, { request: 'deploy', id: 'TASK-2026-0001' },
+    { request: 'task', id: 'CU-2026-0001' }, { request: 'analyze', id: 'TASK-2026-0001' },
+    { request: 'task', id: 'TASK-2026-0001; rm -rf ~' }, { request: 'task', id: "TASK-2026-0001' && echo x '" },
+    { request: 'task', id: 'TASK-2026-0001\n' }, { request: 'task', id: 42 },
+  ]) assert.equal(parseAssistantRequest(bad), null, JSON.stringify(bad));
+});
+
+test('each assistant starts with the request sent: Claude Code and Codex as their prompt, Copilot after -i, VS Code never', () => {
+  assert.deepEqual(promptArgs('claude', requestText('claude-code', 'task', 'TASK-2026-0001')), ['/gtd-task TASK-2026-0001']);
+  assert.deepEqual(promptArgs('codex', requestText('codex', 'analyze', 'CU-2026-0001')), ['Analyze context update CU-2026-0001']);
+  assert.deepEqual(promptArgs('copilot', requestText('copilot', 'apply', 'CU-2026-0001')), ['-i', 'Apply context update CU-2026-0001']);
+  assert.deepEqual(promptArgs('code', 'Execute task TASK-2026-0001'), []);
+  assert.deepEqual(promptArgs('claude', undefined), [], 'without a request it opens as before');
+});
+
+test('on Windows the request goes to the new window as its own arguments, the path as the working directory', () => {
+  const launch = windowsTerminalLaunch('C:\\Fictional & 100%', 'copilot', ['-i', 'Execute task TASK-2026-0001']);
+  assert.deepEqual(launch.args, ['/c', 'start', '', 'cmd', '/k', 'copilot', '-i', 'Execute task TASK-2026-0001']);
+  assert.equal(launch.options.cwd, 'C:\\Fictional & 100%');
 });

@@ -3,6 +3,9 @@ import { useLanguage } from '@/i18n/LanguageProvider';
 import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
 import { useAssistant } from '@/hooks/useAssistant';
+import RunInAssistant from '@/components/assistant/RunInAssistant';
+import type { AssistantRequest } from '@/utils/assistant';
+import type { AiToolId } from '@/utils/setup';
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link, useNavigate } from 'react-router-dom';
@@ -630,15 +633,20 @@ export default function UpdateDetail({ id, onBack, workspace }: { id: string; on
 }
 
 /** The same request for the workspace's other assistants, one line each: Codex and Copilot share theirs. */
-function OtherAssistants({ others }: { others: { labels: string; text: string }[] }) {
+function OtherAssistants({ others, request, id, workspace }: { others: { labels: string; text: string; tools: AiToolId[] }[]; request: AssistantRequest; id: string; workspace?: string }) {
   const { t } = useLanguage();
   if (!others.length) return null;
   return (
     <>
-      {others.map(({ labels, text }) => (
-        <p key={text} style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
-          {rich(t, 'updateDetail.inOtherAssistants', { labels, code: <code style={{ fontFamily: 'var(--font-mono)' }}>{text}</code> })}
-        </p>
+      {others.map(({ labels, text, tools }) => (
+        <div key={text} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+          <p style={{ margin: 0, flex: '1 1 240px', minWidth: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+            {rich(t, 'updateDetail.inOtherAssistants', { labels, code: <code style={{ fontFamily: 'var(--font-mono)' }}>{text}</code> })}
+          </p>
+          {tools.map((tool) => (
+            <RunInAssistant key={tool} request={request} id={id} tool={tool} workspace={workspace} variant="ghost" size="sm" />
+          ))}
+        </div>
       ))}
     </>
   );
@@ -968,7 +976,10 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
           : meta.next}</div>
         {/* A run going by hand (no dashboard run): its command stays at hand to run again. */}
         {u.status === 'analyzing' && !running && !u.follow_up_problem && (
-          <CommandBox command={assistant.request('analyze', u.id)} label={t('updateDetail.runInAssistantToAnalyze', { label: assistant.label })} onCopied={() => setCopiedFor(u.status)} />
+          <>
+            <CommandBox command={assistant.request('analyze', u.id)} label={t('updateDetail.runInAssistantToAnalyze', { label: assistant.label })} onCopied={() => setCopiedFor(u.status)} />
+            <RunInAssistant request="analyze" id={u.id} workspace={api.workspace} size="sm" />
+          </>
         )}
         {/* One primary action (#246): the dashboard runs it, the command one click away under "Or run it yourself";
             when the dashboard cannot run it, copying the command is the main action, with the reason. */}
@@ -976,24 +987,31 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
           <AnalysisRun ref={runRef} startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} onAction={setNextAction} onStartFailed={showNextBox}
             {...(u.status === 'ready' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
               <>
-                <CommandBox command={assistant.request('analyze', u.id)} emphasis={emphasis}
-                  label={emphasis ? t('updateDetail.yourTurnCopyThisAnd', { label: assistant.label }) : t('updateDetail.copyThisAndRunIt', { label: assistant.label })}
+                {/* When the dashboard cannot run it, opening the assistant with the request sent is the main action. */}
+                <RunInAssistant request="analyze" id={u.id} workspace={api.workspace} variant={emphasis ? 'primary' : 'secondary'} hint={emphasis} nextAction={emphasis} />
+                <CommandBox command={assistant.request('analyze', u.id)}
+                  label={t('updateDetail.copyThisAndRunIt', { label: assistant.label })}
                   onCopied={() => setCopiedFor(u.status)} />
-                <OtherAssistants others={assistant.others('analyze', u.id)} />
+                <OtherAssistants others={assistant.others('analyze', u.id)} request="analyze" id={u.id} workspace={api.workspace} />
               </>
             ) } : {})} />
         )}
         {u.status === 'applying' && !running && !u.follow_up_problem && (
-          <CommandBox command={assistant.request('apply', u.id)} label={t('updateDetail.runInAssistantToApply', { label: assistant.label })} onCopied={() => setCopiedFor(u.status)} />
+          <>
+            <CommandBox command={assistant.request('apply', u.id)} label={t('updateDetail.runInAssistantToApply', { label: assistant.label })} onCopied={() => setCopiedFor(u.status)} />
+            <RunInAssistant request="apply" id={u.id} workspace={api.workspace} size="sm" />
+          </>
         )}
         {['approved', 'applying', 'done'].includes(u.status) && (
           <AnalysisRun ref={runRef} startable={!u.follow_up_problem} updateId={u.id} status={u.status} onChange={changed} onRunning={setRunning} onAction={setNextAction} onStartFailed={showNextBox}
             {...(u.status === 'approved' && !u.follow_up_problem ? { manual: (emphasis: boolean) => (
               <>
-                <CommandBox command={assistant.request('apply', u.id)} emphasis={emphasis}
-                  label={emphasis ? t('updateDetail.lastStepCopyThisAnd', { label: assistant.label }) : t('updateDetail.copyThisAndRunIt', { label: assistant.label })}
+                {/* When the dashboard cannot run it, opening the assistant with the request sent is the main action. */}
+                <RunInAssistant request="apply" id={u.id} workspace={api.workspace} variant={emphasis ? 'primary' : 'secondary'} hint={emphasis} nextAction={emphasis} />
+                <CommandBox command={assistant.request('apply', u.id)}
+                  label={t('updateDetail.copyThisAndRunIt', { label: assistant.label })}
                   onCopied={() => setCopiedFor(u.status)} />
-                <OtherAssistants others={assistant.others('apply', u.id)} />
+                <OtherAssistants others={assistant.others('apply', u.id)} request="apply" id={u.id} workspace={api.workspace} />
               </>
             ) } : {})} />
         )}
@@ -1003,7 +1021,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             {u.status === 'analyzing' && <> {t('updateDetail.or')} <button type="button" onClick={reopen} style={{ padding: 0, border: 'none', background: 'transparent', color: 'var(--color-accent)', cursor: 'pointer', fontSize: 'inherit' }}>{t('updateDetail.goBackToCollecting')}</button>.</>}
           </p>
         )}
-        {u.status === 'analyzing' && !u.follow_up_problem && <OtherAssistants others={assistant.others('analyze', u.id)} />}
+        {u.status === 'analyzing' && !u.follow_up_problem && <OtherAssistants others={assistant.others('analyze', u.id)} request="analyze" id={u.id} workspace={api.workspace} />}
         {u.status === 'approved' && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button variant="secondary" size="sm" loading={busy === 'back'} onClick={() => run('back', () => api.post(`/api/context-updates/${u.id}/back-to-review`))}>{t('updateDetail.changeMySelection')}</Button>
@@ -1213,9 +1231,12 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
           {nextAction !== 'copy'
             ? <Button variant="primary" loading={nextAction === 'starting'} onClick={() => runRef.current?.start()}>{u.status === 'ready' ? t('analysisRun.runAnalysis') : t('updateDetail.applyWithClaudeCode')}</Button>
             : (
-              <Button variant={copied ? 'secondary' : 'primary'} onClick={() => void copyText(command).then((ok) => { if (ok) setCopiedFor(u.status); })}>
-                {copied ? t('updateDetail.copyAgain') : t('updateDetail.copyCommand')}
-              </Button>
+              <>
+                <Button variant="secondary" onClick={() => void copyText(command).then((ok) => { if (ok) setCopiedFor(u.status); })}>
+                  {copied ? t('updateDetail.copyAgain') : t('updateDetail.copyCommand')}
+                </Button>
+                <RunInAssistant request={u.status === 'ready' ? 'analyze' : 'apply'} id={u.id} workspace={api.workspace} variant="primary" />
+              </>
             )}
         </div>
       )}
