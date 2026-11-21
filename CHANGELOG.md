@@ -8,6 +8,19 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Meetings in the sidebar.** Meetings that need you now put an amber count on **Meetings**, the
+  same meetings as its **Needs you** filter, and appear under **Waiting on you** on Situation. Both
+  open the list on that filter. While meetings are only in progress, a quiet ring with no count
+  shows that they are moving. (#476)
+
+### Fixed
+
+- **A meeting being recorded is in progress, not waiting on you.** The Meetings list showed it as
+  Recording but filed it under **Needs you**. It is now under **In progress** until the recording
+  stops; an interrupted or unreadable recording still needs you. (#476)
+
 ## [0.18.0] - 2026-11-21
 
 **From answer to action.** The assistant chat now leads somewhere. Tasks, people, notes and files

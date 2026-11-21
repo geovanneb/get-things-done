@@ -3,7 +3,8 @@ import React from 'react';
 import WorkspaceSwitcher from './WorkspaceSwitcher';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppDispatch, useAppState } from '../../store';
-import { usePendingActions, TONE_COLOR, type PendingAction } from '../../hooks/usePendingActions';
+import { usePendingActions, type PendingAction } from '../../hooks/usePendingActions';
+import PendingMark from './PendingMark';
 import { arrangeSidebar, isActivePath, navGroups, type NavItemId } from './navGroups';
 import SidebarEditor from './SidebarEditor';
 import NavMore from './NavMore';
@@ -451,7 +452,7 @@ function NavRailItem({ item, currentPath, collapsed }: { item: NavItem; currentP
   return (
     <li role="listitem">
       <NavLink
-        to={item.path}
+        to={item.pending?.link ?? item.path}
         aria-current={isActive ? 'page' : undefined}
         aria-label={item.pending ? `${item.label}, ${item.pending.label}` : item.label}
         title={item.pending ? `${item.label}: ${item.pending.label}` : collapsed ? item.label : undefined}
@@ -491,27 +492,7 @@ function NavRailItem({ item, currentPath, collapsed }: { item: NavItem; currentP
             {item.label}
           </span>
         )}
-        {!collapsed && item.pending && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--nav-text-active)' }}>
-            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: TONE_COLOR[item.pending.tone] }} />
-            {item.pending.count}
-          </span>
-        )}
-        {collapsed && item.pending && (
-          <span
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              top: 6,
-              right: 8,
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: TONE_COLOR[item.pending.tone],
-              boxShadow: '0 0 0 2px var(--nav-bg)',
-            }}
-          />
-        )}
+        {item.pending && <PendingMark pending={item.pending} corner={collapsed} />}
       </NavLink>
     </li>
   );

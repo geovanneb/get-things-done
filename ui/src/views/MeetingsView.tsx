@@ -13,7 +13,7 @@ import Page, { PageHeader } from '@/components/common/Page';
 import Toggle from '@/components/common/Toggle';
 import { LiveTranscript } from '@/components/meetings/LiveTranscript';
 import { TranscriptReader } from '@/components/meetings/TranscriptReader';
-import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
+import { recordingElsewhere } from '@/utils/meetingQueue';
 import { MeetingsList } from '@/components/meetings/MeetingsList';
 import { useRecordLauncher } from '@/components/recording/RecordLauncher';
 import { useRecorder } from '@/components/recording/RecordingProvider';

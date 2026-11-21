@@ -913,6 +913,15 @@ model is downloaded; the Meetings page shows each one's progress.
 
 The Meetings page includes queued and reviewed meetings. Search titles, people or words in transcripts and notes, then open a meeting to read its transcript, record, action items or files. A record still under review is shown as provisional; confirmed records remain available even when retention has removed their transcripts.
 
+The filters above the list say where each meeting stands, and **Meetings** in the sidebar tells the same story from any
+page. Meetings that need you (a failed or stopped transcription, a missing model, an interrupted recording, a meeting on
+hold) put an amber dot and their count on **Meetings**, like **Tasks** and **Context**; they are listed under **Waiting
+on you** on Situation; a click on either opens the list with **Needs you** selected. While none need you but some are
+**In progress** (being recorded right now, being transcribed, waiting for transcription or for the next digest), **Meetings** shows a small grey
+ring instead, with no count: it says new meetings are moving, not that you have something to do, so it stays out of
+Waiting on you and out of the count on **More**. Meetings waiting for review are counted on **Context**, with their
+update.
+
 After you correct a meeting, its **Tasks** tab can **Check related work**: every task, active or archived, that pinned the meeting, mentions it or was made from its action items, and how each stands now (changes to review, an earlier version that is still valid, not pinned yet, and so on). It changes nothing; open a task to look, and refresh its sources there if you want the newer text.
 
 ### Recordings and versions
