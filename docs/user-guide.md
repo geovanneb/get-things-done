@@ -375,7 +375,8 @@ proposals you ticked.
 ### 1. Collect
 
 Open **Context** and click **Import update** (or **Import & review** in the sidebar,
-under the categories). Then add:
+under the categories), or click **Create context update** at the top of the assistant chat
+to do the same without leaving the chat. Then add:
 
 - **Files**, as many as you like, in any format: transcripts, slides, PDFs,
   spreadsheets, photos, screenshots. Up to 50 MB each.
@@ -410,6 +411,13 @@ not read: either is saved alone, with the reason shown.
   ignore. For example: "Budget figures are a first draft."
 
 Save, and the update gets an ID such as `CU-2026-0001` and the command to run next.
+From the chat, the dialog lists the workspace, the update and the file names it will save
+before you press Save; Cancel discards them. The chat only opens this dialog when you click
+the button: it never starts one itself, and a file is never dropped on the message box.
+After Save the update's page opens beside the chat, which keeps its conversation (on a
+phone the chat closes so the page shows; a message you had not sent is still there when
+you open the chat again). If a file did not upload, a notice names it: add it again on
+that page.
 Put everything about one event (the transcript, the deck and the follow-up email) in
 one update, so the agent reads them together.
 

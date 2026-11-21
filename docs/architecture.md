@@ -133,7 +133,12 @@ workspace never save the same conversation over each other. Answers stream on a 
 panel's requests carry the workspace it shows (`X-GTD-Workspace`, `?workspace=` for the stream) and it drops a
 response that arrives after it moved to another workspace or chat. Errors are classified for
 what the user can do (sign in again, wait for the plan reset, start a new chat, use another tool); plan usage and
-context use come from the tools' own reports. Tests: `server/tests/chat.test.ts` (fake CLIs for all three tools),
+context use come from the tools' own reports. The panel's **Create context update** button opens the Context
+page's importer (`ImportUpdateModal`, update only) for the workspace the panel shows; the tool has no way to open
+it, and the importer's requests carry `X-GTD-Workspace`, so a workspace switched in another tab refuses the save.
+The update's page then opens pinned to that workspace (navigation state `workspace`, as from a run-finished notice),
+so a retried upload after a switch is refused too.
+Tests: `server/tests/chat.test.ts` (fake CLIs for all three tools),
 `ui/src/utils/chat.test.ts`, and the chat block of the smoke test. Copilot's ACP adapter is tested against a fake
 server; check it with a signed-in Copilot CLI before relying on it.
 
