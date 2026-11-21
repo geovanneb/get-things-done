@@ -14,7 +14,8 @@ import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
 import { apiDelete, apiPost } from '@/utils/api';
-import { groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
+import OpenMeetingFolder from '@/components/meetings/OpenMeetingFolder';
+import { canOpenFolder, groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
 import { canMakeDeliverable, deliverableDraft } from '@/utils/meetingDeliverable';
 import { clockLine } from '@/utils/transcriptReading';
 import { useAppDispatch } from '@/store';
@@ -123,6 +124,10 @@ function Row({ row, now, selected, onSelect, said, words }: { row: MeetingRow; n
       </div>
       <Status status={row.processing} label={t('meetingsList.processing')} />
       <Status status={row.review} label={t('shared.review')} />
+      {/* Every row keeps the same width here, also one whose files cannot be opened. */}
+      <span style={{ flex: '0 0 28px', display: 'flex', justifyContent: 'flex-end' }}>
+        {canOpenFolder(row) && <OpenMeetingFolder id={row.id} />}
+      </span>
     </li>
   );
 }

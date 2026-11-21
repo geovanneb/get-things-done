@@ -1,7 +1,7 @@
 /**
  * Unit tests for the desktop bridge and its browser fallback. Run with `npm run test:desktop-bridge --workspace=ui`.
  */
-import { followDesktopUpdate, hasDesktopUpdates, isDesktopApp, openWorkspaceFolder, pickFolder, readDesktopUpdate, restartToUpdate } from './desktop';
+import { canShowInFolder, followDesktopUpdate, hasDesktopUpdates, isDesktopApp, openWorkspaceFolder, pickFolder, readDesktopUpdate, restartToUpdate, showInFolder, workspaceFullPath } from './desktop';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -75,6 +75,31 @@ async function main() {
   stop2();
   check('an older first answer never replaces a newer pushed state', order.join(',') === 'ready', order.join(','));
   delete g.gtdDesktop;
+
+  // Show in folder: only the desktop app opens a folder; the page passes only the workspace-relative path.
+  check('a browser cannot show a folder itself', !canShowInFolder());
+  let shown = '';
+  try { await showInFolder('meetings/MQ-2026-0001'); } catch (err) { shown = (err as Error).message; }
+  check('in a browser, showing a folder says it could not', shown === 'Could not open the folder.', shown);
+  const asked: string[] = [];
+  g.gtdDesktop = { version: 1, pickFolder: async () => null, openWorkspaceFolder: async () => ({ opened: true }),
+    showInFolder: async (p: string) => { asked.push(p); return p === 'gone' ? { opened: false, error: 'It is not there any more' } : { opened: true }; } };
+  check('the desktop app can show a folder', canShowInFolder());
+  await showInFolder('context-updates/CU-2026-0001/materials/MQ-2026-0002-b.vtt');
+  check('the bridge gets the relative path as it is', asked.join() === 'context-updates/CU-2026-0001/materials/MQ-2026-0002-b.vtt', asked.join());
+  let failed = '';
+  try { await showInFolder('gone'); } catch (err) { failed = (err as Error).message; }
+  check('a failed show gives the app\'s reason', failed === 'It is not there any more', failed);
+  g.gtdDesktop = { version: 1, pickFolder: async () => null, openWorkspaceFolder: async () => ({ opened: true }) };
+  check('an older desktop app without the call shows the path instead', !canShowInFolder());
+  delete g.gtdDesktop;
+
+  // The full path a browser shows, in the workspace path's own style.
+  check('a macOS or Linux path', workspaceFullPath('/Users/demo/Northwind', 'meetings/MQ-2026-0001') === '/Users/demo/Northwind/meetings/MQ-2026-0001');
+  check('a trailing slash is not doubled', workspaceFullPath('/Users/demo/Northwind/', 'meetings') === '/Users/demo/Northwind/meetings');
+  check('a Windows path uses backslashes', workspaceFullPath('C:\\Users\\demo\\Northwind', 'context-updates/meeting-queue/MQ-2026-0003') === 'C:\\Users\\demo\\Northwind\\context-updates\\meeting-queue\\MQ-2026-0003');
+  check('a network share stays one', workspaceFullPath('\\\\server\\share\\Northwind', 'meetings') === '\\\\server\\share\\Northwind\\meetings');
+  check('the root folder', workspaceFullPath('/', 'meetings') === '/meetings');
 
   if (failures) {
     console.error(`\n${failures} check(s) failed`);

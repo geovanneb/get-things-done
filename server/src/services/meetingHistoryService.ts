@@ -3,7 +3,7 @@ import * as fsp from 'fs/promises';
 import { ContextUpdateService, readableText, AUDIO_EXTENSIONS, CORRECTION_KIND, type ContextUpdate, type MeetingRecord, type UpdateStatus } from './contextUpdateService';
 import { MeetingDigestService } from './meetingDigestService';
 import { heldMeetings, importedParts, isMeetingId, isMeetingText, QUEUED_MEETING_ID, recordedHash, retentionStart, reviewState, type HeldMeeting, type RecordLink, type ReviewState } from './meetingLibrary';
-import { fileInside, topLevelName } from '../utils/files';
+import { fileInside, topLevelName, workspaceEntry } from '../utils/files';
 import { correctionChain, type ChainState, type CorrectionChain } from './meetingCorrections';
 import { MAX_CONVERT_BYTES } from '../utils/transcript';
 import { meetingFiles } from './meetingFolder';
@@ -122,6 +122,27 @@ export interface VersionSpeakersView {
   model_sha256: string | null;
   /** Its recording is still kept, so a voice can be remembered from it. */
   audio_kept: boolean;
+}
+
+/**
+ * Where a meeting's files are on this computer now, for Open folder (`GET /api/meetings/:id/folder`). Paths are
+ * relative to the workspace, with "/". The desktop app opens `path` itself, or, when `shared`, shows `first_file` in its
+ * folder, so a digest's other meetings are not what the user sees first.
+ */
+export interface MeetingFolderView {
+  /** `queued` in the meeting queue; `update` in an update not done yet; `reviewed` in its own folder; `kept` in a done update's materials (from before meeting folders). */
+  stage: 'queued' | 'update' | 'reviewed' | 'kept';
+  path: string;
+  /** The folder is an update's materials/, which holds more than this meeting. */
+  shared: boolean;
+  /** The meeting's first file there, when `shared`; null otherwise. */
+  first_file: string | null;
+  /** A recording of it is in the folder. */
+  has_audio: boolean;
+  /** A transcript or notes of it is in the folder. */
+  has_text: boolean;
+  /** It came from a recording, so `has_audio: false` means the recording was not kept. */
+  recorded: boolean;
 }
 
 function versionSpeakers(v: FolderVersion, audio: { name: string; sha256: string }[]): VersionSpeakersView | null {
@@ -316,6 +337,57 @@ export class MeetingHistoryService {
       transcription: folder?.manifest.transcribe
         ? { file: folder.manifest.transcribe.file, model: folder.manifest.transcribe.model, status: folder.manifest.transcribe.status, error: folder.manifest.transcribe.error ?? null, started_at: folder.manifest.transcribe.started_at ?? null }
         : null,
+    };
+  }
+
+  /**
+   * Where a meeting's files are now, for Open folder: its queue folder, its own folder under meetings/, or its update's
+   * materials/. Read only. Every folder is checked to lie inside the workspace with no link on the way; a meeting in the
+   * trash or without files on disk answers 404.
+   */
+  async folder(id: string): Promise<MeetingFolderView> {
+    if (!isMeetingId(id)) throw httpError(400, 'Invalid meeting id');
+    const ws = workspace.getWorkspacePath();
+    const rel = (full: string) => path.relative(ws, full).split(path.sep).join('/');
+    const isFile = (full: string) => fsp.lstat(full).then((st) => st.isFile(), () => false);
+    const unsafe = () => httpError(409, 'This meeting\'s folder cannot be opened: it is a link or lies outside the workspace.');
+    const facts = (names: string[]) => ({
+      has_audio: names.some((n) => AUDIO_EXTENSIONS.has(path.extname(n).toLowerCase())),
+      has_text: names.some((n) => isMeetingText(n)),
+    });
+    if (QUEUED_MEETING_ID.test(id)) {
+      const inQueue = await queue.loadMeeting(id).catch(() => null);
+      if (inQueue) {
+        const dir = await queue.meetingFolder(id).catch(() => { throw unsafe(); });
+        const names = [...new Set(inQueue.files.flatMap((f) => [f.name, f.recording?.transcript, f.recording?.draft?.transcript].filter((n): n is string => Boolean(n))))];
+        const present: string[] = [];
+        for (const name of names) if (path.basename(name) === name && await isFile(path.join(dir, name))) present.push(name);
+        return { stage: 'queued', path: rel(dir), shared: false, first_file: null, ...facts(present), recorded: inQueue.files.some((f) => f.recording) };
+      }
+    }
+    const { update: listed } = await this.held(id);
+    // Read as the detail does, so the update's materials on disk are known.
+    const update = await contextUpdates.get(listed.id);
+    const meeting = heldMeetings(update).find((m) => m.id === id);
+    if (!meeting) throw httpError(404, `Meeting not found: ${id}`);
+    const deleted = update.deleted_meetings.find((d) => d.meeting === meeting.key);
+    if (deleted?.trash) throw httpError(404, 'This meeting is in the trash: restore it first to open its folder.');
+    if (deleted) throw httpError(404, 'This meeting\'s transcript and notes were deleted for good.');
+    const where = await meetingFiles(ws, update, meeting);
+    const present = meeting.files.filter((f) => where.present.has(f));
+    if (!present.length) throw httpError(404, 'This meeting\'s files are no longer kept on this computer.');
+    if (where.folder) {
+      const dir = await workspaceEntry(ws, where.folder.dir).catch(() => { throw unsafe(); });
+      return { stage: 'reviewed', path: rel(dir), shared: false, first_file: null, ...facts(present), recorded: meeting.recorded };
+    }
+    const materials = await workspaceEntry(ws, path.join(ws, 'context-updates', update.id, 'materials')).catch(() => { throw unsafe(); });
+    const first = present[0]!;
+    // fileInside resolves links: the file must really be in materials/, and materials/ itself is no link (above).
+    if (!(await where.path(first))) throw httpError(404, 'This meeting\'s files are no longer kept on this computer.');
+    const shared = (update.material_files ?? []).some((f) => !meeting.files.includes(f.name));
+    return {
+      stage: update.status === 'done' ? 'kept' : 'update', path: rel(materials), shared,
+      first_file: shared ? rel(path.join(materials, first)) : null, ...facts(present), recorded: meeting.recorded,
     };
   }
 

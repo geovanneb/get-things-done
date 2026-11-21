@@ -8,6 +8,7 @@ import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import EmptyState from '@/components/common/EmptyState';
 import IconButton, { icons } from '@/components/common/IconButton';
+import OpenMeetingFolder from '@/components/meetings/OpenMeetingFolder';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import Notice from '@/components/common/Notice';
 import { Checkbox, Select } from '@/components/common/Input';
@@ -257,7 +258,10 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   return (
     <>
       <Header id={m.id} title={m.title} statuses={[processing]} line={`${longDate(m.meeting_date)}${period ? ` · ${period}` : ''}${m.participants?.length ? ` · ${joinNames(m.participants)}` : ''}`}
-        actions={<IconButton label={t('meetingDetail.closeMeeting')} icon={icons.close} onClick={onClose} />} />
+        actions={<>
+          <OpenMeetingFolder id={m.id} />
+          <IconButton label={t('meetingDetail.closeMeeting')} icon={icons.close} onClick={onClose} />
+        </>} />
       <Body tab={tab} setTab={setTab} counts={{ files: m.files.length }} main={main} aside={aside} />
     </>
   );
@@ -545,6 +549,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
       <Header id={h.id} title={h.title} statuses={[historyProcessing(h), historyReview(h)]}
         line={`${longDate(h.meeting_date)}${h.people.length ? ` · ${h.people.join(', ')}` : ''}`}
         actions={<>
+          {h.has_text && !h.deleted && <OpenMeetingFolder id={h.id} />}
           {canDelete && <IconButton label={t('meetingDetail.deleteMeeting')} icon={icons.trash} tone="danger" outline disabled={busy} onClick={() => void remove()} />}
           <IconButton label={t('meetingDetail.closeMeeting')} icon={icons.close} onClick={onClose} />
         </>} />

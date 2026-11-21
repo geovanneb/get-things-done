@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { groupRows, historyReview, inFilter, matchingRows, meetingRows, queueProcessing, whenLabel, type QueueFacts } from './meetingHistory';
-import type { HistoryMeeting, QueuedMeeting } from '@/types';
+import { canOpenFolder, groupRows, historyReview, inFilter, matchingRows, meetingFolderTarget, meetingRows, queueProcessing, whenLabel, type QueueFacts } from './meetingHistory';
+import type { HistoryMeeting, MeetingFolder, QueuedMeeting } from '@/types';
 
 const queued = (id: string, date: string, extra: Partial<QueuedMeeting> = {}) =>
   ({ id, title: `Fictional ${id}`, meeting_date: date, status: 'queued', created_at: `${date}T00:00:00.000Z`, files: [], held: null, in_digest: false, ...extra }) as QueuedMeeting;
@@ -54,4 +54,15 @@ assert.deepEqual(matchingRows(rows, '', new Set(['MQ-2026-0007'])).length, rows.
 const now = new Date(2026, 9, 31, 15, 0);
 assert.deepEqual(groupRows(rows, now).map((g) => [g.label, g.rows.length]), [['Today', 1], ['Yesterday', 1], ['This week', 1], ['October 2026', 2]]);
 assert.equal(whenLabel(rows[2]!, now), 'Oct 27');
+// Open folder: which rows offer it, and where it goes.
+assert.deepEqual(rows.map((r) => canOpenFolder(r)), rows.map((r) => !r.inTrash && !r.textGone && r.href.startsWith('/meetings/')));
+assert.equal(canOpenFolder(pending[0]!), false, 'not while its id may still change');
+assert.equal(canOpenFolder(rows[4]!), false, 'not when its text is gone');
+const folder = (o: Partial<MeetingFolder>): MeetingFolder => ({ stage: 'reviewed', path: 'meetings/MQ-2026-0007', shared: false, first_file: null, has_audio: true, has_text: true, recorded: true, ...o });
+assert.deepEqual(meetingFolderTarget(folder({})), { path: 'meetings/MQ-2026-0007', note: null });
+assert.deepEqual(meetingFolderTarget(folder({ has_audio: false })), { path: 'meetings/MQ-2026-0007', note: 'The recording of this meeting was not kept: only its transcript and notes are in this folder.' });
+assert.equal(meetingFolderTarget(folder({ has_audio: false, recorded: false })).note, null, 'never said of a meeting that had no recording');
+assert.equal(meetingFolderTarget(folder({ stage: 'queued', path: 'context-updates/meeting-queue/MQ-2026-0009', has_audio: false })).note, null, 'only after review');
+const shared = meetingFolderTarget(folder({ stage: 'update', path: 'context-updates/CU-2026-0004/materials', shared: true, first_file: 'context-updates/CU-2026-0004/materials/MQ-2026-0008-call.vtt' }));
+assert.deepEqual(shared, { path: 'context-updates/CU-2026-0004/materials/MQ-2026-0008-call.vtt', note: 'This folder also holds the other meetings of CU-2026-0004, so it points to this meeting\'s first file.' });
 console.log('meeting history: ok');

@@ -1041,6 +1041,20 @@ export interface Transcription {
 /* ---- Meetings history (GET /api/meetings/…) -------------------------------- */
 
 /** A meeting held by a context update: a digest's meeting (MQ-…) or a record of an imported update (CU-…-M-01). */
+/** Where a meeting's files are on this computer now (`GET /api/meetings/:id/folder`). Paths are workspace-relative. */
+export interface MeetingFolder {
+  stage: 'queued' | 'update' | 'reviewed' | 'kept';
+  path: string;
+  /** `path` is an update's materials/, which holds more than this meeting. */
+  shared: boolean;
+  /** The meeting's first file there, when `shared`. */
+  first_file: string | null;
+  has_audio: boolean;
+  has_text: boolean;
+  /** It came from a recording. */
+  recorded: boolean;
+}
+
 export interface HistoryMeeting {
   /** A link only when `linkable`: a record-only meeting's id can change until its update is done. */
   id: string;

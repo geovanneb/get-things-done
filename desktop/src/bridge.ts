@@ -4,6 +4,7 @@ import { app, BrowserWindow, IpcMainInvokeEvent, dialog, ipcMain, shell, systemP
 import { classifyLink } from './links';
 import type { RecordingCommand } from './recording-commands';
 import { systemAudioSupport } from './systemAudio';
+import { showInFolder } from './show-in-folder';
 
 /** Asks the system for the microphone. `granted`, or what the user should do: the system only ever asks once. */
 async function microphoneAccess(): Promise<string> {
@@ -112,6 +113,20 @@ export function registerBridge(
   ipcMain.handle('gtd:run-notice-show', async (event, token: unknown) => {
     if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
     return typeof token === 'string' && /^[0-9a-f]{32}$/.test(token) ? runNotices.show(token) : false;
+  });
+
+  // A file or folder of the workspace, named by its relative path: only ever revealed in Finder or Explorer, never opened.
+  ipcMain.handle('gtd:show-in-folder', async (event, relative: unknown) => {
+    if (event.senderFrame !== trusted(event).webContents.mainFrame) throw new Error('Not allowed');
+    try {
+      const res = await fetch(`${getAppUrl()}/api/workspace`, { headers: { Accept: 'application/json' } });
+      if (!res.ok) return { opened: false, error: 'No workspace is open yet.' };
+      const { path } = (await res.json()) as { path?: string };
+      if (!path) return { opened: false, error: 'No workspace is open yet.' };
+      return await showInFolder(path, relative, shell);
+    } catch (err) {
+      return { opened: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   ipcMain.handle('gtd:open-workspace-folder', async (event) => {

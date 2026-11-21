@@ -921,6 +921,16 @@ Enable **Keep recordings after transcription** if you want playback later. For n
 
 From a reviewed meeting's **Files** tab, choose **Transcribe again** and a downloaded model. Queued recordings take priority. The new transcript is added as another version; choose **Use this version** explicitly to make it current. The confirmed meeting record does not automatically change when the transcript does.
 
+### Opening a meeting's folder
+
+A meeting's recording and text are ordinary files on your computer. **Open folder** (the folder button on each row of the Meetings list, and at the top of a meeting) takes you to them, to play the recording in another app, attach the transcript to an email or back it up. The folder depends on where the meeting is: the meeting queue (`context-updates/meeting-queue/<id>/`) while it waits for a digest, its update's `materials/` while that update is not done, and `meetings/<id>/` once it is reviewed. Meetings kept from before `meetings/` existed stay in their update's `materials/`.
+
+- In the desktop app, Finder or File Explorer shows the folder from inside, with its first file selected (never a link). When the folder is an update's `materials/`, which also holds that digest's other meetings, the meeting's own first file is selected instead. The app only ever shows files and folders; it never opens or runs one.
+- In a browser, which cannot open folders, you see the folder's full path with **Copy path**.
+- After review, when **Keep recordings after transcription** was off, the folder holds only the transcript and notes, and the app says the recording was not kept.
+
+A meeting in the trash has no folder to open: restore it first. Opening a folder changes nothing, and no path leaves your computer.
+
 ### Correcting a record
 
 Choose **Suggest corrections** from a confirmed, final meeting record. This creates a context update for analysis and review. Suggestions marked not sure leave the original value in place unless you choose to use them; you can take them back. Confirm and approve the correction before it becomes the current record.

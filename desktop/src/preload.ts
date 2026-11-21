@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('gtdDesktop', {
   preferredLanguages: (): Promise<string[]> => ipcRenderer.invoke('gtd:preferred-languages'),
   pickFolder: (): Promise<string | null> => ipcRenderer.invoke('gtd:pick-folder'),
   openWorkspaceFolder: (): Promise<{ opened: boolean; error?: string }> => ipcRenderer.invoke('gtd:open-workspace-folder'),
+  // A file or folder of the workspace by its relative path: revealed in Finder or Explorer (a folder from inside), never opened.
+  showInFolder: (relativePath: string): Promise<{ opened: boolean; error?: string }> => ipcRenderer.invoke('gtd:show-in-folder', relativePath).then((r) => r, (err: unknown) => ({ opened: false, error: err instanceof Error ? err.message : String(err) })),
   microphoneAccess: (): Promise<string> => ipcRenderer.invoke('gtd:microphone-access'),
   systemAudioSupport: (): Promise<string> => ipcRenderer.invoke('gtd:system-audio-support'),
   recordingState: (active: boolean): void => { void ipcRenderer.invoke('gtd:recording-state', active === true); },
