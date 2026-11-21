@@ -137,11 +137,16 @@ export default function MeetingsView() {
   const shown = pickedMeeting ?? data?.queue.find((m) => m.id === recorder.lastMeetingId && m.id !== closed);
   const transcript = shown ? readableTranscript(shown, pickedMeeting ? picked?.file : undefined) : null;
   const waiting = Boolean(shown && transcriptOnItsWay(shown));
+  // Nor does another dashboard's transcription (its progress is in a file this dashboard does not watch), nor a step
+  // before transcribing here, which reports nothing for minutes: while one runs, its progress is asked for too.
+  const progress = data?.transcription;
+  const transcribing = Boolean(data?.queue.some((m) => m.files.some((f) => f.recording?.status === 'running')))
+    && (!progress || Boolean(progress.elsewhere) || progress.phase !== 'transcribing');
   React.useEffect(() => {
-    if (!recording && !waiting) return undefined;
+    if (!recording && !waiting && !transcribing) return undefined;
     const timer = setInterval(refetch, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [recording, waiting, refetch]);
+  }, [recording, waiting, transcribing, refetch]);
   // This page's recording, or one running in another page: its text can be followed from here too.
   const own = recorder.active ? recorder.meetingId : null;
   const elsewhere = own ? undefined : data?.queue.find((m) => recordingElsewhere(m));

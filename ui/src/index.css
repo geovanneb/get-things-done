@@ -446,6 +446,16 @@ input, textarea, select {
 .recording-dot { animation: recording-pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .recording-dot { animation: none; } }
 
+/* A running transcription's thin bar (TranscriptionBar). While its percent is not known, a short stretch moves along it. */
+.gtd-transcription-bar { position: relative; height: 3px; border-radius: 2px; background: var(--color-border); overflow: hidden; }
+.gtd-transcription-bar > div { height: 100%; background: var(--color-info); transition: width 0.4s ease; }
+.gtd-transcription-bar--moving::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 30%; border-radius: 2px;
+  background: var(--color-info); opacity: 0.7; animation: gtd-transcription-moving 1.8s ease-in-out infinite;
+}
+@keyframes gtd-transcription-moving { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .gtd-transcription-bar--moving::after { animation-duration: 6s; } }
+
 /* @-mentions (task Objective) */
 .mention-picker {
   position: absolute;

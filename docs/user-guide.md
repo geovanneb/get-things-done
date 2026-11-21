@@ -880,6 +880,17 @@ process for each job, so the model's memory and any crash stay out of the dashbo
 Recordings in the meeting queue are transcribed one at a time, oldest first, once a
 model is downloaded; the Meetings page shows each one's progress.
 
+- **Progress in the list:** a meeting being transcribed shows a thin bar under its badge
+  and the step it is in: **Converting the recording** (a recording that is not WAV, such
+  as one from a phone), **Finding who speaks** (with speaker detection on), **Loading the
+  model**, then **Transcribing 34%**. The steps before transcribing show how long they
+  have run, so a long one clearly isn't stuck. Once a minute of audio is done, the line
+  adds the recording's length and an estimate of the time left, such as "52 min recording
+  · about 12 min left", from the job's own pace, rounded; nothing is guessed before then.
+  When another dashboard on the workspace (a browser tab next to the desktop app, say)
+  runs the job, this one shows the same progress, marked **in another dashboard**. The
+  meeting's Files tab and **Transcribe again** use the same wording.
+
 - The transcript becomes a file of the meeting, `<recording>.transcript.md`: each part
   with speech, with its start and end time. Optional speaker detection labels the voices; you can name them in the dashboard.
 - **Stop** ends a transcription and keeps nothing of it; the meeting waits until you

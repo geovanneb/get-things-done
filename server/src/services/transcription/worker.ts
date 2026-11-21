@@ -382,7 +382,7 @@ async function findSpeakers(sherpa: Sherpa, request: Extract<WorkerRequest, { ty
     clustering: { numClusters: -1, threshold: SAME_SPEAKER },
     minDurationOn: 0.3, minDurationOff: 0.5,
   });
-  const turns = speakerTurns(diarization.process(samples.subarray(0, filled)), format.duration);
+  const turns = speakerTurns(await diarize(diarization, samples.subarray(0, filled)), format.duration);
   send({ type: 'turns', turns });
   if (request.identify) {
     // Only a help for suggestions: when it fails, the speakers are still told apart.
@@ -393,6 +393,30 @@ async function findSpeakers(sherpa: Sherpa, request: Extract<WorkerRequest, { ty
     }
   }
   send({ type: 'done', seconds: format.duration, segments: 0 });
+}
+
+type DiarizationSegment = { start: number; end: number; speaker: number };
+type DiarizationAddon = { offlineSpeakerDiarizationProcessAsync?: (handle: unknown, samples: Float32Array, onChunk: (done: number, total: number) => void) => Promise<DiarizationSegment[]> };
+
+/**
+ * Who spoke when, reporting how far it got: the binding's async process calls back with the chunks it has done of its
+ * total (the class does not offer it, the addon does). Sent at each whole percent, so a long recording sends little.
+ * A binding without it is still used, without progress.
+ */
+async function diarize(diarization: InstanceType<Sherpa['OfflineSpeakerDiarization']>, samples: Float32Array): Promise<DiarizationSegment[]> {
+  let addon: DiarizationAddon | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- native addon, loaded only inside the worker
+  try { addon = require('sherpa-onnx-node/addon.js') as DiarizationAddon; } catch { /* an older binding: no progress */ }
+  const handle = (diarization as { handle?: unknown }).handle;
+  if (typeof addon?.offlineSpeakerDiarizationProcessAsync !== 'function' || !handle) return diarization.process(samples);
+  let sent = -1;
+  return addon.offlineSpeakerDiarizationProcessAsync(handle, samples, (done, total) => {
+    if (!(total > 0)) return;
+    const percent = Math.floor((done / total) * 100);
+    if (percent === sent) return;
+    sent = percent;
+    send({ type: 'progress', done, total });
+  });
 }
 
 function newExtractor(sherpa: Sherpa, model: string, threads: number): SherpaExtractor {

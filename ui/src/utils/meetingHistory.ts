@@ -1,6 +1,7 @@
 import { currentLocale, tr } from '@/i18n/current';
 import type { HistoryMeeting, MeetingFolder, QueuedMeeting, TranscriptionProgress } from '@/types';
 import { meetingPeriod, needsYou } from '@/utils/meetingQueue';
+import { transcriptionView } from '@/utils/transcriptionProgress';
 
 /**
  * The Meetings list: queued meetings and meetings held by a context update, as one list. Each row says two separate
@@ -9,7 +10,9 @@ import { meetingPeriod, needsYou } from '@/utils/meetingQueue';
  */
 
 export type StatusTone = 'critical' | 'info' | 'warning' | 'accent' | 'muted' | 'success';
-export interface RowStatus { label: string; tone: StatusTone | null; detail?: string; update?: string; progress?: number }
+export interface RowStatus { label: string; tone: StatusTone | null; detail?: string; update?: string;
+  /** A running transcription's bar (percent null: not known yet) and what a screen reader says of the status. */
+  progress?: { percent: number | null; spoken: string } }
 
 export interface MeetingRow {
   id: string;
@@ -41,6 +44,8 @@ export interface QueueFacts {
   nextDigest: string | null;
   /** The meeting is being recorded now, here or in another page. */
   recordingNow: (m: QueuedMeeting) => boolean;
+  /** Now, in ms, for how long a transcription step has run and the time left; the current time when absent. */
+  now?: number;
 }
 
 const people = (m: QueuedMeeting) => (m.participants ?? []).map((p) => p.name);
@@ -65,9 +70,8 @@ export function queueProcessing(m: QueuedMeeting, facts: QueueFacts): RowStatus 
   }
   const running = m.files.find((f) => f.recording?.status === 'running');
   if (running) {
-    const p = facts.progress && facts.progress.meeting === m.id && facts.progress.file === running.name && facts.progress.total > 0
-      ? Math.min(99, Math.floor((facts.progress.done / facts.progress.total) * 100)) : undefined;
-    return { label: p === undefined ? tr('meetingHistory.transcribing') : tr('meetingHistory.transcribing2', { p }), tone: 'info', ...(p === undefined ? {} : { progress: p }) };
+    const view = transcriptionView(facts.progress?.meeting === m.id && facts.progress.file === running.name ? facts.progress : null, facts.now ?? Date.now());
+    return { label: view.badge, tone: 'info', ...(view.detail ? { detail: view.detail } : {}), progress: { percent: view.percent, spoken: view.spoken } };
   }
   if (m.files.some((f) => f.recording?.status === 'pending')) return { label: tr('meetingHistory.waitingForTranscription'), tone: 'info' };
   return { label: tr('meetingHistory.waitingForDigest'), tone: 'accent', ...(facts.nextDigest ? { detail: tr('meetingHistory.nextDigest', { nextDigest: facts.nextDigest }) } : {}) };
