@@ -2021,6 +2021,8 @@ export default {
   "usePendingActions.toFix": "修正が必要: {plural}",
   "usePendingActions.workspaceValidationError": "件のワークスペース検証エラー",
   "usePendingActions.workspaceValidationErrors": "件のワークスペース検証エラー",
+  "usePendingActions.meetingsNeedYou": {"other": "対応が必要な会議 {count} 件"},
+  "usePendingActions.meetingsInProgress": {"other": "進行中の会議 {count} 件"},
   "useSidebar.couldNotSaveTheSidebar": "サイドバーの順序を保存できませんでした。",
   "boardColumns.enterAName": "名前を入力してください。",
   "boardColumns.useAtMostCharacters": "{MAX_LABEL} 文字以内で入力してください。",

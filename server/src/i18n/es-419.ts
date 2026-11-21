@@ -2023,6 +2023,8 @@ export default {
   "usePendingActions.toFix": "{plural} por corregir",
   "usePendingActions.workspaceValidationError": "error de validación del espacio de trabajo",
   "usePendingActions.workspaceValidationErrors": "errores de validación del espacio de trabajo",
+  "usePendingActions.meetingsNeedYou": {"one": "{count} reunión te necesita", "other": "{count} reuniones te necesitan"},
+  "usePendingActions.meetingsInProgress": {"one": "{count} reunión en curso", "other": "{count} reuniones en curso"},
   "useSidebar.couldNotSaveTheSidebar": "No se pudo guardar el orden de la barra lateral.",
   "boardColumns.enterAName": "Escribe un nombre.",
   "boardColumns.useAtMostCharacters": "Usa como máximo {MAX_LABEL} caracteres.",

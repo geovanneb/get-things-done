@@ -1,7 +1,8 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { TONE_COLOR, type PendingAction } from '../../hooks/usePendingActions';
+import { TONE_COLOR, waitsOnUser, type PendingAction } from '../../hooks/usePendingActions';
+import PendingMark from './PendingMark';
 import { isActivePath } from './navGroups';
 
 export interface MoreItem {
@@ -22,7 +23,8 @@ export default function NavMore({ items, collapsed, currentPath }: { items: More
   const menuRef = React.useRef<HTMLUListElement>(null);
 
   const active = items.some((item) => isActivePath(item.path, currentPath));
-  const waiting = items.filter((item) => item.pending);
+  // A quiet activity marker (meetings in progress) is not the user's move: it shows in the menu, never in More's count.
+  const waiting = items.filter((item) => item.pending && waitsOnUser(item.pending));
   const count = waiting.reduce((sum, item) => sum + item.pending!.count, 0);
   const tone = waiting.some((item) => item.pending!.tone === 'problem') ? 'problem' : 'attention';
   const summary = waiting.map((item) => item.pending!.label).join(', ');
@@ -115,10 +117,11 @@ export default function NavMore({ items, collapsed, currentPath }: { items: More
             return (
               <li key={item.path}>
                 <NavLink
-                  to={item.path}
+                  to={item.pending?.link ?? item.path}
                   onClick={() => setOpen(false)}
                   aria-current={here ? 'page' : undefined}
                   aria-label={item.pending ? `${item.label}, ${item.pending.label}` : item.label}
+                  title={item.pending ? `${item.label}: ${item.pending.label}` : undefined}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10, height: 36, padding: '0 10px',
                     borderRadius: 'var(--radius-md)', textDecoration: 'none', fontSize: 'var(--text-sm)',
@@ -130,12 +133,7 @@ export default function NavMore({ items, collapsed, currentPath }: { items: More
                 >
                   <span style={{ display: 'flex', flexShrink: 0 }}>{item.icon}</span>
                   <span style={{ flex: 1 }}>{item.label}</span>
-                  {item.pending && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--nav-text-active)' }}>
-                      <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: TONE_COLOR[item.pending.tone] }} />
-                      {item.pending.count}
-                    </span>
-                  )}
+                  {item.pending && <PendingMark pending={item.pending} />}
                 </NavLink>
               </li>
             );

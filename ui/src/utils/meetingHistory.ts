@@ -104,7 +104,8 @@ export function meetingRows(queue: QueuedMeeting[], history: HistoryMeeting[], f
         id: m.id, href: `/meetings/${m.id}`, title: m.title, date: m.meeting_date, time: meetingPeriod(m), people: people(m),
         source: m.files.some((f) => f.recording) ? tr('meetingHistory.recorded') : tr('meetingHistory.uploadedFiles'),
         processing, review: { label: tr('meetingHistory.notYet'), tone: null },
-        needsYou: processing.label === 'Needs you' || needsYou(m, facts.installed, facts.runnable),
+        // Being recorded right now is under way, not waiting: only an interrupted or unreadable recording needs you.
+        needsYou: !(m.live && facts.recordingNow(m)) && needsYou(m, facts.installed, facts.runnable),
         textGone: false, inTrash: false, queued: m,
       };
     }),
@@ -118,7 +119,13 @@ export function meetingRows(queue: QueuedMeeting[], history: HistoryMeeting[], f
   return rows.sort((a, b) => b.date.localeCompare(a.date) || (b.time ?? '').localeCompare(a.time ?? '') || b.id.localeCompare(a.id));
 }
 
-export type MeetingFilter = 'all' | 'you' | 'progress' | 'review' | 'reviewed';
+export const MEETING_FILTERS = ['all', 'you', 'progress', 'review', 'reviewed'] as const;
+export type MeetingFilter = typeof MEETING_FILTERS[number];
+
+/** The filter a link asks for (`/meetings?show=you`); anything else shows all meetings. */
+export function filterFromQuery(show: string | null): MeetingFilter {
+  return (MEETING_FILTERS as readonly string[]).includes(show ?? '') ? show as MeetingFilter : 'all';
+}
 
 export function inFilter(row: MeetingRow, filter: MeetingFilter): boolean {
   if (row.inTrash) return false;
@@ -127,6 +134,15 @@ export function inFilter(row: MeetingRow, filter: MeetingFilter): boolean {
   if (filter === 'progress') return Boolean(row.queued) && !row.needsYou;
   const done = row.held?.update.status === 'done';
   return Boolean(row.held) && (filter === 'reviewed' ? done : !done);
+}
+
+/**
+ * How many meetings the page's Needs you and In progress filters hold, for the sidebar. Counted with the page's own rows
+ * and filters, so the two always agree. Only queued meetings can be in either, so the held ones are not needed.
+ */
+export function meetingCounts(queue: QueuedMeeting[], facts: Pick<QueueFacts, 'installed' | 'runnable' | 'recordingNow'>): { needsYou: number; inProgress: number } {
+  const rows = meetingRows(queue, [], { ...facts, progress: null, nextDigest: null });
+  return { needsYou: rows.filter((r) => inFilter(r, 'you')).length, inProgress: rows.filter((r) => inFilter(r, 'progress')).length };
 }
 
 /**

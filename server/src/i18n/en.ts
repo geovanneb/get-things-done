@@ -2022,6 +2022,8 @@ export const en = {
   "usePendingActions.toFix": "{plural} to fix",
   "usePendingActions.workspaceValidationError": "workspace validation error",
   "usePendingActions.workspaceValidationErrors": "workspace validation errors",
+  "usePendingActions.meetingsNeedYou": {"one": "{count} meeting needs you", "other": "{count} meetings need you"},
+  "usePendingActions.meetingsInProgress": {"one": "{count} meeting in progress", "other": "{count} meetings in progress"},
   "useSidebar.couldNotSaveTheSidebar": "Could not save the sidebar order.",
   "boardColumns.enterAName": "Enter a name.",
   "boardColumns.useAtMostCharacters": "Use at most {MAX_LABEL} characters.",

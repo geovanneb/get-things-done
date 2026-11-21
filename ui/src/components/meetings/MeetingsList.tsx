@@ -1,7 +1,7 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
 import { rich } from '@/i18n/rich';
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import Card from '@/components/common/Card';
@@ -12,9 +12,9 @@ import { Checkbox, SearchInput, Select } from '@/components/common/Input';
 import { SegmentedControl } from '@/components/common/Tabs';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useRecorder } from '@/components/recording/RecordingProvider';
-import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
+import { recordingElsewhere } from '@/utils/meetingQueue';
 import { apiDelete, apiPost } from '@/utils/api';
-import { groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
+import { filterFromQuery, groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
 import { canMakeDeliverable, deliverableDraft } from '@/utils/meetingDeliverable';
 import { clockLine } from '@/utils/transcriptReading';
 import { useAppDispatch } from '@/store';
@@ -141,7 +141,17 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   const recorder = useRecorder();
   const confirm = useConfirm();
   const narrow = useNarrow(640);
-  const [filter, setFilter] = React.useState<MeetingFilter>('all');
+  // A link can open the list on a filter: the sidebar's "meetings need you" opens /meetings?show=you.
+  const [params, setParams] = useSearchParams();
+  const [filter, setFilter] = React.useState<MeetingFilter>(() => filterFromQuery(params.get('show')));
+  // Asked again while the list is open (the sidebar's count clicked on this page): that filter, too.
+  const show = params.get('show');
+  React.useEffect(() => { if (show !== null) setFilter(filterFromQuery(show)); }, [show]);
+  // A filter chosen here drops the link's, so the same link works again and a reload does not contradict the list.
+  const choose = (f: MeetingFilter) => {
+    setFilter(f);
+    if (show !== null) setParams((p) => { const next = new URLSearchParams(p); next.delete('show'); return next; }, { replace: true });
+  };
   const [query, setQuery] = React.useState('');
   const [all, setAll] = React.useState(false);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -191,8 +201,8 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-5)', borderBottom: '1px solid var(--color-border)' }}>
             <SearchInput value={query} onChange={setQuery} placeholder={t('meetingsList.searchTitlesPeopleOrWhat')} size="sm" width={narrow ? '100%' : 300} />
             {narrow
-              ? <Select label={t('meetingsList.show')} size="sm" value={filter} onChange={(v) => setFilter(v as MeetingFilter)} options={options} />
-              : <SegmentedControl label={t('meetingsList.show')} value={filter} onChange={setFilter} options={options} />}
+              ? <Select label={t('meetingsList.show')} size="sm" value={filter} onChange={(v) => choose(v as MeetingFilter)} options={options} />
+              : <SegmentedControl label={t('meetingsList.show')} value={filter} onChange={choose} options={options} />}
           </div>
           {said.error && (
             <div style={{ padding: 'var(--space-3) var(--space-5)' }}>
@@ -212,7 +222,7 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
           ) : found.length === 0 ? (
             <EmptyState size="compact" title={query ? t('meetingsList.noMeetingMatches', { query }) : t('meetingsList.noMeetingsHere')}
               description={query ? t('meetingsList.tryATitleADate') : t('meetingsList.chooseAnotherFilterToSee')}
-              action={query ? { label: t('meetingsList.clearSearch'), onClick: () => setQuery('') } : { label: t('meetingsList.showAllMeetings'), onClick: () => setFilter('all') }} />
+              action={query ? { label: t('meetingsList.clearSearch'), onClick: () => setQuery('') } : { label: t('meetingsList.showAllMeetings'), onClick: () => choose('all') }} />
           ) : (
             groupRows(limited, now).map((g) => (
               <section key={g.label} aria-label={g.label}>
