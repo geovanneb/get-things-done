@@ -880,6 +880,15 @@ process for each job, so the model's memory and any crash stay out of the dashbo
 Recordings in the meeting queue are transcribed one at a time, oldest first, once a
 model is downloaded; the Meetings page shows each one's progress.
 
+- **Transcribe next**, in a waiting meeting's **⋯** menu on the Meetings list or in its
+  dialog, moves it to the front of the line; the recording being transcribed finishes
+  first. The meeting moved last goes first, and the row shows **Next** or **#2 in line**.
+  **Move back** undoes it. The order is kept in the workspace, for every dashboard on it.
+- **Transcribe now**, shown while another recording is being transcribed, stops that one
+  and starts this meeting. It asks first and says how far the running one got: that
+  recording goes back in line right after this meeting and starts again from the
+  beginning. Nothing of it is kept.
+
 - The transcript becomes a file of the meeting, `<recording>.transcript.md`: each part
   with speech, with its start and end time. Optional speaker detection labels the voices; you can name them in the dashboard.
 - **Stop** ends a transcription and keeps nothing of it; the meeting waits until you

@@ -906,7 +906,7 @@ export interface Voiceprints {
 }
 
 /** The transcription this dashboard is running; `done` and `total` are seconds of audio. */
-export interface TranscriptionProgress { meeting: string; file: string; done: number; total: number; started_at: string }
+export interface TranscriptionProgress { meeting: string; file: string; done: number; total: number; started_at: string; generation?: string }
 
 /** Someone expected at a meeting: a stakeholder (`ref`) or just a name. */
 export interface MeetingParticipant { name: string; ref?: string }
@@ -928,6 +928,8 @@ export interface QueuedMeeting {
   /** A recording in progress or interrupted: finish or discard it. */
   participants?: MeetingParticipant[];
   live?: { generation: string; state: 'recording' | 'finalizing' | 'damaged'; started_at: string; saved_bytes: number; last_block_at: string | null };
+  /** When "Transcribe next" was chosen: it goes before the other waiting meetings, the latest choice first. */
+  transcribe_first_at?: string;
 }
 
 export interface MeetingDigestSettings {

@@ -135,6 +135,12 @@ router.post('/:id/recordings/:file/:action', async (req: Request, res: Response)
   } else res.status(404).json({ error: 'Not found', message: 'Use stop, retry, accept or use-live' });
 });
 
+// PUT /api/meeting-queue/:id/priority  { first, now?, generation? }  Transcribe next, Move back (first: false), or
+// Transcribe now: the running transcription (the `generation` the page showed) goes back in line after this meeting
+router.put('/:id/priority', async (req: Request, res: Response) => {
+  res.json(await transcription.prioritize(queueId(param(req, 'id')), req.body));
+});
+
 // PUT /api/meeting-queue/:id/recordings/:file/speakers  { transcript_sha256, names: { "Speaker 2": { name, ref } | null } }
 router.put('/:id/recordings/:file/speakers', async (req: Request, res: Response) => {
   const id = queueId(param(req, 'id'));
