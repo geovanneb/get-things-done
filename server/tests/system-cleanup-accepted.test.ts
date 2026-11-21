@@ -180,6 +180,29 @@ test('a run gathers the tasks accepted since the switch was turned on, with copi
   assert.ok(!/left out/.test(next.message), next.message);
 });
 
+test('a confidential task accepted at the very moment of a review, or stamped after it, is counted in one review only', async (t) => {
+  const ws = await workspace(t);
+  const service = new SystemCleanupService();
+  await turnOn(service);
+  // Accepted in the same millisecond the review starts, and one whose done_date is ahead of the clock (a time zone
+  // written as UTC by hand, or a clock that stepped back).
+  await task(ws, 'TASK-2026-0001', { status: 'done', done_date: '2026-11-09T09:00:00.000Z', confidentiality: 'confidential' });
+  await task(ws, 'TASK-2026-0002', { status: 'done', done_date: '2026-11-09T18:00:00.000Z', confidentiality: 'restricted' });
+  const first = await service.runNow(at('2026-11-09T09:00:00.000Z'));
+  assert.match(first.message, /left out 2 marked confidential or restricted/);
+  await finish(ws, first.context_update!);
+
+  const second = await service.runNow(at('2026-11-09T12:00:00.000Z'));
+  assert.ok(!/left out/.test(second.message), second.message);
+  assert.ok(!(await fsp.readdir(materials(ws, second.context_update!))).includes('accepted-tasks.md'), 'nothing to list the second time');
+  await finish(ws, second.context_update!);
+
+  // One accepted after that is still counted.
+  await task(ws, 'TASK-2026-0003', { status: 'done', done_date: '2026-11-10T09:00:00.000Z', confidentiality: 'confidential' });
+  const third = await service.runNow(at('2026-11-16T09:00:00.000Z'));
+  assert.match(third.message, /left out 1 marked confidential or restricted/);
+});
+
 test('a reopened and re-accepted task is gathered once more, an unchanged one never twice', async (t) => {
   const ws = await workspace(t);
   const service = new SystemCleanupService();

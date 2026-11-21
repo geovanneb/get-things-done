@@ -265,6 +265,29 @@ test('a conversation saved while it streamed is read back as stopped; anything u
   assert.equal(normalize({ provider: 'unknown' }, 'chat-abcdefgh01'), null);
 });
 
+test('a conversation file never puts an option on the tool\'s command line: model, effort and session id are checked like a request', () => {
+  // A hand-edited or planted chat file: each of these would reach the tool as --model, --effort or --resume.
+  const planted = normalize({
+    provider: 'claude-code', model: '--dangerously-skip-permissions', effort: '-p',
+    provider_session: { provider: 'claude-code', id: '--settings=/tmp/evil.json' },
+  }, 'chat-abcdefgh01');
+  assert.equal(planted?.model, null);
+  assert.equal(planted?.effort, null);
+  assert.equal(planted?.provider_session, null);
+  for (const id of ['', ' 1234', 'a b', 'x\n--debug', 'a'.repeat(201)]) {
+    assert.equal(normalize({ provider: 'codex', provider_session: { provider: 'codex', id } }, 'chat-abcdefgh01')?.provider_session, null, JSON.stringify(id));
+  }
+  // What the tools write is kept.
+  const kept = normalize({
+    provider: 'claude-code', model: 'claude-opus-4-1[1m]', effort: 'high',
+    provider_session: { provider: 'claude-code', id: '8f14e45f-ceea-467a-9b1c-2a3b4c5d6e7f' },
+  }, 'chat-abcdefgh01');
+  assert.equal(kept?.model, 'claude-opus-4-1[1m]');
+  assert.equal(kept?.effort, 'high');
+  assert.equal(kept?.provider_session?.id, '8f14e45f-ceea-467a-9b1c-2a3b4c5d6e7f');
+  assert.equal(normalize({ provider: 'codex', provider_session: { provider: 'codex', id: 'thr_0193a1b2c3d4.e5:f6' } }, 'chat-abcdefgh01')?.provider_session?.id, 'thr_0193a1b2c3d4.e5:f6');
+});
+
 // ---------------------------------------------------------------- Claude Code, with a fake `claude`
 
 const FAKE_CLAUDE = String.raw`
