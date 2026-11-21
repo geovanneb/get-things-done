@@ -693,6 +693,8 @@ export interface ContextUpdate {
   unread: { name: string; reason: string }[];
   /** Detail only: the files still in materials/. */
   material_files?: { name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }[];
+  /** The materials/ folder, relative to the workspace, while it holds files (for Open folder); null once they are deleted. */
+  materials_folder?: string | null;
 }
 
 /* ---- Routines ------------------------------------------------------------ */

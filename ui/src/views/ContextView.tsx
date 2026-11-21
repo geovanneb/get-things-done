@@ -16,6 +16,7 @@ import { useNotify } from '@/hooks/useNotify';
 import EmptyState from '@/components/common/EmptyState';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import AttachedFiles from '@/components/common/AttachedFiles';
+import { folderFromServer } from '@/utils/desktop';
 import MarkdownEditor from '@/components/common/MarkdownEditor';
 import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api';
 import { formatRelativeDate } from '@/utils/format';
@@ -190,7 +191,8 @@ function NoteModal({ isOpen, onClose, initial, mode, onSaved, categories }: Note
         </Field>
         {effectiveNote?.id && (
           <AttachedFiles baseUrl={`/api/context/${effectiveNote.id}/files`} archiveUrl={`/api/context/${effectiveNote.id}/archive`} label={t('context.attachedFiles')}
-            archiveLabel={t('shareNotes.rawDownload')} archiveTitle={t('shareNotes.rawDownloadTitle')} />
+            archiveLabel={t('shareNotes.rawDownload')} archiveTitle={t('shareNotes.rawDownloadTitle')}
+            folder={() => folderFromServer(`/api/context/${encodeURIComponent(effectiveNote.id)}/folder`)} />
         )}
       </div>
     </Modal>

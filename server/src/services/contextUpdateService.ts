@@ -6,7 +6,7 @@ import { WorkspaceService } from './workspace';
 import { reserveIds, reservedSequence } from './idReservations';
 import { parseMarkdown, stringifyMarkdown } from '../utils/markdown';
 import { atomicWrite } from '../utils/atomicWrite';
-import { fileInside, workspaceEntry, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
+import { fileInside, workspaceEntry, workspaceFolder, listFolderFiles, saveAttachment, safeFileName, topLevelName, FolderFile } from '../utils/files';
 import { lock, unlock } from '../utils/fileLock';
 import { correctionChain, doubtsDropped, fieldTexts, fieldValues, recordDiff, rootActionIdentity, type FieldChange } from './meetingCorrections';
 import { fits, inFile, linkAt, locate, samePlace, setAt, valueAt, type ValueAt } from './meetingSuggestions';
@@ -480,6 +480,8 @@ export interface SuggestionState { index: number; used: boolean; blocked: string
 export interface ContextUpdateDetail extends ContextUpdate {
   proposals: ProposalDetail[];
   material_files: FolderFile[];
+  /** The update's materials/ folder, relative to the workspace, while it holds files (for Open folder); null otherwise. */
+  materials_folder: string | null;
   /**
    * A `meeting-correction` only: the version it corrects (null when that is gone or changed), whether that is still the
    * meeting's current record (`stale` when another correction finished first), why approving would be refused now
@@ -1363,6 +1365,8 @@ export class ContextUpdateService {
       const proposals = await Promise.all(current.proposals.map((p) => this.proposalDetail(dir, current, p, appFiles)));
       await this.markLinkedPeople(current.meeting_records);
       const material_files = await listFolderFiles(path.join(dir, 'materials'));
+      // Only while files are kept: once deleted (or never added) there is nothing to open. A linked folder is never offered.
+      const materials_folder = material_files.length ? await workspaceFolder(workspaceService.getWorkspacePath(), path.join(dir, 'materials')).catch(() => null) : null;
       const hashOf = async (name: string) => {
         const full = await fileInside(path.join(dir, 'materials'), name).catch(() => null);
         const content = full ? await fsp.readFile(full).catch(() => null) : null;
@@ -1378,7 +1382,7 @@ export class ContextUpdateService {
       })));
       const correction_review = current.kind === CORRECTION_KIND && current.correction ? await this.correctionReview(current) : undefined;
       const follow_up_problem = current.kind === FOLLOW_UP_KIND && current.status !== 'done' ? followUpProblem(current, await this.list()) : undefined;
-      return { ...current, proposals, material_files, transcripts, ...(correction_review ? { correction_review } : {}), ...(follow_up_problem !== undefined ? { follow_up_problem } : {}) };
+      return { ...current, proposals, material_files, materials_folder, transcripts, ...(correction_review ? { correction_review } : {}), ...(follow_up_problem !== undefined ? { follow_up_problem } : {}) };
     });
   }
 

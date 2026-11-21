@@ -8,6 +8,7 @@ import IconButton, { icons } from './IconButton';
 import Notice from './Notice';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import OfficeCheckBadge from '@/components/common/OfficeCheckBadge';
+import ShowInFolderButton, { type ShowInFolderTarget } from './ShowInFolderButton';
 import { apiGet } from '@/utils/api';
 import { groupByFolder } from '@/utils/attachedFiles';
 import type { OfficeCheck } from '@/types';
@@ -23,6 +24,11 @@ interface AttachedFilesProps {
   /** Overrides the archive link's text and tooltip (Context says it is the raw folder, not a filtered share). */
   archiveLabel?: string;
   archiveTitle?: string;
+  /**
+   * The folder these files are in, for Open folder: a lookup asked when clicked (the server knows the folder, which
+   * can move). Left out, there is no Open folder button.
+   */
+  folder?: () => Promise<ShowInFolderTarget>;
 }
 
 const labelStyle: React.CSSProperties = {
@@ -41,7 +47,7 @@ async function responseError(res: Response, fallback: string): Promise<Error> {
  * Subfolders (e.g. assets/, source/) are listed read-only: attach and remove act on the top level only.
  * Each subfolder starts collapsed, showing its name and file count; clicking it shows its files.
  */
-export default function AttachedFiles({ baseUrl, label, archiveUrl, archiveLabel, archiveTitle }: AttachedFilesProps) {
+export default function AttachedFiles({ baseUrl, label, archiveUrl, archiveLabel, archiveTitle, folder }: AttachedFilesProps) {
   const { t } = useLanguage();
   const confirm = useConfirm();
   const notify = useNotify();
@@ -123,6 +129,7 @@ export default function AttachedFiles({ baseUrl, label, archiveUrl, archiveLabel
               {archiveLabel ?? t('downloadAllZip')}
             </a>
           )}
+          {folder && <ShowInFolderButton path={folder} />}
           <Button variant="secondary" size="sm" loading={uploading} onClick={() => inputRef.current?.click()}>
             {t('attachFile')}
           </Button>

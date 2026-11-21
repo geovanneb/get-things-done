@@ -1,4 +1,4 @@
-import { deleteAttachment, safeFileName, saveAttachment, topLevelName, workspaceEntry, withOfficeCheck, FolderFile } from '../utils/files';
+import { deleteAttachment, safeFileName, saveAttachment, topLevelName, workspaceEntry, workspaceFolder, withOfficeCheck, FolderFile } from '../utils/files';
 import * as path from 'path';
 import * as fsp from 'fs/promises';
 import { Task, TaskStatus, Priority } from '../types';
@@ -738,6 +738,20 @@ If the executive comes back with feedback on a task that is already \`in_review\
     // Check every ancestor: an atomic attachment write only protects the final file, not linked folders. Save and
     // delete check again right before they change anything, since the folder could be replaced after this check.
     return workspaceEntry(workspaceService.getWorkspacePath(), dir, true);
+  }
+
+  /**
+   * The task's folder for Open folder, relative to the workspace: `tasks/active/<id>`, or `tasks/archive/<id>` once
+   * archived. Read only. Not found when neither holds the task; a linked folder is refused (see workspaceEntry).
+   */
+  async taskFolder(id: string): Promise<string> {
+    const name = topLevelName(id);
+    for (const dir of [this.getActiveDir(), this.getArchiveDir()]) {
+      if (!(await fileService.exists(path.join(dir, name, 'task.md')))) continue;
+      const folder = await workspaceFolder(workspaceService.getWorkspacePath(), path.join(dir, name));
+      if (folder) return folder;
+    }
+    throw new Error(`Task not found: ${id}`);
   }
 
   async listTaskFiles(id: string): Promise<FolderFile[]> {

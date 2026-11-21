@@ -12,7 +12,7 @@ import { categoryIds, withCategoryKept } from './contextCategories';
 const TEXT_FIELDS = ['title', 'slug', 'body', 'content', 'relevance'] as const;
 /** A timestamp as text: YAML reads an unquoted `updated_at: 2026-11-08` as a date, which cannot be sorted as text. */
 const stamp = (value: unknown): string => value instanceof Date && !Number.isNaN(value.getTime()) ? value.toISOString() : typeof value === 'string' && value ? value : new Date().toISOString();
-import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
+import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry, workspaceFolder } from '../utils/files';
 
 const fileService = new FileService();
 
@@ -22,6 +22,11 @@ export type Sensitivity = (typeof SENSITIVITIES)[number];
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
+}
+
+/** Why a note that is still an old single file (its folder name taken by another note) cannot do folder things. */
+function singleFileMessage(name: string): string {
+  return `This note is still the single file ${name}, next to another note's folder of the same name. Rename one of them first.`;
 }
 
 /** How a note's label counts: none is `internal`; anything that is not a known label is `invalid` (never shareable). */
@@ -44,6 +49,46 @@ const workspaceService = new WorkspaceService();
  * once the category is held for the save (`held`). Never set outside tests.
  */
 export const contextSaveHooks: { pause?: (phase: 'checked' | 'held', category: string) => Promise<void> } = {};
+/** Test-only: runs after an old single file's new folder is made, right before the file is moved into it. */
+export const contextMigrateHooks: { beforeMove?: (noteFile: string) => Promise<void> } = {};
+
+/** Whether `a` and `b` are one file under two names (hard links: same device and inode). */
+async function sameFile(a: string, b: string): Promise<boolean> {
+  const [x, y] = await Promise.all([a, b].map((f) => fsp.lstat(f, { bigint: true }).catch(() => null)));
+  return Boolean(x && y && x.isFile() && y.isFile() && x.ino !== 0n && x.dev === y.dev && x.ino === y.ino);
+}
+
+/** Whether two files hold the same bytes. */
+async function sameBytes(a: string, b: string): Promise<boolean> {
+  const [x, y] = await Promise.all([a, b].map((f) => fsp.readFile(f).catch(() => null)));
+  return Boolean(x && y && x.equals(y));
+}
+
+/**
+ * Moves `from` to `to` only if nothing is at `to`, claimed atomically: a hard link fails with EEXIST when `to` exists
+ * (a note saved there a moment ago is never overwritten). Where links are not possible, an exclusive copy does the
+ * same. The source is removed only once the destination is claimed.
+ * - `moved`: done.
+ * - `clash`: something else is at `to`; both files are left as they are.
+ * - `stuck`: claimed, but `from` could not be removed (a read-only folder). Nothing is deleted: both names stay, one
+ *   file (a link) or the same bytes (a copy), which every scan lists once and a later scan finishes (see noteFiles).
+ */
+async function moveExclusive(from: string, to: string): Promise<'moved' | 'clash' | 'stuck'> {
+  try {
+    await fsp.link(from, to);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') return 'clash';
+    if (!['EXDEV', 'EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(code ?? '')) throw err;
+    try {
+      await fsp.copyFile(from, to, fsp.constants.COPYFILE_EXCL);
+    } catch (copyErr) {
+      if ((copyErr as NodeJS.ErrnoException).code === 'EEXIST') return 'clash';
+      throw copyErr;
+    }
+  }
+  return fsp.unlink(from).then(() => 'moved' as const, () => 'stuck' as const);
+}
 
 /** The built-in categories and the workspace's own (context/categories.md); a note anywhere else is never listed, read or deleted. */
 const categories = (): Promise<string[]> => categoryIds(workspaceService.getWorkspacePath());
@@ -109,28 +154,59 @@ export class ContextService {
    * The note files in a category, one at a time and in the folder's order, each old single file migrated when it is
    * reached (a lookup by id stops at its note, as it always has). The category folder is checked before it is
    * created, listed or migrated into. Links inside it (a linked note folder or note.md) are skipped, never followed.
+   * With `migrate` false nothing is created or moved: old single files are yielded where they are (a read-only lookup).
+   * An old file whose folder already holds a note.md is never migrated (see migrateOldFile) and is yielded as it is.
    */
-  private async *noteFiles(cat: ContextCategory): AsyncGenerator<{ filePath: string; name: string }> {
+  private async *noteFiles(cat: ContextCategory, migrate = true): AsyncGenerator<{ filePath: string; name: string }> {
     const dir = await this.contained(this.getContextDir(cat));
-    await fileService.ensureDir(dir);
+    if (migrate) await fileService.ensureDir(dir);
     const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    // Each note once, whichever entry reaches it first (a folder and an old file migrated into it in this scan).
+    const seen = new Set<string>();
     for (const entry of entries) {
       if (entry.isDirectory()) {
         // New structure: category/slug/note.md
         const noteFile = path.join(dir, entry.name, 'note.md');
-        if (!(await fsp.lstat(noteFile).catch(() => null))?.isFile()) continue;
+        if (seen.has(noteFile) || !(await fsp.lstat(noteFile).catch(() => null))?.isFile()) continue;
+        seen.add(noteFile);
         yield { filePath: noteFile, name: entry.name };
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         // Old structure: migrate to new
-        yield { filePath: await this.migrateOldFile(path.join(dir, entry.name), cat), name: entry.name };
+        const oldFile = path.join(dir, entry.name);
+        const noteFile = path.join(dir, entry.name.slice(0, -3), 'note.md');
+        // Only two real files count: the note folder no link, note.md a regular file (lstat, never followed), so a
+        // linked note.md pointing back at the old file is a clash and the only real copy is never removed.
+        const plain = (await fsp.lstat(path.dirname(noteFile)).catch(() => null))?.isDirectory() === true
+          && (await fsp.lstat(noteFile).catch(() => null))?.isFile() === true;
+        if (plain && (await sameFile(oldFile, noteFile) || await sameBytes(oldFile, noteFile))) {
+          // An interrupted migration: the note is already at note.md and the old name is a second link or copy of it.
+          if (migrate) await fsp.unlink(oldFile).catch((err: NodeJS.ErrnoException) => console.warn(`[context] ${cat}/${entry.name} is the same file as ${cat}/${entry.name.slice(0, -3)}/note.md, but the old name could not be removed (${err.code ?? err.message}). The note is listed once.`));
+          if (seen.has(noteFile)) continue;
+          seen.add(noteFile);
+          yield { filePath: noteFile, name: entry.name.slice(0, -3) };
+          continue;
+        }
+        const filePath = migrate ? await this.migrateOldFile(oldFile, cat) : oldFile;
+        if (seen.has(filePath)) continue;
+        seen.add(filePath);
+        yield { filePath, name: entry.name };
       }
     }
   }
 
-  /** The folder of a note found by id, checked again (see contained): 404 when there is no such note. */
+  /** Whether a found note is still an old single file in its category folder (it has no folder of its own). */
+  private isSingleFile(filePath: string, category: ContextCategory): boolean {
+    return path.dirname(filePath) === this.getContextDir(category);
+  }
+
+  /**
+   * The folder of a note found by id, checked again (see contained): 404 when there is no such note. An old single file
+   * left unmigrated (its folder name is taken) has no folder: refused, so attachments never act on the category folder.
+   */
   private async noteFolder(id: string): Promise<string> {
     const result = await this.findContextFile(id);
     if (!result) throw new Error(`Context note not found: ${id}`);
+    if (this.isSingleFile(result.filePath, result.category)) throw httpError(409, singleFileMessage(path.basename(result.filePath)));
     return workspaceEntry(workspaceService.getWorkspacePath(), path.dirname(result.filePath)).catch((err: NodeJS.ErrnoException) => {
       // Removed by something that does not take the lock (an agent or the file manager) since it was found.
       if (err.code === 'ENOENT') throw new Error(`Context note not found: ${id}`);
@@ -138,13 +214,26 @@ export class ContextService {
     });
   }
 
-  // Migrate old-style file to new folder structure
+  /**
+   * Migrates an old single file (`<category>/<slug>.md`) to the folder structure (`<category>/<slug>/note.md`). Never
+   * over another note: when `<slug>/note.md` already exists (or anything else is in its place), the old file stays where
+   * it is, untouched, and is returned as it is; both notes keep their text and both can still be found.
+   */
   private async migrateOldFile(oldPath: string, category: ContextCategory): Promise<string> {
     const slug = path.basename(oldPath, '.md');
     const noteDir = await this.contained(this.getNoteDir(category, slug));
     const noteFile = this.getNoteFile(category, slug);
     await fileService.ensureDir(noteDir);
-    await fsp.rename(oldPath, noteFile);
+    await contextMigrateHooks.beforeMove?.(noteFile);
+    // Claimed atomically: a note.md already there, or saved there since, is never overwritten.
+    const moved = await moveExclusive(oldPath, noteFile);
+    if (moved === 'clash') {
+      console.warn(`[context] ${category}/${slug}.md was not moved into ${category}/${slug}/: that folder already holds a note.md. Both notes are kept; rename one of them.`);
+      return oldPath;
+    }
+    if (moved === 'stuck') {
+      console.warn(`[context] ${category}/${slug}.md is now also ${category}/${slug}/note.md, but the old name cannot be removed (is the folder read-only?). Nothing was deleted; the note is listed once and a later scan finishes the move.`);
+    }
     return noteFile;
   }
 
@@ -295,6 +384,8 @@ export class ContextService {
 
     // If category changed, move the entire slug directory
     if (incomingCategory !== existing.category) {
+      // An old single file left unmigrated has no folder of its own: moving its "folder" would move the whole category.
+      if (this.isSingleFile(existing.path!, existing.category)) throw httpError(409, singleFileMessage(path.basename(existing.path!)));
       const slug = path.basename(path.dirname(existing.path!));
       const newNoteDir = await this.contained(this.getNoteDir(incomingCategory, slug));
       // Never onto another note: its folder would be overwritten.
@@ -359,6 +450,18 @@ export class ContextService {
     }
   }
 
+  /**
+   * The note's folder for Open folder, relative to the workspace (`context/<category>/<slug>`). Read only: found
+   * without migrating anything, so a note that is still an old single file (no folder of its own yet) is not found.
+   */
+  async contextFolder(id: string): Promise<string> {
+    const result = await this.findContextFile(id, false);
+    if (!result || this.isSingleFile(result.filePath, result.category)) throw new Error(`Context note not found: ${id}`);
+    const folder = await workspaceFolder(workspaceService.getWorkspacePath(), path.dirname(result.filePath));
+    if (!folder) throw new Error(`Context note not found: ${id}`);
+    return folder;
+  }
+
   async listContextFiles(id: string): Promise<FolderFile[]> {
     return listFolderFiles(await this.noteFolder(id), ['note.md']);
   }
@@ -384,9 +487,9 @@ export class ContextService {
     await deleteAttachment(noteDir, safe, workspaceService.getWorkspacePath());
   }
 
-  private async findContextFile(id: string): Promise<{ filePath: string; category: ContextCategory } | null> {
+  private async findContextFile(id: string, migrate = true): Promise<{ filePath: string; category: ContextCategory } | null> {
     for (const cat of await categories()) {
-      for await (const { filePath } of this.noteFiles(cat)) {
+      for await (const { filePath } of this.noteFiles(cat, migrate)) {
         try {
           const { data } = await fileService.readMarkdown<{ id?: string }>(filePath);
           if (data.id === id) return { filePath, category: cat };

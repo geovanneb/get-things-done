@@ -39,6 +39,11 @@ router.delete('/templates/:id', async (req: Request, res: Response) => {
   res.status(204).send();
 });
 
+// GET /api/outputs/templates/:id/folder  the template's folder, relative to the workspace, for Open folder
+router.get('/templates/:id/folder', async (req: Request, res: Response) => {
+  res.json({ folder: await outputService.templateFolderPath(param(req, 'id')) });
+});
+
 // GET /api/outputs/templates/:id/files
 router.get('/templates/:id/files', async (req: Request, res: Response) => {
   const files = await outputService.listTemplateFiles(param(req, 'id'));

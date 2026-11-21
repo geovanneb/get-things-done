@@ -4,6 +4,7 @@ import type { OutputTemplate } from '@/types';
 import { selectStyle } from './styles';
 import IconRemoveButton from './IconRemoveButton';
 import TextDeliverableAccordion from './TextDeliverableAccordion';
+import ShowInFolderButton from '@/components/common/ShowInFolderButton';
 
 export interface DeliverableItem {
   id?: string;
@@ -111,6 +112,8 @@ export default function DeliverableRow({ item, index, templates, onChange, onRem
             </Badge>
           )}
           <div style={{ flex: 1 }} />
+          {/* file_path is already relative to the workspace: the file is shown selected in its folder, never opened. */}
+          {item.file_path && <ShowInFolderButton path={item.file_path} label={t('showInFolder.showFile')} iconOnly />}
           {outputUrl && effectiveFormat?.toUpperCase() !== 'TXT' && (
             <a
               href={outputUrl}

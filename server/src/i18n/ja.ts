@@ -3091,6 +3091,8 @@ export default {
   "showInFolder.copied": "パスをコピーしました",
   "showInFolder.couldNotCopy": "コピーできませんでした。パスを選択してコピーしてください。",
   "showInFolder.noWorkspace": "まだワークスペースが開かれていません。",
+  "showInFolder.showFile": "フォルダーで表示",
+  "showInFolder.gone": "このフォルダーはワークスペースにありません。移動または削除された可能性があります。",
   "meetingFolder.recordingNotKept": "この会議の録音は保存されていません。このフォルダーには文字起こしとメモだけがあります。",
   "meetingFolder.sharedFolder": "このフォルダーには {update} の他の会議も入っているため、この会議の最初のファイルを示します。",
   "server.meetingFolderUnsafe": "この会議のフォルダーは開けません。リンクであるか、ワークスペースの外にあります。",

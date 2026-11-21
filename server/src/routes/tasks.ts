@@ -165,6 +165,11 @@ router.put('/:id/deliverables/:deliverable/name-check/dismissed', async (req: Re
   res.json(await setDismissed(param(req, 'id'), param(req, 'deliverable'), req.body));
 });
 
+// GET /api/tasks/:id/folder  the task's folder (active or archived), relative to the workspace, for Open folder
+router.get('/:id/folder', async (req: Request, res: Response) => {
+  res.json({ folder: await taskService.taskFolder(param(req, 'id')) });
+});
+
 // GET /api/tasks/:id/files
 router.get('/:id/files', async (req: Request, res: Response) => {
   const files = await taskService.listTaskFiles(param(req, 'id'));

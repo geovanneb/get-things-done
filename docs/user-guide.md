@@ -209,6 +209,11 @@ your organization (a `public` task, or a stakeholder from another organization) 
 from shareable notes, and a context update can make a label stricter but never looser. A label
 cannot catch a private sentence inside a shareable note, so read the preview before you send it.
 
+**Open folder.** In the note editor, **Open folder** next to **Attach file** takes you to the note's
+folder, to add or replace attachments in bulk. In the desktop app, Finder or File Explorer shows the
+folder from inside; in a browser, which cannot open folders, you see its full path with **Copy path**.
+The folder follows the note when you change its category.
+
 Context goes stale as things change. Instead of editing notes by hand after every
 meeting, import the material and let an agent propose the updates for you to review.
 See [Keeping context up to date](#keeping-context-up-to-date).
@@ -219,6 +224,10 @@ What "finished" looks like. Each template declares a format, required sections a
 style guide. Four ship by default: **Plain text message**, **Executive document**,
 **Executive deck** and **Meeting brief**. Create your own for the artifacts you produce over and over —
 your weekly update, your steering committee pack, your board memo.
+
+**Open folder.** In the template editor, **Open folder** next to **Attach file** takes you to the
+template's folder, to edit a template document (`.pptx`, `.docx`, `.xlsx`) in its own app. The desktop
+app shows it in Finder or File Explorer; a browser shows its full path with **Copy path**.
 
 ### 5. Tasks — `tasks/active/`
 
@@ -236,6 +245,15 @@ tasks/active/TASK-2026-0001/
 Tasks move `backlog` → `in_progress` → `in_review` → `done`. Agents set
 `in_progress` when they pick work up and `in_review` when they finish. **Only you set
 `done`**, and only after reading the output.
+
+**Open folder.** A task's files are ordinary files on your computer. Next to **Open output**, each
+deliverable's folder button shows its file selected in its folder, to edit it in Word or PowerPoint,
+attach it to an email or find its PDF copy and older versions in `backups/`. **Open folder** on the
+Files tab (and on an archived task, next to the notice that it is archived) takes you to the task's
+folder, wherever it is now: `tasks/active/<id>/`, or `tasks/archive/<id>/` once archived. In the
+desktop app, Finder or File Explorer shows it; the app only ever shows files and folders, it never
+opens or runs one. In a browser, which cannot open folders, you see the full path with **Copy path**.
+If the task was deleted or moved in the meantime, the app says the folder is no longer there.
 
 **Share pack.** **Board > Share pack** gathers deliverables and files attached to tasks into one ZIP
 for a colleague: choose the files from any active task, put them in reading order, **Preview** the
@@ -420,6 +438,10 @@ you open the chat again). If a file did not upload, a notice names it: add it ag
 that page.
 Put everything about one event (the transcript, the deck and the follow-up email) in
 one update, so the agent reads them together.
+
+While an update's files are kept, **Open folder** above its materials takes you to its
+`materials/` folder, to check what was imported. Once the files are deleted (when the update
+finishes, unless you kept them) there is no folder to open.
 
 ### 2. Analyze
 
