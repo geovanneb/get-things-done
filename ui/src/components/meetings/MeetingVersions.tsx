@@ -6,6 +6,8 @@ import Button from '@/components/common/Button';
 import Modal from '@/components/common/Modal';
 import Notice from '@/components/common/Notice';
 import { Select } from '@/components/common/Input';
+import { TranscriptionBar } from '@/components/meetings/TranscriptionBar';
+import { transcriptionView } from '@/utils/transcriptionProgress';
 import type { MeetingDetail, MeetingDigest } from '@/types';
 
 /**
@@ -65,10 +67,18 @@ export function TranscriptionNotice({ detail, names, busy, onStop }: {
       </Notice>
     );
   }
-  const progress = p && p.total > 0 ? ` ${Math.min(100, Math.round((p.done / p.total) * 100))}%` : '';
+  // The same wording and bar as the Meetings list (see transcriptionProgress.ts). Only this dashboard's job has progress.
+  const view = t.status === 'running' && p ? transcriptionView(p, Date.now()) : null;
+  const progress = view?.phase === 'transcribing' && view.percent !== null ? ` ${view.percent}%` : '';
   return (
     <Notice tone="info" title={t.status === 'running' ? tr('meetingVersions.transcribingAgainWith', { model, progress }) : tr('meetingVersions.waitingToTranscribeAgainWith', { model })}
       action={<Button size="sm" variant="secondary" disabled={busy} onClick={onStop}>{tr('meetingVersions.stop')}</Button>}>
+      {view && (
+        <span style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', marginBottom: 'var(--space-2)' }}>
+          {view.detail && <span>{view.detail}</span>}
+          <TranscriptionBar percent={view.percent} spoken={view.spoken} width={200} />
+        </span>
+      )}
       {t.status === 'running' ? tr('meetingVersions.whenItIsDoneIt') : tr('meetingVersions.itStartsWhenTheMeetings')}
     </Notice>
   );

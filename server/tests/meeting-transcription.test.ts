@@ -9,7 +9,7 @@ import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { MeetingDigestService, parseSpeakerNames, transcriptSpeakers } from '../src/services/meetingDigestService';
-import { audioTranscriptMarkdown, MeetingTranscriptionService, transcriptionTimings } from '../src/services/meetingTranscription';
+import { audioTranscriptMarkdown, meetingTranscriptionEvents, MeetingTranscriptionService, PROGRESS_FILE, transcriptionTimings, type TranscriptionPhase } from '../src/services/meetingTranscription';
 import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { TranscriptionModelService } from '../src/services/transcriptionModels';
 import type { Segment, TranscriptionEngine } from '../src/services/transcription/engine';
@@ -868,8 +868,10 @@ test('a GPU model runs only while verified here; a GPU failure, or a result not 
   const used: string[] = [];
   let gpuOutcome: 'fail' | 'cpu' | 'metal' | 'other' = 'fail';
   const engine = {
-    transcribe: async (_wav: string, o: { model?: string; onSegment?: (s: Segment) => void }) => {
+    transcribe: async (_wav: string, o: { model?: string; onSegment?: (s: Segment) => void; onPhase?: (phase: TranscriptionPhase) => void }) => {
       used.push(o.model!);
+      o.onPhase?.('loading');
+      o.onPhase?.('transcribing');
       if (o.model === GPU && gpuOutcome === 'fail') {
         o.onSegment?.({ start: 0, end: 1, text: 'Heard on the GPU before it failed' });
         throw Object.assign(new Error('The GPU engine ended (9)'), { failure: 'gpu' });
@@ -890,9 +892,15 @@ test('a GPU model runs only while verified here; a GPU failure, or a result not 
   };
   const folder = (id: string) => path.join(process.env.ESB_WORKSPACE_PATH!, 'context-updates', 'meeting-queue', id);
 
-  // Verified, then the GPU fails part way: made again, whole, on the CPU, and the transcript says so.
+  // Verified, then the GPU fails part way: made again, whole, on the CPU, and the transcript says so. The page sees
+  // the job go back to loading the model, then transcribing again.
   await verify();
+  const phases: (TranscriptionPhase | undefined)[] = [];
+  const seen = () => { const p = job.progress()?.phase; if (phases[phases.length - 1] !== p) phases.push(p); };
+  meetingTranscriptionEvents.on('change', seen);
   const failed = await run('GPU fails');
+  meetingTranscriptionEvents.off('change', seen);
+  assert.deepEqual(phases, ['loading', 'transcribing', 'loading', 'transcribing', undefined]);
   assert.deepEqual(used, [GPU, 'whisper-large-v3-turbo']);
   assert.deepEqual([failed.r.status, failed.r.model], ['done', 'whisper-large-v3-turbo']);
   const text = await fsp.readFile(path.join(folder(failed.id), failed.r.transcript!), 'utf-8');
@@ -930,4 +938,220 @@ test('a GPU model runs only while verified here; a GPU failure, or a result not 
   gpuOutcome = 'other';
   const bad = await run('Bad audio');
   assert.deepEqual([used, bad.r.status], [[GPU], 'failed']);
+});
+
+test('the job says which step it is in: finding who speaks with its part, loading, transcribing; other dashboards read it from its progress file, gone when it ends', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const previous = transcriptionTimings.progressFileMs;
+  transcriptionTimings.progressFileMs = 0;
+  t.after(() => { transcriptionTimings.progressFileMs = previous; });
+  const models = {
+    readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'auto', speakers: true }),
+    installedPath: async () => '/fictional/model',
+  } as unknown as TranscriptionModelService;
+  type Options = { signal?: AbortSignal; onPhase?: (phase: TranscriptionPhase, done?: number, total?: number) => void; onProgress?: (done: number, total: number) => void };
+  /** A point the fake engine stops at, until the test lets it go on. */
+  const barrier = () => {
+    let reach!: () => void;
+    let go!: () => void;
+    return { reached: new Promise<void>((r) => { reach = r; }), reach: () => reach(), released: new Promise<void>((r) => { go = r; }), go: () => go() };
+  };
+  const speakers = barrier();
+  const transcribing = barrier();
+  const engine = {
+    transcribeWithSpeakers: async (_wav: string, o: Options) => {
+      o.onPhase?.('speakers');
+      o.onPhase?.('speakers', 1, 4);
+      speakers.reach();
+      await speakers.released;
+      o.onPhase?.('loading');
+      o.onPhase?.('transcribing');
+      o.onProgress?.(30, 600);
+      transcribing.reach();
+      await transcribing.released;
+      return { segments: [{ start: 0, end: 1, text: 'Fictional words.' }], seconds: 1, load_ms: 1, speaker_note: null, voices: [] };
+    },
+  } as unknown as TranscriptionEngine;
+  const job = new MeetingTranscriptionService(queue, models, engine);
+  const id = await queueRecording(queue, 'Workshop');
+  const file = path.join(ws, '.situation-board', 'routines', PROGRESS_FILE);
+  const saved = async () => { await job.progressSaved(); return JSON.parse(await fsp.readFile(file, 'utf-8')) as Record<string, unknown>; };
+
+  await job.tick();
+  await speakers.reached;
+  const generation = (await recording(queue, id)).generation;
+  assert.deepEqual([job.progress()?.phase, job.progress()?.phase_part, job.progress()?.total], ['speakers', 0.25, 0]);
+  assert.deepEqual(await saved(), { ...job.progress(), generation, pid: process.pid }, 'the file names the job: its generation and this dashboard');
+  assert.equal(await job.progressElsewhere(), null, 'this dashboard shows its own job, never its file as another one');
+  speakers.go();
+  await transcribing.reached;
+  const p = job.progress()!;
+  assert.deepEqual([p.phase, p.done, p.total, p.phase_part], ['transcribing', 30, 600, undefined]);
+  assert.ok(Date.parse(p.phase_started_at) >= Date.parse(p.started_at));
+  assert.deepEqual(await saved(), { ...p, generation, pid: process.pid });
+  transcribing.go();
+  await MeetingTranscriptionService.settled();
+  assert.equal((await recording(queue, id)).status, 'done');
+  await assert.rejects(fsp.access(file), 'the progress file goes with the job');
+});
+
+test('a recording that is not WAV shows its conversion as a step of its own', async (t) => {
+  await workspace(t);
+  const queue = new MeetingDigestService();
+  const { engine } = fakeEngine(speaks(['x']));
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  await queueRecording(queue, 'Phone memo', [['memo.m4a', Buffer.from('not really audio')]]);
+  const phases: (TranscriptionPhase | undefined)[] = [];
+  const seen = () => phases.push(job.progress()?.phase);
+  meetingTranscriptionEvents.on('change', seen);
+  t.after(() => { meetingTranscriptionEvents.off('change', seen); });
+  await job.tick();
+  await MeetingTranscriptionService.settled();
+  assert.deepEqual(phases.slice(0, 2), ['loading', 'converting']);
+});
+
+test('another dashboard\'s progress is shown only while its job is alive, holds the lock and runs that very recording', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  const job = new MeetingTranscriptionService(queue, fakeModels(), fakeEngine(speaks(['x'])).engine);
+  const id = await queueRecording(queue, 'Workshop');
+  const routines = path.join(ws, '.situation-board', 'routines');
+  // Another live dashboard (this test's parent stands in for it) runs the job.
+  const other = process.ppid;
+  const running = async (generation: string, pid = other) => queue.withQueue(async () => {
+    const m = await queue.loadMeeting(id);
+    m.files[0]!.recording = { status: 'running', generation, owner: { pid, token: 'other' }, started_at: '2026-10-30T09:00:00Z' };
+    await queue.saveMeeting(m);
+  });
+  const lock = (pid: number) => fsp.writeFile(path.join(routines, 'transcription.lock'), JSON.stringify({ pid, token: 'other' }));
+  const progress = { meeting: id, file: 'workshop.wav', done: 120, total: 600, started_at: '2026-10-30T09:00:00.000Z', phase: 'transcribing', phase_started_at: '2026-10-30T09:01:00.000Z' };
+  const write = (extra: Record<string, unknown> = {}) => fsp.writeFile(path.join(routines, PROGRESS_FILE), JSON.stringify({ ...progress, generation: 'gen-1', pid: other, ...extra }));
+  await running('gen-1');
+  await lock(other);
+
+  assert.equal(await job.progressElsewhere(), null, 'no file yet');
+  await write();
+  assert.deepEqual(await job.progressElsewhere(), { ...progress, elsewhere: true });
+  await write({ phase: 'speakers', done: 0, total: 0, phase_part: 0.4 });
+  assert.deepEqual(await job.progressElsewhere(), { ...progress, phase: 'speakers', done: 0, total: 0, phase_part: 0.4, elsewhere: true });
+
+  // A dashboard that is gone: its pid has no process, and the lock is its own.
+  const gone = 2 ** 22 + 1;
+  await write({ pid: gone });
+  await lock(gone);
+  await running('gen-1', gone);
+  assert.equal(await job.progressElsewhere(), null, 'a stale pid is never shown');
+  await lock(other);
+  await running('gen-1');
+  // The lock now names another process than the file.
+  await lock(1);
+  await write();
+  assert.equal(await job.progressElsewhere(), null, 'the job must still hold the lock');
+  await lock(other);
+
+  // The recording was stopped and started again (a new generation), or is no longer running.
+  await running('gen-2');
+  assert.equal(await job.progressElsewhere(), null, 'a generation that does not match is never shown');
+  await running('gen-1');
+  assert.ok(await job.progressElsewhere());
+
+  // A damaged file or one with missing or wrong fields.
+  for (const bad of ['{"meeting":', '[]', 'null', JSON.stringify({ ...progress, generation: 'gen-1' }), JSON.stringify({ ...progress, generation: 'gen-1', pid: other, phase: 'thinking' }), JSON.stringify({ ...progress, generation: 'gen-1', pid: other, done: -1 })]) {
+    await fsp.writeFile(path.join(routines, PROGRESS_FILE), bad);
+    assert.equal(await job.progressElsewhere(), null, bad);
+  }
+  // A file this very process left behind is not another dashboard's job.
+  await write({ pid: process.pid });
+  assert.equal(await job.progressElsewhere(), null);
+});
+
+test('the digest shows this dashboard\'s job only in its own workspace: another workspace with the same meeting id and file gets its own progress', async (t) => {
+  const first = await workspace(t);
+  const queueA = new MeetingDigestService();
+  let started!: () => void;
+  const held = new Promise<void>((r) => { started = r; });
+  let finish!: () => void;
+  const done = new Promise<void>((r) => { finish = r; });
+  const { engine } = fakeEngine(async (_wav, o) => {
+    o.onProgress?.(480, 600);
+    started();
+    await done;
+    return { segments: [{ start: 0, end: 1, text: 'Fictional words.' }], seconds: 1, load_ms: 1 };
+  });
+  const job = new MeetingTranscriptionService(queueA, fakeModels(), engine);
+  const idA = await queueRecording(queueA, 'Meeting in A');
+  await job.tick();
+  await held;
+  // Released however the test ends, so a failure never leaves the job waiting.
+  try {
+    // Workspace B: the same meeting id and file name, transcribed by another live dashboard (this test's parent).
+    const second = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-transcribe-b-'));
+    t.after(() => fsp.rm(second, { recursive: true, force: true }));
+    for (const d of ['tasks/active', 'context-updates', '.situation-board/routines']) await fsp.mkdir(path.join(second, d), { recursive: true });
+    process.env.ESB_WORKSPACE_PATH = second;
+    const queueB = new MeetingDigestService();
+    const idB = await queueRecording(queueB, 'Meeting in B');
+    assert.equal(idB, idA, 'the same id in both');
+    await queueB.withQueue(async () => {
+      const m = await queueB.loadMeeting(idB);
+      m.files[0]!.recording = { status: 'running', generation: 'gen-b', owner: { pid: process.ppid, token: 'other' }, started_at: '2026-10-30T09:00:00Z' };
+      await queueB.saveMeeting(m);
+    });
+    const routinesB = path.join(second, '.situation-board', 'routines');
+    await fsp.writeFile(path.join(routinesB, 'transcription.lock'), JSON.stringify({ pid: process.ppid, token: 'other' }));
+    const progressB = { meeting: idB, file: 'workshop.wav', done: 60, total: 600, started_at: '2026-10-30T09:00:00.000Z', phase: 'transcribing', phase_started_at: '2026-10-30T09:01:00.000Z' };
+    await fsp.writeFile(path.join(routinesB, PROGRESS_FILE), JSON.stringify({ ...progressB, generation: 'gen-b', pid: process.ppid }));
+
+    const { default: express } = await import('express');
+    const { default: routines } = await import('../src/routes/routines');
+    const app = express();
+    app.use('/api/routines', routines);
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const digest = async () => (await (await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/api/routines/meeting-digest`)).json()) as { transcription: unknown };
+
+    assert.equal(job.progressHere(), null, 'A\'s job is not B\'s');
+    assert.deepEqual((await digest()).transcription, { ...progressB, elsewhere: true }, 'B sees its own job, never A\'s 80%');
+    process.env.ESB_WORKSPACE_PATH = first;
+    assert.deepEqual((await digest()).transcription, job.progress(), 'A still sees its own job');
+    assert.equal(job.progress()!.done, 480);
+  } finally {
+    process.env.ESB_WORKSPACE_PATH = first;
+    finish();
+    await MeetingTranscriptionService.settled();
+  }
+});
+
+test('a WAV with speakers off is shown loading the model in other dashboards from the moment its job starts', async (t) => {
+  const ws = await workspace(t);
+  const queue = new MeetingDigestService();
+  let loading!: () => void;
+  const reached = new Promise<void>((r) => { loading = r; });
+  let go!: () => void;
+  const released = new Promise<void>((r) => { go = r; });
+  const engine = {
+    // As the real engine does: its first step is the one the job starts in.
+    transcribe: async (_wav: string, o: { onPhase?: (phase: TranscriptionPhase) => void; onProgress?: (done: number, total: number) => void }) => {
+      o.onPhase?.('loading');
+      loading();
+      await released;
+      o.onPhase?.('transcribing');
+      o.onProgress?.(1, 1);
+      return { segments: [{ start: 0, end: 1, text: 'Fictional words.' }], seconds: 1, load_ms: 1 };
+    },
+  } as unknown as TranscriptionEngine;
+  const job = new MeetingTranscriptionService(queue, fakeModels(), engine);
+  const id = await queueRecording(queue, 'Workshop');
+  await job.tick();
+  await reached;
+  try {
+    await job.progressSaved();
+    const saved = JSON.parse(await fsp.readFile(path.join(ws, '.situation-board', 'routines', PROGRESS_FILE), 'utf-8')) as Record<string, unknown>;
+    assert.deepEqual([saved['meeting'], saved['phase'], saved['generation'], saved['pid']], [id, 'loading', (await recording(queue, id)).generation, process.pid]);
+  } finally {
+    go();
+    await MeetingTranscriptionService.settled();
+  }
 });

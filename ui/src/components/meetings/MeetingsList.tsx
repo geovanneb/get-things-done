@@ -13,6 +13,7 @@ import { SegmentedControl } from '@/components/common/Tabs';
 import { useConfirm } from '@/components/common/ConfirmDialog';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { recordingElsewhere } from '@/components/meetings/QueuedMeetingActions';
+import { TranscriptionBar, useTicking } from '@/components/meetings/TranscriptionBar';
 import { apiDelete, apiPost } from '@/utils/api';
 import { groupRows, inFilter, matchingRows, meetingRows, whenLabel, type MeetingFilter, type MeetingRow, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
 import { canMakeDeliverable, deliverableDraft } from '@/utils/meetingDeliverable';
@@ -41,8 +42,9 @@ function useNarrow(px: number): boolean {
 
 function Status({ status, label }: { status: RowStatus; label: string }) {
   return (
-    <div aria-label={`${label}: ${status.label}${status.detail ? `, ${status.detail}` : ''}`} style={{ flex: '0 0 170px', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+    <div aria-label={`${label}: ${status.progress?.spoken ?? `${status.label}${status.detail ? `, ${status.detail}` : ''}`}`} style={{ flex: '0 0 170px', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
       {status.tone ? <Badge size="sm" variant={BADGE[status.tone]}>{status.label}</Badge> : <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{status.label}</span>}
+      {status.progress && <TranscriptionBar percent={status.progress.percent} spoken={status.progress.spoken} width={120} />}
       {status.update && <Link to={`/context/updates/${status.update}`} className="gtd-link mono" style={{ fontSize: 'var(--text-xs)' }}>{status.update}</Link>}
       {status.detail && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{status.detail}</span>}
     </div>
@@ -149,12 +151,13 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   // Meetings picked for a deliverable, in the order they were picked.
   const [selected, setSelected] = React.useState<string[]>([]);
   const dispatch = useAppDispatch();
-  const now = new Date();
+  // A running transcription's step time and time left move on between updates.
+  const now = new Date(useTicking(Boolean(job?.queue.some((m) => m.files.some((f) => f.recording?.status === 'running')))));
 
   const rows = job && history ? meetingRows(job.queue, history, {
     installed: job.installed_models ?? null, runnable: job.runnable_models ?? {}, progress: job.transcription ?? null,
     nextDigest: job.next_run_at && !job.open_digest ? new Date(job.next_run_at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : null,
-    recordingNow: (m) => (recorder.active && recorder.meetingId === m.id) || recordingElsewhere(m),
+    recordingNow: (m) => (recorder.active && recorder.meetingId === m.id) || recordingElsewhere(m), now: now.getTime(),
   }) : [];
   const count = (f: MeetingFilter) => rows.filter((r) => inFilter(r, f)).length;
   const said = useSaidSearch(query);

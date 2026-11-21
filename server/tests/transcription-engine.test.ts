@@ -492,6 +492,45 @@ test('finding speakers failing leaves the transcript, the slot is kept between t
   assert.equal(TranscriptionEngine.isBusy(), false);
 });
 
+test('the engine says which step a job is in: finding who speaks with its chunks, loading the model, then transcribing', async (t) => {
+  const dir = await tmp(t);
+  const replies: Record<string, string> = {
+    speakers: "process.send({ type: 'progress', done: 1, total: 4 }); process.send({ type: 'progress', done: 4, total: 4 }); process.send({ type: 'turns', turns: [] }); process.send({ type: 'done', seconds: 1, segments: 0 })",
+    transcribe: "process.send({ type: 'loaded', ms: 3 }); process.send({ type: 'progress', done: 1, total: 1 }); process.send({ type: 'segment', start: 0, end: 1, text: 'Fictional words.' }); process.send({ type: 'done', seconds: 1, segments: 1 })",
+  };
+  const script = path.join(dir, 'worker.cjs');
+  await fsp.writeFile(script, `process.on('message', (m) => { ({ ${Object.entries(replies).map(([k, v]) => `${k}: () => { ${v} }`).join(', ')} })[m.type](); });`);
+  const launcher: WorkerLauncher = () => fork(script, [], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  const models = {
+    readSettings: async () => ({ model: 'whisper-large-v3-turbo', language: 'auto' }),
+    lease: async () => async () => {},
+    installedPath: async () => dir,
+  } as unknown as TranscriptionModelService;
+  const engine = new TranscriptionEngine(models, launcher);
+  (engine as unknown as { engineModel: () => Promise<unknown> }).engineModel = async () => ({ kind: 'whisper', files: {}, vad: '', threads: 1 });
+  const wav = path.join(dir, 'a.wav');
+  const data = Buffer.alloc(32_000);
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0, 'ascii'); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8, 'ascii');
+  head.write('fmt ', 12, 'ascii'); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(16000, 24); head.writeUInt32LE(32000, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+  head.write('data', 36, 'ascii'); head.writeUInt32LE(data.length, 40);
+  await fsp.writeFile(wav, Buffer.concat([head, data]));
+
+  const seen: string[] = [];
+  const result = await engine.transcribeWithSpeakers(wav, {
+    onPhase: (phase, done, total) => seen.push(done === undefined ? phase : `${phase} ${done}/${total}`),
+    onProgress: (done, total) => seen.push(`progress ${done}/${total}`),
+  });
+  assert.deepEqual(result.segments.map((s) => s.text), ['Fictional words.']);
+  assert.deepEqual(seen, ['speakers', 'speakers 1/4', 'speakers 4/4', 'loading', 'transcribing', 'progress 1/1']);
+
+  // Without speakers: loading, then transcribing once the model has loaded.
+  seen.length = 0;
+  await engine.transcribe(wav, { onPhase: (phase) => seen.push(phase), onProgress: (done, total) => seen.push(`progress ${done}/${total}`) });
+  assert.deepEqual(seen, ['loading', 'transcribing', 'progress 1/1']);
+});
+
 test('words in any script count; punctuation and repeat marks alone do not', () => {
   assert.equal(hasWords([',', '.', ' 。', '、', '[repeated 7 times]']), false);
   for (const text of ['Olá', '中学', 'ありがとう', '42', 'Привет']) assert.equal(hasWords([',', text]), true, text);

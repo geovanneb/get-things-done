@@ -8,6 +8,24 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Transcription progress in the Meetings list.** A meeting being transcribed shows a thin bar under
+  its badge and the step it is in: converting the recording, finding who speaks, loading the model,
+  then the percent. Steps before transcribing show how long they have run, and once a minute of audio
+  is done the line adds the recording's length and about how long is left. Another dashboard on the
+  same workspace now shows the same progress, marked as running in another dashboard. The meeting's
+  files and **Transcribe again** use the same wording. (#480)
+- **API:** `transcription` in `GET /api/routines/meeting-digest` gains `phase`, `phase_started_at`,
+  `phase_part` and, for another dashboard's job, `elsewhere`. See [docs/api.md](docs/api.md). (#480)
+
+### Fixed
+
+- **"Loading the model" no longer stands in for speaker detection.** With speaker detection on, a
+  long recording could say "loading the model" for many minutes while the computer was busy finding
+  who speaks, or converting a phone recording. Each step is now named, and finding who speaks shows
+  its percent. (#480)
+
 ## [0.18.0] - 2026-11-21
 
 **From answer to action.** The assistant chat now leads somewhere. Tasks, people, notes and files

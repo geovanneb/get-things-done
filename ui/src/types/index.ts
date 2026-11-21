@@ -906,7 +906,19 @@ export interface Voiceprints {
 }
 
 /** The transcription this dashboard is running; `done` and `total` are seconds of audio. */
-export interface TranscriptionProgress { meeting: string; file: string; done: number; total: number; started_at: string }
+/** The step a transcription is in; only `transcribing` has `done` and `total`, seconds of audio. */
+export type TranscriptionPhase = 'converting' | 'speakers' | 'loading' | 'transcribing';
+export interface TranscriptionProgress {
+  meeting: string; file: string; done: number; total: number; started_at: string;
+  /** Absent from an older server: then known from `total` alone. */
+  phase?: TranscriptionPhase;
+  /** When the job entered its step. */
+  phase_started_at?: string;
+  /** How far finding who speaks got, 0 to 1, when known. */
+  phase_part?: number;
+  /** Another dashboard on this workspace runs the job. */
+  elsewhere?: true;
+}
 
 /** Someone expected at a meeting: a stakeholder (`ref`) or just a name. */
 export interface MeetingParticipant { name: string; ref?: string }
@@ -1096,7 +1108,7 @@ export interface MeetingDetail {
   /** Transcribe again: waiting, running or failed; null when none. */
   transcription: { file: string; model: string; status: 'pending' | 'running' | 'failed'; error: string | null; started_at: string | null } | null;
   /** How far it got, when this dashboard runs it. */
-  transcription_progress?: { done: number; total: number } | null;
+  transcription_progress?: TranscriptionProgress | null;
 }
 
 /** For a task made from a meeting action item: what the record says about it now, versus when the task was made. */

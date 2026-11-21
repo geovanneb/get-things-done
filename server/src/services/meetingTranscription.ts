@@ -10,7 +10,7 @@ import { forgetSpeed, ranOnGpu } from './transcription/speedTest';
 import { GPU_FAILURES } from './transcription/whisperHelper';
 import { TranscriptionEngine, Segment, engineEvents, setLiveRoomMaker, type TranscribeOptions } from './transcription/engine';
 import { hashFile } from '../utils/fileHash';
-import { HeldLock, tryLock, unlock } from '../utils/fileLock';
+import { HeldLock, readLock, tryLock, unlock } from '../utils/fileLock';
 import { processAlive } from './runState';
 import { WorkspaceService, withWorkspacePath } from './workspace';
 import { atomicWrite } from '../utils/atomicWrite';
@@ -55,10 +55,37 @@ function noWords(model: string, parts: number): string {
 }
 /** Progress reaches the dashboard at most this often. */
 const NOTIFY_MS = 1000;
-/** How often a running job checks it is still wanted: a Stop or a removal from another dashboard ends it. Tests shorten it. */
-export const transcriptionTimings = { ownerCheckMs: 15_000 };
+/**
+ * How often a running job checks it is still wanted: a Stop or a removal from another dashboard ends it. And how often
+ * at most it writes its progress for the other dashboards (a new step is written at once). Tests shorten them.
+ */
+export const transcriptionTimings = { ownerCheckMs: 15_000, progressFileMs: 3000 };
 
-export interface TranscriptionProgress { meeting: string; file: string; done: number; total: number; started_at: string }
+/** Where the job's progress waits for the other dashboards on this workspace, next to its lock. */
+export const PROGRESS_FILE = 'transcription-progress.json';
+
+/**
+ * The step a job is in. Converting a recording that is not WAV, finding who speaks (with Speakers on), loading the
+ * model, then transcribing: only that last step has `done` and `total`, seconds of audio.
+ */
+export type TranscriptionPhase = 'converting' | 'speakers' | 'loading' | 'transcribing';
+const PHASES: readonly TranscriptionPhase[] = ['converting', 'speakers', 'loading', 'transcribing'];
+
+export interface TranscriptionProgress {
+  meeting: string; file: string; done: number; total: number; started_at: string;
+  phase: TranscriptionPhase;
+  /** When the job entered its step: how long a step without progress has run, and the pace of transcribing. */
+  phase_started_at: string;
+  /** How far finding who speaks got, 0 to 1, when the speaker library says. */
+  phase_part?: number;
+  /** Read from another dashboard's progress file: that dashboard runs the job. */
+  elsewhere?: true;
+}
+
+const startProgress = (meeting: string, file: string): TranscriptionProgress => {
+  const now = new Date().toISOString();
+  return { meeting, file, done: 0, total: 0, started_at: now, phase: 'loading', phase_started_at: now };
+};
 
 /** Notices for the dashboard when a transcription starts, moves or ends. */
 export const meetingTranscriptionEvents = new EventEmitter();
@@ -78,6 +105,8 @@ interface Job { meeting: string; file: string; generation: string; token: string
   suggestions?: Omit<SpeakerSuggestions, 'transcript_sha256'>;
   /** A Transcribe again stopped for a recording that needed the engine: it goes back in line, never fails. */
   yielded?: boolean;
+  /** Its progress file: when it was last written, a write waiting for its turn, the writes in order, and whether it ended. */
+  saving?: { at: number; timer?: ReturnType<typeof setTimeout>; chain: Promise<void>; ended: boolean };
   /** The workspace it belongs to: a recording may start in another one, after a switch. */
   workspace: string;
   /**
@@ -155,9 +184,56 @@ export class MeetingTranscriptionService {
     private readonly voiceprints = new VoiceprintService(),
   ) {}
 
-  /** The transcription running in this dashboard, with its progress. */
+  /** The transcription running in this dashboard, with its progress, in whichever workspace it belongs to. */
   progress(): TranscriptionProgress | null {
     return active ? { ...active.progress } : null;
+  }
+
+  /**
+   * The transcription this dashboard runs for the workspace in use now; null when none, or when its job belongs to
+   * another workspace (one it started in before a switch): that one's meeting ids and files mean nothing here.
+   */
+  progressHere(): TranscriptionProgress | null {
+    const job = active;
+    return job && job.workspace === new WorkspaceService().getWorkspacePath() ? { ...job.progress } : null;
+  }
+
+  /**
+   * The transcription running in another dashboard on this workspace, from the progress file its job writes. Believed
+   * only while that dashboard still holds the transcription lock and is alive, and the recording it names is
+   * `running` in the queue with the same generation and owner: a file left behind is never shown. Null otherwise.
+   */
+  async progressElsewhere(): Promise<TranscriptionProgress | null> {
+    const routines = await this.queue.routinesFolder();
+    let saved: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(await fsp.readFile(path.join(routines, PROGRESS_FILE), 'utf-8'));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      saved = parsed as Record<string, unknown>;
+    } catch { return null; }
+    const text = (k: string) => (typeof saved[k] === 'string' && saved[k] ? saved[k] as string : null);
+    const count = (k: string) => (typeof saved[k] === 'number' && Number.isFinite(saved[k]) && (saved[k] as number) >= 0 ? saved[k] as number : null);
+    const [meeting, file, generation, started, phaseStarted] = ['meeting', 'file', 'generation', 'started_at', 'phase_started_at'].map(text);
+    const [done, total] = ['done', 'total'].map(count);
+    const phase = PHASES.find((p) => p === saved['phase']);
+    const pid = saved['pid'];
+    if (!meeting || !file || !generation || !started || !phaseStarted || done === null || total === null || !phase) return null;
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0 || pid === process.pid) return null;
+    const holder = await readLock(path.join(routines, 'transcription.lock'));
+    if (!holder || holder.incomplete || holder.pid !== pid || !processAlive(pid)) return null;
+    const entry = (await this.queue.readQueue()).meetings.find((m) => m.id === meeting)?.files.find((f) => f.name === file);
+    const r = entry?.recording;
+    if (r?.status !== 'running' || r.generation !== generation || r.owner?.pid !== pid) return null;
+    const part = count('phase_part');
+    return {
+      meeting, file, done, total, started_at: started, phase, phase_started_at: phaseStarted,
+      ...(phase === 'speakers' && part !== null && part <= 1 ? { phase_part: part } : {}), elsewhere: true,
+    };
+  }
+
+  /** Waits for the running job's progress file writes so far; for tests. */
+  async progressSaved(): Promise<void> {
+    await active?.saving?.chain;
   }
 
   /**
@@ -201,6 +277,8 @@ export class MeetingTranscriptionService {
       }
       if (!job) return;
       active = job;
+      // Other dashboards see the job from its first step on, however long that step lasts.
+      this.saveProgress(job, true);
     } finally {
       claiming--;
     }
@@ -222,6 +300,7 @@ export class MeetingTranscriptionService {
         // Counted as busy until the next start is under way, so the queue never looks idle in between.
         ticking++;
         try {
+          await this.endProgressFile(claimed);
           await unlock(claimed.lock).catch(() => {});
           meetingTranscriptionEvents.emit('change');
         } finally {
@@ -232,6 +311,54 @@ export class MeetingTranscriptionService {
         }
       }
     })();
+  }
+
+  /** Moves `job` to `phase`: a new step is shown at once, here and in the other dashboards; a step's part, at most every so often. */
+  private phase(job: Job, phase: TranscriptionPhase, part?: number): void {
+    if (job.progress.phase !== phase) {
+      const { phase_part: _part, ...rest } = job.progress;
+      job.progress = { ...rest, phase, phase_started_at: new Date().toISOString(), ...(part === undefined ? {} : { phase_part: part }) };
+      meetingTranscriptionEvents.emit('change');
+      this.saveProgress(job, true);
+      return;
+    }
+    if (part === undefined) return;
+    job.progress = { ...job.progress, phase_part: part };
+    this.saveProgress(job);
+  }
+
+  /**
+   * Writes `job`'s progress for the other dashboards, atomically and in order: at once when `now`, else at most every
+   * `progressFileMs`, the last state always written in the end. Best effort: a write that fails only costs the others
+   * the percent.
+   */
+  private saveProgress(job: Job, now = false): void {
+    const saving = job.saving ??= { at: 0, chain: Promise.resolve(), ended: false };
+    if (saving.ended) return;
+    if (saving.timer) {
+      if (!now) return;
+      clearTimeout(saving.timer);
+      saving.timer = undefined;
+    }
+    const write = () => {
+      saving.timer = undefined;
+      if (saving.ended) return;
+      saving.at = Date.now();
+      const body = JSON.stringify({ ...job.progress, generation: job.generation, pid: process.pid });
+      saving.chain = saving.chain.then(() => atomicWrite(path.join(path.dirname(job.lock.file), PROGRESS_FILE), body)).catch(() => {});
+    };
+    const wait = now ? 0 : saving.at + transcriptionTimings.progressFileMs - Date.now();
+    if (wait <= 0) write();
+    else { saving.timer = setTimeout(write, wait); saving.timer.unref?.(); }
+  }
+
+  /** The job ended: its progress file goes, after any write still under way, while the job still holds the lock. */
+  private async endProgressFile(job: Job): Promise<void> {
+    const saving = job.saving ??= { at: 0, chain: Promise.resolve(), ended: false };
+    saving.ended = true;
+    if (saving.timer) clearTimeout(saving.timer);
+    await saving.chain;
+    await fsp.rm(path.join(path.dirname(job.lock.file), PROGRESS_FILE), { force: true }).catch(() => {});
   }
 
   /** Starts the next job without waiting; a failure is logged, never thrown at nobody. */
@@ -491,7 +618,7 @@ export class MeetingTranscriptionService {
         return {
           meeting: meeting.id, file: entry.name, generation, token, abort: new AbortController(), lock, model: use.model, language: use.language, changes: use.changes, speakers: wantSpeakers, frees,
           workspace: new WorkspaceService().getWorkspacePath(),
-          progress: { meeting: meeting.id, file: entry.name, done: 0, total: 0, started_at: new Date().toISOString() },
+          progress: startProgress(meeting.id, entry.name),
         };
       }
       return null;
@@ -534,7 +661,7 @@ export class MeetingTranscriptionService {
         speakers: claimed.speakers && speakerModel, frees, workspace: ws,
         ...(claimed.speakers && !speakerModel ? { speakerNote: 'the speaker model is not downloaded' } : {}),
         folder: { dir: w.dir, audio: path.join(path.dirname(w.audio), claimed.file), transcript: claimed.transcript },
-        progress: { meeting: w.id, file: claimed.file, done: 0, total: 0, started_at: new Date().toISOString() },
+        progress: startProgress(w.id, claimed.file),
       };
     }
     return null;
@@ -582,14 +709,23 @@ export class MeetingTranscriptionService {
       wav = source;
       if (path.extname(job.file).toLowerCase() !== '.wav') {
         converted = true;
+        this.phase(job, 'converting');
         wav = path.join((await workFolder(folder, true))!, `${job.generation}-${process.pid}.wav`);
         await convertToWav(source, wav, job.abort.signal);
       }
       const options: TranscribeOptions = {
         model, language, changes: job.changes, signal: job.abort.signal,
         onSegment: (s) => { segments.push(s); },
+        // Speakers report how many of their chunks are done; transcribing starts once the model has loaded.
+        onPhase: (phase, done, total) => {
+          this.phase(job, phase, phase === 'speakers' && done !== undefined && total ? Math.min(1, done / total) : undefined);
+          const now = Date.now();
+          if (phase === 'speakers' && now - notified >= NOTIFY_MS) { notified = now; meetingTranscriptionEvents.emit('change'); }
+        },
         onProgress: (done, total) => {
+          if (job.progress.phase !== 'transcribing') this.phase(job, 'transcribing');
           job.progress = { ...job.progress, done, total };
+          this.saveProgress(job);
           const now = Date.now();
           if (now - notified >= NOTIFY_MS) { notified = now; meetingTranscriptionEvents.emit('change'); }
         },
@@ -618,6 +754,7 @@ export class MeetingTranscriptionService {
         // What the GPU heard is not kept: the CPU starts over, and the page shows it from the beginning.
         segments.length = 0;
         job.progress = { ...job.progress, done: 0, total: 0 };
+        this.phase(job, 'loading');
         meetingTranscriptionEvents.emit('change');
         const cpu = CATALOG.find((c) => c.id === gpu.cpu)!;
         if (!await this.models.installedPath(cpu.id)) throw new Error(`The GPU engine failed (${(err as Error).message}). Download ${cpu.name} in Settings > Transcription to transcribe it on the CPU instead, then try again.`, { cause: err });
