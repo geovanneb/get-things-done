@@ -15,6 +15,7 @@ import { LiveTranscript } from '@/components/meetings/LiveTranscript';
 import { TranscriptReader } from '@/components/meetings/TranscriptReader';
 import { recordingElsewhere } from '@/utils/meetingQueue';
 import { MeetingsList } from '@/components/meetings/MeetingsList';
+import { AutoPrepareCard } from '@/components/routines/AutoPrepare';
 import { useRecordLauncher } from '@/components/recording/RecordLauncher';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { readableTranscript, transcriptOnItsWay } from '@/utils/transcriptReading';
@@ -173,6 +174,7 @@ export default function MeetingsView() {
           <LoadingSpinner inline text={t('meetings.theTranscriptAppearsHereWhen')} />
         </Card>
       )}
+      {data && <AutoPrepareCard job={data} onChanged={changed} />}
       <MeetingsList job={data ?? null} history={history ?? null} error={error ?? historyError} retention={retention} onChanged={changed}
         actions={data && <DigestNow job={data} onDone={changed} />} />
       <Outlet context={{ job: data ?? null, retention, onChanged: changed } satisfies MeetingsOutlet} />

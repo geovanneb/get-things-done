@@ -967,6 +967,13 @@ export interface MeetingDigest {
     analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started'; message: string; at: string };
   };
   open_digest: string | null;
+  /**
+   * Whether automatic analysis, on now or switched on now, starts the open digest's analysis at the next check (once
+   * resumed, if paused); `maybe` while an interrupted digest is still to be finished first.
+   */
+  analyze_open_digest: 'yes' | 'no' | 'maybe';
+  /** The workspace the view was read from; a settings write naming it is refused in any other. */
+  workspace: string;
   queue: QueuedMeeting[];
   transcription: TranscriptionProgress | null;
   /** Downloaded transcription models; null when unknown. */

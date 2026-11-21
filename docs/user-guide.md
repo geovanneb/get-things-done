@@ -733,7 +733,7 @@ context update, tagged **Meeting digest**, every working day at 18:00 by default
 `/gtd-context-analyze` on it (or **Run analysis** on its page), and the agent drafts one
 meeting record per meeting and proposes context changes, as for any update. No AI runs
 by itself unless you switch on **Analyze each new digest automatically** in its
-settings.
+settings, or **Prepare meetings for review automatically** (below).
 
 - A day without queued meetings makes nothing. Missed days (the computer was off) make
   one digest the next time the dashboard starts; a digest covering several days says
@@ -760,6 +760,25 @@ settings.
   started again automatically. While the routine is paused nothing starts on its own;
   **Make digest now** with automatic analysis on still analyzes the digest it makes.
   Nothing changes in your context until you approve.
+- **Prepare meetings for review automatically** (off by default), on the Meetings page and
+  on the Meeting digest card, switches both of the above on, or off, in one step. Before it
+  turns on it says which Claude account and plan the analyses use (from the runner status
+  in Settings), that they use that plan's usage, that nothing changes in your context until
+  you approve, and whether a digest open now is analyzed at once (or may be, when one from
+  an interrupted run is still being finished). **Turn on** waits for a fresh check of the
+  runner made when the dialog opens, and shows the account from that check. When you confirm,
+  the dashboard checks the runner once more: if it is no longer ready, or another account
+  is signed in now, nothing is turned on and the dialog shows the current state for you to
+  confirm again. The change applies only to the workspace you reviewed it in. The same
+  check applies to **Analyze each new digest automatically** in the settings. With it on, a recorded
+  meeting reaches "ready for your review" with no other click. It can be turned on only
+  while the background runner (Claude Code today) is ready, as its status in Settings
+  shows: when it reports a problem (for example not installed, not signed in, or the folder
+  not trusted) or its status could not be checked, the switch is disabled and shows the
+  runner's own message on what to fix. Turning it off is always possible. When only one of the two is on, or
+  the routine is paused, it says so with what to fix. The
+  schedule, the limits per digest, one open digest at a time and the checks above stay as
+  they are.
 - Each meeting keeps its own date, and the digest records which queued meeting each
   file came from. A meeting whose file changed since it was queued stays in the queue,
   with the reason.
