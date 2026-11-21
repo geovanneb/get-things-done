@@ -18,10 +18,16 @@ import type { EngineModel, HeardVoiceReply, WorkerControl, WorkerReply, WorkerRe
  * desktop app with Electron's own binary running as Node.
  */
 
+export type EnginePhase = 'speakers' | 'loading' | 'transcribing';
 export interface Segment { start: number; end: number; text: string; speaker?: number }
 /** `backend`: for the GPU engine, the device it really used (e.g. "MTL0"). */
 export interface TranscriptResult { segments: Segment[]; seconds: number; load_ms: number | null; backend?: string }
 export interface TranscribeOptions { model?: string; language?: string; changes?: LanguageChange[]; turns?: SpeakerTurn[]; onSegment?: (s: Segment) => void; onProgress?: (done: number, total: number) => void; signal?: AbortSignal;
+  /**
+   * Which step the job is in: finding who speaks (with how many of its chunks are done, when the speaker library says),
+   * loading the model, then transcribing (from the model's 'loaded' on). Only `onProgress` moves within transcribing.
+   */
+  onPhase?: (phase: EnginePhase, done?: number, total?: number) => void;
   /** With speakers: also each voice's mean embedding, to compare with remembered voices. */
   identify?: boolean }
 /**
@@ -258,10 +264,12 @@ export class TranscriptionEngine {
           leases.push(await this.models.lease(SPEAKER_MODEL.id));
           const dir = await this.models.installedPath(SPEAKER_MODEL.id);
           if (!dir) throw new Error('The speaker model is not downloaded');
+          options.onPhase?.('speakers');
           await this.run({
             type: 'speakers', wav, segmentation: path.join(dir, SPEAKER_MODEL.files[0]!.name), embedding: path.join(dir, SPEAKER_MODEL.files[1]!.name),
             threads: Math.max(1, Math.min(8, os.availableParallelism() - 1)), ...(options.identify ? { identify: true } : {}),
           }, speakerTimeout(prepared.format.duration), (reply) => {
+            if (reply.type === 'progress') options.onPhase?.('speakers', reply.done, reply.total);
             if (reply.type === 'turns') turns = reply.turns;
             if (reply.type === 'voices') heard = reply.voices;
           }, options.signal, undefined, true);
@@ -289,8 +297,9 @@ export class TranscriptionEngine {
     let loadMs: number | null = null;
     let backend: string | undefined;
     let seconds = format.duration;
+    options.onPhase?.('loading');
     await this.run({ type: 'transcribe', model, wav, language, ...(options.changes?.length ? { changes: options.changes } : {}), ...(options.turns?.length ? { turns: options.turns } : {}) }, transcriptionTimeout(format.duration), (reply) => {
-      if (reply.type === 'loaded') { loadMs = reply.ms; backend = reply.backend; }
+      if (reply.type === 'loaded') { loadMs = reply.ms; backend = reply.backend; options.onPhase?.('transcribing'); }
       if (reply.type === 'segment') {
         const segment = { start: reply.start, end: reply.end, text: reply.text, ...(reply.speaker ? { speaker: reply.speaker } : {}) };
         segments.push(segment);

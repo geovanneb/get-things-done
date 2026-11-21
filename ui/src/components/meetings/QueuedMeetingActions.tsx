@@ -1,5 +1,4 @@
 import { useLanguage } from '@/i18n/LanguageProvider';
-import { tr } from '@/i18n/current';
 import { rich } from '@/i18n/rich';
 import React from 'react';
 import Notice from '@/components/common/Notice';
@@ -8,13 +7,9 @@ import Button from '@/components/common/Button';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { apiDelete, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
+import { duration as minutes, transcriptionView } from '@/utils/transcriptionProgress';
+import { TranscriptionBar } from '@/components/meetings/TranscriptionBar';
 import type { MeetingDigest, QueuedMeeting, RecordingState, TranscriptionProgress } from '@/types';
-
-function minutes(seconds: number): string {
-  if (seconds < 60) return seconds < 1 ? tr('queuedMeetingActions.aMoment') : `${Math.max(1, Math.round(seconds))} s`;
-  const m = Math.round(seconds / 60);
-  return m < 60 ? tr('queuedMeetingActions.min', { m }) : tr('queuedMeetingActions.hMin', { floor: Math.floor(m / 60), padStart: String(m % 60).padStart(2, '0') });
-}
 
 /** One recording of a queued meeting: where its transcription stands, and what can be done about it. */
 function RecordingLine({ meeting, file, state, progress, disabled, installed, speeds, names, chosen, runnable, onAction, onRead }: {
@@ -36,10 +31,10 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   // Fixed to a model that is not downloaded: it can switch to the one chosen now, when that one is.
   const missing = state.status === 'pending' && target !== null && Boolean(installed) && !installed!.includes(target);
   const switchTo = missing && chosen && chosen !== target && installed!.includes(chosen) ? chosen : null;
-  if (state.status === 'running') {
-    text = progress && progress.total > 0
-      ? t('queuedMeetingActions.transcribingOf', { min: Math.min(99, Math.floor((progress.done / progress.total) * 100)), minutes: minutes(progress.total) })
-      : progress ? t('queuedMeetingActions.transcribingLoadingTheModel') : t('queuedMeetingActions.transcribingInAnotherDashboard');
+  // The same wording as the Meetings list (see transcriptionProgress.ts).
+  const view = state.status === 'running' ? transcriptionView(progress, Date.now()) : null;
+  if (view) {
+    text = view.line;
   } else if (missing) {
     text = t('queuedMeetingActions.waitsForWhichIsNot', { name: name(target!), value: switchTo ? t('queuedMeetingActions.orUse', { name: name(switchTo) }) : '' });
     tone = 'var(--color-warning)';
@@ -65,6 +60,7 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
     <div style={{ flexBasis: '100%', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)' }}>
       <span className="mono truncate" style={{ color: 'var(--color-text-muted)', maxWidth: '40%' }}>{file}</span>
       <span role="status" style={{ flex: '1 1 200px', minWidth: 0, color: tone }}>{text}</span>
+      {view && <TranscriptionBar percent={view.percent} spoken={view.spoken} width={120} />}
       {(state.status === 'running' || state.status === 'pending') && (
         <Button size="sm" variant="ghost" disabled={disabled}
           onClick={async () => {

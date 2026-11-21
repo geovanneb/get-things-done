@@ -54,12 +54,14 @@ router.post('/system-cleanup/run', async (_req: Request, res: Response) => {
 
 // GET /api/routines/meeting-digest  the built-in digest: settings, schedule, queue, open digest, last run
 router.get('/meeting-digest', async (_req: Request, res: Response) => {
-  // With the transcription running in this dashboard, if any, and its progress.
+  // With the transcription this dashboard runs for this workspace, if any, and its progress (never one of another
+  // workspace it started in before a switch); else the one another dashboard on this workspace runs, from the progress
+  // file its job writes (marked `elsewhere`).
   // Which models are downloaded: a recording fixed to one that is not waits, and the card says which to download.
   const view = await new TranscriptionModelService().view().catch(() => null);
   const models = view?.models.filter((m) => m.installed) ?? null;
   res.json({
-    ...await service.meetingDigest(), transcription: transcription.progress(),
+    ...await service.meetingDigest(), transcription: transcription.progressHere() ?? await transcription.progressElsewhere().catch(() => null),
     installed_models: models ? models.map((m) => m.id) : null,
     // Names to show instead of ids, and the model chosen now: a waiting recording can switch to it.
     // Every model's name, also of one not offered here (a GPU model named by a copied workspace).
