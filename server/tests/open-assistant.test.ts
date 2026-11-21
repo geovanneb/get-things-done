@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fsp from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { assistantLaunch, windowsTerminalLaunch, workspaceAssistants } from '../src/routes/workspace';
+import { assistantLaunch, requestTarget, windowsTerminalLaunch, workspaceAssistants } from '../src/routes/workspace';
 import { promptArgs } from '../src/utils/assistantCommand';
 import { parseAssistantRequest, requestText } from '../src/utils/assistantRequest';
 
@@ -57,4 +57,19 @@ test('on Windows the request goes to the new window as its own arguments, the pa
   const launch = windowsTerminalLaunch('C:\\Fictional & 100%', 'copilot', ['-i', 'Execute task TASK-2026-0001']);
   assert.deepEqual(launch.args, ['/c', 'start', '', 'cmd', '/k', 'copilot', '-i', 'Execute task TASK-2026-0001']);
   assert.equal(launch.options.cwd, 'C:\\Fictional & 100%');
+});
+
+test('a request starts only for an active task or a context update the workspace holds', async (t) => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'gtd-targets-'));
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+  assert.equal(await requestTarget(dir, 'task', 'TASK-2026-0001'), null, 'a workspace with no tasks folder');
+  await fsp.mkdir(path.join(dir, 'tasks', 'active', 'TASK-2026-0001'), { recursive: true });
+  await fsp.mkdir(path.join(dir, 'tasks', 'archive', 'TASK-2026-0002'), { recursive: true });
+  await fsp.mkdir(path.join(dir, 'context-updates', 'CU-2026-0001'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'context-updates', 'CU-2026-0002'), 'a file, not an update folder');
+  assert.equal(await requestTarget(dir, 'task', 'TASK-2026-0001'), 'TASK-2026-0001');
+  assert.equal(await requestTarget(dir, 'task', 'TASK-2026-0002'), null, 'an archived task is not run');
+  assert.equal(await requestTarget(dir, 'analyze', 'CU-2026-0001'), 'CU-2026-0001');
+  assert.equal(await requestTarget(dir, 'apply', 'CU-2026-0002'), null);
+  assert.equal(await requestTarget(dir, 'analyze', 'CU-2026-0009'), null);
 });

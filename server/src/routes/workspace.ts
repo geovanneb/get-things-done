@@ -1,6 +1,7 @@
 import { assistantCommand, promptArgs } from '../utils/assistantCommand';
-import { parseAssistantRequest, requestText } from '../utils/assistantRequest';
+import { parseAssistantRequest, requestText, type AssistantRequest } from '../utils/assistantRequest';
 import * as path from 'path';
+import * as fsp from 'fs/promises';
 import { beginStart } from '../services/appActivity';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -83,9 +84,24 @@ export function windowsTerminalLaunch(workspacePath: string, program: string, ar
 }
 
 /**
+ * The ID as the workspace has it: the folder of an active task (`task`) or of a context update (`analyze`, `apply`)
+ * whose name is `id`, read from disk. Null when there is none. The launch uses the name from disk, never the value
+ * from the request body, so only an ID the workspace already holds can reach a command line.
+ */
+export async function requestTarget(workspacePath: string, request: AssistantRequest, id: string): Promise<string | null> {
+  const folder = request === 'task' ? path.join(workspacePath, 'tasks', 'active') : path.join(workspacePath, 'context-updates');
+  try {
+    const entries = await fsp.readdir(folder, { withFileTypes: true });
+    return entries.find((entry) => entry.isDirectory() && entry.name === id)?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Launch an assistant's program in a new terminal window at the workspace directory, with `args` (a prompt to send
- * when it starts). The command is built from server-side state and a checked request (fixed words and an ID of
- * letters, digits and dashes, see parseAssistantRequest): no free text from the request body reaches the shell.
+ * when it starts). The command is built from server-side state only: fixed words and an ID read from the workspace
+ * folder (see requestTarget). No value from the request body reaches the shell.
  */
 async function openInTerminal(workspacePath: string, program: string, args: readonly string[] = []): Promise<void> {
   const shellCommand = `cd ${shellQuote(workspacePath)} && ${[program, ...args.map(shellQuote)].join(' ')}`;
@@ -421,7 +437,8 @@ router.post('/open', async (req: Request, res: Response) => {
 // POST /api/workspace/open-assistant  { tool?: "claude-code" | "codex" | "copilot", request?: { request, id } }
 // Opens the workspace's assistant: the first one the workspace has when no tool is named. With `request` (run a task,
 // analyze or apply a context update), the assistant starts with that request already sent, in a window the user
-// sees: the same text they would paste, under the tool's own permission prompts. VS Code cannot be handed a prompt,
+// sees: the same text they would paste, under the tool's own permission prompts. The ID must be an active task or a
+// context update of the open workspace (404 otherwise), and the launch uses its name as read from disk. VS Code cannot be handed a prompt,
 // so there `typed` is false and the dashboard copies the text for the user to paste.
 router.post('/open-assistant', async (req: Request, res: Response) => {
   const workspacePath = workspaceService.getWorkspacePath();
@@ -437,9 +454,14 @@ router.post('/open-assistant', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'request must be { request: "task" | "analyze" | "apply", id } with a TASK-… or CU-… ID.' });
     return;
   }
+  const target = parsed ? await requestTarget(workspacePath, parsed.request, parsed.id) : null;
+  if (parsed && !target) {
+    res.status(404).json({ error: parsed.request === 'task' ? 'No active task with this ID in the open workspace.' : 'No context update with this ID in the open workspace.' });
+    return;
+  }
   const tool = (requested as AiTool | undefined) ?? workspaceAssistants(workspacePath)[0];
   const launch = assistantLaunch(tool);
-  const text = parsed ? requestText(tool, parsed.request, parsed.id) : undefined;
+  const text = parsed && target ? requestText(tool, parsed.request, target) : undefined;
   const program = launch.via === 'terminal' ? launch.program : 'code';
   const command = assistantCommand(workspacePath, program, process.platform === 'win32', text);
   const typed = Boolean(text) && launch.via === 'terminal';

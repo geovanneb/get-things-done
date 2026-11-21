@@ -394,9 +394,10 @@ try {
     openWith({ request: 'deploy', id: task.id }),
     openWith('task'),
   ]);
-  check('opening an assistant with a request refuses anything but a known kind and a well-formed ID',
-    refusedStarts.every((r) => r.status === 400) && !fs.existsSync(path.join(ws, 'injected')),
-    refusedStarts.map((r) => r.status).join(','));
+  const unknownTask = await openWith({ request: 'task', id: 'TASK-1999-9999' });
+  check('opening an assistant with a request refuses anything but a known kind and the ID of an active task or update',
+    refusedStarts.every((r) => r.status === 400) && unknownTask.status === 404 && !fs.existsSync(path.join(ws, 'injected')),
+    [...refusedStarts, unknownTask].map((r) => r.status).join(','));
   const boardReset = await fetch(`${base}/api/workspace/board`, { method: 'DELETE' });
   check('resetting the board removes the saved columns',
     boardReset.ok && !('board' in JSON.parse(fs.readFileSync(path.join(ws, '.situation-board', 'ui-preferences.json'), 'utf-8'))));
