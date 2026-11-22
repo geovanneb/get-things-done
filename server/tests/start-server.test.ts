@@ -26,7 +26,8 @@ test('startServer runs in-process on the given workspace and closes without exit
   const { startServer } = await import('../src/server');
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'gtd-start-ws-'));
   fs.writeFileSync(path.join(workspace, 'workspace.yaml'), 'name: "Northwind Labs"\n');
-  t.after(() => { for (const d of [home, workspace]) fs.rmSync(d, { recursive: true, force: true }); });
+  // The closed server can still be finishing a write in these folders (a log or settings file); retry rather than fail.
+  t.after(() => { for (const d of [home, workspace]) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); });
 
   const port = await freePort();
   const running = await startServer({ port, workspacePath: workspace, logRequests: false });
