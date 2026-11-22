@@ -58,6 +58,7 @@ export type WorkerReply =
    * a model, and the dashboard makes sure it is gone before the job's slot and model are free.
    */
   | { type: 'helper'; pid: number }
+  /** Seconds of audio done of the total; in a `speakers` job, the speaker library's chunks done of its total. */
   | { type: 'progress'; done: number; total: number }
   | { type: 'segment'; start: number; end: number; text: string; speaker?: number }
   /** A follow job's decoded part, with or without words: its own speech and the language it sounded like. */

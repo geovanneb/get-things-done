@@ -240,8 +240,9 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
     <>
       <Steps title={t('meetingsList.processing')} steps={[
         { label: recorded ? t('meetingHistory.recorded') : t('meetingDetail.added'), detail: `${longDate(m.meeting_date)}${period ? `, ${period}` : ''}`, state: m.live ? 'now' : 'done' },
-        ...(recorded ? [{ label: t('meetingDetail.transcribed'), detail: transcribed ? undefined : processing.label, state: transcribed ? 'done' as const : 'now' as const }] : []),
-        { label: m.in_digest ? t('meetingHistory.goingIntoADigest') : t('meetingDetail.waitsForTheDigest'), detail: processing.detail, state: !transcribed || m.live ? 'later' as const : 'now' as const },
+        // Until it is transcribed, where its transcription stands (such as its step and time left) is said under that step.
+        ...(recorded ? [{ label: t('meetingDetail.transcribed'), detail: transcribed ? undefined : [processing.label, processing.detail].filter(Boolean).join(' · '), state: transcribed ? 'done' as const : 'now' as const }] : []),
+        { label: m.in_digest ? t('meetingHistory.goingIntoADigest') : t('meetingDetail.waitsForTheDigest'), detail: transcribed || !recorded ? processing.detail : undefined, state: !transcribed || m.live ? 'later' as const : 'now' as const },
       ]} />
       <Steps title={t('shared.review')} steps={[
         { label: t('analysisRun.analyzed'), state: 'later' },
