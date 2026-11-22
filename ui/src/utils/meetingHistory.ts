@@ -2,6 +2,7 @@ import { currentLocale, tr } from '@/i18n/current';
 import type { HistoryMeeting, MeetingFolder, QueuedMeeting, TranscriptionProgress } from '@/types';
 import { meetingPeriod, missingModel, needsYou } from '@/utils/meetingQueue';
 import { transcriptionView } from '@/utils/transcriptionProgress';
+import { meetingReviewHref } from '@/utils/meetingFocus';
 
 /**
  * The Meetings list: queued meetings and meetings held by a context update, as one list. Each row says two separate
@@ -11,6 +12,10 @@ import { transcriptionView } from '@/utils/transcriptionProgress';
 
 export type StatusTone = 'critical' | 'info' | 'warning' | 'accent' | 'muted' | 'success';
 export interface RowStatus { label: string; tone: StatusTone | null; detail?: string; update?: string;
+  /** Where `update` opens: its review at this meeting. */
+  href?: string;
+  /** A way to the meeting's review, at this meeting (`?meeting=`). */
+  link?: { label: string; href: string };
   /** A running transcription's bar (percent null: not known yet) and what a screen reader says of the status. */
   progress?: { percent: number | null; spoken: string } }
 
@@ -119,25 +124,35 @@ export function queueProcessing(m: QueuedMeeting, facts: QueueFacts): RowStatus 
   return { label: tr('meetingHistory.waitingForDigest'), tone: 'accent', ...(facts.nextDigest ? { detail: tr('meetingHistory.nextDigest', { nextDigest: facts.nextDigest }) } : {}) };
 }
 
+/**
+ * Where a meeting's review opens: at the meeting when its id is final, else the whole update. A record-only meeting's id
+ * names a record id the analysis wrote, which a new analysis may give to another meeting before the update is done.
+ */
+export function reviewHref(h: Pick<HistoryMeeting, 'id' | 'update_id' | 'linkable'>): string {
+  return h.linkable ? meetingReviewHref(h.update_id, h.id) : `/context/updates/${encodeURIComponent(h.update_id)}`;
+}
+
 /** How far the user got with a meeting an update holds. */
 export function historyReview(h: HistoryMeeting): RowStatus {
   const status = h.update.status;
   if (status === 'ready' || status === 'analyzing') return { label: tr('meetingHistory.waitingForAnalysis'), tone: 'info' };
+  const href = reviewHref(h);
   if (status === 'in_review') {
     const toConfirm = h.record && h.record.confirmation === null;
-    return { label: tr('meetingHistory.waitingForReview'), tone: 'warning', ...(toConfirm ? { detail: tr('meetingHistory.recordToConfirm') } : {}) };
+    return { label: tr('meetingHistory.waitingForReview'), tone: 'warning', ...(toConfirm ? { detail: tr('meetingHistory.recordToConfirm') } : {}), link: { label: tr('meetingHistory.reviewThisMeeting'), href } };
   }
-  if (status === 'approved' || status === 'applying') return { label: tr('format.approved'), tone: 'info', detail: tr('meetingHistory.beingApplied') };
+  const see = { label: tr('meetingHistory.seeTheReview'), href };
+  if (status === 'approved' || status === 'applying') return { label: tr('format.approved'), tone: 'info', detail: tr('meetingHistory.beingApplied'), link: see };
   const context = h.update.context_changed ? tr('meetingHistory.contextUpdated') : tr('meetingHistory.noContextChanges');
-  if (h.record?.confirmation === 'confirmed') return { label: tr('meetingHistory.recordConfirmed'), tone: 'success', detail: context };
-  if (h.record?.confirmation === 'rejected') return { label: tr('meetingHistory.recordRejected'), tone: 'muted', detail: context };
-  return { label: tr('taskMeetingSources.reviewed'), tone: 'muted', detail: context };
+  if (h.record?.confirmation === 'confirmed') return { label: tr('meetingHistory.recordConfirmed'), tone: 'success', detail: context, link: see };
+  if (h.record?.confirmation === 'rejected') return { label: tr('meetingHistory.recordRejected'), tone: 'muted', detail: context, link: see };
+  return { label: tr('taskMeetingSources.reviewed'), tone: 'muted', detail: context, link: see };
 }
 
 export function historyProcessing(h: HistoryMeeting): RowStatus {
   return h.origin === 'digest'
-    ? { label: tr('meetingHistory.inADigest'), tone: 'muted', update: h.update_id }
-    : { label: tr('meetingHistory.addedAsAnUpdate'), tone: 'muted', update: h.update_id };
+    ? { label: tr('meetingHistory.inADigest'), tone: 'muted', update: h.update_id, href: reviewHref(h) }
+    : { label: tr('meetingHistory.addedAsAnUpdate'), tone: 'muted', update: h.update_id, href: reviewHref(h) };
 }
 
 /** Both lists as one, newest first. A meeting being handed to a digest is in both for a moment: the queue shows it. */
@@ -157,7 +172,7 @@ export function meetingRows(queue: QueuedMeeting[], history: HistoryMeeting[], f
       };
     }),
     ...history.filter((h) => !queued.has(h.id)).map((h): MeetingRow => ({
-      id: h.id, href: h.linkable ? `/meetings/${h.id}` : `/context/updates/${h.update_id}`, title: h.title, date: h.meeting_date, time: null, people: h.people,
+      id: h.id, href: h.linkable ? `/meetings/${h.id}` : reviewHref(h), title: h.title, date: h.meeting_date, time: null, people: h.people,
       source: h.origin === 'update' ? tr('meetingHistory.importedAsAnUpdate') : h.recorded ? tr('meetingHistory.recorded') : tr('meetingHistory.uploadedFiles'),
       processing: historyProcessing(h), review: historyReview(h), needsYou: false,
       textGone: !h.has_text && !h.deleted?.in_trash, inTrash: Boolean(h.deleted?.in_trash), held: h,

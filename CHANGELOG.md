@@ -27,6 +27,14 @@ minor versions may include breaking changes.
   meeting** or **Apply**, then **Create deliverable**. **Create deliverable** is also offered beside the step wherever
   the list allows it, queued meetings included, and the tasks made from its action items and those that mention it
   are listed. Opening a meeting only reads. (#483)
+- **Review one meeting of a digest.** **Review this meeting** in the Meetings list opens the digest's
+  review at that meeting (`/context/updates/<id>?meeting=<meeting id>`): its record first, the
+  proposals from it below with their diffs one click away, and a scope line ("Meeting 2 of 6 in this
+  digest") with the previous and next meeting and what is still open across all meetings. A proposal
+  drawing on several meetings is listed under each and counted once. Approving works as before; at one
+  meeting, the first Approve first shows any records still without a choice or proposals folded away.
+  (#488)
+- **API:** `GET /api/context-updates/:id` gains `held_meetings`. See [docs/api.md](docs/api.md). (#488)
 - **API:** `transcription` in `GET /api/routines/meeting-digest` gains `phase`, `phase_started_at`,
   `phase_part` and, for another dashboard's job, `elsewhere`. See [docs/api.md](docs/api.md). (#480)
 
