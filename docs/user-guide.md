@@ -986,6 +986,24 @@ ring instead, with no count: it says new meetings are moving, not that you have 
 Waiting on you and out of the count on **More**. Meetings waiting for review are counted on **Context**, with their
 update.
 
+**Next step**, at the top of every meeting you open, says the one thing to do now and gives you the button for it:
+the transcription's progress while it runs; **Download it in Settings** when the model it waits for is not downloaded
+(its own model, or for an upload the model chosen in Settings); **Try again** or **Use this transcript** when a
+transcription failed, stopped or ended part way; **Make digest now** (or when the next digest runs) once it is
+transcribed; **Open it** when an open digest holds it back, with whether the next digest will likely take it (a digest
+takes the oldest meetings first, up to its limits); **Open its update** to start the analysis; **Review this meeting** or
+**Apply**, which open its update (not yet at this meeting's record); and **Create deliverable** once it is reviewed.
+**Create deliverable** is also offered next to the step whenever the meeting could be picked in the list, queued
+meetings included. Under the step are the tasks made from its action items, and, apart, active tasks whose objective
+mentions the meeting.
+
+Opening a meeting only reads: it never starts anything or uses your AI assistant. The buttons say what they do. With
+**Prepare meetings for review automatically** on, the step says that automatic analysis will start the analysis by
+itself as soon as your assistant is free (it checks about every minute), and that **Make digest now** also tries to
+start the new digest's analysis with your assistant: later if the assistant is busy, or left for you to start if it
+cannot. Which digest a waiting meeting goes into is an estimate: a meeting whose files changed since it was queued is
+skipped.
+
 After you correct a meeting, its **Tasks** tab can **Check related work**: every task, active or archived, that pinned the meeting, mentions it or was made from its action items, and how each stands now (changes to review, an earlier version that is still valid, not pinned yet, and so on). It changes nothing; open a task to look, and refresh its sources there if you want the newer text.
 
 ### Recordings and versions

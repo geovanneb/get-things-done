@@ -7,7 +7,7 @@ import Button from '@/components/common/Button';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { apiDelete, apiPost } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
-import { recordingElsewhere } from '@/utils/meetingQueue';
+import { missingModel, recordingElsewhere, recordingModel } from '@/utils/meetingQueue';
 import { duration as minutes, transcriptionView } from '@/utils/transcriptionProgress';
 import { TranscriptionBar } from '@/components/meetings/TranscriptionBar';
 import type { MeetingDigest, QueuedMeeting, RecordingState, TranscriptionProgress } from '@/types';
@@ -28,9 +28,10 @@ function RecordingLine({ meeting, file, state, progress, disabled, installed, sp
   let tone = 'var(--color-text-muted)';
   const name = (id: string) => names[id] ?? id;
   // The model this recording will really be transcribed with, which is what it waits for.
-  const target = state.target ? runnable[state.target.model] ?? state.target.model : null;
+  // An upload has no target of its own: like the server's worker, it waits for the model chosen in Settings.
+  const target = recordingModel(state, runnable, chosen);
   // Fixed to a model that is not downloaded: it can switch to the one chosen now, when that one is.
-  const missing = state.status === 'pending' && target !== null && Boolean(installed) && !installed!.includes(target);
+  const missing = missingModel(state, installed, runnable, chosen) !== null;
   const switchTo = missing && chosen && chosen !== target && installed!.includes(chosen) ? chosen : null;
   // The same wording as the Meetings list (see transcriptionProgress.ts).
   const view = state.status === 'running' ? transcriptionView(progress, Date.now()) : null;

@@ -1,4 +1,4 @@
-import type { QueuedMeeting } from '@/types';
+import type { QueuedMeeting, RecordingState } from '@/types';
 
 /** How recently audio must have arrived for a recording to count as still going in some page. */
 export const RECORDING_ELSEWHERE_MS = 30_000;
@@ -61,13 +61,28 @@ export function meetingPeriod(m: QueuedMeeting): string | null {
  * Something about this meeting waits for the user: it is always shown, however old. `installed` are the downloaded
  * models, when known: a recording waiting for one that is not waits for the user.
  */
-export function needsYou(m: QueuedMeeting, installed: string[] | null = null, runnable: Record<string, string> = {}): boolean {
+/**
+ * The model a waiting recording will really be transcribed with, the way the server's worker picks it: its own target,
+ * fixed when it was finished, else the model chosen in Settings now (an upload has no target), then what that model
+ * runs as here (a GPU model not verified here runs as its CPU counterpart). Null when it cannot be told.
+ */
+export function recordingModel(r: Pick<RecordingState, 'target'>, runnable: Record<string, string> = {}, chosen: string | null = null): string | null {
+  const model = r.target?.model ?? chosen;
+  return model ? runnable[model] ?? model : null;
+}
+
+/** The model a waiting recording needs and that is not downloaded, or null: until it is, the worker skips the recording. */
+export function missingModel(r: Pick<RecordingState, 'status' | 'target'>, installed: string[] | null, runnable: Record<string, string> = {}, chosen: string | null = null): string | null {
+  if (r.status !== 'pending' || installed === null) return null;
+  const model = recordingModel(r, runnable, chosen);
+  return model && !installed.includes(model) ? model : null;
+}
+
+export function needsYou(m: QueuedMeeting, installed: string[] | null = null, runnable: Record<string, string> = {}, chosen: string | null = null): boolean {
   return Boolean(m.live || m.held || m.files.some((f) => {
     const r = f.recording;
     if (!r) return false;
-    const target = r.target ? runnable[r.target.model] ?? r.target.model : null;
-    const missingModel = r.status === 'pending' && installed !== null && target !== null && !installed.includes(target);
-    return missingModel || r.status === 'failed' || r.status === 'stopped' || (r.status === 'partial' && !r.accepted);
+    return missingModel(r, installed, runnable, chosen) !== null || r.status === 'failed' || r.status === 'stopped' || (r.status === 'partial' && !r.accepted);
   }));
 }
 
@@ -79,11 +94,11 @@ export function newestFirst(meetings: QueuedMeeting[]): QueuedMeeting[] {
 }
 
 /** What the list shows: what needs you first, then the newest others, at most `limit` of them unless searching. */
-export function visibleMeetings(meetings: QueuedMeeting[], query: string, all: boolean, installed: string[] | null = null, limit = SHOWN_MEETINGS, runnable: Record<string, string> = {}): { shown: QueuedMeeting[]; hidden: number } {
+export function visibleMeetings(meetings: QueuedMeeting[], query: string, all: boolean, installed: string[] | null = null, limit = SHOWN_MEETINGS, runnable: Record<string, string> = {}, chosen: string | null = null): { shown: QueuedMeeting[]; hidden: number } {
   const found = matching(newestFirst(meetings), query);
   if (query.trim() || all) return { shown: found, hidden: 0 };
-  const urgent = found.filter((m) => needsYou(m, installed, runnable));
-  const others = found.filter((m) => !needsYou(m, installed, runnable));
+  const urgent = found.filter((m) => needsYou(m, installed, runnable, chosen));
+  const others = found.filter((m) => !needsYou(m, installed, runnable, chosen));
   return { shown: [...urgent, ...others.slice(0, limit)], hidden: Math.max(0, others.length - limit) };
 }
 

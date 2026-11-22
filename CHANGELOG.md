@@ -20,10 +20,23 @@ minor versions may include breaking changes.
   is done the line adds the recording's length and about how long is left. Another dashboard on the
   same workspace now shows the same progress, marked as running in another dashboard. The meeting's
   files and **Transcribe again** use the same wording. (#480)
+- **Next step on each meeting.** The top of a meeting now says the one thing to do next, with its button:
+  the transcription's progress, **Download it in Settings** for a missing model (also for an upload waiting for the
+  model chosen in Settings), **Try again** or **Use this transcript**, **Make digest now**, **Open it** for the digest
+  that holds it back, **Open its update** to analyze it (saying when automatic analysis will start it), **Review this
+  meeting** or **Apply**, then **Create deliverable**. **Create deliverable** is also offered beside the step wherever
+  the list allows it, queued meetings included, and the tasks made from its action items and those that mention it
+  are listed. Opening a meeting only reads. (#483)
 - **API:** `transcription` in `GET /api/routines/meeting-digest` gains `phase`, `phase_started_at`,
   `phase_part` and, for another dashboard's job, `elsewhere`. See [docs/api.md](docs/api.md). (#480)
 
 ### Fixed
+
+- **An uploaded recording waiting for a model that is not downloaded needs you.** A recording added as a file has no
+  model of its own and is transcribed with the one chosen in Settings; when that one is not downloaded, the Meetings
+  list, its files and the sidebar now say it waits for a model to download instead of "Waiting for transcription".
+  (#483)
+- **Listing tasks no longer creates `tasks/active/`.** A missing folder now reads as no tasks. (#483)
 
 - **A meeting being recorded is in progress, not waiting on you.** The Meetings list showed it as
   Recording but filed it under **Needs you**. It is now under **In progress** until the recording
