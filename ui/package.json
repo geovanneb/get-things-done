@@ -16,6 +16,7 @@
     "test:meeting-prep": "tsx src/utils/meetingPrep.test.ts",
     "test:meeting-participants": "tsx src/utils/meetingParticipants.test.ts",
     "test:meeting-deliverable": "tsx src/utils/meetingDeliverable.test.ts",
+    "test:meeting-next-step": "tsx src/utils/meetingNextStep.test.ts",
     "test:record-doubts": "tsx src/utils/recordDoubts.test.ts",
     "test:task-notice": "tsx src/components/board/TaskMeetingAction.test.tsx",
     "test:import-summary": "tsx src/components/context-updates/ImportSummary.test.tsx",

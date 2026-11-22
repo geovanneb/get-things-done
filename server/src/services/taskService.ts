@@ -262,9 +262,18 @@ export class TaskService {
     return path.join(workspaceService.getWorkspacePath(), 'tasks', 'archive');
   }
 
+  /**
+   * The active tasks. Only reads: a missing `tasks/active/` is an empty list, never created here (a GET writes nothing).
+   * Anything else wrong with it (a file in its place, no access) fails as before, never as an empty board.
+   */
   async listTasks(filters?: TaskFilters): Promise<Task[]> {
     const activeDir = this.getActiveDir();
-    await fileService.ensureDir(activeDir);
+    const found = await fsp.stat(activeDir).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return null;
+      throw err;
+    });
+    if (!found) return [];
+    if (!found.isDirectory()) throw Object.assign(new Error(`ENOTDIR: not a directory, ${activeDir}`), { code: 'ENOTDIR' });
     return this.readTaskFolders(activeDir, filters);
   }
 
@@ -303,7 +312,11 @@ export class TaskService {
   }
 
   private async readTaskFolders(dir: string, filters?: TaskFilters): Promise<Task[]> {
-    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+    // A missing folder holds no tasks; one that cannot be read (no access, not a folder) fails, never as an empty list.
+    const entries = await fsp.readdir(dir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    });
     const tasks: Task[] = [];
 
     for (const entry of entries) {

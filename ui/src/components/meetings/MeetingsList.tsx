@@ -171,7 +171,7 @@ export function MeetingsList({ job, history, error, retention, actions, onChange
   const now = new Date(useTicking(Boolean(job?.queue.some((m) => m.files.some((f) => f.recording?.status === 'running')))));
 
   const rows = job && history ? meetingRows(job.queue, history, {
-    installed: job.installed_models ?? null, runnable: job.runnable_models ?? {}, progress: job.transcription ?? null,
+    installed: job.installed_models ?? null, runnable: job.runnable_models ?? {}, chosen: job.chosen_model ?? null, progress: job.transcription ?? null,
     nextDigest: job.next_run_at && !job.open_digest ? new Date(job.next_run_at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : null,
     recordingNow: (m) => (recorder.active && recorder.meetingId === m.id) || recordingElsewhere(m), now: now.getTime(),
   }) : [];

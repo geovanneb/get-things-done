@@ -28,12 +28,14 @@ import { useApi } from '@/hooks/useApi';
 import { useNotify } from '@/hooks/useNotify';
 import { useAppDispatch, useDataVersion } from '@/store';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
-import { historyProcessing, historyReview, queueProcessing, transcribeLine, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
+import { historyProcessing, historyReview, meetingRows, queueProcessing, transcribeLine, type QueueFacts, type RowStatus, type StatusTone } from '@/utils/meetingHistory';
+import { meetingNextStep, tasksFromMeeting, type DigestFacts } from '@/utils/meetingNextStep';
+import { MeetingNextStep } from '@/components/meetings/MeetingNextStep';
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { joinNames } from '@/utils/meetingParticipants';
 import { meetingPeriod } from '@/utils/meetingQueue';
 import { readableTranscript, speakerLabelsOf, transcriptOnItsWay } from '@/utils/transcriptReading';
-import type { MeetingDetail, MeetingDigest, MeetingRecord, QueuedMeeting, SpeakerName, Stakeholder, VersionSpeakers } from '@/types';
+import type { MeetingDetail, MeetingDigest, MeetingRecord, QueuedMeeting, SpeakerName, Stakeholder, Task, VersionSpeakers } from '@/types';
 
 /** What the Meetings page hands its dialog: the queue it already has, and System cleanup's Meetings settings. */
 export interface MeetingsOutlet {
@@ -54,6 +56,23 @@ const longDate = (date: string) => {
   const [y, m, d] = date.split('-').map(Number);
   return y && m && d ? new Date(y, m - 1, d).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) : date || tr('meetingHistory.noDate');
 };
+
+/** What the Next step line needs of the Meeting digest (#483). */
+const digestFacts = (job: MeetingDigest | null): DigestFacts => ({
+  open_digest: job?.open_digest ?? null,
+  analyze_open_digest: job?.analyze_open_digest ?? 'no',
+  settings: {
+    enabled: job?.settings.enabled ?? false, auto_analyze: job?.settings.auto_analyze ?? false, after_each_meeting: job?.settings.after_each_meeting ?? false,
+    max_meetings: job?.settings.max_meetings ?? 10,
+  },
+  analysis: job?.state.analysis ?? null,
+});
+
+/** The active tasks, for the ones already made from a meeting. Only read: nothing is started. */
+function useTasks(): Task[] {
+  const { data } = useApi<Task[]>('/api/tasks', [useDataVersion('tasks')]);
+  return data ?? [];
+}
 
 function StatusBadge({ status }: { status: RowStatus }) {
   return status.tone ? <Badge size="md" variant={BADGE[status.tone]}>{status.label}</Badge> : null;
@@ -129,7 +148,7 @@ export default function MeetingDetailView() {
   return <HeldMeetingBody id={id} outlet={outlet} onClose={close} frame={frame} />;
 }
 
-function Header({ id, title, statuses, line, actions }: { id: string; title: string; statuses: RowStatus[]; line: string; actions?: React.ReactNode }) {
+function Header({ id, title, statuses, line, actions, next }: { id: string; title: string; statuses: RowStatus[]; line: string; actions?: React.ReactNode; next?: React.ReactNode }) {
   return (
     <div className="gtd-modal__header" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 'var(--space-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
@@ -143,6 +162,7 @@ function Header({ id, title, statuses, line, actions }: { id: string; title: str
         {statuses.map((s) => <StatusBadge key={s.label} status={s} />)}
         <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{line}</span>
       </div>
+      {next}
     </div>
   );
 }
@@ -174,11 +194,14 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   const { t } = useLanguage();
   const recorder = useRecorder();
   const [tab, setTab] = useState<MeetingTab>('transcript');
-  const processing = queueProcessing(m, {
-    installed: job.installed_models ?? null, runnable: job.runnable_models ?? {}, progress: job.transcription ?? null, line: transcribeLine(job.queue),
+  const tasks = useTasks();
+  const facts: QueueFacts = {
+    installed: job.installed_models ?? null, runnable: job.runnable_models ?? {}, chosen: job.chosen_model ?? null, progress: job.transcription ?? null, line: transcribeLine(job.queue),
     nextDigest: job.next_run_at && !job.open_digest ? new Date(job.next_run_at).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : null,
     recordingNow: (q) => (recorder.active && recorder.meetingId === q.id) || recordingElsewhere(q),
-  });
+  };
+  const processing = queueProcessing(m, facts);
+  const next = meetingNextStep({ queued: m }, { ...facts, digest: digestFacts(job), queue: job.queue });
   // What can be read: each recording's transcript (or its live draft), and transcripts or notes added as files.
   const sources = m.files.flatMap((f): { key: string; label: string; url: string; text: string; names: Record<string, string>; audio?: { url: string; label: string } }[] => {
     const r = f.recording;
@@ -261,6 +284,8 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
   return (
     <>
       <Header id={m.id} title={m.title} statuses={[processing]} line={`${longDate(m.meeting_date)}${period ? ` · ${period}` : ''}${m.participants?.length ? ` · ${joinNames(m.participants)}` : ''}`}
+        next={<MeetingNextStep step={next} row={meetingRows([m], [], facts)[0]!} meetingId={m.id} tasks={tasksFromMeeting(m.id, null, tasks)}
+          onFiles={() => setTab('files')} onChanged={onChanged} />}
         actions={<>
           <TranscribeOrderMenu meeting={m} job={job} onChanged={onChanged} />
           <OpenMeetingFolder id={m.id} />
@@ -273,6 +298,9 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
 
 // ---- a meeting held by a context update ------------------------------------------------------------------------
 
+/** A held meeting's row and next step read nothing of the queue. */
+const heldFacts: QueueFacts = { installed: null, runnable: {}, progress: null, nextDigest: null, recordingNow: () => false };
+
 function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: MeetingsOutlet; onClose: () => void; frame: (body: React.ReactNode, label: string) => React.ReactNode }) {
   const { t } = useLanguage();
   const confirm = useConfirm();
@@ -280,6 +308,7 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
   const dispatch = useAppDispatch();
   const updatesVersion = useDataVersion('context-updates');
   const { data, error, refetch } = useApi<MeetingDetail>(`/api/meetings/${encodeURIComponent(id)}`, [updatesVersion]);
+  const tasks = useTasks();
   const [tab, setTab] = useState<MeetingTab>('transcript');
   // Found by a search: open the file it was found in, with the words to find.
   const [params] = useSearchParams();
@@ -552,6 +581,9 @@ function HeldMeetingBody({ id, outlet, onClose, frame }: { id: string; outlet: M
     <>
       <Header id={h.id} title={h.title} statuses={[historyProcessing(h), historyReview(h)]}
         line={`${longDate(h.meeting_date)}${h.people.length ? ` · ${h.people.join(', ')}` : ''}`}
+        next={<MeetingNextStep step={meetingNextStep({ held: h }, { ...heldFacts, digest: digestFacts(outlet.job), queue: [] })}
+          row={meetingRows([], [h], heldFacts)[0]!} meetingId={h.id} tasks={tasksFromMeeting(h.id, record, tasks)}
+          onFiles={() => setTab('files')} onChanged={changed} />}
         actions={<>
           {h.has_text && !h.deleted && <OpenMeetingFolder id={h.id} />}
           {canDelete && <IconButton label={t('meetingDetail.deleteMeeting')} icon={icons.trash} tone="danger" outline disabled={busy} onClick={() => void remove()} />}

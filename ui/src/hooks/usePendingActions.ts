@@ -76,7 +76,7 @@ export function usePendingActions(): PendingAction[] {
   }, [recheck, refetchDigest]);
   // A meeting being recorded now, here or in another page, is in progress there too, not waiting on you.
   const meetings = meetingCounts(queue, {
-    installed: digest?.installed_models ?? null, runnable: digest?.runnable_models ?? {},
+    installed: digest?.installed_models ?? null, runnable: digest?.runnable_models ?? {}, chosen: digest?.chosen_model ?? null,
     recordingNow: (m) => (recorder.active && recorder.meetingId === m.id) || recordingElsewhere(m, readAt),
   });
   const meetingAction: PendingAction = meetings.needsYou > 0

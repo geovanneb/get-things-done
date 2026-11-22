@@ -21,7 +21,7 @@ interface Loaded { row: MeetingRow; detail: MeetingDetail; stakeholders: Stakeho
  * are pinned. The record is read again when the choice is accepted: if it is no longer confirmed, changed, or its
  * versions do not agree, nothing from it is copied and the plain draft opens, with a notice saying why.
  */
-export function CreateDeliverableButton({ rows, onDone }: { rows: MeetingRow[]; onDone: () => void }) {
+export function CreateDeliverableButton({ rows, onDone, variant = 'primary' }: { rows: MeetingRow[]; onDone: () => void; variant?: 'primary' | 'secondary' }) {
   const { t } = useLanguage();
   const dispatch = useAppDispatch();
   const [busy, setBusy] = React.useState(false);
@@ -109,7 +109,7 @@ export function CreateDeliverableButton({ rows, onDone }: { rows: MeetingRow[]; 
 
   return (
     <>
-      <Button size="sm" variant="primary" loading={busy} onClick={() => void start()}>{t('meetingsList.createDeliverable')}</Button>
+      <Button size="sm" variant={variant} loading={busy} onClick={() => void start()}>{t('meetingsList.createDeliverable')}</Button>
       {loaded && record && (
         <Modal isOpen onClose={() => setLoaded(null)} size="md" title={t('meetingDeliverable.whatIsItFor', { title: loaded.row.title })}
           description={t('meetingDeliverable.pickAnActionItem')}

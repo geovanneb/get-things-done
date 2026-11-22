@@ -1,6 +1,6 @@
 import { currentLocale, tr } from '@/i18n/current';
 import type { HistoryMeeting, MeetingFolder, QueuedMeeting, TranscriptionProgress } from '@/types';
-import { meetingPeriod, needsYou } from '@/utils/meetingQueue';
+import { meetingPeriod, missingModel, needsYou } from '@/utils/meetingQueue';
 import { transcriptionView } from '@/utils/transcriptionProgress';
 
 /**
@@ -39,6 +39,8 @@ export interface MeetingRow {
 export interface QueueFacts {
   installed: string[] | null;
   runnable: Record<string, string>;
+  /** The model chosen in Settings now: what a recording without a target of its own is transcribed with. */
+  chosen?: string | null;
   progress: TranscriptionProgress | null;
   /** When the next digest runs, as shown ("Mon 18:00"); null when it waits for something else. */
   nextDigest: string | null;
@@ -99,8 +101,7 @@ export function queueProcessing(m: QueuedMeeting, facts: QueueFacts): RowStatus 
   for (const f of m.files) {
     const r = f.recording;
     if (!r) continue;
-    const target = r.target ? facts.runnable[r.target.model] ?? r.target.model : null;
-    if (r.status === 'pending' && facts.installed && target && !facts.installed.includes(target)) return { label: tr('meetingHistory.needsYou'), tone: 'warning', detail: tr('meetingHistory.waitsForAModelTo') };
+    if (missingModel(r, facts.installed, facts.runnable, facts.chosen ?? null)) return { label: tr('meetingHistory.needsYou'), tone: 'warning', detail: tr('meetingHistory.waitsForAModelTo') };
     if (r.status === 'failed') return { label: tr('meetingHistory.needsYou'), tone: 'warning', detail: tr('meetingHistory.transcriptionFailed') };
     if (r.status === 'stopped') return { label: tr('meetingHistory.needsYou'), tone: 'warning', detail: tr('meetingHistory.transcriptionStopped') };
     if (r.status === 'partial' && !r.accepted) return { label: tr('meetingHistory.needsYou'), tone: 'warning', detail: tr('meetingHistory.partialTranscript') };
@@ -151,7 +152,7 @@ export function meetingRows(queue: QueuedMeeting[], history: HistoryMeeting[], f
         source: m.files.some((f) => f.recording) ? tr('meetingHistory.recorded') : tr('meetingHistory.uploadedFiles'),
         processing, review: { label: tr('meetingHistory.notYet'), tone: null },
         // Being recorded right now is under way, not waiting: only an interrupted or unreadable recording needs you.
-        needsYou: !(m.live && facts.recordingNow(m)) && needsYou(m, facts.installed, facts.runnable),
+        needsYou: !(m.live && facts.recordingNow(m)) && needsYou(m, facts.installed, facts.runnable, facts.chosen ?? null),
         textGone: false, inTrash: false, queued: m,
       };
     }),
@@ -186,7 +187,7 @@ export function inFilter(row: MeetingRow, filter: MeetingFilter): boolean {
  * How many meetings the page's Needs you and In progress filters hold, for the sidebar. Counted with the page's own rows
  * and filters, so the two always agree. Only queued meetings can be in either, so the held ones are not needed.
  */
-export function meetingCounts(queue: QueuedMeeting[], facts: Pick<QueueFacts, 'installed' | 'runnable' | 'recordingNow'>): { needsYou: number; inProgress: number } {
+export function meetingCounts(queue: QueuedMeeting[], facts: Pick<QueueFacts, 'installed' | 'runnable' | 'chosen' | 'recordingNow'>): { needsYou: number; inProgress: number } {
   const rows = meetingRows(queue, [], { ...facts, progress: null, nextDigest: null });
   return { needsYou: rows.filter((r) => inFilter(r, 'you')).length, inProgress: rows.filter((r) => inFilter(r, 'progress')).length };
 }

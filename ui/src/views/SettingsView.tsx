@@ -18,7 +18,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/api';
 import { openWorkspaceFolder, pickFolder } from '@/utils/desktop';
 import { formatDate, formatRelativeDate } from '@/utils/format';
 import { useAppState, useAppDispatch } from '@/store';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { useApi } from '@/hooks/useApi';
 import { cleanupSummary } from '@/components/routines/SystemCleanup';
 import WorkspaceAvatar from '@/components/layout/WorkspaceAvatar';
@@ -550,6 +550,12 @@ export default function SettingsView() {
     setSearchParams({}, { replace: true });
   }, [config, searchParams]);
 
+  // A meeting waiting for a model that is not downloaded links here (#483): show Transcription once the page is drawn.
+  const location = useLocation();
+  useEffect(() => {
+    if (!loading && location.hash === '#transcription') document.getElementById('transcription')?.scrollIntoView({ block: 'start' });
+  }, [loading, location.hash, location.key]);
+
   const handleBrowse = async () => {
     setPicking(true);
     setChangeError(null);
@@ -829,9 +835,11 @@ export default function SettingsView() {
         <RunNoticeSettings />
       </Card>
 
-      <Card title={t('transcription')}>
-        <TranscriptionSettings />
-      </Card>
+      <div id="transcription">
+        <Card title={t('transcription')}>
+          <TranscriptionSettings />
+        </Card>
+      </div>
 
       <Card title={t('devices')}>
         <DeviceSettings />
