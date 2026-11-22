@@ -52,8 +52,18 @@ export type RunCommand = 'analyze' | 'apply';
 /** How a run started from the dashboard ended: what the page needs to say so, never more. */
 export interface RunFinished { workspace: string; update_id: string; command: RunCommand; status: Exclude<RunStatus, 'queued' | 'running'> }
 
-/** Says when a run started from the dashboard ends, after its record is saved ('finished', RunFinished). */
+/**
+ * Says when a run started from the dashboard ends, after its record is saved ('finished', RunFinished), and that a run
+ * was queued, started, ended or left the line ('change', with its workspace): views that show whether an update waits
+ * on the user read again. A queued run is never saved, so the file watcher cannot tell them.
+ */
 export const runEvents = new EventEmitter();
+const runsChanged = (workspace: string): void => { runEvents.emit('change', workspace); };
+
+/** True when `workspace` is the one the dashboard shows now: only its pages hear that a run changed. */
+export function shownWorkspace(workspace: string): boolean {
+  try { return selectedWorkspacePath() === workspace; } catch { return false; }
+}
 
 export interface AgentRun {
   update_id: string;
@@ -810,6 +820,7 @@ export class AgentRunnerService {
         message: QUEUED_MESSAGE, refused: 0, turns: null, usage_usd: null, pid: null,
       },
     });
+    runsChanged(workspace);
     return this.queuedView(workspace, uid)!;
   }
 
@@ -833,6 +844,7 @@ export class AgentRunnerService {
       };
       // Only when nothing newer was asked for this update meanwhile.
       if (!(active?.workspace === entry.workspace && active.run.update_id === entry.run.update_id)) recent.set(recentKey(entry.workspace, entry.run.update_id), dropped);
+      runsChanged(entry.workspace);
       startNext();
     }
   }
@@ -854,10 +866,12 @@ export class AgentRunnerService {
     active = current;
     recent.delete(recentKey(workspace, uid));
     setAnalysisRunning(workspace, uid, true);
+    runsChanged(workspace);
     const release = () => {
       if (active === current) active = null;
       setAnalysisRunning(workspace, uid, false);
       resolveDone();
+      runsChanged(workspace);
       startNext();
     };
     try {
@@ -934,6 +948,7 @@ export class AgentRunnerService {
       if (active === current) active = null;
       setAnalysisRunning(current.workspace, current.run.update_id, false);
       current.resolveDone();
+      runsChanged(current.workspace);
       // However it ended (done, failed, stopped, timed out), the next one in line goes.
       startNext();
     }
@@ -948,6 +963,7 @@ export class AgentRunnerService {
       // Kept like a dropped run (in memory only), so another page that saw it waiting can say what became of it.
       const removed: AgentRun = { ...entry!.run, status: 'cancelled', not_started: true, ended_at: new Date().toISOString(), message: 'Removed from the queue; it did not start.' };
       recent.set(recentKey(workspace, removed.update_id), removed);
+      runsChanged(workspace);
       return removed;
     }
     if (!active || active.workspace !== workspace || active.run.update_id !== updateId(id)) throw httpError(409, 'Nothing is running for this update');
@@ -976,3 +992,4 @@ export class AgentRunnerService {
     }
   }
 }
+

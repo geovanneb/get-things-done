@@ -73,7 +73,7 @@ A few routes return a simpler `{ "error": "…" }` body. They are noted below.
 | Method | Path | What it does |
 |---|---|---|
 | `GET` | `/health` | Checks that the server is up |
-| `GET` | `/api/events` | Server-sent events: one `file_change` event each time a workspace file changes, and a `run-finished` event when a run started from this dashboard ends (`update_id`, `command`, `status`: `succeeded`, `failed` or `cancelled`, and `workspace`), after its record is saved |
+| `GET` | `/api/events` | Server-sent events: one `file_change` event each time a workspace file changes, and a `run-finished` event when a run started from this dashboard ends (`update_id`, `command`, `status`: `succeeded`, `failed` or `cancelled`, and `workspace`), after its record is saved, and a `run-change` event (no data) when a run in the workspace shown now is queued, starts, ends or leaves the queue |
 
 ```text
 GET /health
@@ -353,7 +353,7 @@ state changes by editing `update.md`; the routes below are the ones the dashboar
 
 | Method | Path | What it does |
 |---|---|---|
-| `GET` | `/api/context-updates` | List context updates |
+| `GET` | `/api/context-updates` | List context updates. A `ready` update that is not the user's move has `waits_on_agent: true`: its analysis is queued or running in this dashboard (a run another dashboard, or this one before a restart, recorded counts while its process is alive), or the meeting digest will start it by itself on its next check (on, Analyze automatically on, its last attempt waiting for another run, and the update never had a run). A run queued in another dashboard is not seen. Other updates have no such field |
 | `POST` | `/api/context-updates` | Create an update. Body: `title`, `source_date`, `notes`, `text` (all optional). Returns `201` |
 | `GET` | `/api/context-updates/:id` | Get one update with its proposals, and the current and proposed content. A `meeting-correction` also has `correction_review`: `base` (the version it corrects, as confirmed, or `null` when that is gone or changed), `stale` (another correction finished first; it can only be closed), `blocked` (why approving would be refused now, checked against the versions themselves: stale, a changed source or meeting, slots that no longer match, a field with a change marked not sure that changed anyway, or such a change that does not quote a value exactly, a pin that is not one of the meeting's files (an analysis started from the dashboard is refused for that too), a changed speaker without its transcript pinned at the start; empty once done), `changes` and `doubts_dropped` (what the version corrected was not sure of and the corrected record no longer is) (each field the record changes, decided on its values; `before` and `after` as lines to read). With `?workspace=<path>` (a link from a page opened from a run-finished notice; also on `/materials/…`), it is read only when that workspace is the one open: `409` otherwise. Any request may say the same in an `X-GTD-Workspace` header (the path, URI-encoded): refused with `409` before anything is read or changed when another workspace is open |
 | `PATCH` | `/api/context-updates/:id` | Edit `title`, `source_date` or `notes` |
