@@ -22,6 +22,7 @@ import { TranscribeAgainDialog, TranscriptionNotice, VersionsSection } from '@/c
 import { QueuedMeetingActions } from '@/components/meetings/QueuedMeetingActions';
 import { recordingElsewhere } from '@/utils/meetingQueue';
 import { TranscribeOrderMenu } from '@/components/meetings/TranscribeOrder';
+import { ProcessMeetingNow } from '@/components/meetings/ProcessMeetingNow';
 import { useRecorder } from '@/components/recording/RecordingProvider';
 import { useDialogFocus } from '@/hooks/useDialogFocus';
 import { useApi } from '@/hooks/useApi';
@@ -287,6 +288,7 @@ function QueuedMeetingBody({ meeting: m, job, onClose, onChanged }: { meeting: Q
         next={<MeetingNextStep step={next} row={meetingRows([m], [], facts)[0]!} meetingId={m.id} tasks={tasksFromMeeting(m.id, null, tasks)}
           onFiles={() => setTab('files')} onChanged={onChanged} />}
         actions={<>
+          <ProcessMeetingNow meeting={m} job={job} onChanged={onChanged} />
           <TranscribeOrderMenu meeting={m} job={job} onChanged={onChanged} />
           <OpenMeetingFolder id={m.id} />
           <IconButton label={t('meetingDetail.closeMeeting')} icon={icons.close} onClick={onClose} />

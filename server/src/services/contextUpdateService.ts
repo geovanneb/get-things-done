@@ -1355,6 +1355,30 @@ export class ContextUpdateService {
     return updates.sort((a, b) => b.id.localeCompare(a.id));
   }
 
+  /**
+   * Every update, and the folders whose update.md is there but cannot be read. For a caller that must not guess, such
+   * as the meeting digest's one-open-digest rule: `list` leaves an unreadable update out, which would read as "not open".
+   * A folder without update.md is not published (a digest being made writes it last), so it is in neither.
+   */
+  async listStrict(): Promise<{ updates: ContextUpdate[]; unreadable: string[] }> {
+    const entries = await fsp.readdir(this.rootDir(), { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    });
+    const updates: ContextUpdate[] = [];
+    const unreadable: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !ID_PATTERN.test(entry.name)) continue;
+      try {
+        updates.push((await this.read(entry.name)).update);
+      } catch {
+        const there = await fsp.lstat(path.join(this.rootDir(), entry.name, 'update.md')).then(() => true, (err: NodeJS.ErrnoException) => err.code !== 'ENOENT');
+        if (there) unreadable.push(entry.name);
+      }
+    }
+    return { updates: updates.sort((a, b) => b.id.localeCompare(a.id)), unreadable: unreadable.sort() };
+  }
+
   async get(id: string): Promise<ContextUpdateDetail> {
     return this.serialized(id, async () => {
       const { update, data, file } = await this.read(id);

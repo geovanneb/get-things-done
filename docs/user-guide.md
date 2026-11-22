@@ -838,6 +838,25 @@ settings, or **Prepare meetings for review automatically** (below).
   its transcripts are. The Meeting digest card in Routines keeps the schedule and settings.
 - **Make digest now** on the Meetings page sends the queue to a digest without waiting for
   the schedule, which it shows beside the button.
+- **Process this meeting now**, in a queued meeting's dialog, makes a digest of that meeting
+  alone, for example before a follow-up call; the other meetings stay in the queue. Before it
+  runs it says what happens next: with **Analyze automatically** on, the dashboard tries to
+  start the analysis with your AI assistant, and if another run is going it starts after it.
+  While the routine is paused it tries once only: if another run is going, you start the
+  analysis from the update (or resume the routine). With it off, you start the analysis from
+  the update. If the settings change before you confirm, nothing is made and the dialog asks
+  again with what happens now. Digests of one meeting each use somewhat more AI usage than a
+  batch, because each analysis reads the workspace context once. It is disabled, with the
+  reason, while the meeting is not ready (not queued, on hold, or waiting for its transcript),
+  and while another digest waits for review: "Waiting for CU-… to be reviewed", with a link.
+  The meeting is checked again when it runs; a file changed since it was queued keeps it in
+  the queue, and no other meeting is ever taken instead.
+- A meeting whose list of files is damaged, or whose recording is marked transcribed without
+  its transcript, never goes into a digest; it stays in the queue for you to check. If a
+  queued meeting's files or its details change after its digest was made but before it left the queue (the
+  dashboard stopped halfway), its folder is kept on hold instead of removed. If a context
+  update cannot be read, no new digest is made until it is fixed or removed, since it might be
+  the digest waiting for review.
 - Starting a recording opens the Meetings page with its live text. After Stop the page
   shows the transcript, the live text first and the final one once it is ready, and
   **Read it** on any meeting opens its transcript there.
