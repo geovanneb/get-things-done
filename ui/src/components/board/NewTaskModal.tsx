@@ -5,6 +5,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import Button from '@/components/common/Button';
 import StakeholderPicker from '@/components/task-form/StakeholderPicker';
+import SuggestedStakeholders from '@/components/task-form/SuggestedStakeholders';
 import DeliverableList from '@/components/task-form/DeliverableList';
 import { DeliverableItem } from '@/components/task-form/DeliverableRow';
 import { sectionLabelStyle } from '@/components/task-form/styles';
@@ -321,6 +322,8 @@ export default function NewTaskModal({
                 onAdd={(s) => setSelectedStakeholders((prev) => [...prev, s])}
                 onRemove={(id) => setSelectedStakeholders((prev) => prev.filter((s) => s.id !== id))}
               />
+              <SuggestedStakeholders suggested={draft?.suggested_stakeholders ?? []} selected={selectedStakeholders}
+                onToggle={(s, on) => setSelectedStakeholders((prev) => [...prev.filter((x) => x.id !== s.id), ...(on ? [s] : [])])} />
             </aside>
           </div>
         </div>
