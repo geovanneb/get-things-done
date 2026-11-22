@@ -65,11 +65,38 @@ const kinds = (s: ReturnType<typeof step>) => s.actions.map((a) => a.kind).join(
 {
   const s = step(queued({ files: recording('done') }));
   assert.equal(s.code, 'make_digest');
+  // Its recording names no transcript, so Process this meeting now is not offered (see below).
   assert.equal(kinds(s), 'make_digest');
   assert.equal(s.actions[0]!.label, 'Make digest now');
   assert.equal(s.detail, 'Or wait for the next digest, Mon 18:00.');
   assert.match(step(queued(), facts({ digest: digest({}, { after_each_meeting: true }) })).detail ?? '', /right after each meeting/);
   assert.match(step(queued(), facts({ nextDigest: null, digest: digest({}, { enabled: false }) })).detail ?? '', /paused/);
+}
+
+// Process this meeting now (#487) next to Make digest now, only while #487's own rule says it can run.
+{
+  const ready = queued({ files: [
+    { name: FILE, size: 1, sha256: 'a', capture: 'c', recording: { status: 'done', transcript: 't.md', transcript_sha256: 'h' } },
+    { name: 't.md', size: 1, sha256: 'h' },
+  ] as QueuedMeeting['files'] });
+  const s = step(ready);
+  assert.equal(s.code, 'make_digest');
+  assert.deepEqual(s.actions[1], { kind: 'process_now', label: 'Process this meeting now' });
+  // Paused, or with automatic analysis: still offered; its own confirmation says what happens to the analysis.
+  assert.equal(kinds(step(ready, facts({ digest: digest({}, { enabled: false, auto_analyze: true }) }))), 'make_digest,process_now');
+  // Another meeting going into a digest right now: a digest is being made, so it is not offered.
+  const other = queued({ id: 'MQ-2026-0001', in_digest: true });
+  assert.equal(kinds(step(ready, facts({ queue: [other, ready] }))), 'make_digest');
+  // A transcript counted as done but missing from the meeting's files: not offered.
+  const missing = queued({ files: recording('done', { transcript: 'gone.md', transcript_sha256: 'h' }) });
+  assert.equal(kinds(step(missing)), 'make_digest');
+  // An open digest blocks it: the step says so once, with Open it, and offers no Process button.
+  const blocked = step(ready, facts({ digest: digest({ open_digest: 'CU-2026-0004' }) }));
+  assert.equal(blocked.code, 'blocked_by_digest');
+  assert.equal(kinds(blocked), 'link');
+  // Not ready yet (on hold, transcribing): never offered.
+  assert.ok(!kinds(step(queued({ held: 'Files changed' }))).includes('process_now'));
+  assert.ok(!kinds(step(queued({ files: recording('running') }))).includes('process_now'));
 }
 
 // Blocked by an open digest: "Waiting for CU-… to be reviewed", with Open it.
@@ -84,7 +111,7 @@ const kinds = (s: ReturnType<typeof step>) => s.actions.map((a) => a.kind).join(
 {
   const manual = heldStep(held('ready'));
   assert.equal(manual.code, 'analyze');
-  assert.deepEqual(manual.actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003', label: 'Open its update' }]);
+  assert.deepEqual(manual.actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003?meeting=MQ-2026-0007', label: 'Open its update' }]);
   assert.match(manual.detail ?? '', /only starts when you click/);
   const auto = heldStep(held('ready'), digest({ open_digest: 'CU-2026-0003', analyze_open_digest: 'yes' }, { auto_analyze: true }));
   assert.match(auto.detail ?? '', /starts it by itself/);
@@ -99,16 +126,29 @@ const kinds = (s: ReturnType<typeof step>) => s.actions.map((a) => a.kind).join(
   assert.equal(heldStep(held('analyzing')).code, 'analyzing');
 }
 
-// In review or approved: Review this meeting / Apply, opening the update.
+// In review or approved: Review this meeting / Apply, opening the update's review at this meeting (#488).
 {
   const review = heldStep(held('in_review', { record: { id: 'M-01', revision: 'r1', confirmation: null, confirmed_at: null, link: 'explicit' } }));
   assert.equal(review.code, 'review');
-  assert.deepEqual(review.actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003', label: 'Review this meeting' }]);
+  assert.deepEqual(review.actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003?meeting=MQ-2026-0007', label: 'Review this meeting' }]);
   assert.match(review.detail ?? '', /Confirm or reject/);
   const apply = heldStep(held('approved'));
   assert.equal(apply.code, 'apply');
-  assert.deepEqual(apply.actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003', label: 'Apply' }]);
+  assert.deepEqual(apply.actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003?meeting=MQ-2026-0007', label: 'Apply' }]);
   assert.equal(heldStep(held('applying')).code, 'applying');
+  assert.deepEqual(heldStep(held('applying')).actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003?meeting=MQ-2026-0007', label: 'Open its update' }]);
+  assert.deepEqual(heldStep(held('analyzing')).actions, [{ kind: 'link', to: '/context/updates/CU-2026-0003?meeting=MQ-2026-0007', label: 'Open its update' }]);
+}
+
+// A meeting whose id is not final yet (an imported record in review) keeps the whole-update link, by #488's own rule.
+{
+  for (const status of ['ready', 'analyzing', 'in_review', 'approved', 'applying'] as const) {
+    const s = heldStep(held(status, { id: 'M-01', linkable: false, origin: 'update' }));
+    assert.deepEqual(s.actions.map((a) => a.kind === 'link' ? a.to : a.kind), ['/context/updates/CU-2026-0003'], status);
+  }
+  // The meeting id goes into the link encoded.
+  const odd = heldStep(held('in_review', { id: 'MQ 2026&7' }));
+  assert.deepEqual(odd.actions.map((a) => a.kind === 'link' ? a.to : a.kind), ['/context/updates/CU-2026-0003?meeting=MQ+2026%267']);
 }
 
 // Reviewed: Create deliverable as the step itself, never offered twice.
@@ -161,7 +201,7 @@ const kinds = (s: ReturnType<typeof step>) => s.actions.map((a) => a.kind).join(
     step(queued({ files: recording('failed') })), step(queued()), heldStep(held('ready'), digest({ open_digest: 'CU-2026-0003', analyze_open_digest: 'yes' }, { auto_analyze: true })),
     heldStep(held('in_review')), heldStep(held('approved')), heldStep(held('done')),
   ];
-  for (const s of all) for (const a of s.actions) assert.ok(['link', 'files', 'retry', 'accept', 'queue_again', 'make_digest', 'deliverable'].includes(a.kind));
+  for (const s of all) for (const a of s.actions) assert.ok(['link', 'files', 'retry', 'accept', 'queue_again', 'make_digest', 'process_now', 'deliverable'].includes(a.kind));
 }
 
 // The tasks already made: from the record's action items (also archived or gone), and active tasks that mention it.

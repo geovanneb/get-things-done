@@ -3,11 +3,13 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import Button from '@/components/common/Button';
 import { CreateDeliverableButton } from '@/components/meetings/CreateDeliverableButton';
+import { ProcessMeetingNow } from '@/components/meetings/ProcessMeetingNow';
 import { TranscriptionBar } from '@/components/meetings/TranscriptionBar';
 import { useNotify } from '@/hooks/useNotify';
 import { apiPost } from '@/utils/api';
 import type { MeetingRow } from '@/utils/meetingHistory';
 import type { MeetingTask, NextStep, NextStepAction } from '@/utils/meetingNextStep';
+import type { MeetingDigest, QueuedMeeting } from '@/types';
 
 const TONE: Record<NextStep['tone'], string> = {
   info: 'var(--color-info)', warning: 'var(--color-warning)', success: 'var(--color-success)', muted: 'var(--color-border)',
@@ -18,9 +20,12 @@ const TONE: Record<NextStep['tone'], string> = {
  * Nothing runs until the user clicks; opening the meeting only reads. Create deliverable is offered next to it whenever
  * the list would let the meeting be picked. Under it: the tasks made from its action items, and the active tasks that
  * mention it (a mention is not proof a task was made from the meeting, so they are listed apart).
+ * Process this meeting now (#487) is offered here, and only here in the dialog, when it can run: its own button, with its
+ * confirmation and request, needs the queued meeting and the Meeting digest (`processNow`).
  */
-export function MeetingNextStep({ step, row, meetingId, tasks, onFiles, onChanged }: {
+export function MeetingNextStep({ step, row, meetingId, tasks, onFiles, onChanged, processNow }: {
   step: NextStep; row: MeetingRow; meetingId: string; tasks: MeetingTask[]; onFiles: () => void; onChanged: () => void;
+  processNow?: { meeting: QueuedMeeting; job: MeetingDigest };
 }) {
   const { t } = useLanguage();
   const notify = useNotify();
@@ -53,6 +58,7 @@ export function MeetingNextStep({ step, row, meetingId, tasks, onFiles, onChange
       case 'accept': return <Button key={a.label} size="sm" variant={variant} disabled={busy} onClick={() => void post(recording(a.file, 'accept'))}>{a.label}</Button>;
       case 'queue_again': return <Button key={a.label} size="sm" variant={variant} disabled={busy} onClick={() => void post(`/api/meeting-queue/${encodeURIComponent(meetingId)}/queue`)}>{a.label}</Button>;
       case 'make_digest': return <Button key={a.label} size="sm" variant={variant} loading={busy} onClick={() => void post('/api/routines/meeting-digest/run', true)}>{a.label}</Button>;
+      case 'process_now': return processNow ? <ProcessMeetingNow key={a.label} meeting={processNow.meeting} job={processNow.job} onChanged={onChanged} /> : null;
       case 'deliverable': return <CreateDeliverableButton key={a.label} rows={[row]} onDone={() => undefined} variant={variant} />;
       default: return null;
     }

@@ -838,7 +838,7 @@ settings, or **Prepare meetings for review automatically** (below).
   its transcripts are. The Meeting digest card in Routines keeps the schedule and settings.
 - **Make digest now** on the Meetings page sends the queue to a digest without waiting for
   the schedule, which it shows beside the button.
-- **Process this meeting now**, in a queued meeting's dialog, makes a digest of that meeting
+- **Process this meeting now**, on a queued meeting's **Next step** once it is ready, makes a digest of that meeting
   alone, for example before a follow-up call; the other meetings stay in the queue. Before it
   runs it says what happens next: with **Analyze automatically** on, the dashboard tries to
   start the analysis with your AI assistant, and if another run is going it starts after it.
@@ -1026,9 +1026,11 @@ update.
 the transcription's progress while it runs; **Download it in Settings** when the model it waits for is not downloaded
 (its own model, or for an upload the model chosen in Settings); **Try again** or **Use this transcript** when a
 transcription failed, stopped or ended part way; **Make digest now** (or when the next digest runs) once it is
-transcribed; **Open it** when an open digest holds it back, with whether the next digest will likely take it (a digest
-takes the oldest meetings first, up to its limits); **Open its update** to start the analysis; **Review this meeting** or
-**Apply**, which open its update (not yet at this meeting's record); and **Create deliverable** once it is reviewed.
+transcribed, with **Process this meeting now** beside it when the meeting can go into a digest of its own; **Open
+it** when an open digest holds it back, with whether the next digest will likely take it (a digest takes the oldest
+meetings first, up to its limits); **Open its update** to start the analysis; **Review this meeting** or **Apply**,
+which open its update at this meeting (the whole update while an imported record is still in review); and **Create
+deliverable** once it is reviewed.
 **Create deliverable** is also offered next to the step whenever the meeting could be picked in the list, queued
 meetings included. Under the step are the tasks made from its action items, and, apart, active tasks whose objective
 mentions the meeting.
