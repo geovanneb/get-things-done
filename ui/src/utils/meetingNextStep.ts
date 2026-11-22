@@ -1,8 +1,9 @@
 import { tr } from '@/i18n/current';
 import type { HistoryMeeting, MeetingRecord, QueuedMeeting, Task } from '@/types';
 import { canMakeDeliverable, mentionsMeeting } from './meetingDeliverable';
-import { queueProcessing, transcribeChoices, transcribeLine, type QueueFacts } from './meetingHistory';
+import { queueProcessing, reviewHref, transcribeChoices, transcribeLine, type QueueFacts } from './meetingHistory';
 import { missingModel } from './meetingQueue';
+import { processNowState } from './processNow';
 
 /**
  * The one thing to do next on a meeting (#483), shown at the top of its dialog. Worked out only from what the page
@@ -25,6 +26,8 @@ export type NextStepAction =
   | { kind: 'accept'; file: string; label: string }
   | { kind: 'queue_again'; label: string }
   | { kind: 'make_digest'; label: string }
+  /** Process this meeting now (#487): a digest of this meeting alone, after its own confirmation. Offered only when it can run. */
+  | { kind: 'process_now'; label: string }
   | { kind: 'deliverable'; label: string };
 
 export interface NextStep {
@@ -60,6 +63,8 @@ export type NextStepMeeting = { queued: QueuedMeeting; held?: undefined } | { he
 
 const update = (id: string) => `/context/updates/${id}`;
 const open = (id: string, label: string): NextStepAction => ({ kind: 'link', to: update(id), label });
+/** The meeting's own update, opened at this meeting when its id is final, else the whole update (#488's rule). */
+const openAt = (h: HistoryMeeting, label: string): NextStepAction => ({ kind: 'link', to: reviewHref(h), label });
 
 /** The next step for a meeting in the queue, or one held by a context update. */
 export function meetingNextStep(meeting: NextStepMeeting, facts: NextStepFacts): NextStep {
@@ -132,7 +137,12 @@ function queuedStep(m: QueuedMeeting, facts: NextStepFacts): Step {
     // straight away, even while the schedule is paused.
     s.auto_analyze ? tr('meetingNextStep.makeDigestAnalyzes') : null,
   ].filter(Boolean).join(' ');
-  return { code: 'make_digest', text: tr('meetingNextStep.makeDigest'), ...(detail ? { detail } : {}), tone: 'info', actions: [{ kind: 'make_digest', label: tr('meetingDigest.makeDigestNow') }] };
+  // Process this meeting now, next to Make digest now, by #487's own rule (it also checks what Make digest now does not:
+  // a digest being made, a transcript gone missing). The workspace is only for its request, which its button builds.
+  const now = processNowState(m, { open_digest: digest.open_digest, queue: facts.queue, workspace: '', settings: s });
+  const actions: NextStepAction[] = [{ kind: 'make_digest', label: tr('meetingDigest.makeDigestNow') }];
+  if (now.kind === 'ready') actions.push({ kind: 'process_now', label: tr('processNow.action') });
+  return { code: 'make_digest', text: tr('meetingNextStep.makeDigest'), ...(detail ? { detail } : {}), tone: 'info', actions };
 }
 
 /** Ready for a digest as the server reads it (`readyForDigest`): queued, not on hold, every recording transcribed. */
@@ -180,19 +190,19 @@ function heldStep(h: HistoryMeeting, digest: DigestFacts): Step {
     case 'ready': {
       const auto = autoAnalysis(id, digest);
       return { code: 'analyze', text: auto ? tr('meetingNextStep.analysisStartsByItself', { id }) : tr('meetingNextStep.analyze', { id }),
-        detail: auto ?? tr('meetingNextStep.analyzeDetail'), tone: 'info', actions: [open(id, tr('meetingNextStep.openItsUpdate'))] };
+        detail: auto ?? tr('meetingNextStep.analyzeDetail'), tone: 'info', actions: [openAt(h, tr('meetingNextStep.openItsUpdate'))] };
     }
     case 'analyzing':
-      return { code: 'analyzing', text: tr('meetingNextStep.analyzing', { id }), tone: 'info', actions: [open(id, tr('meetingNextStep.openItsUpdate'))] };
+      return { code: 'analyzing', text: tr('meetingNextStep.analyzing', { id }), tone: 'info', actions: [openAt(h, tr('meetingNextStep.openItsUpdate'))] };
     case 'in_review': {
       const toConfirm = h.record && h.record.confirmation === null;
       return { code: 'review', text: tr('meetingNextStep.review', { id }), ...(toConfirm ? { detail: tr('meetingNextStep.reviewDetail') } : {}), tone: 'warning',
-        actions: [open(id, tr('meetingNextStep.reviewThisMeeting'))] };
+        actions: [openAt(h, tr('meetingNextStep.reviewThisMeeting'))] };
     }
     case 'approved':
-      return { code: 'apply', text: tr('meetingNextStep.apply', { id }), tone: 'warning', actions: [open(id, tr('meetingNextStep.applyIt'))] };
+      return { code: 'apply', text: tr('meetingNextStep.apply', { id }), tone: 'warning', actions: [openAt(h, tr('meetingNextStep.applyIt'))] };
     case 'applying':
-      return { code: 'applying', text: tr('meetingNextStep.applying', { id }), tone: 'info', actions: [open(id, tr('meetingNextStep.openItsUpdate'))] };
+      return { code: 'applying', text: tr('meetingNextStep.applying', { id }), tone: 'info', actions: [openAt(h, tr('meetingNextStep.openItsUpdate'))] };
     default:
       break;
   }

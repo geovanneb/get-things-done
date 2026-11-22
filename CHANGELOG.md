@@ -27,6 +27,9 @@ minor versions may include breaking changes.
   meeting** or **Apply**, then **Create deliverable**. **Create deliverable** is also offered beside the step wherever
   the list allows it, queued meetings included, and the tasks made from its action items and those that mention it
   are listed. Opening a meeting only reads. (#483)
+- **Next step opens the review at the meeting.** **Review this meeting**, **Apply** and **Open its update** on a
+  meeting's Next step open its digest's review at that meeting, and a ready meeting's step offers **Process this
+  meeting now** beside **Make digest now** (it moved there from the dialog's header).
 - **Review one meeting of a digest.** **Review this meeting** in the Meetings list opens the digest's
   review at that meeting (`/context/updates/<id>?meeting=<meeting id>`): its record first, the
   proposals from it below with their diffs one click away, and a scope line ("Meeting 2 of 6 in this
