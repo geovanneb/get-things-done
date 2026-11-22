@@ -8,7 +8,7 @@ import { titleSlug } from '../utils/slug';
 import { requireText, requireList, textList, textOf } from '../utils/loose';
 
 const TEXT_FIELDS = ['name', 'slug', 'format', 'description', 'style_guide'] as const;
-import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry } from '../utils/files';
+import { deleteAttachment, saveAttachment, fileInside, listFolderFiles, topLevelName, zipFolder, FolderFile, workspaceEntry, workspaceFolder } from '../utils/files';
 
 const fileService = new FileService();
 const workspaceService = new WorkspaceService();
@@ -160,6 +160,13 @@ export class OutputService {
   async deleteTemplate(id: string): Promise<void> {
     // Delete the whole template directory (fs.rm never follows links inside it)
     await fsp.rm(await this.templateFolder(id), { recursive: true, force: true });
+  }
+
+  /** The template's folder for Open folder, relative to the workspace (`outputs/templates/<slug>`). Read only. */
+  async templateFolderPath(id: string): Promise<string> {
+    const folder = await workspaceFolder(workspaceService.getWorkspacePath(), await this.templateFolder(id));
+    if (!folder) throw new Error(`Output template not found: ${id}`);
+    return folder;
   }
 
   async listTemplateFiles(id: string): Promise<FolderFile[]> {

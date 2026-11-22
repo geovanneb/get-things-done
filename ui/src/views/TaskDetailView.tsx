@@ -35,6 +35,8 @@ import { isMeetingPrepTask, recordPrefillFromTask } from '../utils/meetingPartic
 import { formatDate, formatPriorityLabel, formatStatusLabel } from '../utils/format';
 import { canSave, emptyDraft, hasEdits, isArchived, taskDraftReducer } from '../utils/taskDraft';
 import RunInAssistant from '../components/assistant/RunInAssistant';
+import ShowInFolderButton from '../components/common/ShowInFolderButton';
+import { folderFromServer } from '../utils/desktop';
 import { useAssistant } from '../hooks/useAssistant';
 
 /* ---- Tab type ------------------------------------------------------ */
@@ -236,6 +238,11 @@ function WorkTab({ task, onFieldChange, savedCount, pinError, onPinned, dirty, o
 
 /* ---- Context package tab ------------------------------------------ */
 /* ---- Files tab ----------------------------------------------------- */
+/** Open folder for the task's folder, which the server looks up when clicked: it moves to tasks/archive/ on archive. */
+function TaskFolderButton({ taskId }: { taskId: string }) {
+  return <ShowInFolderButton path={() => folderFromServer(`/api/tasks/${encodeURIComponent(taskId)}/folder`)} />;
+}
+
 function FilesTab({ taskId }: { taskId: string }) {
   const { t } = useLanguage();
   const confirm = useConfirm();
@@ -279,9 +286,12 @@ function FilesTab({ taskId }: { taskId: string }) {
     <div style={{ flex: 1, overflowY: 'auto' }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
         <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={handleUpload} />
-        <Button size="sm" variant="secondary" loading={uploading} onClick={() => inputRef.current?.click()}>
-          {t('attachFile')}
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <TaskFolderButton taskId={taskId} />
+          <Button size="sm" variant="secondary" loading={uploading} onClick={() => inputRef.current?.click()}>
+            {t('attachFile')}
+          </Button>
+        </div>
       </div>
       {/* A failed load is not an empty folder: say so, and keep a list already shown rather than blank it. */}
       {error && (
@@ -547,7 +557,7 @@ function TaskDetailView({ id, close, panelRef }: { id: string | undefined; close
         style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: 'var(--space-5)' }}>
         {archived && (
           <div style={{ marginBottom: 'var(--space-4)' }}>
-            <Notice tone="info">{t('taskDetail.archivedReadOnly')}</Notice>
+            <Notice tone="info" action={id ? <TaskFolderButton taskId={id} /> : undefined}>{t('taskDetail.archivedReadOnly')}</Notice>
           </div>
         )}
         {readOnly && isDirty && (

@@ -13,6 +13,7 @@ import { useNotify } from '@/hooks/useNotify';
 import EmptyState from '@/components/common/EmptyState';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import AttachedFiles from '@/components/common/AttachedFiles';
+import { folderFromServer } from '@/utils/desktop';
 import { apiGet, apiPost, apiPut, apiDelete } from '@/utils/api';
 import { formatRelativeDate } from '@/utils/format';
 import type { OutputTemplate } from '@/types';
@@ -132,7 +133,8 @@ function TemplateModal({ isOpen, onClose, initial, mode, onSaved }: TemplateModa
           placeholder={t('outputs.requiredSectionsStructureToneAnd')}
           hint={t('outputs.agentsFollowThisWhenThey')} />
         {mode === 'edit' && initial?.id && (
-          <AttachedFiles baseUrl={`/api/outputs/templates/${initial.id}/files`} archiveUrl={`/api/outputs/templates/${initial.id}/archive`} label={t('newTaskModal.files')} />
+          <AttachedFiles baseUrl={`/api/outputs/templates/${initial.id}/files`} archiveUrl={`/api/outputs/templates/${initial.id}/archive`} label={t('newTaskModal.files')}
+            folder={() => folderFromServer(`/api/outputs/templates/${encodeURIComponent(initial.id!)}/folder`)} />
         )}
       </div>
     </Modal>

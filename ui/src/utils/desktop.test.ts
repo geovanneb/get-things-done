@@ -1,7 +1,7 @@
 /**
  * Unit tests for the desktop bridge and its browser fallback. Run with `npm run test:desktop-bridge --workspace=ui`.
  */
-import { canShowInFolder, followDesktopUpdate, hasDesktopUpdates, isDesktopApp, openWorkspaceFolder, pickFolder, readDesktopUpdate, restartToUpdate, showInFolder, workspaceFullPath } from './desktop';
+import { canShowInFolder, folderFromServer, followDesktopUpdate, hasDesktopUpdates, isDesktopApp, openWorkspaceFolder, pickFolder, readDesktopUpdate, restartToUpdate, showInFolder, workspaceFullPath } from './desktop';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -100,6 +100,24 @@ async function main() {
   check('a Windows path uses backslashes', workspaceFullPath('C:\\Users\\demo\\Northwind', 'context-updates/meeting-queue/MQ-2026-0003') === 'C:\\Users\\demo\\Northwind\\context-updates\\meeting-queue\\MQ-2026-0003');
   check('a network share stays one', workspaceFullPath('\\\\server\\share\\Northwind', 'meetings') === '\\\\server\\share\\Northwind\\meetings');
   check('the root folder', workspaceFullPath('/', 'meetings') === '/meetings');
+
+  // A folder only the server knows (a task's, active or archived): asked when clicked, a gone item is a notice.
+  const before = g.fetch;
+  const folderCalls: string[] = [];
+  g.fetch = async (url: string) => {
+    folderCalls.push(url);
+    if (url.includes('TASK-2026-0009')) return new Response(JSON.stringify({ error: 'Not Found', message: 'Task not found: TASK-2026-0009' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    if (url.includes('TASK-2026-0010')) return new Response(JSON.stringify({ error: 'Error', message: 'Invalid path traversal: symbolic link at tasks/archive' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ folder: 'tasks/archive/TASK-2026-0001' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  const found = await folderFromServer('/api/tasks/TASK-2026-0001/folder');
+  check('the server\'s folder is used as it is', found.path === 'tasks/archive/TASK-2026-0001' && !found.missing && folderCalls[0] === '/api/tasks/TASK-2026-0001/folder', JSON.stringify(found));
+  const gone = await folderFromServer('/api/tasks/TASK-2026-0009/folder');
+  check('an item no longer there is a notice, not an error', gone.missing === 'This folder is no longer in the workspace: it may have been moved or deleted.', JSON.stringify(gone));
+  let refused = '';
+  try { await folderFromServer('/api/tasks/TASK-2026-0010/folder'); } catch (err) { refused = (err as Error).message; }
+  check('a refused folder is still an error with the server\'s reason', refused.startsWith('Invalid path traversal'), refused);
+  g.fetch = before;
 
   if (failures) {
     console.error(`\n${failures} check(s) failed`);

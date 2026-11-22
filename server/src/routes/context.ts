@@ -80,6 +80,11 @@ router.delete('/:id', async (req: Request, res: Response) => {
   res.status(204).send();
 });
 
+// GET /api/context/:id/folder  the note's folder, relative to the workspace, for Open folder
+router.get('/:id/folder', async (req: Request, res: Response) => {
+  res.json({ folder: await contextService.contextFolder(param(req, 'id')) });
+});
+
 // GET /api/context/:id/files
 router.get('/:id/files', async (req: Request, res: Response) => {
   const files = await contextService.listContextFiles(param(req, 'id'));

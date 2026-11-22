@@ -3107,6 +3107,8 @@ export default {
   "showInFolder.copied": "Caminho copiado",
   "showInFolder.couldNotCopy": "Não foi possível copiar. Selecione o caminho e copie-o.",
   "showInFolder.noWorkspace": "Nenhum espaço de trabalho está aberto ainda.",
+  "showInFolder.showFile": "Mostrar na pasta",
+  "showInFolder.gone": "Esta pasta não está mais no espaço de trabalho: ela pode ter sido movida ou excluída.",
   "meetingFolder.recordingNotKept": "A gravação desta reunião não foi mantida: nesta pasta estão apenas a transcrição e as notas.",
   "meetingFolder.sharedFolder": "Esta pasta também contém as outras reuniões de {update}, então é indicado o primeiro arquivo desta reunião.",
   "server.meetingFolderUnsafe": "Não é possível abrir a pasta desta reunião: ela é um link ou fica fora do espaço de trabalho.",

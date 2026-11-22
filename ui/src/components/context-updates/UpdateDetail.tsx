@@ -11,6 +11,7 @@ import { useConfirm } from '@/components/common/ConfirmDialog';
 import { Link, useNavigate } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
+import ShowInFolderButton from '@/components/common/ShowInFolderButton';
 import { Textarea } from '@/components/common/Input';
 import LoadingSpinner from '@/components/common/LoadingSpinner';
 import MarkdownView from '@/components/common/MarkdownView';
@@ -1046,6 +1047,10 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
         <h3 style={sectionLabel}>{rich(t, 'updateDetail.materials2', { length: materials.length })}</h3>
         <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {filesGone && <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{t('updateDetail.deletedWhenTheUpdateFinished')}</p>}
+          {/* The server names materials/ only while it holds files; once they are deleted there is nothing to open. */}
+          {!filesGone && u.materials_folder && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}><ShowInFolderButton path={u.materials_folder} /></div>
+          )}
           {u.status === 'done' && u.keep_materials && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
               <span style={{ flex: 1, minWidth: 0 }}>{rich(t, 'updateDetail.keptAtYourRequestOn', { keptSize: formatBytes(keptSize) })}</span>

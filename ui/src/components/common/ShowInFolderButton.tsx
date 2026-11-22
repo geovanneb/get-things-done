@@ -9,8 +9,11 @@ import { apiGet } from '@/utils/api';
 import { canShowInFolder, showInFolder, workspaceFullPath } from '@/utils/desktop';
 import type { WorkspaceConfig } from '@/types';
 
-/** What to show: a path relative to the workspace (a folder, or a file to show selected in its folder), and a note. */
-export interface ShowInFolderTarget { path: string; note?: string | null }
+/**
+ * What to show: a path relative to the workspace (a folder, or a file to show selected in its folder), and a note.
+ * `missing` instead says the item is no longer there: shown as a notice, nothing is opened.
+ */
+export interface ShowInFolderTarget { path: string; note?: string | null; missing?: string | null }
 
 /**
  * Open folder for any file or folder of the workspace. In the desktop app it reveals it in Finder or Explorer (a file
@@ -36,6 +39,7 @@ export default function ShowInFolderButton({ path, label, iconOnly = false, size
     setBusy(true);
     try {
       const target = typeof path === 'string' ? { path } : await path();
+      if (target.missing) { notify.warning(target.missing); return; }
       if (canShowInFolder()) {
         await showInFolder(target.path);
         if (target.note) notify.info(target.note);

@@ -3106,6 +3106,8 @@ export const en = {
   "showInFolder.copied": "Path copied",
   "showInFolder.couldNotCopy": "Could not copy. Select the path and copy it.",
   "showInFolder.noWorkspace": "No workspace is open yet.",
+  "showInFolder.showFile": "Show in folder",
+  "showInFolder.gone": "This folder is no longer in the workspace: it may have been moved or deleted.",
   "meetingFolder.recordingNotKept": "The recording of this meeting was not kept: only its transcript and notes are in this folder.",
   "meetingFolder.sharedFolder": "This folder also holds the other meetings of {update}, so it points to this meeting's first file.",
   "server.meetingFolderUnsafe": "This meeting's folder cannot be opened: it is a link or lies outside the workspace.",

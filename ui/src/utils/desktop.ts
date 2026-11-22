@@ -3,7 +3,7 @@ import { tr } from '@/i18n/current';
  * Native helpers when the dashboard runs in the desktop app, with the server routes as the browser fallback.
  * The desktop app's preload script sets `window.gtdDesktop`; a browser tab never has it.
  */
-import { apiPost } from './api';
+import { apiGet, apiPost } from './api';
 
 export interface DesktopBridge {
   version: number;
@@ -203,4 +203,19 @@ export function workspaceFullPath(workspace: string, relativePath: string): stri
   const base = workspace.replace(/[\\/]+$/, '');
   const parts = relativePath.split(/[\\/]/).filter((p) => p && p !== '.');
   return parts.length ? [base || sep, ...parts].join(sep).replace(/^\/\//, '/') : (base || sep);
+}
+
+/**
+ * Where Open folder goes for an item whose folder only the server knows: `url` answers `{ folder }` (relative to the
+ * workspace). Asked when clicked, so a task archived or a note moved since the page loaded is still found. An item no
+ * longer there (404) gives `missing`, a notice to show instead of an error.
+ */
+export async function folderFromServer(url: string): Promise<{ path: string; missing?: string }> {
+  try {
+    const { folder } = await apiGet<{ folder: string }>(url);
+    return { path: folder };
+  } catch (err) {
+    if ((err as { status?: number }).status === 404) return { path: '', missing: tr('showInFolder.gone') };
+    throw err;
+  }
 }

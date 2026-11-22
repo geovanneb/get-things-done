@@ -58,6 +58,20 @@ export async function workspaceEntry(workspace: string, target: string, allowMis
 }
 
 /**
+ * An existing folder of the workspace as the page names it, for Open folder: relative to the workspace, with "/". No
+ * part of it below the workspace may be a link (see workspaceEntry, which throws for one). Null when it is not there
+ * or is not a folder.
+ */
+export async function workspaceFolder(workspace: string, dir: string): Promise<string | null> {
+  const full = await workspaceEntry(workspace, dir).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  });
+  if (!full || !(await fsp.lstat(full).then((st) => st.isDirectory(), () => false))) return null;
+  return path.relative(path.resolve(workspace), full).split(path.sep).join('/');
+}
+
+/**
  * Writes `file`, the app's own record somewhere below the workspace (such as `.situation-board/...`), atomically. No
  * folder on its way below the workspace may be a link: one is refused before its folder is made or anything written.
  * Checked again right before the write, since a folder could be replaced while it is made.

@@ -3107,6 +3107,8 @@ export default {
   "showInFolder.copied": "Ruta copiada",
   "showInFolder.couldNotCopy": "No se pudo copiar. Selecciona la ruta y cópiala.",
   "showInFolder.noWorkspace": "Todavía no hay un espacio de trabajo abierto.",
+  "showInFolder.showFile": "Mostrar en la carpeta",
+  "showInFolder.gone": "Esta carpeta ya no está en el espacio de trabajo: puede que se haya movido o eliminado.",
   "meetingFolder.recordingNotKept": "La grabación de esta reunión no se conservó: en esta carpeta solo están su transcripción y sus notas.",
   "meetingFolder.sharedFolder": "Esta carpeta también contiene las otras reuniones de {update}, así que se indica el primer archivo de esta reunión.",
   "server.meetingFolderUnsafe": "No se puede abrir la carpeta de esta reunión: es un enlace o está fuera del espacio de trabajo.",
