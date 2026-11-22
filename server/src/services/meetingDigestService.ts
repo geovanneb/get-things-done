@@ -141,7 +141,7 @@ export interface DigestState {
 }
 
 /** What the digest needs from the dashboard runner. */
-export type DigestRunner = Pick<AgentRunnerService, 'startAnalysis' | 'get'>;
+export type DigestRunner = Pick<AgentRunnerService, 'startAnalysis' | 'get' | 'status'>;
 
 /** Automatic analysis may start anything now: on, and the job on (or the user's own "Make digest now"). */
 function autoAnalysisOn(settings: Pick<DigestSettings, 'enabled' | 'auto_analyze'>, manual: boolean): boolean {
@@ -435,6 +435,14 @@ export interface DigestView {
   state: DigestState;
   /** The digest that is not done yet, if any: no new one starts until it is. */
   open_digest: string | null;
+  /**
+   * Whether automatic analysis, on now or switched on now, starts the open digest's analysis at the next check: `yes`
+   * when it is ready, has had no run and was not refused before; `maybe` while a digest is still being handed over (an
+   * interrupted one is finished first, then may start); `no` otherwise. While the job is paused, once it is resumed.
+   */
+  analyze_open_digest: 'yes' | 'no' | 'maybe';
+  /** The workspace this view was read from: a settings write that names it is refused in any other. */
+  workspace: string;
   queue: (Omit<QueuedMeeting, 'live'> & { live?: LiveView })[];
   /** Queue folders that could not be read, with the reason. */
   queue_problems: { id: string; reason: string }[];
@@ -838,6 +846,21 @@ export class MeetingDigestService {
     await atomicWrite(path.join(await this.inWorkspace(this.routinesDir(), true), name), JSON.stringify(value, null, 2));
   }
 
+  /**
+   * The state as the settings save needs it, to put back if the settings cannot be saved: a missing file is the initial
+   * state; any other read or parse error refuses the save before anything is written, so a checkpoint is never lost.
+   */
+  private async readStateStrict(): Promise<DigestState> {
+    let raw: string;
+    try { raw = await fsp.readFile(path.join(this.routinesDir(), 'meeting-digest-state.json'), 'utf-8'); } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      throw httpError(400, `The meeting digest state cannot be read: ${(err as Error).message}`);
+    }
+    try { return obj(JSON.parse(raw)) as DigestState; } catch (err) {
+      throw httpError(400, `The meeting digest state cannot be read (.situation-board/routines/meeting-digest-state.json): ${(err as Error).message}`);
+    }
+  }
+
   async readState(): Promise<DigestState> {
     try {
       return obj(JSON.parse(await fsp.readFile(path.join(this.routinesDir(), 'meeting-digest-state.json'), 'utf-8'))) as DigestState;
@@ -884,17 +907,36 @@ export class MeetingDigestService {
   }
 
   async openDigest(): Promise<string | null> {
+    return (await this.openUpdate())?.id ?? null;
+  }
+
+  private async openUpdate() {
     const updates = await contextUpdateService.list().catch(() => []);
-    return updates.find((u) => u.origin === DIGEST_ORIGIN && u.kind === DIGEST_KIND && u.status !== 'done')?.id ?? null;
+    return updates.find((u) => u.origin === DIGEST_ORIGIN && u.kind === DIGEST_KIND && u.status !== 'done') ?? null;
+  }
+
+  /**
+   * The same conditions analyzeIfWanted checks, as they would be with automatic analysis on (#484). A digest still
+   * being handed over (a batch an interrupted run left, or one being built) is finished before the next analysis check,
+   * and may then be started: `maybe`. A damaged batch stops everything: `no`.
+   */
+  private async analysisDue(settings: DigestSettings, state: DigestState, open: { id: string; status: string } | null, batch: Batch | null | true): Promise<'yes' | 'no' | 'maybe'> {
+    if (batch === true) return 'no';
+    if (batch) return 'maybe';
+    if (!open || open.status !== 'ready') return 'no';
+    const before = state.analysis?.update_id === open.id ? state.analysis : null;
+    // Switching automatic analysis on clears an earlier refusal; while it stays on, a refusal is not retried.
+    if (settings.auto_analyze && before && before.status !== 'waiting') return 'no';
+    return await this.runner.get(open.id).catch(() => null) ? 'no' : 'yes';
   }
 
   async view(now = new Date()): Promise<DigestView> {
     const [settings, state, open, queue, batch] = await Promise.all([
-      this.readSettings(), this.readState(), this.openDigest(), this.readQueue(), this.readBatch().catch(() => null),
+      this.readSettings(), this.readState(), this.openUpdate(), this.readQueue(), this.readBatch().catch(() => true as const),
     ]);
     const from = state.checked_at && Date.parse(state.checked_at) > now.getTime() ? new Date(state.checked_at) : now;
     const next = settings.enabled ? nextOccurrences(settings.schedule, from, 1)[0] : undefined;
-    const busy = new Set(batch?.meetings ?? []);
+    const busy = new Set(batch === true ? [] : batch?.meetings ?? []);
     return {
       id: MEETING_DIGEST_ID,
       title: MEETING_DIGEST_TITLE,
@@ -902,7 +944,9 @@ export class MeetingDigestService {
       summary: describeSchedule(settings.schedule),
       next_run_at: next ? next.toISOString() : null,
       state,
-      open_digest: open,
+      open_digest: open?.id ?? null,
+      analyze_open_digest: await this.analysisDue(settings, state, open, batch),
+      workspace: workspaceService.getWorkspacePath(),
       queue: await Promise.all(queue.meetings.map(async (m) => ({ ...await this.withLiveView(m), in_digest: busy.has(m.id) }))),
       queue_problems: queue.problems,
       defaults: defaultSettings(),
@@ -912,20 +956,57 @@ export class MeetingDigestService {
 
   /** Saves new settings. A changed schedule, or switching the job back on, starts counting from now. */
   async update(input: unknown, now = new Date()): Promise<DigestView> {
-    const current = await this.readSettings().catch(() => defaultSettings());
+    const o = obj(input);
+    // A request that names the workspace it was reviewed in is refused in any other (#484): turning automation on must
+    // never land in a workspace the user did not look at.
+    const named = o['workspace'];
+    if (named !== undefined && (typeof named !== 'string' || path.resolve(named) !== path.resolve(workspaceService.getWorkspacePath()))) {
+      throw Object.assign(httpError(409, 'These settings are from another workspace. Switch to it, then try again.'), { details: { code: 'other_workspace' } });
+    }
+    // Settings that cannot be read are never replaced by defaults: that would turn a refused save into a changed one.
+    // A missing file reads as the defaults.
+    const current = await this.readSettings();
     const next = parseSettings(input, current);
     next.updated_at = now.toISOString();
-    await this.writeJson('meeting-digest.json', next);
-    if (JSON.stringify(next.schedule) !== JSON.stringify(current.schedule) || next.enabled !== current.enabled) {
-      await this.writeJson('meeting-digest-state.json', { ...await this.readState(), checked_at: now.toISOString(), disabled: !next.enabled });
+    // Switching automation on runs analyses with the background runner: only while it is ready, and, when the request
+    // says which account it was confirmed for, only with that account still signed in. Turning off never checks.
+    if (next.auto_analyze && ((!current.auto_analyze) || (next.after_each_meeting && !current.after_each_meeting))) {
+      await this.runnerReady(o['account']);
     }
-    if (next.auto_analyze && !current.auto_analyze) {
-      // Switched on: the open digest may be tried again, even if an earlier attempt could not start.
-      const state = await this.readState();
-      delete state.analysis;
-      await this.writeJson('meeting-digest-state.json', state);
+    const scheduleChanged = JSON.stringify(next.schedule) !== JSON.stringify(current.schedule) || next.enabled !== current.enabled;
+    const analysisOn = next.auto_analyze && !current.auto_analyze;
+    if (!scheduleChanged && !analysisOn) {
+      await this.writeJson('meeting-digest.json', next);
+      return this.view(now);
+    }
+    // The state first, then the settings, and the state put back when the settings cannot be saved: a refused save
+    // changes nothing, so a failed enable stays off and a failed pause keeps the schedule's checkpoint (#484).
+    const before = await this.readStateStrict();
+    const state: DigestState = { ...before };
+    if (scheduleChanged) Object.assign(state, { checked_at: now.toISOString(), disabled: !next.enabled });
+    // Switched on: the open digest may be tried again, even if an earlier attempt could not start.
+    if (analysisOn) delete state.analysis;
+    await this.writeJson('meeting-digest-state.json', state);
+    try {
+      await this.writeJson('meeting-digest.json', next);
+    } catch (err) {
+      await this.writeJson('meeting-digest-state.json', before).catch(() => { /* the save's own error is what is reported */ });
+      throw err;
     }
     return this.view(now);
+  }
+
+  /** Refuses (409) unless the background runner can start an analysis now, signed in as `account` when one is given. */
+  private async runnerReady(account: unknown): Promise<void> {
+    const status = await this.runner.status().catch(() => null);
+    const problem = !status ? 'its status could not be checked.' : !status.installed || status.problems.length ? status.problems[0]?.message ?? 'it is not installed.' : null;
+    if (problem) {
+      throw Object.assign(httpError(409, `The background runner is not ready, so automatic analysis was not turned on: ${problem}`), { details: { code: 'runner_not_ready' } });
+    }
+    const signedIn = status!.account?.email ?? status!.account?.organization ?? null;
+    if (account !== undefined && account !== signedIn) {
+      throw Object.assign(httpError(409, 'The account signed in to the background runner changed since you reviewed it. Check it, then confirm again.'), { details: { code: 'runner_account_changed' } });
+    }
   }
 
   // ---- the queue ----------------------------------------------------------------

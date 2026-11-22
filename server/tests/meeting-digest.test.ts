@@ -10,7 +10,7 @@ import { ContextUpdateService } from '../src/services/contextUpdateService';
 import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, queueLimits, type DigestRunner } from '../src/services/meetingDigestService';
 import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
-import type { AgentRun } from '../src/services/agentRunner';
+import { AgentRunnerService, type AgentRun, type RunnerStatus } from '../src/services/agentRunner';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -398,6 +398,11 @@ test('long meetings: a digest holds at most max_characters of readable text, and
   assert.equal(parseSettings({}).max_characters, 400_000);
 });
 
+/** The runner status of a ready background runner, signed in as a fictional account. */
+const readyRunner = (email = 'someone@example.com'): RunnerStatus => ({
+  id: 'claude', label: 'Claude Code', installed: true, logged_in: true, trusted: true, problems: [], account: { email, organization: null, plan: 'pro' },
+});
+
 /** A runner that starts nothing: each start does what `next` says, and the runs it started are remembered. */
 function fakeRunner() {
   const started: string[] = [];
@@ -415,8 +420,10 @@ function fakeRunner() {
       return run;
     },
     get: async (id: string) => runs.get(id) ?? null,
+    status: async () => status,
   };
-  return { runner, started, runs, set: (mode: 'start' | 'busy' | 'refuse') => { next = mode; } };
+  let status: RunnerStatus = readyRunner();
+  return { runner, started, runs, set: (mode: 'start' | 'busy' | 'refuse') => { next = mode; }, setStatus: (value: RunnerStatus) => { status = value; } };
 }
 
 test('automatic analysis: off by default; when on, each new digest is started once, waits for another run, and a refusal is not retried', async (t) => {
@@ -494,6 +501,207 @@ test('automatic analysis: off by default; when on, each new digest is started on
   fake.set('start');
   assert.ok(quiet(await service.runIfDue(new Date('2026-10-29T18:01:00'))));
   assert.ok(!fake.started.includes(fourth));
+});
+
+test('hands-off meetings: both flags are saved together under the routine lock, and turning off clears both (#484)', async (t) => {
+  const ws = await workspace(t);
+  const file = path.join(ws, '.situation-board', 'routines', 'meeting-digest.json');
+  const saved = async () => JSON.parse(await fsp.readFile(file, 'utf-8')) as Record<string, unknown>;
+  // The routine engine's own digest uses the real runner: its status is a ready fictional one here.
+  mock.method(AgentRunnerService.prototype, 'status', async () => readyRunner());
+  t.after(() => mock.restoreAll());
+  const routine = new RoutineService();
+  const on = await routine.updateMeetingDigest({ after_each_meeting: true, auto_analyze: true });
+  assert.deepEqual([on.settings.after_each_meeting, on.settings.auto_analyze], [true, true]);
+  assert.deepEqual([(await saved())['after_each_meeting'], (await saved())['auto_analyze']], [true, true]);
+  assert.equal(on.settings.enabled, true, 'the rest of the settings stay as they were');
+
+  // One bad value refuses the whole write: never one flag on and the other not.
+  await routine.updateMeetingDigest({ after_each_meeting: false, auto_analyze: 'no' }).then(() => assert.fail('accepted'), (err: Error) => assert.match(err.message, /auto_analyze/));
+  assert.deepEqual([(await saved())['after_each_meeting'], (await saved())['auto_analyze']], [true, true]);
+
+  const off = await routine.updateMeetingDigest({ after_each_meeting: false, auto_analyze: false });
+  assert.deepEqual([off.settings.after_each_meeting, off.settings.auto_analyze], [false, false]);
+  assert.deepEqual([(await saved())['after_each_meeting'], (await saved())['auto_analyze']], [false, false]);
+});
+
+test('analyze_open_digest says whether switching automatic analysis on starts the open digest at the next check (#484)', async (t) => {
+  await workspace(t);
+  const fake = fakeRunner();
+  const service = new MeetingDigestService(fake.runner);
+  assert.equal((await service.view()).analyze_open_digest, 'no', 'no open digest');
+  await queueMeeting(service, 'Sync', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const open = (await service.runNow(new Date('2026-10-26T18:00:00'))).context_update!;
+  assert.equal((await service.view()).analyze_open_digest, 'yes', 'ready and never run: switching on would start it');
+
+  // Paused, it is still the one that starts, once the job is resumed.
+  await service.update({ enabled: false });
+  assert.equal((await service.view()).analyze_open_digest, 'yes');
+  await service.update({ enabled: true });
+
+  // Refused while automatic analysis is on: not retried until it is switched on again, and the view says so.
+  await service.update({ auto_analyze: true });
+  fake.set('refuse');
+  await service.runIfDue(new Date('2026-10-26T18:01:00'));
+  assert.equal((await service.readState()).analysis?.status, 'not_started');
+  assert.equal((await service.view()).analyze_open_digest, 'no', 'on and refused: nothing starts by itself');
+  await service.update({ auto_analyze: false });
+  assert.equal((await service.view()).analyze_open_digest, 'yes', 'off: switching on clears the refusal');
+
+  // Once it had a run, never again.
+  fake.set('start');
+  await service.update({ auto_analyze: true });
+  await service.runIfDue(new Date('2026-10-26T18:02:00'));
+  assert.deepEqual(fake.started, [open]);
+  assert.equal((await service.view()).analyze_open_digest, 'no');
+});
+
+test('analyze_open_digest is "maybe" while an interrupted digest waits to be finished, which the next check may start (#484)', async (t) => {
+  const ws = await workspace(t);
+  const fake = fakeRunner();
+  const service = new MeetingDigestService(fake.runner);
+  const a = await queueMeeting(service, 'Sync', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const open = (await service.runNow(new Date('2026-10-26T18:00:00'))).context_update!;
+  // Interrupted after publishing, before its batch marker was cleared: the scheduler recovers it first.
+  await fsp.writeFile(batchFile(ws), batch([[a, [[`${a}-a.md`, 'A']]]], open, true));
+  const view = await service.view();
+  assert.deepEqual([view.open_digest, view.analyze_open_digest], [open, 'maybe']);
+  await service.update({ after_each_meeting: true, auto_analyze: true });
+  await service.runIfDue(new Date('2026-10-26T18:01:00'));
+  assert.deepEqual(fake.started, [open], 'the same check recovers it and starts it: "maybe" was right to warn');
+  // A damaged batch stops every run: nothing starts.
+  await fsp.writeFile(batchFile(ws), '{ damaged');
+  assert.equal((await service.view()).analyze_open_digest, 'no');
+});
+
+test('a settings write names its workspace: refused in another one, accepted in its own (#484)', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService(fakeRunner().runner);
+  assert.equal((await service.view()).workspace, ws);
+  const other = path.join(path.dirname(ws), 'another-workspace');
+  await assert.rejects(service.update({ workspace: other, after_each_meeting: true, auto_analyze: true }), (err: Error & { statusCode?: number; details?: { code?: string } }) =>
+    err.statusCode === 409 && err.details?.code === 'other_workspace');
+  await assert.rejects(service.update({ workspace: 42, auto_analyze: true }), /another workspace/);
+  assert.deepEqual([(await service.readSettings()).after_each_meeting, (await service.readSettings()).auto_analyze], [false, false], 'nothing written');
+  const saved = await service.update({ workspace: ws, after_each_meeting: true, auto_analyze: true });
+  assert.deepEqual([saved.settings.after_each_meeting, saved.settings.auto_analyze], [true, true]);
+});
+
+test('a failed enable leaves both flags off: the state is written before the settings (#484)', async (t) => {
+  const ws = await workspace(t);
+  const fake = fakeRunner();
+  const service = new MeetingDigestService(fake.runner);
+  await queueMeeting(service, 'Sync', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const state = path.join(ws, '.situation-board', 'routines', 'meeting-digest-state.json');
+  await fsp.mkdir(state); // a write to it fails
+  await assert.rejects(service.update({ after_each_meeting: true, auto_analyze: true }));
+  const settings = await service.readSettings();
+  assert.deepEqual([settings.after_each_meeting, settings.auto_analyze], [false, false], 'refused means off');
+  await fsp.rm(state, { recursive: true });
+  await service.runIfDue(new Date('2026-10-26T18:01:00'));
+  assert.deepEqual(fake.started, [], 'nothing armed: no analysis starts without another confirmation');
+});
+
+test('an editor that sends only what it changed keeps a turn-off made in another tab (#484)', async (t) => {
+  await workspace(t);
+  const service = new MeetingDigestService(fakeRunner().runner);
+  await service.update({ after_each_meeting: true, auto_analyze: true });
+  // Tab 2 turns both off; tab 1's editor, opened before, then saves a new meeting limit only.
+  await service.update({ after_each_meeting: false, auto_analyze: false });
+  const saved = await service.update({ max_meetings: 3 });
+  assert.deepEqual([saved.settings.max_meetings, saved.settings.after_each_meeting, saved.settings.auto_analyze], [3, false, false]);
+});
+
+test('switching analysis on checks the runner itself: refused when not ready or the confirmed account changed; off never checks (#484)', async (t) => {
+  await workspace(t);
+  const fake = fakeRunner();
+  const service = new MeetingDigestService(fake.runner);
+  const flags = async () => { const s = await service.readSettings(); return [s.after_each_meeting, s.auto_analyze]; };
+  const refused = (code: string) => (err: Error & { statusCode?: number; details?: { code?: string } }) => err.statusCode === 409 && err.details?.code === code;
+
+  // Ready when the dialog checked, gone before Turn on: refused, nothing written.
+  fake.setStatus({ ...readyRunner(), installed: false, problems: [{ code: 'not_installed', message: 'Not installed.' }], account: null });
+  await assert.rejects(service.update({ after_each_meeting: true, auto_analyze: true, account: 'someone@example.com' }), refused('runner_not_ready'));
+  await assert.rejects(service.update({ auto_analyze: true }), refused('runner_not_ready'), 'the editor checkbox too');
+  assert.deepEqual(await flags(), [false, false]);
+  fake.setStatus({ ...readyRunner(), problems: [{ code: 'not_trusted', message: 'Trust the folder.' }] });
+  await assert.rejects(service.update({ after_each_meeting: true, auto_analyze: true }), /not ready.*Trust the folder\./);
+
+  // Another account signed in since the dialog showed one: confirm again.
+  fake.setStatus(readyRunner('other@example.com'));
+  await assert.rejects(service.update({ after_each_meeting: true, auto_analyze: true, account: 'someone@example.com' }), refused('runner_account_changed'));
+  assert.deepEqual(await flags(), [false, false]);
+  await service.update({ after_each_meeting: true, auto_analyze: true, account: 'other@example.com' });
+  assert.deepEqual(await flags(), [true, true]);
+
+  // Turning off, and saving other settings, never checks the runner.
+  fake.setStatus({ ...readyRunner(), installed: false, problems: [{ code: 'not_installed', message: 'Not installed.' }], account: null });
+  await service.update({ max_meetings: 4 });
+  await service.update({ after_each_meeting: false, auto_analyze: false });
+  assert.deepEqual(await flags(), [false, false]);
+  // Right after each meeting alone needs no runner either.
+  await service.update({ after_each_meeting: true });
+  assert.deepEqual(await flags(), [true, false]);
+});
+
+test('settings that cannot be read are never replaced: an enable and an editor save are refused, the file stays (#484)', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService(fakeRunner().runner);
+  const file = path.join(ws, '.situation-board', 'routines', 'meeting-digest.json');
+  await fsp.writeFile(file, '{ "enabled": false, damaged');
+  await assert.rejects(service.update({ after_each_meeting: true, auto_analyze: true }), /cannot be read/);
+  await assert.rejects(service.update({ max_meetings: 4 }), /cannot be read/, 'the changed-fields editor too');
+  assert.equal(await fsp.readFile(file, 'utf-8'), '{ "enabled": false, damaged', 'not replaced by defaults');
+  await fsp.rm(file);
+  assert.equal((await service.update({ max_meetings: 4 })).settings.max_meetings, 4, 'a missing file reads as the defaults');
+});
+
+test('a pause that cannot be saved keeps the schedule: Friday 18:00 still makes its digest at 18:01 (#484)', async (t) => {
+  await workspace(t);
+  const service = new MeetingDigestService(fakeRunner().runner);
+  // 2026-10-30 is a Friday; the default schedule is working days at 18:00.
+  await queueMeeting(service, 'Sync', '2026-10-30', [['a.md', Buffer.from('A')]]);
+  assert.equal(await service.runIfDue(new Date('2026-10-30T17:59:00')), null, 'first check: counting starts');
+  const checkpoint = (await service.readState()).checked_at;
+  // The settings write fails (the state write before it does not).
+  const writes = service as unknown as { writeJson: (name: string, value: unknown) => Promise<void> };
+  const original = writes.writeJson.bind(service);
+  writes.writeJson = async (name, value) => { if (name === 'meeting-digest.json') throw new Error('EPERM: the settings file cannot be replaced'); return original(name, value); };
+  await assert.rejects(service.update({ enabled: false }, new Date('2026-10-30T18:00:00')), /EPERM/);
+  writes.writeJson = original;
+  const state = await service.readState();
+  assert.equal(state.checked_at, checkpoint, 'the checkpoint is put back');
+  assert.ok(!state.disabled, 'no pause recorded');
+  assert.equal((await service.readSettings()).enabled, true);
+  const made = await service.runIfDue(new Date('2026-10-30T18:01:00'));
+  assert.equal(made?.status, 'ok', made?.message);
+  assert.ok(made?.context_update, 'the 18:00 digest is made');
+});
+
+test('a state file that cannot be read refuses the save before anything is written: its checkpoint is kept (#484)', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService(fakeRunner().runner);
+  await queueMeeting(service, 'Sync', '2026-10-30', [['a.md', Buffer.from('A')]]);
+  await service.runIfDue(new Date('2026-10-30T17:59:00'));
+  const file = path.join(ws, '.situation-board', 'routines', 'meeting-digest-state.json');
+  const saved = await fsp.readFile(file, 'utf-8');
+  assert.match(saved, /checked_at/);
+  // Write-only (where file modes apply): readable by nobody, so the save must not use it as its rollback snapshot.
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    await fsp.chmod(file, 0o200);
+    await assert.rejects(service.update({ enabled: false }, new Date('2026-10-30T18:00:00')), /state cannot be read/);
+    await fsp.chmod(file, 0o600);
+    assert.equal(await fsp.readFile(file, 'utf-8'), saved, 'not replaced');
+    assert.equal((await service.readSettings()).enabled, true);
+  }
+  // Damaged: the same, on every platform.
+  await fsp.writeFile(file, '{ damaged');
+  await assert.rejects(service.update({ after_each_meeting: true, auto_analyze: true }), /state cannot be read/);
+  assert.equal(await fsp.readFile(file, 'utf-8'), '{ damaged');
+  assert.deepEqual([(await service.readSettings()).after_each_meeting, (await service.readSettings()).auto_analyze], [false, false]);
+  // With the original state back, the 18:01 check makes the 18:00 digest.
+  await fsp.writeFile(file, saved);
+  assert.ok((await service.runIfDue(new Date('2026-10-30T18:01:00')))?.context_update);
 });
 
 test('right after a meeting: a digest within a check of queueing, meetings wait while one is open, and a failure waits for a change', async (t) => {

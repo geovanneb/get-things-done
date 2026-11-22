@@ -12,6 +12,8 @@ import Toggle from '@/components/common/Toggle';
 import { dateInputStyle, sectionLabelStyle, fieldLabelStyle } from '@/components/task-form/styles';
 import { apiGet, apiPost, apiPut } from '@/utils/api';
 import { formatRelativeTime } from '@/utils/format';
+import { AutoPrepareSwitch } from './AutoPrepare';
+import { editedSettings } from '@/utils/autoPrepare';
 import type { MeetingDigest, MeetingDigestSettings, RoutineRun, RoutineWeekday, RunnerStatus } from '@/types';
 
 const WEEKDAYS = (): { id: RoutineWeekday; short: string }[] => ([
@@ -99,6 +101,10 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
         />
       </div>
 
+      <div style={{ marginTop: 12 }}>
+        <AutoPrepareSwitch job={job} onChanged={onChanged} />
+      </div>
+
       <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <Button size="sm" variant="secondary" loading={busy === 'run'} disabled={busy !== null || queued.length === 0}
           title={queued.length === 0 ? t('meetingDigest.theQueueIsEmpty') : t('meetingDigest.makeADigestFromThe')}
@@ -123,12 +129,17 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [runner, setRunner] = React.useState<RunnerStatus | null>(null);
+  // The settings as they were when the editor opened: only what changed since is saved (#484).
+  const opened = React.useRef<MeetingDigestSettings | null>(null);
+  const openedIn = React.useRef<string | undefined>(undefined);
 
   // Filled once when the editor opens: the job is fetched again on every queue or update change, and a
   // background refresh must not undo what is being edited.
   const loaded = job !== null;
   const settings = React.useRef(job?.settings);
   settings.current = job?.settings;
+  const workspace = React.useRef(job?.workspace);
+  workspace.current = job?.workspace;
   React.useEffect(() => {
     if (!isOpen) return;
     let live = true;
@@ -139,6 +150,8 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
   React.useEffect(() => {
     if (!isOpen) { setDraft(null); return; }
     if (!loaded || !settings.current) return;
+    opened.current = structuredClone(settings.current);
+    openedIn.current = workspace.current;
     setDraft(structuredClone(settings.current));
     setMax(String(settings.current.max_meetings));
     setError(null);
@@ -157,7 +170,10 @@ export function MeetingDigestEditor({ isOpen, job, onClose, onSaved }: { isOpen:
     setSaving(true);
     setError(null);
     try {
-      await apiPut('/api/routines/meeting-digest', { ...draft, max_meetings: /^\d+$/.test(max.trim()) ? Number(max) : max });
+      // Only what was changed here: a whole draft would undo what another tab changed meanwhile, such as turning
+      // automation off.
+      const edited = editedSettings<Record<string, unknown>>((opened.current ?? {}) as unknown as Record<string, unknown>, { ...draft, max_meetings: /^\d+$/.test(max.trim()) ? Number(max) : max });
+      if (edited) await apiPut('/api/routines/meeting-digest', { ...edited, workspace: openedIn.current }, openedIn.current);
       onSaved();
       onClose();
     } catch (err) {
