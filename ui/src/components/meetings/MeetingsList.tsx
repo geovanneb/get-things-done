@@ -47,8 +47,9 @@ function Status({ status, label }: { status: RowStatus; label: string }) {
     <div aria-label={`${label}: ${status.progress?.spoken ?? `${status.label}${status.detail ? `, ${status.detail}` : ''}`}`} style={{ flex: '0 0 170px', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
       {status.tone ? <Badge size="sm" variant={BADGE[status.tone]}>{status.label}</Badge> : <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-muted)' }}>{status.label}</span>}
       {status.progress && <TranscriptionBar percent={status.progress.percent} spoken={status.progress.spoken} width={120} />}
-      {status.update && <Link to={`/context/updates/${status.update}`} className="gtd-link mono" style={{ fontSize: 'var(--text-xs)' }}>{status.update}</Link>}
+      {status.update && <Link to={status.href ?? `/context/updates/${status.update}`} className="gtd-link mono" style={{ fontSize: 'var(--text-xs)' }}>{status.update}</Link>}
       {status.detail && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{status.detail}</span>}
+      {status.link && <Link to={status.link.href} className="gtd-link" style={{ fontSize: 'var(--text-xs)' }}>{status.link.label}</Link>}
     </div>
   );
 }

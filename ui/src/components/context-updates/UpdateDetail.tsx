@@ -8,7 +8,7 @@ import type { AssistantRequest } from '@/utils/assistant';
 import type { AiToolId } from '@/utils/setup';
 import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useConfirm } from '@/components/common/ConfirmDialog';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import ShowInFolderButton from '@/components/common/ShowInFolderButton';
@@ -24,9 +24,11 @@ import { formatRelativeDate } from '@/utils/format';
 import { meetingActionDraft } from '@/utils/meetingAction';
 import { doubtLine, doubtsAbout } from '@/utils/recordDoubts';
 import { mergeServerChoices, PendingChoices, shownChoice } from '@/utils/reviewChoices';
+import { approveNeedsWholeView, focusIndex, focusScope, meetingReviewHref, openAcrossUpdate, proposalsByMeeting } from '@/utils/meetingFocus';
 import type { ContextUpdate, ContextUpdateProposal, FieldChange, MeetingPerson, MeetingRecord, MeetingSpeaker, RecordChange, RecordDoubt, Stakeholder, TranscriptChangeView, TranscriptReview } from '@/types';
 import AnalysisRun, { type AnalysisRunHandle, type NextAction } from './AnalysisRun';
 import DiffView from './DiffView';
+import { MeetingScope } from './MeetingFocus';
 import { DropZone, uploadMaterial } from './ImportUpdateModal';
 import { CommandBox, HelpBox, STATUS_META, StatusPill, StepIndicator, TypeBadge, copyText, formatBytes, sectionLabel } from './shared';
 
@@ -500,15 +502,20 @@ function KaizenCard({ kaizen }: { kaizen: NonNullable<ContextUpdate['kaizen']> }
   );
 }
 
-function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
+function ProposalCard({ proposal, reviewing, decision, onToggle, onNote, diffOpen, from, linkState }: {
   proposal: ContextUpdateProposal;
   reviewing: boolean;
   decision: Decisions[string];
   onToggle: (accepted: boolean) => void;
   onNote: (note: string) => void;
+  /** Whether the diff starts open; by default it does, except for a removal. */
+  diffOpen?: boolean;
+  /** The meetings its evidence names; one whose id is final is a link that opens the review at it (with the page's `linkState`). */
+  from?: { id: string; title: string; href: string | null }[];
+  linkState?: unknown;
 }) {
   const { t } = useLanguage();
-  const [showDiff, setShowDiff] = useState(proposal.action !== 'remove');
+  const [showDiff, setShowDiff] = useState(diffOpen ?? proposal.action !== 'remove');
   const [note, setNote] = useState(decision.reviewer_note);
   useEffect(() => setNote(decision.reviewer_note), [decision.reviewer_note]);
 
@@ -562,6 +569,13 @@ function ProposalCard({ proposal, reviewing, decision, onToggle, onNote }: {
           {proposal.evidence && (
             <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
               <span style={{ fontWeight: 600 }}>{t('updateDetail.evidence')} </span>{proposal.evidence}
+            </div>
+          )}
+          {from && from.length > 0 && (
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+              {rich(t, 'meetingFocus.cites', { meetings: <>{from.map((m, i) => (
+                <span key={m.id}>{i > 0 && ', '}{m.href ? <Link to={m.href} state={linkState} className="gtd-link">{m.title}</Link> : m.title}</span>
+              ))}</> })}
             </div>
           )}
           {proposal.outcome_note && <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}><span style={{ fontWeight: 600 }}>{removal ? t('updateDetail.dashboard') : t('updateDetail.agent')}</span>{proposal.outcome_note}</div>}
@@ -662,6 +676,17 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   const api = usePageApi();
   const { data, loading, error, refetch } = useApi<ContextUpdate>(`/api/context-updates/${id}`, [version], api.workspace);
   const dispatch = useAppDispatch();
+  // `?meeting=<id>` opens the review at one meeting: navigation only, nothing is chosen or saved by opening it.
+  const [params] = useSearchParams();
+  const location = useLocation();
+  const askedMeeting = params.get('meeting');
+  const focusBox = useRef<HTMLDivElement | null>(null);
+  const scrolledTo = useRef<string | null>(null);
+  // Approve pressed at one meeting while approval would decide records or proposals folded away: the whole review is
+  // shown, the first of them comes into view, and the bar says why. The next Approve works as on the whole page.
+  const [revealed, setRevealed] = useState<ReturnType<typeof approveNeedsWholeView>>(null);
+  const revealScrolled = useRef(false);
+  const lastAsked = useRef<string | null>(askedMeeting);
   const [decisions, setDecisions] = useState<Decisions>({});
   const [confirmations, setConfirmations] = useState<Confirmations>({});
   // Choices still being saved. Finishing the review waits for them, so it always uses the last click.
@@ -717,6 +742,33 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
     return () => watch.disconnect();
   }, [nextBox]);
 
+  // Once per meeting asked for: a refresh of the update never scrolls the page back while the user reads on.
+  useEffect(() => {
+    const key = data && askedMeeting ? `${data.id}\0${askedMeeting}` : null;
+    if (!askedMeeting) scrolledTo.current = null;
+    if (!key || scrolledTo.current === key || !focusBox.current) return;
+    scrolledTo.current = key;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    focusBox.current.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  });
+
+  // Once the whole review shows after such an Approve: bring the first record without a choice (or the proposals) into
+  // view. Opening one meeting again drops the note.
+  useEffect(() => {
+    // Only a meeting opened after the note was given drops it (not the one Approve was pressed at, still in the URL for a moment).
+    const openedAnother = askedMeeting !== null && askedMeeting !== lastAsked.current;
+    lastAsked.current = askedMeeting;
+    if (!revealed) { revealScrolled.current = false; return; }
+    if (openedAnother) { setRevealed(null); return; }
+    if (askedMeeting) return;
+    if (revealScrolled.current) return;
+    const target = document.getElementById(revealed.first === 'proposals' ? 'review-proposals' : `meeting-record-${revealed.first.record}`);
+    if (!target) return;
+    revealScrolled.current = true;
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  }, [askedMeeting, revealed, data]);
+
   /** A start from the sticky bar failed: the box, with its message, comes into view. */
   const showNextBox = () => {
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
@@ -769,6 +821,49 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
   // updates need the apply command.
   const noFileToWrite = canApprove && u.proposals.every((p) => decisions[p.id]?.decision !== 'accepted' || p.action === 'remove');
   const isCorrection = u.kind === 'meeting-correction';
+  // The review at one meeting (`?meeting=`). An id the update does not hold is ignored: the page shows everything.
+  const held = u.held_meetings ?? [];
+  const analyzed = ['in_review', 'approved', 'applying', 'done'].includes(u.status);
+  const focusAt = analyzed && !isCorrection ? focusIndex(held, askedMeeting) : null;
+  const focused = focusAt !== null ? held[focusAt]! : null;
+  const focusRecord = focused && focused.record_index !== null ? records[focused.record_index] ?? null : null;
+  const links = proposalsByMeeting(u.proposals, held, records);
+  const focusProposalIds = new Set(focused ? links.byMeeting.get(focused.id) ?? [] : []);
+  const heldById = new Map(held.map((m) => [m.id, m]));
+  // A meeting whose id is not final (an imported record in review) is named, not linked: its link could not focus it.
+  const fromOf = (proposalId: string) => (held.length > 1 ? (links.cited.get(proposalId) ?? []).map((m) => ({
+    id: m, title: heldById.get(m)?.title ?? m, href: heldById.get(m)?.linkable ? meetingReviewHref(u.id, m) : null,
+  })) : undefined);
+  const goToMeeting = (meeting: string) => navigate(meetingReviewHref(u.id, meeting), { state: location.state });
+  const showAllMeetings = () => navigate(`/context/updates/${encodeURIComponent(u.id)}`, { state: location.state });
+  const proposalCard = (p: ContextUpdateProposal, diffOpen?: boolean) => (
+    <ProposalCard key={p.id} proposal={p} reviewing={reviewing}
+      decision={decisions[p.id] ?? { decision: p.decision, reviewer_note: p.reviewer_note }}
+      onToggle={(on) => void saveDecision(p.id, { decision: on ? 'accepted' : null })}
+      onNote={(note) => void saveDecision(p.id, { reviewer_note: note })}
+      {...(diffOpen !== undefined ? { diffOpen } : {})} from={fromOf(p.id)} linkState={location.state} />
+  );
+  const recordCard = (r: MeetingRecord, i: number) => (
+    <div key={`${i}-${r.id}`} id={`meeting-record-${i}`} style={{ scrollMarginTop: 16 }}>
+      <MeetingRecordCard record={r} reviewing={reviewing} confirmation={recordChoice(r)}
+        onChoose={(value) => void chooseRecord(r, value)}
+        onSpeaker={(speaker, person) => void setSpeaker(r, speaker, person)}
+        onCreateTask={r.confirmation === 'confirmed' && u.status === 'done' ? (item) => void createTask(r, item) : undefined} />
+    </div>
+  );
+  const approve = () => {
+    // At one meeting, what approval would decide out of sight is shown first; approval itself is unchanged.
+    const hidden = focused ? approveNeedsWholeView(focused.record_index !== null && focusRecord ? focused.record_index : null, records, recordChoice, u.proposals, focusProposalIds) : null;
+    if (hidden) {
+      revealScrolled.current = false;
+      setRevealed(hidden);
+      showAllMeetings();
+      return;
+    }
+    setRevealed(null);
+    void run('approve', () => api.post(`/api/context-updates/${u.id}/approve`),
+      isCorrection ? 'Corrected. The meeting shows the new version of its record.' : !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.');
+  };
   const approveHint = isCorrection ? t('updateDetail.approvingMakesTheConfirmedRecord')
     : !noFileToWrite ? t('updateDetail.afterApprovingApplyYourAccepted')
     : acceptedCount > 0 ? t('updateDetail.approvingMovesTheSelectedFiles')
@@ -1117,6 +1212,14 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
               </HelpBox>
             )}
 
+            {focused && focusAt !== null && (
+              <div ref={focusBox} style={{ position: 'sticky', top: 0, zIndex: 2, scrollMarginTop: 8 }}>
+                <MeetingScope digest={u.origin === 'meetings'} focused={focused} scope={focusScope(held, focusAt)}
+                  open={openAcrossUpdate(records, recordChoice, u.proposals, (p) => decisions[p]?.decision === 'accepted')}
+                  onGo={(m) => goToMeeting(m.id)} onShowAll={showAllMeetings} />
+              </div>
+            )}
+
             {records.length > 0 && (
               <section aria-label={t('updateDetail.meetingRecords')} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <h4 style={{ ...sectionLabel, margin: 0 }}>{rich(t, 'updateDetail.meetings', { length: records.length })}</h4>
@@ -1143,12 +1246,36 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
                     {t('updateDetail.whatEachMeetingWasAs')}
                   </HelpBox>
                 )}
-                {records.map((r, i) => (
-                  <MeetingRecordCard key={`${i}-${r.id}`} record={r} reviewing={reviewing} confirmation={recordChoice(r)}
-                    onChoose={(value) => void chooseRecord(r, value)}
-                    onSpeaker={(speaker, person) => void setSpeaker(r, speaker, person)}
-                    onCreateTask={r.confirmation === 'confirmed' && u.status === 'done' ? (item) => void createTask(r, item) : undefined} />
-                ))}
+                {!focused && records.map(recordCard)}
+                {focused && !focusRecord && (
+                  <>
+                    <HelpBox>{t('meetingFocus.noRecord')}</HelpBox>
+                    {records.map(recordCard)}
+                  </>
+                )}
+                {focused && focusRecord && (
+                  <>
+                    <div aria-current="true" style={{ borderRadius: 'var(--radius-lg)', boxShadow: '0 0 0 2px var(--color-accent)' }}>{recordCard(focusRecord, focused.record_index!)}</div>
+                    {records.length > 1 && (
+                      <details style={card}>
+                        <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'meetingFocus.otherMeetings', { length: records.length - 1 })}</summary>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+                          {records.map((r, i) => (r === focusRecord ? null : recordCard(r, i)))}
+                        </div>
+                      </details>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
+            {focused && !isCorrection && u.proposals.length > 0 && (
+              <section aria-label={t('meetingFocus.fromThisMeeting', { length: focusProposalIds.size })} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <h4 style={{ ...sectionLabel, margin: 0 }}>{rich(t, 'meetingFocus.fromThisMeeting', { length: focusProposalIds.size })}</h4>
+                <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>
+                  {focusProposalIds.size > 0 ? t('meetingFocus.citesHow') : t('meetingFocus.noneFromThisMeeting')}
+                </p>
+                {u.proposals.filter((p) => focusProposalIds.has(p.id)).map((p) => proposalCard(p, false))}
               </section>
             )}
 
@@ -1167,12 +1294,16 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
                     {rich(t, 'updateDetail.eachProposalShowsTheFile', { part: <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>{t('updateDetail.green')}</span>, part2: <span style={{ color: 'var(--color-critical)', fontWeight: 600 }}>{t('updateDetail.red')}</span> })}
                   </HelpBox>
                 )}
-                {u.proposals.map((p) => (
-                  <ProposalCard key={p.id} proposal={p} reviewing={reviewing}
-                    decision={decisions[p.id] ?? { decision: p.decision, reviewer_note: p.reviewer_note }}
-                    onToggle={(on) => void saveDecision(p.id, { decision: on ? 'accepted' : null })}
-                    onNote={(note) => void saveDecision(p.id, { reviewer_note: note })} />
-                ))}
+                {!focused && <div id="review-proposals" style={{ display: 'flex', flexDirection: 'column', gap: 12, scrollMarginTop: 16 }}>{u.proposals.map((p) => proposalCard(p))}</div>}
+                {/* At one meeting, every other proposal is one click away: each card is on the page once, so a tick counts once. */}
+                {focused && u.proposals.length > focusProposalIds.size && (
+                  <details style={card}>
+                    <summary style={{ cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'meetingFocus.otherProposals', { length: u.proposals.length - focusProposalIds.size })}</summary>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+                      {u.proposals.filter((p) => !focusProposalIds.has(p.id)).map((p) => proposalCard(p))}
+                    </div>
+                  </details>
+                )}
               </>
             )}
 
@@ -1202,6 +1333,11 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
               <Button variant="ghost" size="sm" onClick={() => void selectAll(false)}>{t('updateDetail.clear')}</Button>
             </>
           )}
+          {revealed && !focused && (
+            <span role="status" style={{ flexBasis: '100%', fontSize: 'var(--text-sm)', color: 'var(--color-warning)', fontWeight: 600 }}>
+              {revealed.records > 0 ? t('meetingFocus.revealRecords', { count: revealed.records }) : t('meetingFocus.revealProposals')}
+            </span>
+          )}
           {records.length > 0 && <span aria-live="polite" style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>{rich(t, 'updateDetail.ofMeetingsConfirmed', { confirmedCount: new Intl.NumberFormat(locale).format(confirmedCount), count: records.length })}</span>}
           {canApprove && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)' }}>{approveHint}</span>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1212,8 +1348,7 @@ function UpdateDetailPage({ id, onBack }: { id: string; onBack: () => void }) {
             {(u.proposals.length > 0 || records.length > 0) && (
               <Button variant="primary" disabled={!canApprove || saving > 0} loading={busy === 'approve'}
                 title={saving > 0 ? t('updateDetail.savingYourChoices') : correctionBlocked ? (u.follow_up_problem ? t('updateDetail.thisFollowUpNoLonger2') : t('updateDetail.thisCorrectionCannotBeApproved2')) : !canApprove ? t('updateDetail.tickAtLeastOneProposal') : noFileToWrite ? t('updateDetail.finishThisUpdateNowNothing') : t('updateDetail.lockYourSelectionAndGet')}
-                onClick={() => run('approve', () => api.post(`/api/context-updates/${u.id}/approve`),
-                  isCorrection ? 'Corrected. The meeting shows the new version of its record.' : !noFileToWrite ? 'Approved. Run the apply command to write the changes.' : acceptedCount > 0 ? 'Approved. The files are in the trash.' : 'Approved. The meeting records are kept.')}>
+                onClick={approve}>
                 {acceptedCount > 0 ? t('updateDetail.approveSelected', { acceptedCount }) : isCorrection ? t('updateDetail.approveCorrection') : t('updateDetail.approve')}
               </Button>
             )}

@@ -555,6 +555,23 @@ your selection is locked. Changed your mind before applying? **Change my selecti
 takes you back. If nothing is worth taking, **Close without changes** finishes the
 update without touching any file.
 
+**Reviewing one meeting of a digest.** A digest can hold many meetings. To review one, open it
+from the Meetings list: **Review this meeting** in its review column (or the update's id in its
+processing column) opens the update at that meeting. The page shows a scope line, such as
+"Meeting 2 of 6 in this digest", with **Previous meeting**, **Next meeting** and **Show all
+meetings**, and how many meeting records are still to confirm or reject and how many proposals are
+selected, across all meetings. That meeting's record comes first, with the proposals from it
+below it (their diffs one click away); the other records and proposals are one click away too.
+A proposal is "from" a meeting when its evidence names the meeting, one of its files or its
+record (the whole file name), so a proposal drawing on two meetings is listed under each, and on a
+digest every proposal names the meetings it is from. This is only a way to look at the review:
+ticking, confirming and approving work exactly as on the whole page, and each choice counts once.
+Approving decides every meeting, so **Approve** pressed at one meeting while other records still
+have no choice, or other proposals are folded away, does not approve yet: the whole review opens at
+the first of them and says why, and the next **Approve** works as usual. A link to a meeting the
+update does not hold opens the whole review, and so does a link to a meeting of an imported update
+still in review, whose record ids a new analysis may renumber.
+
 If a file was edited after the analysis, the proposal says so. The diff is then shown
 against the current version, and when applying the agent merges instead of
 overwriting the newer edits.

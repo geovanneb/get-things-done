@@ -423,3 +423,64 @@ test('System cleanup moves old meeting text to the trash, skips kept meetings, t
   const raw = parseMarkdown(await fsp.readFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md'), 'utf-8')).data as Record<string, unknown>;
   assert.ok(Array.isArray(raw['meeting_records']) && (raw['meeting_records'] as unknown[]).length === 1, 'the record stays');
 });
+
+test('an update\'s detail lists its meetings in order with the place of each certain record, for opening the review at one', async (t) => {
+  const ws = await workspace(t);
+  // The second meeting's record is listed first; the first meeting is found by its record's source.
+  await digest(ws, 'CU-2026-0001', [record('M-01', { meeting: 'MQ-2026-0002' }), record('M-02', { source: 'MQ-2026-0001-a.transcript.md' })]);
+  const before = await fsp.readFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md'), 'utf8');
+  const detail = await updates.get('CU-2026-0001');
+  assert.deepEqual(detail.held_meetings.map((m) => [m.id, m.title, m.record_index]), [['MQ-2026-0001', 'Weekly sync', 1], ['MQ-2026-0002', 'Pilot review', 0]]);
+  assert.deepEqual(detail.held_meetings[1]!.files, ['MQ-2026-0002-b.vtt', 'MQ-2026-0002-board.png', 'MQ-2026-0002-b.transcript.md']);
+  assert.equal(await fsp.readFile(path.join(ws, 'context-updates', 'CU-2026-0001', 'update.md'), 'utf8'), before, 'reading it writes nothing');
+
+  // No certain record: the meetings are still listed, without one.
+  await digest(ws, 'CU-2026-0002', [record('M-01'), record('M-02')]);
+  assert.deepEqual((await updates.get('CU-2026-0002')).held_meetings.map((m) => m.record_index), [null, null]);
+  // An update about something else holds no meetings.
+  await update(ws, 'CU-2026-0003', { origin: 'system-cleanup', kind: 'memory-review', meeting_records: [record('M-01')] });
+  assert.deepEqual((await updates.get('CU-2026-0003')).held_meetings, []);
+});
+
+test('opening a finished update at one meeting does exactly what opening the update does, keeping what the update keeps', async (t) => {
+  const ws = await workspace(t);
+  const express = (await import('express')).default;
+  const { default: router } = await import('../src/routes/contextUpdates');
+  const { errorHandler } = await import('../src/middleware/errorHandler');
+  const app = express();
+  app.use(express.json());
+  app.use('/api/context-updates', router);
+  app.use(errorHandler);
+  const listener = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => listener.once('listening', resolve));
+  t.after(() => listener.close());
+  const base = `http://127.0.0.1:${(listener.address() as import('node:net').AddressInfo).port}/api/context-updates`;
+
+  // Just set done by the apply command, which left materials/ for the dashboard (as gtd-context-apply step 3 allows).
+  // Two copies with meeting text kept, two without: one opened at a meeting, its twin opened as a whole.
+  const done = { status: 'done', approved_at: '2026-10-28T09:00:00.000Z', applied_at: '2026-10-28T09:05:00.000Z' };
+  const recs = [record('M-01', { meeting: 'MQ-2026-0001' }), record('M-02', { meeting: 'MQ-2026-0002' })];
+  await digest(ws, 'CU-2026-0001', recs, { ...done, keep_meeting_text: true });
+  await digest(ws, 'CU-2026-0002', recs, { ...done, keep_meeting_text: true });
+  await digest(ws, 'CU-2026-0003', recs, done);
+  await digest(ws, 'CU-2026-0004', recs, done);
+  const tree = async (id: string) => {
+    const dir = path.join(ws, 'context-updates', id);
+    const files = (await fsp.readdir(dir, { recursive: true })).map(String).sort();
+    const front = parseMarkdown(await fsp.readFile(path.join(dir, 'update.md'), 'utf8')).data as Record<string, unknown>;
+    return { files, front: { ...front, id: undefined, title: undefined, updated_at: undefined, meetings_linked_at: front['meetings_linked_at'] ? 'set' : undefined } };
+  };
+  const strip = (body: Record<string, unknown>) => ({ ...body, id: undefined, title: undefined, updated_at: undefined, meetings_linked_at: undefined, material_files: undefined, materials_folder: undefined });
+  for (const [focused, whole] of [['CU-2026-0001', 'CU-2026-0002'], ['CU-2026-0003', 'CU-2026-0004']] as const) {
+    const a = await fetch(`${base}/${focused}?meeting=MQ-2026-0001`);
+    const b = await fetch(`${base}/${whole}`);
+    assert.equal(a.status, 200);
+    assert.deepEqual(strip(await a.json() as Record<string, unknown>), strip(await b.json() as Record<string, unknown>), 'the same answer');
+    assert.deepEqual(await tree(focused), await tree(whole), 'the same files left, the same update.md');
+  }
+  // What the finished update keeps: with meeting text kept, the transcripts and their copies stay and the photo goes;
+  // without it, materials/ goes, as the apply command itself would have deleted it.
+  assert.deepEqual((await tree('CU-2026-0001')).files.filter((f) => f.startsWith('materials/')),
+    ['materials/MQ-2026-0001-a.transcript.md', 'materials/MQ-2026-0001-a.vtt', 'materials/MQ-2026-0002-b.transcript.md', 'materials/MQ-2026-0002-b.vtt']);
+  assert.deepEqual((await tree('CU-2026-0003')).files.filter((f) => f.startsWith('materials')), []);
+});

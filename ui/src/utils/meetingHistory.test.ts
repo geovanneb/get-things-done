@@ -27,8 +27,9 @@ assert.deepEqual(queueProcessing(queued('q', '2026-10-31'), facts), { label: 'Wa
 
 // Review says how far the user got; "no context changes" is never "in context".
 assert.equal(historyReview(held('a', '2026-10-27', {}, { status: 'analyzing' })).label, 'Waiting for analysis');
-assert.deepEqual(historyReview(held('a', '2026-10-27', { record: { id: 'M-01', revision: 'r1', confirmation: null, confirmed_at: null, link: 'explicit' } }, { status: 'in_review' })), { label: 'Waiting for review', tone: 'warning', detail: 'Record to confirm' });
-assert.deepEqual(historyReview(held('a', '2026-10-27', { record: { id: 'M-01', revision: 'r1', confirmation: 'confirmed', confirmed_at: '', link: 'explicit' } })), { label: 'Record confirmed', tone: 'success', detail: 'No context changes' });
+assert.deepEqual(historyReview(held('a', '2026-10-27', { record: { id: 'M-01', revision: 'r1', confirmation: null, confirmed_at: null, link: 'explicit' } }, { status: 'in_review' })), { label: 'Waiting for review', tone: 'warning', detail: 'Record to confirm', link: { label: 'Review this meeting', href: '/context/updates/CU-2026-0003?meeting=a' } });
+assert.deepEqual(historyReview(held('a', '2026-10-27', { record: { id: 'M-01', revision: 'r1', confirmation: 'confirmed', confirmed_at: '', link: 'explicit' } })), { label: 'Record confirmed', tone: 'success', detail: 'No context changes', link: { label: 'See its review', href: '/context/updates/CU-2026-0003?meeting=a' } });
+assert.equal(historyReview(held('a', '2026-10-27', {}, { status: 'analyzing' })).link, undefined, 'no review to open before the analysis');
 assert.equal(historyReview(held('a', '2026-10-27', {}, { context_changed: true })).detail, 'Context updated');
 
 // One list: the queue's copy wins while a meeting is being handed over; deleted text is listed apart.
@@ -48,7 +49,13 @@ assert.deepEqual(rows.filter((r) => inFilter(r, 'reviewed')).map((r) => r.id), [
 assert.deepEqual([rows[2]!.href, rows[4]!.href], ['/meetings/MQ-2026-0007', '/meetings/CU-2026-0001-M-01'], 'a meeting with a final id opens its own dialog');
 // A record id can change until its update is done: the row opens the update instead, and its id is not searchable.
 const pending = meetingRows([], [held('CU-2026-0002-M-01', '2026-10-28', { origin: 'update', linkable: false, review_state: 'provisional', title: 'Steering call' }, { id: 'CU-2026-0002', status: 'in_review' })], facts);
-assert.equal(pending[0]!.href, '/context/updates/CU-2026-0003');
+assert.equal(pending[0]!.href, '/context/updates/CU-2026-0003', 'the whole update: the record id may go to another meeting after a new analysis');
+assert.deepEqual([pending[0]!.review.link?.href, pending[0]!.processing.href], ['/context/updates/CU-2026-0003', '/context/updates/CU-2026-0003'], 'every link of a provisional record');
+{
+  // Once done, its id is final and every link opens the review at it.
+  const final = meetingRows([], [held('CU-2026-0002-M-01', '2026-10-28', { origin: 'update' }, { id: 'CU-2026-0002' })], facts)[0]!;
+  assert.deepEqual([final.review.link?.href, final.processing.href], ['/context/updates/CU-2026-0003?meeting=CU-2026-0002-M-01', '/context/updates/CU-2026-0003?meeting=CU-2026-0002-M-01']);
+}
 assert.deepEqual(matchingRows(pending, 'M-01'), [], 'no link to a record id that may still change');
 assert.deepEqual(matchingRows(rows, 'jane 2026-10-27').map((r) => r.id), ['MQ-2026-0007'], 'every word, from title, date or people');
 assert.deepEqual(matchingRows(rows, 'warehouse lease', new Set(['MQ-2026-0007'])).map((r) => r.id), ['MQ-2026-0007'], 'or found by what was said in it');

@@ -699,7 +699,11 @@ export interface ContextUpdate {
   material_files?: { name: string; size: number; modified: string; type: string; officeCheck?: OfficeCheck }[];
   /** The materials/ folder, relative to the workspace, while it holds files (for Open folder); null once they are deleted. */
   materials_folder?: string | null;
+  /** Detail only: the meetings it holds, in its order, with the place of each one's record in `meeting_records` (null when not certain), and whether its id is final. */
+  held_meetings?: HeldMeetingView[];
 }
+
+export interface HeldMeetingView { id: string; title: string; meeting_date: string; record_index: number | null; files: string[]; linkable: boolean }
 
 /* ---- Routines ------------------------------------------------------------ */
 

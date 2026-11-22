@@ -492,7 +492,16 @@ export interface ContextUpdateDetail extends ContextUpdate {
   correction_review?: { base: MeetingRecord | null; stale: boolean; blocked: string[]; changes: FieldChange[]; doubts_dropped: RecordDoubt[]; current: boolean; suggestions: SuggestionState[]; transcript: TranscriptReview | null; finishing: boolean };
   /** A `correction-follow-up` only, while not done: why its material no longer describes the current record (null when it does). */
   follow_up_problem?: string | null;
+  /**
+   * The meetings this update holds, in its own order, as the Meetings page links them: the meeting id, its record (by
+   * its place in `meeting_records`, null when no record is certain), its files, and whether its id is final
+   * (`linkable`; a record-only meeting's id can change until its update is done). Read only: the review uses it to open
+   * at one meeting (`?meeting=`), and only at a meeting whose id is final.
+   */
+  held_meetings: HeldMeetingView[];
 }
+
+export interface HeldMeetingView { id: string; title: string; meeting_date: string; record_index: number | null; files: string[]; linkable: boolean }
 
 function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
@@ -1384,7 +1393,11 @@ export class ContextUpdateService {
       })));
       const correction_review = current.kind === CORRECTION_KIND && current.correction ? await this.correctionReview(current) : undefined;
       const follow_up_problem = current.kind === FOLLOW_UP_KIND && current.status !== 'done' ? followUpProblem(current, await this.list()) : undefined;
-      return { ...current, proposals, material_files, materials_folder, transcripts, ...(correction_review ? { correction_review } : {}), ...(follow_up_problem !== undefined ? { follow_up_problem } : {}) };
+      const held_meetings = heldMeetings(current).map((m): HeldMeetingView => {
+        const index = m.record ? current.meeting_records.indexOf(m.record) : -1;
+        return { id: m.id, title: m.title, meeting_date: m.meeting_date, record_index: index >= 0 ? index : null, files: m.files, linkable: m.linkable };
+      });
+      return { ...current, proposals, material_files, materials_folder, transcripts, held_meetings, ...(correction_review ? { correction_review } : {}), ...(follow_up_problem !== undefined ? { follow_up_problem } : {}) };
     });
   }
 
