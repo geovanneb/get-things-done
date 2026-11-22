@@ -381,3 +381,93 @@ test("a task pinned to a new transcription gets its speakers unnamed; one pinned
   await assert.rejects(updates.confirmedSpeakerEvidence('CU-2026-0001', 'M-09'), /not in CU-2026-0001/);
   await assert.rejects(updates.confirmedSpeakerEvidence('CU-2026-0099', 'M-01'));
 });
+
+/** A short fictional WAV of 16 kHz mono silence, for meetings queued next to a Transcribe again. */
+function silentWav(): Buffer {
+  const data = Buffer.alloc(16000 * 2);
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0, 'ascii'); head.writeUInt32LE(36 + data.length, 4); head.write('WAVE', 8, 'ascii');
+  head.write('fmt ', 12, 'ascii'); head.writeUInt32LE(16, 16); head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(16000, 24); head.writeUInt32LE(32000, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+  head.write('data', 36, 'ascii'); head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+
+/** A Transcribe again and two queued meetings, with an engine whose jobs are released one by one. */
+async function againAndQueue(t: Parameters<typeof workspace>[0]) {
+  const ws = await workspace(t);
+  await reviewed(ws);
+  await ask(ws);
+  const queue = new MeetingDigestService();
+  const ids: string[] = [];
+  /** Queued while the Transcribe again runs: the queue would otherwise go first. */
+  const addMeetings = async () => {
+    for (const [title, date] of [['A', '2026-10-28'], ['B', '2026-10-29']] as const) {
+      const m = await queue.createMeeting({ title, meeting_date: date });
+      await queue.addFile(m.id, 'workshop.wav', silentWav());
+      await queue.queue(m.id);
+      ids.push(m.id);
+    }
+    return { a: ids[0]!, b: ids[1]! };
+  };
+  const calls: string[] = [];
+  const started: (() => void)[] = [];
+  const release: (() => void)[] = [];
+  const reached = (n: number) => new Promise<void>((r) => { if (calls.length >= n) r(); else started[n - 1] = r; });
+  const run = {
+    transcribe: (wav: string, o: Parameters<Transcribe>[1]) => new Promise((resolve, reject) => {
+      calls.push(wav.includes('meeting-queue') ? path.basename(path.dirname(wav)) : 'again');
+      const n = calls.length;
+      o.signal!.addEventListener('abort', () => reject(new Error('Cancelled.')));
+      release[n - 1] = () => { void speaks([`Fictional words, job ${n}.`])(wav, o).then(resolve); };
+      started[n - 1]?.();
+    }),
+  } as unknown as TranscriptionEngine;
+  const job = new MeetingTranscriptionService(queue, models, run);
+  return { ws, queue, job, addMeetings, calls, reached, release };
+}
+
+test('Transcribe now while a Transcribe again runs here names it by its generation: it goes back in line and the chosen meeting starts', async (t) => {
+  const { ws, queue, job, addMeetings, calls, reached, release } = await againAndQueue(t);
+  await job.tick();
+  await reached(1);
+  const { a, b } = await addMeetings();
+  assert.deepEqual(calls, ['again']);
+  const shown = job.progress()!;
+  assert.ok(shown.generation, 'the page gets the job\'s generation');
+
+  await job.prioritize(b, { first: true, now: true, generation: shown.generation });
+  await reached(2);
+  assert.deepEqual(calls, ['again', b]);
+  assert.equal((await manifest(ws)).transcribe?.status, 'pending', 'the Transcribe again waits in line again');
+  for (let i = 1; i <= 3; i++) { await reached(i + 1); release[i]!(); }
+  await MeetingTranscriptionService.settled();
+  assert.deepEqual(calls, ['again', b, a, 'again']);
+  assert.equal((await queue.loadMeeting(a)).files[0]!.recording!.status, 'done');
+});
+
+test('a confirmation left open for a Transcribe again that ended never stops the queued job that started after it', async (t) => {
+  const { queue, job, addMeetings, calls, reached, release } = await againAndQueue(t);
+  await job.tick();
+  await reached(1);
+  const { a, b } = await addMeetings();
+  const shown = job.progress()!.generation!;
+  // The user opens Transcribe now for B and waits; meanwhile the reviewed meeting finishes and A starts.
+  release[0]!();
+  await reached(2);
+  assert.deepEqual(calls, ['again', a]);
+  const running = (await queue.loadMeeting(a)).files[0]!.recording!;
+  assert.equal(running.status, 'running');
+
+  await assert.rejects(job.prioritize(b, { first: true, now: true, generation: shown }), (err: { statusCode?: number }) => err.statusCode === 409);
+  // Nor a request that names no job at all (what the page used to send for a Transcribe again).
+  await assert.rejects(job.prioritize(b, { first: true, now: true }), (err: { statusCode?: number }) => err.statusCode === 409);
+  const still = (await queue.loadMeeting(a)).files[0]!.recording!;
+  assert.deepEqual([still.status, still.generation], ['running', running.generation], 'A goes on');
+  assert.equal((await queue.loadMeeting(b)).transcribe_first_at, undefined, 'nothing changed');
+  release[1]!();
+  await reached(3);
+  release[2]!();
+  await MeetingTranscriptionService.settled();
+  assert.deepEqual(calls, ['again', a, b], 'A ran once, to the end');
+});
