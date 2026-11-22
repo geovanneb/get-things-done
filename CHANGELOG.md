@@ -35,6 +35,14 @@ minor versions may include breaking changes.
   meeting, the first Approve first shows any records still without a choice or proposals folded away.
   (#488)
 - **API:** `GET /api/context-updates/:id` gains `held_meetings`. See [docs/api.md](docs/api.md). (#488)
+- **Process one meeting now.** A queued meeting's dialog has **Process this meeting now**: a
+  digest of that meeting alone, without waiting for the schedule or sending the whole queue. The
+  confirmation says whether the analysis then starts with your AI assistant or is yours to start,
+  and that one-meeting digests use somewhat more AI usage than a batch. While another digest
+  waits for review it says which one, with a link. (#487)
+- **API:** `POST /api/routines/meeting-digest/run` takes `meeting`, `workspace` and
+  `expect_analysis` to make a digest of that queued meeting alone; refusals answer `404`/`409`/`503`
+  with a `details.code`. See [docs/api.md](docs/api.md). (#487)
 - **API:** `transcription` in `GET /api/routines/meeting-digest` gains `phase`, `phase_started_at`,
   `phase_part` and, for another dashboard's job, `elsewhere`. See [docs/api.md](docs/api.md). (#480)
 
@@ -45,6 +53,11 @@ minor versions may include breaking changes.
   list, its files and the sidebar now say it waits for a model to download instead of "Waiting for transcription".
   (#483)
 - **Listing tasks no longer creates `tasks/active/`.** A missing folder now reads as no tasks. (#483)
+- **Meeting digests keep what they cannot verify.** A queued meeting whose files changed after
+  its digest was made, while the dashboard was stopped halfway, now stays on hold instead of
+  being removed. A meeting with a damaged list of files, or a recording marked transcribed without
+  its transcript, no longer goes into a digest. No new digest is made while a context update
+  cannot be read, so two digests can no longer wait for review at once. (#487)
 
 - **A meeting being recorded is in progress, not waiting on you.** The Meetings list showed it as
   Recording but filed it under **Needs you**. It is now under **In progress** until the recording

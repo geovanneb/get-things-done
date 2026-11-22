@@ -10,7 +10,7 @@ import {
   Schedule, ScheduleError, addDays, describeSchedule, isDateOnly, localDate, nextOccurrences, occurrencesBetween, parseSchedule,
 } from './routineSchedule';
 import { CleanupRunResult, CleanupView, SYSTEM_CLEANUP_ID, SYSTEM_CLEANUP_TITLE, SystemCleanupService, parseSettings } from './systemCleanupService';
-import { DigestRunResult, DigestView, MEETING_DIGEST_ID, MEETING_DIGEST_TITLE, MeetingDigestService } from './meetingDigestService';
+import { DigestRunResult, DigestView, MEETING_DIGEST_ID, MEETING_DIGEST_TITLE, MeetingDigestService, type OneMeetingRun } from './meetingDigestService';
 import { MeetingTranscriptionService } from './meetingTranscription';
 
 const workspaceService = new WorkspaceService();
@@ -129,6 +129,8 @@ export interface RoutineRun {
   message: string;
   /** System cleanup: the memory review it opened. */
   context_update?: string;
+  /** Meeting digest: what its automatic analysis did with the digest, when it tried (see DigestRunResult). */
+  analysis?: DigestRunResult['analysis'];
   /** System cleanup: what it archived, trashed or deleted (at most 100 listed). */
   cleaned?: CleanupRunResult['cleaned'];
 }
@@ -781,6 +783,7 @@ export class RoutineService {
       routine_id: MEETING_DIGEST_ID, routine_title: MEETING_DIGEST_TITLE, trigger, at: now.toISOString(), status: result.status,
       occurrences: [occurrenceKey(now)], skipped: [], created: [], message: result.message,
       ...(result.context_update ? { context_update: result.context_update } : {}),
+      ...(result.analysis ? { analysis: result.analysis } : {}),
     };
   }
 
@@ -795,9 +798,14 @@ export class RoutineService {
     return this.mutate(() => meetingDigest.update(input, now));
   }
 
-  async runMeetingDigestNow(now = new Date()): Promise<RoutineRun> {
+  /**
+   * With `one`, a digest of that queued meeting alone (#487). A refusal throws and is not a run in the history; an
+   * interrupted digest finished or undone first is recorded as a run of its own, before it.
+   */
+  async runMeetingDigestNow(now = new Date(), one?: Omit<OneMeetingRun, 'onRecovered'>): Promise<RoutineRun> {
     const result = await this.serialized(async () => this.withLock(async () => {
-      const run = this.digestRun(await meetingDigest.runNow(now), 'manual', now);
+      const onRecovered = async (recovered: DigestRunResult) => { await this.appendRuns([this.digestRun(recovered, 'manual', now)]); };
+      const run = this.digestRun(await meetingDigest.runNow(now, one ? { ...one, onRecovered } : undefined), 'manual', now);
       await this.appendRuns([run]);
       return run;
     }));

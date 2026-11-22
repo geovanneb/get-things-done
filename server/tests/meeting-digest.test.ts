@@ -11,6 +11,10 @@ import { DIGEST_KIND, DIGEST_ORIGIN, MeetingDigestService, parseSettings, queueL
 import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { AgentRunnerService, type AgentRun, type RunnerStatus } from '../src/services/agentRunner';
+import { parseMarkdown, stringifyMarkdown } from '../src/utils/markdown';
+import express from 'express';
+import routineRoutes from '../src/routes/routines';
+import { errorHandler } from '../src/middleware/errorHandler';
 
 /** A throwaway fictional workspace; services read its path from ESB_WORKSPACE_PATH. */
 async function workspace(t: { after: (fn: () => Promise<void> | void) => void }): Promise<string> {
@@ -152,7 +156,8 @@ test('an interrupted digest is discarded before publishing and finished after it
   assert.deepEqual(made.digest_meetings.map((m) => m.id), [a]);
 
   // Crash after publishing, before the queue was emptied: finished, with no second digest.
-  const b = await queueMeeting(service, 'Review', '2026-10-29', [['b.md', Buffer.from('B')]]);
+  // Its file is what the batch recorded: a queue folder that differs from what the digest took is kept (#487 review 4).
+  const b = await queueMeeting(service, 'Review', '2026-10-29', [['b.md', Buffer.from('A')]]);
   await fsp.writeFile(path.join(ws, 'context-updates', made.id, 'update.md'),
     (await fsp.readFile(path.join(ws, 'context-updates', made.id, 'update.md'), 'utf-8')).replace(`id: ${a}`, `id: ${b}`));
   await fsp.writeFile(batchFile(ws), batch([[b, [[`${a}-a.md`, 'A']]]], made.id, true));
@@ -960,4 +965,418 @@ test('uploads: a recording is judged by the name it is saved under, so a trailin
   assert.equal(both.files.length, 2);
   assert.match(both.files[1].name, /\.wav$/);
   assert.equal(both.files[1].recording?.status, 'pending');
+});
+
+// ---- one meeting now (#487) ---------------------------------------------------------------------------------------
+
+/** A request for one meeting, as the confirmation sends it: in this workspace, under the settings it showed. */
+const one = (meeting: string, expect_analysis: 'manual' | 'auto' | 'auto_paused' = 'manual') => ({ meeting, workspace: process.env.ESB_WORKSPACE_PATH!, expect_analysis });
+const queued = async (service: MeetingDigestService) => (await service.readQueue()).meetings.map((m) => m.id);
+const refusal = (code: string, extra: Record<string, unknown> = {}) => (err: unknown) => {
+  assert.equal((err as { details?: { code?: string } }).details?.code, code, (err as Error).message);
+  for (const [k, v] of Object.entries(extra)) assert.equal((err as { details: Record<string, unknown> }).details[k], v);
+  return true;
+};
+
+test('one meeting now: the digest holds that meeting alone, the others stay queued, and an open digest refuses the next (#487)', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const older = await queueMeeting(service, 'Weekly sync', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const chosen = await queueMeeting(service, 'Pilot review', '2026-10-27', [['b.vtt', vtt('Jane Doe', 'Pilot on track.')]]);
+
+  const routine = new RoutineService();
+  const run = await routine.runMeetingDigestNow(new Date('2026-10-27T10:00:00'), one(chosen));
+  assert.equal(run.status, 'ok', run.message);
+  assert.match(run.message, new RegExp(`Made digest ${run.context_update} from ${chosen} alone`));
+  const update = await updates.get(run.context_update!);
+  assert.deepEqual(update.digest_meetings.map((m) => m.id), [chosen], 'not the older meeting, though it was first in line');
+  assert.equal(update.title, 'Meeting digest 2026-10-27');
+  assert.deepEqual(await queued(service), [older]);
+  await assert.rejects(fsp.access(batchFile(ws)));
+  const receipts = (await fsp.readFile(path.join(ws, '.situation-board', 'routines', 'meeting-digest-receipts.jsonl'), 'utf-8')).trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(receipts.map((r) => r.meeting), [chosen]);
+  assert.equal((await service.readState()).last_context_update, update.id);
+
+  // The digest waits for review: the other meeting is refused, naming it, and nothing is written or recorded.
+  const history = (await routine.history()).length;
+  await assert.rejects(routine.runMeetingDigestNow(new Date('2026-10-27T10:05:00'), one(older)), refusal('digest_open', { open_digest: update.id, meeting: older }));
+  await assert.rejects(service.runNow(new Date(), one(older)), new RegExp(`Digest ${update.id} waits for review`));
+  assert.equal((await routine.history()).length, history, 'a refusal is not a run');
+  assert.deepEqual(await queued(service), [older]);
+  assert.equal((await updates.list()).length, 1);
+});
+
+test('one meeting now: rechecked when it runs; a meeting that is gone, a draft, on hold, untranscribed or unreadable is refused (#487)', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const other = await queueMeeting(service, 'Other', '2026-10-26', [['o.md', Buffer.from('O')]]);
+  await assert.rejects(service.runNow(new Date(), one('MQ-2026-0099')), refusal('meeting_not_found'));
+
+  const draft = await service.createMeeting({ title: 'Draft', meeting_date: '2026-10-27' });
+  await service.addFile(draft.id, 'd.md', Buffer.from('D'));
+  await assert.rejects(service.runNow(new Date(), one(draft.id)), (err: Error) => refusal('meeting_not_ready')(err) && /not queued yet/.test(err.message));
+
+  const held = await queueMeeting(service, 'Held', '2026-10-27', [['h.md', Buffer.from('H')]]);
+  const manifest = path.join(ws, 'context-updates', 'meeting-queue', held, 'meeting.md');
+  await fsp.writeFile(manifest, (await fsp.readFile(manifest, 'utf-8')).replace('status: queued', 'status: queued\nheld: Its digest was removed.'));
+  await assert.rejects(service.runNow(new Date(), one(held)), (err: Error) => refusal('meeting_not_ready')(err) && /on hold/.test(err.message));
+
+  const recorded = await service.createMeeting({ title: 'Recorded', meeting_date: '2026-10-27' });
+  await service.addFile(recorded.id, 'r.wav', silentWav());
+  await service.queue(recorded.id);
+  await assert.rejects(service.runNow(new Date(), one(recorded.id)), (err: Error) => refusal('meeting_not_ready')(err) && /waits for its transcript/.test(err.message));
+
+  const broken = await queueMeeting(service, 'Broken', '2026-10-27', [['x.md', Buffer.from('X')]]);
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue', broken, 'meeting.md'), 'not a manifest');
+  await assert.rejects(service.runNow(new Date(), one(broken)), refusal('meeting_unreadable'));
+
+  assert.equal((await updates.list()).length, 0, 'no digest from any of them, and never the other meeting instead');
+  assert.ok((await queued(service)).includes(other));
+  await assert.rejects(fsp.access(batchFile(ws)));
+});
+
+test('one meeting now: a file changed since it was queued refuses it, and no other meeting takes its place (#487)', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const other = await queueMeeting(service, 'Other', '2026-10-26', [['o.md', Buffer.from('O')]]);
+  const chosen = await queueMeeting(service, 'Chosen', '2026-10-27', [['c.md', Buffer.from('original')]]);
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue', chosen, 'c.md'), 'edited');
+  await assert.rejects(service.runNow(new Date(), one(chosen)), (err: Error) => refusal('meeting_changed', { meeting: chosen })(err) && /missing or changed/.test(err.message));
+  assert.equal((await updates.list()).length, 0);
+  assert.deepEqual(await queued(service), [other, chosen]);
+  await assert.rejects(fsp.access(batchFile(ws)));
+});
+
+test('one meeting now: while another digest is being built it is refused as busy, then goes ahead alone (#487)', async (t) => {
+  await workspace(t);
+  const service = new MeetingDigestService();
+  const first = await queueMeeting(service, 'First', '2026-10-26', [['f.md', Buffer.from('F')]]);
+  const original = ContextUpdateService.prototype.createDigest;
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const paused = mock.method(ContextUpdateService.prototype, 'createDigest', async function (this: ContextUpdateService, ...args: Parameters<typeof original>) {
+    enter();
+    await gate;
+    return original.apply(this, args);
+  });
+  t.after(() => paused.mock.restore());
+
+  const batchRun = service.runNow(new Date('2026-10-26T18:00:00'));
+  await entered;
+  // The batch file names the first meeting and its builder is alive: the chosen one waits for it, nothing is taken over.
+  const chosen = await queueMeeting(service, 'Chosen', '2026-10-27', [['c.md', Buffer.from('C')]]);
+  await assert.rejects(service.runNow(new Date('2026-10-26T18:00:01'), one(chosen)), refusal('digest_busy'));
+  release();
+  const made = await batchRun;
+  assert.deepEqual((await updates.get(made.context_update!)).digest_meetings.map((m) => m.id), [first]);
+  paused.mock.restore();
+
+  const done = path.join(process.env.ESB_WORKSPACE_PATH!, 'context-updates', made.context_update!, 'update.md');
+  await fsp.writeFile(done, (await fsp.readFile(done, 'utf-8')).replace('status: ready', 'status: done'));
+  const alone = await service.runNow(new Date('2026-10-27T10:00:00'), one(chosen));
+  assert.deepEqual((await updates.get(alone.context_update!)).digest_meetings.map((m) => m.id), [chosen]);
+});
+
+test('one meeting now: a crash before publishing is undone and a retry takes the same meeting alone; a crash after publishing is finished with it alone (#487)', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const other = await queueMeeting(service, 'Other', '2026-10-26', [['o.md', Buffer.from('O')]]);
+  const chosen = await queueMeeting(service, 'Chosen', '2026-10-27', [['c.md', Buffer.from('C')]]);
+
+  // Crash after the id was reserved, and whether it was published cannot be told: the batch file is left behind.
+  const original = ContextUpdateService.prototype.createDigest;
+  const crash = mock.method(ContextUpdateService.prototype, 'createDigest', async function (this: ContextUpdateService, input: Parameters<typeof original>[0], system: Parameters<typeof original>[1], onReserved: Parameters<typeof original>[2]) {
+    return original.call(this, input, system, async (id: string) => { await onReserved(id); throw new Error('the dashboard stopped'); });
+  });
+  const unknown = mock.method(ContextUpdateService.prototype, 'published', async () => { throw new Error('cannot tell'); });
+  const failed = await service.runNow(new Date('2026-10-27T10:00:00'), one(chosen));
+  assert.equal(failed.status, 'error');
+  crash.mock.restore();
+  unknown.mock.restore();
+  const left = JSON.parse(await fsp.readFile(batchFile(ws), 'utf-8'));
+  assert.deepEqual(left.meetings, [chosen], 'the batch names the chosen meeting alone');
+  const half = left.update_id as string;
+  assert.ok(half);
+
+  // The retry undoes the half-made digest first, recorded as a run of its own, then makes one of the same meeting, alone.
+  const recoveries: string[] = [];
+  const retried = await service.runNow(new Date('2026-10-27T10:01:00'), { ...one(chosen), onRecovered: async (r) => { recoveries.push(r.message); } });
+  assert.equal(retried.status, 'ok', retried.message);
+  assert.match(recoveries.join(), /Discarded a digest that was interrupted/);
+  assert.match(retried.message, /alone/);
+  assert.doesNotMatch(retried.message, /Discarded/, 'the recovery is its own run');
+  assert.deepEqual((await updates.get(retried.context_update!)).digest_meetings.map((m) => m.id), [chosen]);
+  assert.deepEqual(await queued(service), [other]);
+  const done = path.join(ws, 'context-updates', retried.context_update!, 'update.md');
+  await fsp.writeFile(done, (await fsp.readFile(done, 'utf-8')).replace('status: ready', 'status: done'));
+
+  // Crash after publishing, before the meeting left the queue: the next check finishes the handoff with it alone.
+  const third = await queueMeeting(service, 'Third', '2026-10-28', [['t.md', Buffer.from('T')]]);
+  const stop = mock.method(MeetingDigestService.prototype as unknown as { release: () => Promise<string[]> }, 'release', async () => { throw new Error('the dashboard stopped'); });
+  const cut = await service.runNow(new Date('2026-10-28T10:00:00'), one(third));
+  assert.equal(cut.status, 'error');
+  stop.mock.restore();
+  assert.equal(JSON.parse(await fsp.readFile(batchFile(ws), 'utf-8')).published, true);
+  const finished = await service.runIfDue(new Date('2026-10-28T10:01:00'));
+  assert.match(finished!.message, /Finished digest .* which was interrupted/);
+  assert.deepEqual((await updates.get(finished!.context_update!)).digest_meetings.map((m) => m.id), [third]);
+  assert.deepEqual(await queued(service), [other], 'the other meeting is still queued, in no digest');
+  await assert.rejects(fsp.access(batchFile(ws)));
+});
+
+test('one meeting now: automatic analysis tries to start its digest, also while the job is paused; off, nothing starts (#487)', async (t) => {
+  await workspace(t);
+  const fake = fakeRunner();
+  const service = new MeetingDigestService(fake.runner);
+  const a = await queueMeeting(service, 'Sync', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const off = await service.runNow(new Date('2026-10-26T10:00:00'), one(a));
+  assert.deepEqual(fake.started, []);
+  const close = async (id: string) => {
+    const file = path.join(process.env.ESB_WORKSPACE_PATH!, 'context-updates', id, 'update.md');
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace(/status: \w+/, 'status: done'));
+  };
+  await close(off.context_update!);
+
+  await service.update({ auto_analyze: true, enabled: false });
+  const b = await queueMeeting(service, 'Review', '2026-10-27', [['b.md', Buffer.from('B')]]);
+  const on = await service.runNow(new Date('2026-10-27T10:00:00'), one(b, 'auto_paused'));
+  assert.deepEqual(fake.started, [on.context_update]);
+  assert.match(on.message, new RegExp(`alone[\\s\\S]*Started the analysis of ${on.context_update}`));
+  await close(on.context_update!);
+
+  // A busy runner: it waits, as for any digest.
+  const c = await queueMeeting(service, 'Planning', '2026-10-28', [['c.md', Buffer.from('C')]]);
+  fake.set('busy');
+  const waits = await service.runNow(new Date('2026-10-28T10:00:00'), one(c, 'auto_paused'));
+  // Paused, nothing starts it later by itself: the user is told to start it, or resume the routine (#487 review 8).
+  assert.equal(waits.analysis, 'paused_waiting');
+  assert.match(waits.message, /routine is paused, so it does not start by itself: start it from the update when that run ends, or resume the routine/);
+  await close(waits.context_update!);
+
+  // Not paused: it waits for the other run, and a later check starts it.
+  await service.update({ enabled: true });
+  const d = await queueMeeting(service, 'Retro', '2026-10-29', [['d.md', Buffer.from('D')]]);
+  const later = await service.runNow(new Date('2026-10-29T10:00:00'), one(d, 'auto'));
+  assert.equal(later.analysis, 'waiting');
+  fake.set('start');
+  await service.runIfDue(new Date('2026-10-29T10:01:00'));
+  assert.ok(fake.started.includes(later.context_update!));
+});
+
+// ---- review of #487: each finding, reproduced ---------------------------------------------------------------------
+
+/** Rewrites a queued meeting's manifest frontmatter with `edit`. */
+async function editManifest(ws: string, id: string, edit: (data: Record<string, unknown>) => void): Promise<void> {
+  const file = path.join(ws, 'context-updates', 'meeting-queue', id, 'meeting.md');
+  const parsed = parseMarkdown(await fsp.readFile(file, 'utf-8'));
+  const data = (parsed.data ?? {}) as Record<string, unknown>;
+  edit(data);
+  await fsp.writeFile(file, stringifyMarkdown(parsed.content, data));
+}
+const exists = (p: string) => fsp.access(p).then(() => true, () => false);
+
+test('#487 review 1: a request confirmed in another workspace is refused before anything is written', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const id = await queueMeeting(service, 'Sync', '2026-10-27', [['a.md', Buffer.from('A')]]);
+  await assert.rejects(service.runNow(new Date(), { ...one(id), workspace: path.join(ws, '..', 'another-workspace') }), refusal('other_workspace'));
+  assert.equal((await updates.list()).length, 0);
+  assert.deepEqual(await queued(service), [id]);
+  await assert.rejects(fsp.access(batchFile(ws)));
+});
+
+test('#487 review 2: a request confirmed under other analysis settings is refused, saying what holds now', async (t) => {
+  const ws = await workspace(t);
+  const fake = fakeRunner();
+  const service = new MeetingDigestService(fake.runner);
+  const id = await queueMeeting(service, 'Sync', '2026-10-27', [['a.md', Buffer.from('A')]]);
+  // The dialog said "No analysis starts by itself"; meanwhile another page turned automatic analysis on.
+  await service.update({ auto_analyze: true });
+  await assert.rejects(service.runNow(new Date(), one(id, 'manual')), refusal('analysis_setting_changed', { expect_analysis: 'auto' }));
+  assert.deepEqual(fake.started, []);
+  assert.equal((await updates.list()).length, 0);
+  assert.deepEqual(await queued(service), [id]);
+  await assert.rejects(fsp.access(batchFile(ws)));
+  // Paused too: the expectation changes again.
+  await service.update({ enabled: false });
+  await assert.rejects(service.runNow(new Date(), one(id, 'auto')), refusal('analysis_setting_changed', { expect_analysis: 'auto_paused' }));
+});
+
+test('#487 review 3: finishing another interrupted digest is its own run; the request is refused and never analyzes that digest', async (t) => {
+  const ws = await workspace(t);
+  mock.method(AgentRunnerService.prototype, 'status', async () => readyRunner());
+  mock.method(AgentRunnerService.prototype, 'get', async () => null);
+  const started: string[] = [];
+  mock.method(AgentRunnerService.prototype, 'startAnalysis', async (id: string) => { started.push(id); return { update_id: id, status: 'running' } as AgentRun; });
+  t.after(() => mock.restoreAll());
+  const service = new MeetingDigestService();
+  await service.update({ auto_analyze: true });
+  const a = await queueMeeting(service, 'A', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const b = await queueMeeting(service, 'B', '2026-10-27', [['b.md', Buffer.from('B')]]);
+
+  // A's digest is published, then the dashboard stops before A leaves the queue.
+  const stop = mock.method(MeetingDigestService.prototype as unknown as { release: () => Promise<unknown> }, 'release', async () => { throw new Error('the dashboard stopped'); });
+  const cut = await service.runNow(new Date('2026-10-27T10:00:00'), one(a, 'auto'));
+  stop.mock.restore();
+  assert.equal(cut.context_update, undefined, 'a failed handoff starts no analysis');
+  const digestA = JSON.parse(await fsp.readFile(batchFile(ws), 'utf-8')).update_id as string;
+
+  const routine = new RoutineService();
+  const before = (await routine.history()).length;
+  await assert.rejects(routine.runMeetingDigestNow(new Date('2026-10-27T10:05:00'), one(b, 'auto')), refusal('digest_open', { open_digest: digestA, meeting: b }));
+  const runs = await routine.history();
+  assert.equal(runs.length, before + 1, 'the recovery, and nothing for the refused request');
+  assert.match(runs[0]!.message, new RegExp(`Finished digest ${digestA}, which was interrupted`));
+  assert.deepEqual(started, [], "B's request never starts A's analysis");
+  assert.deepEqual(await queued(service), [b]);
+});
+
+test('#487 review 4: a queue folder edited after its digest was published is kept on hold, on both paths', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const cutAfterPublish = async (run: () => Promise<unknown>) => {
+    const stop = mock.method(MeetingDigestService.prototype as unknown as { release: () => Promise<unknown> }, 'release', async () => { throw new Error('the dashboard stopped'); });
+    try { await run(); } finally { stop.mock.restore(); }
+  };
+  const close = async (id: string) => {
+    const file = path.join(ws, 'context-updates', id, 'update.md');
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf-8')).replace(/status: \w+/, 'status: done'));
+  };
+
+  // One meeting.
+  const a = await queueMeeting(service, 'A', '2026-10-26', [['a.md', Buffer.from('original')]]);
+  await cutAfterPublish(() => service.runNow(new Date('2026-10-26T10:00:00'), one(a)));
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue', a, 'a.md'), 'edited while the dashboard was down');
+  const finished = await service.runIfDue(new Date('2026-10-26T10:01:00'));
+  assert.equal(finished!.status, 'error');
+  assert.match(finished!.message, new RegExp(`${a} is in ${finished!.context_update} as it was, but a file changed afterwards`));
+  assert.equal(await fsp.readFile(path.join(ws, 'context-updates', 'meeting-queue', a, 'a.md'), 'utf-8'), 'edited while the dashboard was down', 'the edit is kept');
+  assert.match((await service.loadMeeting(a)).held ?? '', /a file changed afterwards/);
+  await assert.rejects(fsp.access(batchFile(ws)));
+  await close(finished!.context_update!);
+
+  // The batch: the unchanged meeting leaves, the edited one stays on hold.
+  const b = await queueMeeting(service, 'B', '2026-10-27', [['b.md', Buffer.from('B')]]);
+  const c = await queueMeeting(service, 'C', '2026-10-27', [['c.md', Buffer.from('C')]]);
+  await cutAfterPublish(() => service.runNow(new Date('2026-10-27T18:00:00')));
+  await fsp.writeFile(path.join(ws, 'context-updates', 'meeting-queue', c, 'extra.md'), 'a file added by hand');
+  const again = await service.runIfDue(new Date('2026-10-27T18:01:00'));
+  assert.match(again!.message, new RegExp(`${c} is in .* but a file changed afterwards`));
+  assert.ok(!await exists(path.join(ws, 'context-updates', 'meeting-queue', b)), 'the unchanged meeting left the queue');
+  assert.ok(await exists(path.join(ws, 'context-updates', 'meeting-queue', c, 'extra.md')));
+  assert.deepEqual((await service.readQueue()).meetings.map((m) => [m.id, Boolean(m.held)]), [[a, true], [c, true]]);
+});
+
+test('#487 review 5: a context update that cannot be read refuses a new digest, on both paths; the listing is unchanged', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const a = await queueMeeting(service, 'A', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const made = await service.runNow(new Date('2026-10-26T10:00:00'), one(a));
+  const file = path.join(ws, 'context-updates', made.context_update!, 'update.md');
+  const b = await queueMeeting(service, 'B', '2026-10-27', [['b.md', Buffer.from('B')]]);
+  await fsp.chmod(file, 0o000);
+  try {
+    await assert.rejects(service.runNow(new Date('2026-10-27T10:00:00'), one(b)), (err: Error) => refusal('digest_state_unknown')(err) && (err as { statusCode?: number }).statusCode === 503 && err.message.includes(made.context_update!));
+    const batch = await service.runNow(new Date('2026-10-27T18:00:00'));
+    assert.equal(batch.status, 'error');
+    assert.match(batch.message, new RegExp(`${made.context_update} cannot be read`));
+    assert.equal(batch.context_update, undefined);
+    assert.deepEqual(await queued(service), [b]);
+    assert.deepEqual((await updates.list()).map((u) => u.id), [], 'the general listing still leaves it out, as before');
+  } finally {
+    await fsp.chmod(file, 0o644);
+  }
+});
+
+test('#487 review 6: a request for one meeting never cleans up other abandoned drafts; the batch still does', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const draft = await service.createMeeting({ title: 'Draft', meeting_date: '2026-10-20' });
+  await service.addFile(draft.id, 'notes.md', Buffer.from('Fictional notes.'));
+  const later = new Date(Date.now() + 26 * 3_600_000);
+  await assert.rejects(service.runNow(later, one('MQ-2026-0099')), refusal('meeting_not_found'));
+  assert.ok(await exists(path.join(ws, 'context-updates', 'meeting-queue', draft.id, 'notes.md')), 'the draft and its file are still there');
+  await service.runNow(later);
+  assert.ok(!await exists(path.join(ws, 'context-updates', 'meeting-queue', draft.id)), 'the batch cleans it up, as before');
+});
+
+test('#487 review 7: a damaged file entry, or a recording marked done without its transcript, never goes into a digest, on both paths', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const dir = (id: string) => path.join(ws, 'context-updates', 'meeting-queue', id);
+
+  // A file entry without its hash: the meeting is unreadable, and no file is lost.
+  const two = await queueMeeting(service, 'Two files', '2026-10-26', [['first.md', Buffer.from('1')], ['second.md', Buffer.from('2')]]);
+  await editManifest(ws, two, (d) => { delete (d['files'] as Record<string, unknown>[])[0]!['sha256']; });
+  await assert.rejects(service.runNow(new Date(), one(two)), refusal('meeting_unreadable'));
+  const batch = await service.runNow(new Date('2026-10-26T18:00:00'));
+  assert.equal(batch.context_update, undefined);
+  assert.match(batch.message, new RegExp(`cannot be read: ${two}`));
+  assert.ok(await exists(path.join(dir(two), 'first.md')) && await exists(path.join(dir(two), 'second.md')));
+
+  // A recording marked done with no transcript: refused alone, and left in the queue by the batch.
+  const rec = await service.createMeeting({ title: 'Recorded', meeting_date: '2026-10-27' });
+  await service.addFile(rec.id, 'r.wav', silentWav());
+  await service.queue(rec.id);
+  await editManifest(ws, rec.id, (d) => { ((d['files'] as Record<string, unknown>[])[0]!['recording'] as Record<string, unknown>)['status'] = 'done'; });
+  await assert.rejects(service.runNow(new Date(), one(rec.id)), (err: Error) => refusal('meeting_not_ready')(err) && /transcript is not among its files/.test(err.message));
+  const again = await service.runNow(new Date('2026-10-27T18:00:00'));
+  assert.equal(again.context_update, undefined);
+  assert.match(again.message, new RegExp(`${rec.id} was left in the queue`));
+  assert.ok(await exists(path.join(dir(rec.id), 'r.wav')));
+  assert.equal((await updates.list()).length, 0);
+});
+
+test('#487 recheck 1: over HTTP, any one-meeting field without the others is refused, never a digest of the whole queue', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const a = await queueMeeting(service, 'A', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  const b = await queueMeeting(service, 'B', '2026-10-27', [['b.md', Buffer.from('B')]]);
+  const app = express();
+  app.use(express.json());
+  app.use('/api/routines', routineRoutes);
+  app.use(errorHandler);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((r) => server.once('listening', r));
+  t.after(() => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/routines/meeting-digest/run`;
+  const post = (body: unknown) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+  for (const body of [{ workspace: ws, expect_analysis: 'manual' }, { workspace: ws }, { expect_analysis: 'manual' }, { meeting: a }, { meeting: a, workspace: ws }]) {
+    assert.equal((await post(body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await updates.list()).length, 0, 'no digest');
+  assert.deepEqual(await queued(service), [a, b], 'both meetings still queued');
+
+  // All three: that meeting alone.
+  const alone = await post({ meeting: b, workspace: ws, expect_analysis: 'manual' });
+  assert.equal(alone.status, 201);
+  assert.deepEqual(await queued(service), [a]);
+});
+
+test('#487 recheck 2: a manifest edited after its digest was published keeps the folder on hold, on both paths', async (t) => {
+  const ws = await workspace(t);
+  const service = new MeetingDigestService();
+  const cutAfterPublish = async (run: () => Promise<unknown>) => {
+    const stop = mock.method(MeetingDigestService.prototype as unknown as { release: () => Promise<unknown> }, 'release', async () => { throw new Error('the dashboard stopped'); });
+    try { await run(); } finally { stop.mock.restore(); }
+  };
+  const a = await queueMeeting(service, 'A', '2026-10-26', [['a.md', Buffer.from('A')]]);
+  await cutAfterPublish(() => service.runNow(new Date('2026-10-26T10:00:00'), one(a)));
+  assert.match(JSON.parse(await fsp.readFile(batchFile(ws), 'utf-8')).expected[0].manifest_sha256, /^[0-9a-f]{64}$/, 'the batch records the manifest');
+  await editManifest(ws, a, (d) => { d['title'] = 'A, renamed while the dashboard was down'; });
+  const finished = await service.runIfDue(new Date('2026-10-26T10:01:00'));
+  assert.match(finished!.message, new RegExp(`${a} is in .* but a file changed afterwards`));
+  assert.equal((await service.loadMeeting(a)).title, 'A, renamed while the dashboard was down', 'the edit is kept');
+  const done = path.join(ws, 'context-updates', finished!.context_update!, 'update.md');
+  await fsp.writeFile(done, (await fsp.readFile(done, 'utf-8')).replace(/status: \w+/, 'status: done'));
+
+  const b = await queueMeeting(service, 'B', '2026-10-27', [['b.md', Buffer.from('B')]]);
+  await cutAfterPublish(() => service.runNow(new Date('2026-10-27T18:00:00')));
+  await editManifest(ws, b, (d) => { d['meeting_date'] = '2026-10-28'; });
+  const again = await service.runIfDue(new Date('2026-10-27T18:01:00'));
+  assert.match(again!.message, new RegExp(`${b} is in .* but a file changed afterwards`));
+  assert.ok(await exists(path.join(ws, 'context-updates', 'meeting-queue', b, 'b.md')));
 });

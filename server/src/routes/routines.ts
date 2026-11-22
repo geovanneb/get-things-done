@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { param } from '../utils/params';
 import { RoutineService, routineId } from '../services/routineService';
 import { MeetingTranscriptionService } from '../services/meetingTranscription';
+import { parseOneMeetingRun } from '../services/meetingDigestService';
 
 import { TranscriptionModelService, CATALOG, runnableModel } from '../services/transcriptionModels';
 const router = Router();
@@ -80,9 +81,13 @@ router.put('/meeting-digest', async (req: Request, res: Response) => {
   res.json(await service.updateMeetingDigest(body(req)));
 });
 
-// POST /api/routines/meeting-digest/run  make a digest now from the queue
-router.post('/meeting-digest/run', async (_req: Request, res: Response) => {
-  res.status(201).json(await service.runMeetingDigestNow());
+// POST /api/routines/meeting-digest/run  make a digest now from the queue, or, with
+// { meeting, workspace, expect_analysis }, of that one queued meeting alone (#487)
+router.post('/meeting-digest/run', async (req: Request, res: Response) => {
+  const b = body(req);
+  // Any one-meeting field makes it a one-meeting request, which needs all three: never the whole queue by mistake.
+  const one = ['meeting', 'workspace', 'expect_analysis'].some((k) => b[k] !== undefined);
+  res.status(201).json(await service.runMeetingDigestNow(new Date(), one ? parseOneMeetingRun(b) : undefined));
 });
 
 // POST /api/routines  { title, enabled?, schedule, catch_up?, task }

@@ -424,6 +424,11 @@ export interface DigestRunResult {
   context_update?: string;
   /** False when nothing was made, finished, removed or failed. Such scheduled runs stay out of the history. */
   did_something: boolean;
+  /**
+   * What the automatic analysis did with the digest, when it tried: `paused_waiting` when another run was going and the
+   * routine is paused, so it will not start by itself until the routine is resumed (a digest of one meeting, #487).
+   */
+  analysis?: 'started' | 'waiting' | 'paused_waiting' | 'not_started';
 }
 
 export interface DigestView {
@@ -450,7 +455,11 @@ export interface DigestView {
   max_meetings_limit: number;
 }
 
-interface BatchMeeting { id: string; files: { file: string; sha256: string }[]; recordings?: DigestRecording[] }
+/**
+ * `manifest_sha256`: the meeting's manifest as it was when the batch was written, so a manifest edited before the
+ * meeting left the queue keeps its folder (#487). Batches written before it have none: then only the files are checked.
+ */
+interface BatchMeeting { id: string; files: { file: string; sha256: string }[]; recordings?: DigestRecording[]; manifest_sha256?: string }
 /** The digest being made: which meetings, exactly which files (saved name and hash) it must hold, and how far it got. */
 interface Batch { meetings: string[]; expected: BatchMeeting[]; update_id: string | null; published: boolean; started_at: string; owner?: BatchOwner }
 /** The dashboard building the digest, and its build's token: only it may change the batch while it lives. */
@@ -473,6 +482,19 @@ function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode: status });
 }
 
+/**
+ * Why a digest of one chosen meeting (#487) was not made, found before anything was written: answered as an HTTP error
+ * with a `code` (and the open digest, when one waits), never as a run in the history.
+ */
+export interface RefusalDetails { code: string; meeting: string; open_digest?: string; expect_analysis?: AnalysisExpectation }
+export class DigestRefusal extends Error {
+  readonly details: RefusalDetails;
+  constructor(readonly statusCode: number, message: string, details: RefusalDetails) {
+    super(message);
+    this.details = details;
+  }
+}
+
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
 
 function isDateOnly(value: string): boolean {
@@ -484,6 +506,37 @@ function isDateOnly(value: string): boolean {
 function str(value: unknown, dateOnly = false): string {
   if (value instanceof Date) return dateOnly ? value.toISOString().slice(0, 10) : value.toISOString();
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * What a digest's analysis does once a manual digest is made (#487): nothing by itself (`manual`), the dashboard tries to
+ * start it and, when another run is going, starts it after that run (`auto`), or tries once, and with another run going
+ * leaves it to the user or to resuming the routine (`auto_paused`). The confirmation says one of these, and the request
+ * names it: a digest is made only while it still holds.
+ */
+export type AnalysisExpectation = 'manual' | 'auto' | 'auto_paused';
+const EXPECTATIONS: AnalysisExpectation[] = ['manual', 'auto', 'auto_paused'];
+export function analysisExpectation(settings: Pick<DigestSettings, 'enabled' | 'auto_analyze'>): AnalysisExpectation {
+  return !settings.auto_analyze ? 'manual' : settings.enabled ? 'auto' : 'auto_paused';
+}
+
+/** A request for a digest of one meeting (#487), bound to what its confirmation showed. */
+export interface OneMeetingRun {
+  meeting: string;
+  /** The workspace the confirmation was shown in. */
+  workspace: string;
+  /** What the confirmation said the analysis does. */
+  expect_analysis: AnalysisExpectation;
+  /** Records an interrupted digest that was finished or undone first, as a run of its own. */
+  onRecovered?: (result: DigestRunResult) => Promise<void>;
+}
+
+/** The body of `POST /api/routines/meeting-digest/run` for one meeting: every field is required. */
+export function parseOneMeetingRun(body: Record<string, unknown>): Omit<OneMeetingRun, 'onRecovered'> {
+  const meeting = queueId(body['meeting']);
+  if (typeof body['workspace'] !== 'string' || !body['workspace']) throw httpError(400, 'Invalid workspace: send the workspace the meeting was shown in');
+  if (!EXPECTATIONS.includes(body['expect_analysis'] as AnalysisExpectation)) throw httpError(400, 'Invalid expect_analysis: use manual, auto or auto_paused');
+  return { meeting, workspace: body['workspace'], expect_analysis: body['expect_analysis'] as AnalysisExpectation };
 }
 
 /** A queued meeting id from a request. Strict, because it becomes a folder name. */
@@ -889,7 +942,8 @@ export class MeetingDigestService {
       // A batch that lost a recording's link must stop the job: its audio may go only with a verified transcript.
       if (m['recordings'] !== undefined && (!Array.isArray(m['recordings']) || recordings.length !== m['recordings'].length)) return [];
       return typeof m['id'] === 'string' && QUEUE_ID.test(m['id']) && Array.isArray(m['files']) && files.length === m['files'].length && files.length > 0
-        ? [{ id: m['id'], files: files.map((f) => ({ file: f['file'] as string, sha256: f['sha256'] as string })), ...(recordings.length ? { recordings } : {}) }] : [];
+        ? [{ id: m['id'], files: files.map((f) => ({ file: f['file'] as string, sha256: f['sha256'] as string })), ...(recordings.length ? { recordings } : {}),
+          ...(typeof m['manifest_sha256'] === 'string' && SHA256.test(m['manifest_sha256']) ? { manifest_sha256: m['manifest_sha256'] } : {}) }] : [];
     }) : [];
     const updateId = typeof o['update_id'] === 'string' && /^CU-\d{4}-\d{4}$/.test(o['update_id']) ? o['update_id'] : null;
     if (!Array.isArray(o['expected']) || expected.length !== o['expected'].length || expected.length === 0
@@ -1022,6 +1076,7 @@ export class MeetingDigestService {
     const status = data['status'] === 'queued' ? 'queued' : data['status'] === 'draft' ? 'draft' : null;
     const meetingDate = str(data['meeting_date'], true);
     if (!status || !isDateOnly(meetingDate)) throw httpError(400, `The queued meeting ${id} cannot be read (${MANIFEST})`);
+    if (data['files'] !== undefined && !Array.isArray(data['files'])) throw httpError(400, `The queued meeting ${id} cannot be read: its list of files is damaged (${MANIFEST})`);
     const files = Array.isArray(data['files']) ? (data['files'] as unknown[]).flatMap((f) => {
       const o = obj(f);
       const recording = parseRecording(o['recording']);
@@ -1029,6 +1084,11 @@ export class MeetingDigestService {
       return typeof o['name'] === 'string' && plainName(o['name']) && typeof o['sha256'] === 'string'
         ? [{ name: o['name'], size: Number(o['size']) || 0, sha256: o['sha256'], ...(recording ? { recording } : {}), ...(typeof o['capture'] === 'string' ? { capture: o['capture'] } : {}) }] : [];
     }) : [];
+    // A listed file that cannot be read (no name, or no hash) would otherwise just be left out: a digest would then take
+    // the others and remove its folder, file and all. The whole meeting is unreadable instead.
+    if (Array.isArray(data['files']) && files.length !== (data['files'] as unknown[]).length) {
+      throw httpError(400, `The queued meeting ${id} cannot be read: an entry in its list of files is damaged (${MANIFEST})`);
+    }
     // A live draft or target that is there but cannot be trusted, or a draft its meeting does not list as a file: the
     // whole meeting is unreadable, so nothing transcribes, digests or cleans it, and every file stays for a person to see.
     const listed = Array.isArray(data['files']) ? (data['files'] as unknown[]).map(obj) : [];
@@ -1362,13 +1422,60 @@ export class MeetingDigestService {
   }
 
   /** Makes a digest straight away, whatever the schedule says. The caller holds the routine lock. */
-  async runNow(now: Date): Promise<DigestRunResult> {
+  async runNow(now: Date, one?: OneMeetingRun): Promise<DigestRunResult> {
+    if (one) return this.runOne(now, one);
     const recovered = await this.recover();
     if (recovered === BUSY) return { status: 'error', message: 'A digest is being made right now, in this or another dashboard; try again when it is done.', did_something: false };
     if (recovered?.status === 'error') return this.stopped(recovered, now, true);
     const result = await this.make(await this.readSettings(), now);
     await this.writeJson('meeting-digest-state.json', { ...await this.readState(), ...this.stateFor(result, now) });
     return combine(combine(recovered, result), await this.analyzeIfWanted(now, true)) ?? result;
+  }
+
+  /**
+   * A digest of one chosen meeting (#487), only while it is ready (queued, not on hold, every recording transcribed, its
+   * files unchanged since it was queued), rechecked under the queue lock. Anything else is refused with a DigestRefusal
+   * before anything is written, and so is a request confirmed in another workspace or under other analysis settings.
+   * No other meeting ever takes its place: the batch file names it alone, so finishing or undoing an interrupted run
+   * touches only it. An interrupted digest found first is finished or undone and recorded as a run of its own; the
+   * request then goes on, or is refused (one open digest at a time still holds), and the analysis step only ever
+   * starts the digest of this meeting. The caller holds the routine lock, so the settings cannot change meanwhile.
+   */
+  private async runOne(now: Date, one: OneMeetingRun): Promise<DigestRunResult> {
+    const { meeting } = one;
+    if (path.resolve(one.workspace) !== path.resolve(workspaceService.getWorkspacePath())) {
+      throw new DigestRefusal(409, 'This meeting was shown in another workspace. Switch to it, then try again.', { code: 'other_workspace', meeting });
+    }
+    const expectation = analysisExpectation(await this.readSettings());
+    if (expectation !== one.expect_analysis) {
+      throw new DigestRefusal(409, 'The analysis settings changed since you confirmed. Check what happens now, then confirm again.', { code: 'analysis_setting_changed', meeting, expect_analysis: expectation });
+    }
+    const recovered = await this.recover();
+    if (recovered === BUSY) {
+      throw new DigestRefusal(409, 'A digest is being made right now, in this or another dashboard; try again when it is done.', { code: 'digest_busy', meeting });
+    }
+    if (recovered) {
+      const recorded = recovered.status === 'error' ? await this.stopped(recovered, now, true) : recovered;
+      if (recovered.status !== 'error') await this.writeJson('meeting-digest-state.json', { ...await this.readState(), ...this.stateFor(recovered, now) });
+      await one.onRecovered?.(recorded);
+      // Not resolved (the batch is still there, or cannot be read): nothing new is made until it is.
+      if (await this.readBatch().then(Boolean, () => true)) {
+        throw new DigestRefusal(409, `${recovered.message} ${meeting} stays in the queue.`, { code: 'digest_interrupted', meeting });
+      }
+    }
+    const settings = await this.readSettings();
+    const result = await this.make(settings, now, meeting);
+    await this.writeJson('meeting-digest-state.json', { ...await this.readState(), ...this.stateFor(result, now) });
+    if (!result.context_update) return result;
+    const analysis = await this.analyzeIfWanted(now, true, result.context_update);
+    if (analysis?.analysis === 'waiting' && !settings.enabled) {
+      // A paused routine starts nothing on its own: the user starts it, or resumes the routine.
+      return combine(result, {
+        ...analysis, analysis: 'paused_waiting',
+        message: `The analysis of ${result.context_update} waits for another run to end, and the routine is paused, so it does not start by itself: start it from the update when that run ends, or resume the routine.`,
+      })!;
+    }
+    return combine(result, analysis) ?? result;
   }
 
   /**
@@ -1379,13 +1486,15 @@ export class MeetingDigestService {
    * even a failed one, is never started again by itself: the user starts it from the digest's page. A paused job
    * starts nothing on its own; "Make digest now" is the user's own click, so its digest is analyzed even then.
    */
-  private async analyzeIfWanted(now: Date, manual: boolean): Promise<DigestRunResult | null> {
+  private async analyzeIfWanted(now: Date, manual: boolean, only?: string): Promise<DigestRunResult | null> {
     const settings = await this.readSettings().catch(() => null);
     if (!settings || !autoAnalysisOn(settings, manual)) return null;
     if (await this.readBatch().catch(() => true)) return null; // a digest is still being handed over, or the batch is damaged
     const updates = await contextUpdateService.list().catch(() => []);
     const open = updates.find((u) => u.origin === DIGEST_ORIGIN && u.kind === DIGEST_KIND && u.status !== 'done');
     if (!open || open.status !== 'ready') return null;
+    // A digest of one meeting starts the analysis of that digest only, never of another one (#487).
+    if (only && open.id !== only) return null;
     const state = await this.readState();
     const before = state.analysis?.update_id === open.id ? state.analysis : null;
     if (!autoAnalysisDue(settings, state.analysis, open, (await this.runner.get(open.id)) !== null, manual)) return null;
@@ -1403,7 +1512,7 @@ export class MeetingDigestService {
     await this.writeJson('meeting-digest-state.json', { ...await this.readState(), analysis });
     // A scheduled check that is still waiting stays out of the history.
     if (analysis.status === 'waiting' && before?.status === 'waiting' && !manual) return null;
-    return { status: analysis.status === 'not_started' ? 'error' : 'ok', message: analysis.message, context_update: open.id, did_something: true };
+    return { status: analysis.status === 'not_started' ? 'error' : 'ok', message: analysis.message, context_update: open.id, did_something: true, analysis: analysis.status };
   }
 
   /**
@@ -1441,10 +1550,10 @@ export class MeetingDigestService {
         if (batch.update_id && await contextUpdateService.published(batch.update_id)) {
           // Recorded before anything else, so a digest removed while this recovery fails is held, not made again.
           if (!batch.published) await this.writeJson('meeting-digest-batch.json', { ...batch, published: true });
-          const kept = await this.release(batch);
+          const { kept, changed } = await this.release(batch);
           return {
-            status: kept.length ? 'error' : 'ok',
-            message: `Finished digest ${batch.update_id}, which was interrupted.${keptNote(kept)}`,
+            status: kept.length || changed.length ? 'error' : 'ok',
+            message: `Finished digest ${batch.update_id}, which was interrupted.${keptNote(kept)}${changedNote(changed, batch.update_id)}`,
             context_update: batch.update_id,
             did_something: true,
           };
@@ -1482,9 +1591,10 @@ export class MeetingDigestService {
   /**
    * After the digest is published: each meeting the digest fully holds gets a receipt, then its queue folder is
    * removed, then the batch file goes. A meeting it does not fully hold stays queued. Each step can be repeated.
-   * Returns the meetings that stayed.
+   * Returns the meetings that stayed (`kept`), and those the digest holds whose queue folder changed since the batch
+   * was written (`changed`): their folder is never removed, so an edit made meanwhile is not lost; they stay on hold.
    */
-  private async release(batch: Batch): Promise<string[]> {
+  private async release(batch: Batch): Promise<{ kept: string[]; changed: string[] }> {
     const routines = await this.inWorkspace(this.routinesDir(), true);
     const receipts = await workspaceEntry(workspaceService.getWorkspacePath(), path.join(routines, 'meeting-digest-receipts.jsonl'), true);
     const done = new Set((await fsp.readFile(receipts, 'utf-8').catch(() => '')).split('\n').flatMap((line) => {
@@ -1505,15 +1615,61 @@ export class MeetingDigestService {
       await fsp.appendFile(receipts, JSON.stringify({ meeting: id, update_id: batch.update_id, files, ...(recordings ? { recordings } : {}), at: new Date().toISOString() }) + '\n', { mode: 0o600 });
     }
     await reserveIds(released);
+    const changed: string[] = [];
     for (const id of released) {
       const dir = await this.inWorkspace(this.meetingDir(id)).catch((err: NodeJS.ErrnoException) => {
         if (err.code === 'ENOENT') return null;
         throw err;
       });
-      if (dir) await fsp.rm(dir, { recursive: true, force: true });
+      if (!dir) continue;
+      // The folder is removed only while it still holds exactly what went into the digest: an edit made after the
+      // batch was written (while a dashboard was down, say) would otherwise be lost. Such a meeting waits on hold.
+      if (!await this.unchangedSince(batch.expected.find((e) => e.id === id)!, dir)) {
+        changed.push(id);
+        await this.hold([id], `Its digest ${batch.update_id} holds the meeting as it was; a file changed afterwards, so its folder was kept. Check it, then queue it again or remove it.`);
+        continue;
+      }
+      await fsp.rm(dir, { recursive: true, force: true });
     }
     await this.clearBatch();
-    return kept;
+    return { kept, changed };
+  }
+
+  /**
+   * Whether a meeting's queue folder holds only what its digest took: its manifest unchanged since the batch was written
+   * (when the batch recorded it; a readable one otherwise), every listed file on disk
+   * with its recorded hash, each of those hashes one the batch recorded, and nothing else in the folder.
+   */
+  private async unchangedSince(want: BatchMeeting, dir: string): Promise<boolean> {
+    const meeting = await this.readMeeting(want.id).catch(() => null);
+    if (!meeting) return false;
+    if (want.manifest_sha256) {
+      const manifest = await fileInside(dir, MANIFEST).then((f) => hashFile(f), () => null).catch(() => null);
+      if (manifest?.sha256 !== want.manifest_sha256) return false;
+    }
+    const known = new Set([...want.files.map((f) => f.sha256), ...(want.recordings ?? []).flatMap((r) => [r.source_sha256, r.transcript_sha256])]);
+    for (const f of meeting.files) {
+      if (!known.has(f.sha256)) return false;
+      const file = await fileInside(dir, f.name).catch(() => null);
+      if (!file || (await hashFile(file).catch(() => null))?.sha256 !== f.sha256) return false;
+    }
+    const listed = new Set([MANIFEST, ...meeting.files.map((f) => f.name)]);
+    const entries = await fsp.readdir(dir).catch(() => null);
+    return Boolean(entries && entries.every((name) => listed.has(name) || name === '.DS_Store'));
+  }
+
+  /**
+   * The open digest, for deciding whether a new one may be made. Unlike the listing, an update that is there but cannot
+   * be read refuses: it may be the open digest, and making a second one would break the one-open-digest rule.
+   */
+  private async admissionOpenDigest(only?: string): Promise<string | null> {
+    const { updates, unreadable } = await contextUpdateService.listStrict();
+    if (unreadable.length) {
+      const message = `Context update ${unreadable.join(', ')} cannot be read, so it cannot be told whether a digest waits for review; no digest was made. Fix or remove ${unreadable.length === 1 ? 'it' : 'them'}, then try again.`;
+      if (only) throw new DigestRefusal(503, message, { code: 'digest_state_unknown', meeting: only });
+      throw new Error(message);
+    }
+    return updates.find((u) => u.origin === DIGEST_ORIGIN && u.kind === DIGEST_KIND && u.status !== 'done')?.id ?? null;
   }
 
   /** True when the published digest records the meeting with exactly its files, and every one of them (and its readable copy) is there unchanged. */
@@ -1547,11 +1703,11 @@ export class MeetingDigestService {
    * file, which reserves them (removal, uploads and every other change refuse a meeting named in it). Without the
    * lock: build the digest, which may copy large files. Under the lock again: hand the meetings over, or clean up.
    */
-  private async make(settings: DigestSettings, now: Date): Promise<DigestRunResult> {
+  private async make(settings: DigestSettings, now: Date, only?: string): Promise<DigestRunResult> {
     const token = randomUUID();
     building.add(token);
     try {
-      return await this.build(settings, now, token);
+      return await this.build(settings, now, token, only);
     } finally {
       building.delete(token);
     }
@@ -1566,15 +1722,18 @@ export class MeetingDigestService {
     });
   }
 
-  private async build(settings: DigestSettings, now: Date, token: string): Promise<DigestRunResult> {
+  private async build(settings: DigestSettings, now: Date, token: string, only?: string): Promise<DigestRunResult> {
     try {
       const plan = await this.exclusive(async (): Promise<DigestRunResult | MakePlan> => {
         if (await this.readBatch()) throw new Error('An earlier digest is not finished yet');
-        const removed = await this.removeAbandoned(now);
-        const open = await this.openDigest();
+        // The queue-wide cleanup of abandoned drafts is the batch's job: a request for one meeting touches no other.
+        const removed = only ? 0 : await this.removeAbandoned(now);
+        const open = await this.admissionOpenDigest(only);
         const keepRecordings = await new TranscriptionModelService().keepRecordings();
         const { meetings, problems } = await this.readQueue();
-        const queued = meetings.filter(readyForDigest);
+        // One chosen meeting: refused, before anything is written, unless it alone can go into a digest now.
+        if (only) refuseUnlessReady(only, meetings, problems, open);
+        const queued = meetings.filter((m) => readyForDigest(m) && (!only || m.id === only));
         const transcribing = meetings.filter((m) => m.status === 'queued' && !m.held && waitsForTranscript(m)).length;
         const waitNote = transcribing ? ` ${transcribing} meeting${transcribing === 1 ? ' waits' : 's wait'} for transcription.` : '';
         const unreadable = problems.length ? ` ${problems.length} queued meeting${problems.length === 1 ? '' : 's'} cannot be read: ${problems.map((p) => p.id).join(', ')}.` : '';
@@ -1593,6 +1752,7 @@ export class MeetingDigestService {
         // Oldest first, up to max_meetings and max_characters of readable text: the first meeting that does not fit
         // waits for the next digest (and so do the ones after it), except that a digest always takes at least one.
         const chosen: { meeting: QueuedMeeting; files: { from: string; file: QueuedFile }[]; characters: number }[] = [];
+        const manifests = new Map<string, string>();
         const broken: string[] = [];
         let characters = 0;
         for (const meeting of queued) {
@@ -1610,10 +1770,16 @@ export class MeetingDigestService {
             files.push({ from, file });
             size += await readableSizeOf(from, file.name);
           }
-          if (!ok) { broken.push(meeting.id); continue; }
+          if (!ok || transcriptMissing(meeting)) { broken.push(meeting.id); continue; }
           if (chosen.length > 0 && characters + size > settings.max_characters) break;
+          const manifest = dir ? await fileInside(dir, MANIFEST).then((f) => hashFile(f), () => null).catch(() => null) : null;
+          if (!manifest) { broken.push(meeting.id); continue; }
+          manifests.set(meeting.id, manifest.sha256);
           chosen.push({ meeting, files, characters: size });
           characters += size;
+        }
+        if (only && broken.length) {
+          throw new DigestRefusal(409, `${only} was not put into a digest: a file is missing or changed since it was queued. It stays in the queue.`, { code: 'meeting_changed', meeting: only });
         }
         const brokenNote = broken.length ? ` ${broken.join(', ')} ${broken.length === 1 ? 'was' : 'were'} left in the queue: a file is missing or changed since it was queued.` : '';
         if (chosen.length === 0) return { status: 'error', message: `No digest was made.${brokenNote}${unreadable}`, did_something: true };
@@ -1652,7 +1818,7 @@ export class MeetingDigestService {
 
         const batch: Batch = {
           meetings: digestMeetings.map((m) => m.id),
-          expected: digestMeetings.map((m) => ({ id: m.id, files: m.files.map((f) => ({ file: f.file, sha256: f.sha256 })), ...(m.recordings ? { recordings: m.recordings } : {}) })),
+          expected: digestMeetings.map((m) => ({ id: m.id, files: m.files.map((f) => ({ file: f.file, sha256: f.sha256 })), ...(m.recordings ? { recordings: m.recordings } : {}), manifest_sha256: manifests.get(m.id)! })),
           update_id: null,
           published: false,
           started_at: now.toISOString(),
@@ -1690,22 +1856,31 @@ export class MeetingDigestService {
           });
           // Published, but reading it back failed: finish the handoff as usual.
         }
-        const kept = await this.asOwner(token, async () => {
+        const { kept, changed } = await this.asOwner(token, async () => {
           batch.published = true;
           await this.writeJson('meeting-digest-batch.json', batch);
           return this.release(batch);
         });
         const updateId = batch.update_id!;
         const left = queued.length - chosen.length - broken.length;
+        if (only) {
+          return {
+            status: kept.length || changed.length ? 'error' : 'ok',
+            message: `Made digest ${updateId} from ${only} alone. Run the analyze command to get proposals.${keptNote(kept)}${changedNote(changed, updateId)}`,
+            context_update: updateId,
+            did_something: true,
+          };
+        }
         return {
-          status: broken.length || problems.length || kept.length ? 'error' : 'ok',
+          status: broken.length || problems.length || kept.length || changed.length ? 'error' : 'ok',
           message: `Made digest ${updateId} from ${chosen.length} meeting${chosen.length === 1 ? '' : 's'}. Run the analyze command to get proposals.`
             + (left > 0 ? ` ${left} more wait for the next digest (at most ${settings.max_meetings} meetings and ${settings.max_characters.toLocaleString('en-US')} characters of text per digest).` : '')
-            + (chosen.length === 1 && characters > settings.max_characters ? ` ${chosen[0]!.meeting.id} is longer than the text per digest, so it has a digest of its own.` : '') + brokenNote + keptNote(kept) + unreadable,
+            + (chosen.length === 1 && characters > settings.max_characters ? ` ${chosen[0]!.meeting.id} is longer than the text per digest, so it has a digest of its own.` : '') + brokenNote + keptNote(kept) + changedNote(changed, updateId) + unreadable,
           context_update: updateId,
           did_something: true,
         };
     } catch (err) {
+      if (err instanceof DigestRefusal) throw err;
       return { status: 'error', message: `The meeting digest failed: ${(err as Error).message}`, did_something: true };
     }
   }
@@ -1778,6 +1953,38 @@ function readyForDigest(meeting: QueuedMeeting): boolean {
   return meeting.status === 'queued' && !meeting.held && !waitsForTranscript(meeting);
 }
 
+/**
+ * Refuses a digest of the one meeting `id` unless it can go into one now: no digest waits for review, and the meeting is
+ * in the queue, readable, queued, not on hold and transcribed. Its files are checked by hash after this, as for any
+ * digest. Runs under the queue lock, so what it checks cannot change before the batch file reserves the meeting.
+ */
+function refuseUnlessReady(id: string, meetings: QueuedMeeting[], problems: { id: string; reason: string }[], open: string | null): void {
+  if (open) {
+    throw new DigestRefusal(409, `Digest ${open} waits for review, so no new digest can be made until it is done. ${id} stays in the queue.`, { code: 'digest_open', meeting: id, open_digest: open });
+  }
+  const problem = problems.find((p) => p.id === id);
+  if (problem) throw new DigestRefusal(409, `${id} cannot be read, so it was not put into a digest: ${problem.reason}`, { code: 'meeting_unreadable', meeting: id });
+  const meeting = meetings.find((m) => m.id === id);
+  if (!meeting) throw new DigestRefusal(404, `${id} is no longer in the queue: it may already be in a digest.`, { code: 'meeting_not_found', meeting: id });
+  const why = meeting.status !== 'queued' ? 'it is not queued yet: its files are still being added'
+    : meeting.held ? 'it is on hold: queue it again first'
+      : waitsForTranscript(meeting) ? 'it waits for its transcript'
+        : transcriptMissing(meeting) ? 'a recording is marked transcribed, but its transcript is not among its files' : null;
+  if (why) throw new DigestRefusal(409, `${id} cannot go into a digest now: ${why}.`, { code: 'meeting_not_ready', meeting: id });
+}
+
+/** A recording counted as transcribed whose transcript is not a file of the meeting, with its hash: never digested. */
+function transcriptMissing(meeting: QueuedMeeting): boolean {
+  return meeting.files.some((f) => f.recording && transcribed(f.recording)
+    && !(f.recording.transcript && meeting.files.some((o) => o.name === f.recording!.transcript && o.sha256 === f.recording!.transcript_sha256)));
+}
+
+/** Meetings a digest holds whose queue folder changed afterwards: kept, on hold. */
+function changedNote(changed: string[], updateId: string | null): string {
+  if (changed.length === 0) return '';
+  return ` ${changed.join(', ')} ${changed.length === 1 ? 'is' : 'are'} in ${updateId} as ${changed.length === 1 ? 'it was' : 'they were'}, but a file changed afterwards, so ${changed.length === 1 ? 'its folder stays' : 'their folders stay'} in the queue on hold.`;
+}
+
 /** The meetings a published digest did not fully hold: they stay queued, so nothing is lost. */
 function keptNote(kept: string[]): string {
   if (kept.length === 0) return '';
@@ -1793,5 +2000,6 @@ function combine(first: DigestRunResult | null, second: DigestRunResult | null):
     message: `${first.message} ${second.message}`,
     ...(second.context_update ?? first.context_update ? { context_update: second.context_update ?? first.context_update } : {}),
     did_something: first.did_something || second.did_something,
+    ...(second.analysis ?? first.analysis ? { analysis: second.analysis ?? first.analysis } : {}),
   };
 }

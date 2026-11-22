@@ -57,6 +57,7 @@
     "test:speaker-choices": "tsx src/utils/speakerChoices.test.ts",
     "test:voiceprints": "tsx src/utils/voiceprints.test.ts",
     "test:auto-prepare": "tsx src/utils/autoPrepare.test.ts",
+    "test:process-now": "tsx src/utils/processNow.test.ts",
     "test:format": "tsx src/utils/format.test.ts"
   },
   "dependencies": {
