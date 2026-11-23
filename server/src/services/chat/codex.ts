@@ -2,9 +2,10 @@ import * as os from 'os';
 import type { ChildProcess } from 'child_process';
 import { findCommand } from '../aiToolDetection';
 import { killTree, launch, stopTree } from '../agentRunner';
+import { CHOSEN_FOLDER_PROBLEM, accountKey, holdFolder, withChosenFolder } from '../assistantAccountFolder';
 import { RpcConnection } from './rpc';
 import {
-  isObject, isoFromEpoch, shortDetail, turnError,
+  accountChangedError, isObject, isoFromEpoch, shortDetail, turnError,
   type ChatAdapter, type ChatEvent, type ChatModel, type ChatOpenOptions, type ChatProblem, type ChatSession, type ProviderStatus,
   type TurnError, type TurnOutcome, type UsageWindow,
 } from './types';
@@ -103,6 +104,30 @@ export function codexEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
   return env;
 }
 
+/** codexEnv, with `CODEX_HOME` set to the account chosen in Settings → Assistant accounts (#505), if any. */
+export function codexChosenEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return withChosenFolder('codex', codexEnv(base));
+}
+
+/**
+ * Who is signed in to the Codex config folder `env` points to (`CODEX_HOME`), from Codex's own `account/read`: the
+ * same check the chat makes. No thread is started and no model is called. Null when it could not be checked.
+ */
+export async function codexAccount(bin: string, env: NodeJS.ProcessEnv): Promise<{ signed_in: boolean; method: string | null; email: string | null; plan: string | null } | null> {
+  let conn: { child: ChildProcess; rpc: RpcConnection };
+  try { conn = await connect(bin, os.homedir(), env); } catch { return null; }
+  try {
+    const read = await conn.rpc.request<Record<string, unknown>>('account/read', {}, PROBE_TIMEOUT_MS).catch(() => null);
+    if (!read) return null;
+    if (read['requiresOpenaiAuth'] === false) return { signed_in: true, method: 'provider', email: null, plan: null };
+    const account = isObject(read['account']) ? read['account'] : null;
+    if (!account) return { signed_in: false, method: null, email: null, plan: null };
+    return { signed_in: true, method: shortDetail(account['type'], 40), email: shortDetail(account['email']), plan: shortDetail(account['planType'], 40) };
+  } finally {
+    killTree(conn.child, true);
+  }
+}
+
 export function codexModels(raw: unknown): ChatModel[] {
   const list = isObject(raw) && Array.isArray(raw['data']) ? raw['data'] : [];
   return list.flatMap((m): ChatModel[] => {
@@ -180,19 +205,25 @@ export function refuse(method: string): unknown {
 export class CodexChatAdapter implements ChatAdapter {
   id = 'codex' as const;
   label = 'OpenAI Codex';
-  private cached: { at: number; workspace: string; result: Promise<ProviderStatus> } | null = null;
+  private cached: { at: number; workspace: string; folder: string; result: Promise<ProviderStatus> } | null = null;
 
   constructor(
     private readonly binary: () => string | null = () => findCommand('codex'),
-    private readonly env: () => NodeJS.ProcessEnv = () => codexEnv(),
+    private readonly env: () => NodeJS.ProcessEnv = () => codexChosenEnv(),
   ) {}
 
+  /** The account checks use now (folder and sign-in generation): a change of account is checked again at once. */
+  private folder(): string {
+    try { return accountKey('codex', this.env()); } catch { return '\0unusable'; }
+  }
+
   status(workspace: string, options: { fresh?: boolean } = {}): Promise<ProviderStatus> {
-    if (!options.fresh && this.cached && this.cached.workspace === workspace && Date.now() - this.cached.at < STATUS_TTL_MS) {
+    const folder = this.folder();
+    if (!options.fresh && this.cached && this.cached.workspace === workspace && this.cached.folder === folder && Date.now() - this.cached.at < STATUS_TTL_MS) {
       return this.cached.result.then((s) => ({ ...s, limits: lastLimits.windows ?? s.limits }));
     }
     const result = this.check(workspace);
-    this.cached = { at: Date.now(), workspace, result };
+    this.cached = { at: Date.now(), workspace, folder, result };
     return result;
   }
 
@@ -200,8 +231,13 @@ export class CodexChatAdapter implements ChatAdapter {
     const base = { id: this.id, label: this.label, notes: [] as ProviderStatus['notes'], plan: null as string | null, models: [] as ChatModel[], limits: null as UsageWindow[] | null };
     const bin = this.binary();
     if (!bin) return { ...base, installed: false, ready: false, problems: [{ code: 'not_installed', message: 'OpenAI Codex is not installed on this computer. Install it, sign in once with your ChatGPT account, then try again.' }] };
+    let env: NodeJS.ProcessEnv;
+    try { env = this.env(); } catch {
+      return { ...base, installed: true, ready: false, problems: [{ code: 'check_failed', message: CHOSEN_FOLDER_PROBLEM }] };
+    }
+    const launchKey = accountKey('codex', env);
     let conn: { child: ChildProcess; rpc: RpcConnection };
-    try { conn = await connect(bin, os.homedir(), this.env()); } catch {
+    try { conn = await connect(bin, os.homedir(), env); } catch {
       return { ...base, installed: true, ready: false, problems: [{ code: 'check_failed', message: 'Could not check whether Codex is signed in. Open a terminal, run codex to make sure it starts and is signed in, then try again.' }] };
     }
     try {
@@ -227,7 +263,7 @@ export class CodexChatAdapter implements ChatAdapter {
       const models = signedIn ? codexModels(await conn.rpc.request('model/list', {}, PROBE_TIMEOUT_MS).catch(() => null)) : [];
       const limits = signedIn ? codexLimits(await conn.rpc.request('account/rateLimits/read', {}, PROBE_TIMEOUT_MS).catch(() => null)) : null;
       if (limits) lastLimits.windows = limits;
-      return { ...base, installed: true, ready: problems.length === 0, problems, plan: account ? shortDetail(account['planType'], 40) : null, models, limits };
+      return { ...base, installed: true, ready: problems.length === 0, problems, plan: account ? shortDetail(account['planType'], 40) : null, models, limits, launch_key: launchKey };
     } finally {
       killTree(conn.child, true);
     }
@@ -238,8 +274,17 @@ export class CodexChatAdapter implements ChatAdapter {
     if (!bin) throw Object.assign(new Error('OpenAI Codex is not installed on this computer.'), { statusCode: 409 });
     // Not cached for the next check: a session can change the sign-in (an expired token refreshed or not).
     this.cached = null;
+    const env = this.env();
+    if (options.launch_key !== undefined && options.launch_key !== accountKey('codex', env)) throw accountChangedError();
+    // Nobody signs this account out from the dashboard while the conversation starts and while its process lives.
+    const release = holdFolder('codex', env);
     const session = new CodexSession();
-    await session.start(bin, options, this.env());
+    try {
+      await session.start(bin, options, env, release);
+    } catch (err) {
+      release();
+      throw err;
+    }
     return session;
   }
 }
@@ -273,14 +318,16 @@ class CodexSession implements ChatSession {
     return this.rpc?.alive ?? false;
   }
 
-  async start(bin: string, options: ChatOpenOptions, env: NodeJS.ProcessEnv): Promise<void> {
+  async start(bin: string, options: ChatOpenOptions, env: NodeJS.ProcessEnv, release: () => void = () => {}): Promise<void> {
     // 1. Which MCP servers Codex would load for this folder (personal and project config), read by a process that
     //    starts no thread: reading the configuration starts no server.
     const names = await discoverServers(bin, options.workspace, env);
     if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin) && names.some((name) => !BARE_KEY.test(name))) {
       throw notReadOnly('Codex has an MCP server whose name cannot be passed to it from here to turn it off (use letters, digits, - and _ only, or install the Codex app). Rename it, or use another tool for the chat.');
     }
-    // 2. The chat's process starts with every one of them off.
+    // 2. The chat's process starts with every one of them off, and only with the account the message's check approved:
+    //    a sign-in may have changed while the configuration was read.
+    if (options.launch_key !== undefined && options.launch_key !== accountKey('codex', env)) throw accountChangedError();
     let conn: { child: ChildProcess; rpc: RpcConnection };
     try {
       conn = await connect(bin, options.workspace, env, {
@@ -298,6 +345,8 @@ class CodexSession implements ChatSession {
     const { child, rpc } = conn;
     this.child = child;
     this.rpc = rpc;
+    // The account stays held while the conversation's process lives.
+    child.on('exit', release);
     // 3. Before any thread: Codex itself must report every configured server off. One added since step 1, or an
     //    override it did not take, means the chat does not start.
     const configured = codexConfiguredServers(await rpc.request('config/read', { cwd: options.workspace, includeLayers: false }).catch(() => null));

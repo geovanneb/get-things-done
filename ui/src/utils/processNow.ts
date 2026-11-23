@@ -59,13 +59,13 @@ export function processNowRequest(meeting: Pick<QueuedMeeting, 'id'>, job: Pick<
 }
 
 /** What the run answered (201), as the toast after it says it. */
-export interface ProcessNowResult { status: 'ok' | 'error'; message: string; context_update?: string; analysis?: 'started' | 'waiting' | 'paused_waiting' | 'not_started' }
+export interface ProcessNowResult { status: 'ok' | 'error'; message: string; context_update?: string; analysis?: 'started' | 'waiting' | 'paused_waiting' | 'not_started' | 'account_changed' }
 
 export function processNowOutcome(result: ProcessNowResult, title: string): { tone: 'success' | 'warning' | 'error'; text: string } {
   const id = result.context_update;
   if (!id) return { tone: 'error', text: result.message };
   if (result.analysis === 'paused_waiting') return { tone: 'warning', text: tr('processNow.madePausedWaiting', { id, title }) };
-  if (result.analysis === 'not_started' || result.status === 'error') return { tone: 'warning', text: result.message };
+  if (result.analysis === 'not_started' || result.analysis === 'account_changed' || result.status === 'error') return { tone: 'warning', text: result.message };
   if (result.analysis === 'started') return { tone: 'success', text: tr('processNow.madeStarted', { id, title }) };
   if (result.analysis === 'waiting') return { tone: 'success', text: tr('processNow.madeWaiting', { id, title }) };
   return { tone: 'success', text: tr('processNow.made', { id, title }) };

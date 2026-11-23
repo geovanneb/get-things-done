@@ -11,7 +11,8 @@ function check(name: string, ok: boolean, detail = '') {
   if (!ok) failures++;
 }
 
-const settings = (after_each_meeting: boolean, auto_analyze: boolean, enabled = true) => ({ enabled, after_each_meeting, auto_analyze });
+// Turned on through the confirmation, which keeps the account's fingerprint.
+const settings = (after_each_meeting: boolean, auto_analyze: boolean, enabled = true) => ({ enabled, after_each_meeting, auto_analyze, ...(auto_analyze ? { confirmed_account: 'f'.repeat(64) } : {}) });
 const ready: RunnerStatus = {
   id: 'claude', label: 'Claude Code', installed: true, logged_in: true, trusted: true, problems: [],
   account: { email: 'someone@example.com', organization: 'Example Team', plan: 'max' },
@@ -107,6 +108,15 @@ check('the editor: a changed schedule is sent whole; nothing changed sends nothi
   JSON.stringify(editedSettings(openedWith, { ...openedWith, schedule: { time: '17:00' } })) === JSON.stringify({ schedule: { time: '17:00' } })
   && editedSettings(openedWith, { ...openedWith }) === null);
 check('the editor: a flag the user did change there is sent', JSON.stringify(editedSettings(openedWith, { ...openedWith, auto_analyze: false })) === JSON.stringify({ auto_analyze: false }));
+
+// #505: hands-off is held back after an account switch until the user confirms the new account.
+const confirmedFor = (fp: string) => ({ ...settings(true, true), confirmed_account: fp });
+const switched = autoPrepareView(confirmedFor('a'.repeat(64)), { ...ready, account_fingerprint: 'b'.repeat(64) });
+check('another account than the one confirmed: held back, with what to do', codes(switched) === 'account_changed' && switched.mode === 'on', codes(switched));
+check('the confirmed account: no issue', codes(autoPrepareView(confirmedFor('a'.repeat(64)), { ...ready, account_fingerprint: 'a'.repeat(64) })) === '');
+check('the digest said it held one back: shown even before the runner is checked', codes(autoPrepareView(confirmedFor('a'.repeat(64)), undefined, 'account_changed')) === 'account_changed');
+check('on, with no confirmed account kept (settings from before): asks for a confirmation', codes(autoPrepareView({ enabled: true, after_each_meeting: true, auto_analyze: true }, ready)) === 'account_changed');
+check('off: never', codes(autoPrepareView({ ...settings(false, false), confirmed_account: 'a'.repeat(64) }, { ...ready, account_fingerprint: 'b'.repeat(64) })) === '');
 
 if (failures) { console.log(`\n${failures} failed`); process.exit(1); }
 console.log('\nall passed');

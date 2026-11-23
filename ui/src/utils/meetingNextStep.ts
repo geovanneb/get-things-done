@@ -50,7 +50,7 @@ export interface DigestFacts {
   analyze_open_digest: 'yes' | 'no' | 'maybe';
   settings: { enabled: boolean; auto_analyze: boolean; after_each_meeting: boolean; max_meetings: number };
   /** The last automatic analysis attempt the digest recorded (`state.analysis`): `waiting` while another run held the runner. */
-  analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started' } | null;
+  analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started' | 'account_changed' } | null;
 }
 
 export interface NextStepFacts extends QueueFacts {

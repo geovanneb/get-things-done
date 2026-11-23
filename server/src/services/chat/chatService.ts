@@ -493,7 +493,7 @@ export class ChatService {
         await this.write(workspace, c);
         throw httpError(409, 'The dashboard is stopping. Send the message again once it has started.', 'stopping');
       }
-      this.startTurn(workspace, key, c, question, answer, page, held);
+      this.startTurn(workspace, key, c, question, answer, page, held, status.launch_key);
       held = null;
       return this.view(workspace, c);
     } finally {
@@ -537,7 +537,7 @@ export class ChatService {
 
   /** The live process for this conversation with its current tool and model, started (or resumed) when needed. */
   /** Null when the answer ended while the process started: that process is closed again, never kept. */
-  private async session(workspace: string, key: string, c: Conversation, owner: Turn, ended: () => boolean): Promise<ChatSession | null> {
+  private async session(workspace: string, key: string, c: Conversation, owner: Turn, ended: () => boolean, launchKey?: string): Promise<ChatSession | null> {
     const current = live.get(key);
     if (current && current.session.alive && current.provider === c.provider && current.model === c.model && current.effort === c.effort) {
       if (current.idle) { clearTimeout(current.idle); current.idle = null; }
@@ -548,7 +548,7 @@ export class ChatService {
     const resume = c.provider_session?.provider === c.provider ? c.provider_session.id : null;
     const start = Symbol(key);
     const started = (async () => {
-      const s = await this.adapters[c.provider].open({ workspace, model: c.model, effort: c.effort, resume, instructions: CHAT_INSTRUCTIONS });
+      const s = await this.adapters[c.provider].open({ workspace, model: c.model, effort: c.effort, resume, instructions: CHAT_INSTRUCTIONS, ...(launchKey !== undefined ? { launch_key: launchKey } : {}) });
       // A timeout, Stop or the dashboard stopping came first: nobody is waiting for this process.
       if (ended()) { await s.close().catch(() => {}); return null; }
       return s;
@@ -565,7 +565,7 @@ export class ChatService {
     return session;
   }
 
-  private startTurn(workspace: string, key: string, c: Conversation, question: ChatMessage, answer: ChatMessage, page: string | null, held: HeldLock): void {
+  private startTurn(workspace: string, key: string, c: Conversation, question: ChatMessage, answer: ChatMessage, page: string | null, held: HeldLock, launchKey?: string): void {
     let resolveDone!: () => void;
     const done = new Promise<void>((r) => { resolveDone = r; });
     let session: ChatSession | null = null;
@@ -670,7 +670,7 @@ export class ChatService {
 
     const run = async () => {
       try {
-        session = await this.session(workspace, key, c, turn, () => finished || stopped);
+        session = await this.session(workspace, key, c, turn, () => finished || stopped, launchKey);
       } catch (err) {
         const e = err as Error & { turnError?: TurnError };
         onEvent({ type: 'end', outcome: { status: 'error', error: e.turnError ?? { code: 'crashed', detail: shortDetail(e.message) } } });

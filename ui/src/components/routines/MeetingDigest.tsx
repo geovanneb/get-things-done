@@ -82,7 +82,7 @@ export function MeetingDigestCard({ job, onEdit, onChanged }: { job: MeetingDige
             </div>
           )}
           {settings.auto_analyze && state.analysis && state.analysis.update_id === job.open_digest && (
-            <div style={{ fontSize: 'var(--text-xs)', marginTop: 4, color: state.analysis.status === 'not_started' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
+            <div style={{ fontSize: 'var(--text-xs)', marginTop: 4, color: state.analysis.status === 'not_started' || state.analysis.status === 'account_changed' ? 'var(--color-critical)' : 'var(--color-text-muted)' }}>
               {state.analysis.message}
             </div>
           )}

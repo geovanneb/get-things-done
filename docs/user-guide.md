@@ -507,10 +507,40 @@ An apply never waits in line; start it once nothing else is running.
 
 Next to the button, **Signed in as** shows the Claude account the dashboard's runs use.
 A computer can have more than one Claude Code sign-in (for example a work and a personal
-account in different config folders), and the dashboard uses the one its own environment
-points to, which may not be the one your terminal uses. When Claude Code stops a run with
+account in different config folders). The dashboard uses the one chosen in Settings (see
+below), else the one its own environment points to, which may not be the one your terminal
+uses. When Claude Code stops a run with
 an error of its own, such as "You've hit your weekly limit", the dashboard quotes it, and
 says when the account has reached its plan's usage limit.
+
+**Choose the account in Settings.** Settings → **Assistant accounts** shows, for each
+assistant on this computer, which account it uses: "Signed in as you@example.com", with
+the plan. If you have only one account, that is all you see, with **Sign in** or **Sign
+out**. To add a second one, for example a work account, click **Use another account**,
+give it a name if you like (such as "Work"), and sign in. Once there is more than one,
+**Use this account** chooses the one the dashboard uses: for Claude Code in the chat and in
+the analyses it runs for you, for Codex in the chat. The change applies the next time the
+assistant starts; anything running keeps its account. The choice stays on this computer and
+is never saved in the workspace.
+
+**Sign in** first tells you that your browser will open. Sign in there, then come back: the
+page updates by itself. For Claude Code you choose between your Claude account and your
+organization's single sign-on (SSO); for Codex, single sign-on is offered on the sign-in page
+that opens. **Sign in again** uses the way you signed in last time. **Sign out** asks first:
+the dashboard and your own sessions that use that account will need to sign in again. The
+dashboard never sees or stores your password: it only starts the assistant's own sign-in
+and checks who is signed in. GitHub Copilot shows the account it is signed in with; to sign
+in or change it, sign in to Copilot from a terminal.
+
+With **Prepare meetings for review automatically** on, meetings go only to the account you
+confirmed when you turned it on. If you switch accounts (or sign in with another one),
+automatic analysis pauses and the Meetings page asks you to **Check and confirm** the new
+account; analyses you start yourself are not affected.
+
+Each account keeps its own trust: after you switch Claude Code to another account, the
+dashboard may ask you to trust the workspace folder once more for that account.
+**Details** shows where each account is kept on this computer, the command to sign in from
+a terminal if no browser can open, and lets you add an existing config folder by its path.
 
 While it runs, the same box shows how long it has been going and the step it is on, for
 example "Step 7 · Reading `context/risks/…/note.md`". **Show details** lists one line per step
