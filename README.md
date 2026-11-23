@@ -65,7 +65,7 @@ The workspace and offline transcription need no Get Things Done account. AI anal
 
 The dashboard is available in English, Japanese, Portuguese (Brazil) and Spanish. It follows your system language; change it in **Settings → Appearance → Language**.
 
-> **New in 0.18:** open what the assistant chat names with one click, continue a chat in your own assistant, run task and context requests in Claude Code, Codex or Copilot with one button, and see only what a release changed in a file you customised. [See what changed](CHANGELOG.md).
+> **New in 0.19:** every meeting shows its next step with one button, a meeting can be processed on its own without waiting for the batch, one switch prepares meetings for review automatically, and a deliverable can be drafted straight from a meeting's confirmed record. [See what changed](CHANGELOG.md).
 
 ## From meetings to memory to finished work
 
