@@ -8,8 +8,67 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-23
+
+**From meeting to deliverable.** A meeting now moves on by itself, and tells you when it needs you.
+Each meeting shows **its next step with one button**, from transcription to review to
+**Create deliverable**, which drafts the task from the meeting's confirmed record. **Process this
+meeting now** makes a digest of one meeting without waiting for the batch, **Transcribe next** and
+**Transcribe now** change the order of the queue, and **one switch** prepares meetings for review
+automatically. The sidebar shows the meetings that need you, transcriptions show their step and the
+time left, and **Open folder** shows where a meeting, task, note or deliverable lives on your computer.
+
+**Download** (below, under Assets):
+- **Mac with Apple Silicon** (M1 and newer): `Get-Things-Done-0.19.0-arm64.dmg`
+- **Mac with Intel**: `Get-Things-Done-0.19.0.dmg`
+- **Windows 10/11**: `Get-Things-Done-Setup-0.19.0-unsigned-preview.exe`
+
+The Mac apps installed from 0.8.0 or newer update themselves to this release. With `npm`:
+`npm install -g @bertonha/getthingsdone@0.19.0`, or **Update and restart** in Settings. No schema or
+agent instruction changes. **Open folder** opens Finder or File Explorer in the desktop app; in a
+browser it shows the path to copy. If you call the API directly, see Changed.
+
 ### Added
 
+- **Next step on each meeting.** The top of a meeting now says the one thing to do next, with its button:
+  the transcription's progress, **Download it in Settings** for a missing model (also for an upload waiting for the
+  model chosen in Settings), **Try again** or **Use this transcript**, **Make digest now**, **Open it** for the digest
+  that holds it back, **Open its update** to analyze it (saying when automatic analysis will start it), **Review this
+  meeting** or **Apply**, then **Create deliverable**. **Create deliverable** is also offered beside the step wherever
+  the list allows it, queued meetings included, and the tasks made from its action items and those that mention it
+  are listed. Opening a meeting only reads. (#483)
+- **Next step opens the review at the meeting.** **Review this meeting**, **Apply** and **Open its update** on a
+  meeting's Next step open its digest's review at that meeting, and a ready meeting's step offers **Process this
+  meeting now** beside **Make digest now** (it moved there from the dialog's header). (#501)
+- **Process one meeting now.** A queued meeting has **Process this meeting now**: a digest of that
+  meeting alone, without waiting for the schedule or sending the whole queue. The confirmation says
+  whether the analysis then starts with your AI assistant or is yours to start, and that one-meeting
+  digests use somewhat more AI usage than a batch. While another digest waits for review it says
+  which one, with a link. (#487)
+- **Prepare meetings for review automatically.** One switch at the top of the Meetings page turns on
+  both **Right after each meeting** and **Analyze automatically** of the Meeting digest. It turns on
+  only while the background runner is ready, and first says what it will do and with which account;
+  turning it off always works. When only one of the two is on, or the routine is paused, it says so and
+  what to do. (#496)
+- **Draft a deliverable from a meeting's record.** **Create deliverable** on one meeting with a
+  confirmed record first asks what the deliverable is for: one of its action items or the meeting as a
+  whole. The New task form then holds the record's decisions and the chosen action item, with its due
+  date, picks the output template only when the action item names it in full, and offers the people of
+  the meeting as stakeholders to tick (none is ticked for you). One action item can instead become a
+  task of its own with **Create task instead**. If the record changed since you opened it, nothing
+  from it is copied and the plain draft opens, with a notice saying why. (#495)
+- **Choose which meeting is transcribed next.** Each waiting meeting has a small menu with
+  **Transcribe next**, **Transcribe now** and **Move back**. **Transcribe now** asks first and says how
+  far the running transcription got: that one goes back in line right after, and starts again from the
+  beginning. A meeting that cannot start (its model is not downloaded, for example) is put first, and
+  the running transcription goes on. (#491)
+- **Review one meeting of a digest.** **Review this meeting** in the Meetings list opens the digest's
+  review at that meeting (`/context/updates/<id>?meeting=<meeting id>`): its record first, the
+  proposals from it below with their diffs one click away, and a scope line ("Meeting 2 of 6 in this
+  digest") with the previous and next meeting and what is still open across all meetings. A proposal
+  drawing on several meetings is listed under each and counted once. Approving works as before; at one
+  meeting, the first Approve first shows any records still without a choice or proposals folded away.
+  (#488)
 - **Meetings in the sidebar.** Meetings that need you now put an amber count on **Meetings**, the
   same meetings as its **Needs you** filter, and appear under **Waiting on you** on Situation. Both
   open the list on that filter. While meetings are only in progress, a quiet ring with no count
@@ -20,48 +79,51 @@ minor versions may include breaking changes.
   is done the line adds the recording's length and about how long is left. Another dashboard on the
   same workspace now shows the same progress, marked as running in another dashboard. The meeting's
   files and **Transcribe again** use the same wording. (#480)
-- **Next step on each meeting.** The top of a meeting now says the one thing to do next, with its button:
-  the transcription's progress, **Download it in Settings** for a missing model (also for an upload waiting for the
-  model chosen in Settings), **Try again** or **Use this transcript**, **Make digest now**, **Open it** for the digest
-  that holds it back, **Open its update** to analyze it (saying when automatic analysis will start it), **Review this
-  meeting** or **Apply**, then **Create deliverable**. **Create deliverable** is also offered beside the step wherever
-  the list allows it, queued meetings included, and the tasks made from its action items and those that mention it
-  are listed. Opening a meeting only reads. (#483)
-- **Next step opens the review at the meeting.** **Review this meeting**, **Apply** and **Open its update** on a
-  meeting's Next step open its digest's review at that meeting, and a ready meeting's step offers **Process this
-  meeting now** beside **Make digest now** (it moved there from the dialog's header).
-- **Review one meeting of a digest.** **Review this meeting** in the Meetings list opens the digest's
-  review at that meeting (`/context/updates/<id>?meeting=<meeting id>`): its record first, the
-  proposals from it below with their diffs one click away, and a scope line ("Meeting 2 of 6 in this
-  digest") with the previous and next meeting and what is still open across all meetings. A proposal
-  drawing on several meetings is listed under each and counted once. Approving works as before; at one
-  meeting, the first Approve first shows any records still without a choice or proposals folded away.
-  (#488)
-- **API:** `GET /api/context-updates/:id` gains `held_meetings`. See [docs/api.md](docs/api.md). (#488)
-- **Process one meeting now.** A queued meeting's dialog has **Process this meeting now**: a
-  digest of that meeting alone, without waiting for the schedule or sending the whole queue. The
-  confirmation says whether the analysis then starts with your AI assistant or is yours to start,
-  and that one-meeting digests use somewhat more AI usage than a batch. While another digest
-  waits for review it says which one, with a link. (#487)
-- **API:** `POST /api/routines/meeting-digest/run` takes `meeting`, `workspace` and
-  `expect_analysis` to make a digest of that queued meeting alone; refusals answer `404`/`409`/`503`
-  with a `details.code`. See [docs/api.md](docs/api.md). (#487)
-- **API:** `transcription` in `GET /api/routines/meeting-digest` gains `phase`, `phase_started_at`,
-  `phase_part` and, for another dashboard's job, `elsewhere`. See [docs/api.md](docs/api.md). (#480)
+- **Open folder.** A meeting (from its dialog and from its row in the Meetings list), a task's
+  **Files** tab and an archived task, each deliverable, a context note's and an output template's
+  files, and a context update's materials have **Open folder**. The desktop app shows the item in
+  Finder or File Explorer, a file selected in its folder; it never opens or runs anything. A browser,
+  which cannot open folders, shows the full path with **Copy path**. (#482, #494)
+- **API:** `GET /api/meetings/:id/folder`, `GET /api/tasks/:id/folder`, `GET /api/context/:id/folder`,
+  `GET /api/outputs/templates/:id/folder` and `PUT /api/meeting-queue/:id/priority` are new.
+  `GET /api/context-updates/:id` gains `held_meetings` and `materials_folder`, and
+  `GET /api/context-updates` marks a `ready` update that is not your move with `waits_on_agent`.
+  `POST /api/routines/meeting-digest/run` takes `meeting`, `workspace` and `expect_analysis` to make a
+  digest of that queued meeting alone; refusals answer `404`/`409`/`503` with a `details.code`.
+  `GET /api/routines/meeting-digest` gains `analyze_open_digest` and `workspace`, and its
+  `transcription` gains `phase`, `phase_started_at`, `phase_part`, `generation` and, for another
+  dashboard's job, `elsewhere`. `/api/events` also sends `run-change`. See [docs/api.md](docs/api.md).
+  (#480, #482, #487, #488, #491, #492, #494, #496)
+
+### Changed
+
+- **API: Meeting digest settings are checked before they are saved.** `PUT /api/routines/meeting-digest`
+  no longer replaces settings it cannot read with the defaults: it refuses with `400` and writes
+  nothing. Switching `auto_analyze` on (or `after_each_meeting` on while `auto_analyze` is on) now
+  checks the background runner and refuses with `409` (`runner_not_ready`) when it is not ready, and
+  with an optional `account`, also when another account is signed in now (`runner_account_changed`).
+  An optional `workspace` refuses the save in any other workspace (`other_workspace`). (#496)
 
 ### Fixed
 
-- **An uploaded recording waiting for a model that is not downloaded needs you.** A recording added as a file has no
-  model of its own and is transcribed with the one chosen in Settings; when that one is not downloaded, the Meetings
-  list, its files and the sidebar now say it waits for a model to download instead of "Waiting for transcription".
-  (#483)
-- **Listing tasks no longer creates `tasks/active/`.** A missing folder now reads as no tasks. (#483)
+- **An old single-file note can no longer overwrite another note.** Opening the context library moves a
+  note saved as one file (`<category>/<slug>.md`, from older versions) into a folder of its own. When
+  that folder already held a note, the move replaced it and its text was lost. The move now never
+  overwrites: the old file stays where it is, both notes stay listed, and the log says to rename one of
+  them. (#494)
 - **Meeting digests keep what they cannot verify.** A queued meeting whose files changed after
   its digest was made, while the dashboard was stopped halfway, now stays on hold instead of
   being removed. A meeting with a damaged list of files, or a recording marked transcribed without
   its transcript, no longer goes into a digest. No new digest is made while a context update
   cannot be read, so two digests can no longer wait for review at once. (#487)
-
+- **The sidebar shows an update waiting for you to start its analysis.** After **Make digest now** or an
+  import with **Analyze automatically** off, the new update waited for you, but neither the Context dot
+  nor **Waiting on you** said so. It now counts, unless its analysis is queued or running, or the
+  Meeting digest will start it by itself. (#492)
+- **An uploaded recording waiting for a model that is not downloaded needs you.** A recording added as a file has no
+  model of its own and is transcribed with the one chosen in Settings; when that one is not downloaded, the Meetings
+  list, its files and the sidebar now say it waits for a model to download instead of "Waiting for transcription".
+  (#483)
 - **A meeting being recorded is in progress, not waiting on you.** The Meetings list showed it as
   Recording but filed it under **Needs you**. It is now under **In progress** until the recording
   stops; an interrupted or unreadable recording still needs you. (#476)
@@ -69,6 +131,11 @@ minor versions may include breaking changes.
   long recording could say "loading the model" for many minutes while the computer was busy finding
   who speaks, or converting a phone recording. Each step is now named, and finding who speaks shows
   its percent. (#480)
+- **The sidebar no longer reads the meeting queue every second during a transcription.** It now
+  follows a running transcription at most every 10 seconds, on every page. (#502)
+- **A task title from an action item stays on one line.** An action item written over two lines ran
+  two words together in the title ("deckto"). (#502)
+- **Listing tasks no longer creates `tasks/active/`.** A missing folder now reads as no tasks. (#483)
 
 ## [0.18.0] - 2026-11-21
 
@@ -1663,7 +1730,8 @@ First public release on npm as
   commands), GitHub Copilot and OpenAI Codex.
 - Full-text search, live updates from a file watcher, optional git integration.
 
-[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/geovanneb/get-things-done/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/geovanneb/get-things-done/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/geovanneb/get-things-done/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/geovanneb/get-things-done/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/geovanneb/get-things-done/compare/v0.15.0...v0.16.0
