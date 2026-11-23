@@ -8,6 +8,12 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Import & review shows the same count as the sidebar's Context entry.** A context update waiting for you to start
+  its analysis (for example the weekly memory review) lit the sidebar's Context dot, but Context's own **Import &
+  review** entry showed no count, so the dot led nowhere visible. Both now show one shared count.
+
 ## [0.19.0] - 2026-11-23
 
 **From meeting to deliverable.** A meeting now moves on by itself, and tells you when it needs you.

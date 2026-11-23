@@ -86,6 +86,14 @@ export function waitingOnUser(updates: Pick<ContextUpdate, 'status' | 'waits_on_
   return waitingCounts(updates.filter((u) => !(TO_ANALYZE.includes(u.status) && u.waits_on_agent)));
 }
 
+/**
+ * The number the sidebar's Context entry and Context's own Import & review entry both show: updates ready for you plus
+ * material whose analysis is yours to start. One count, so the two places never disagree.
+ */
+export function waitingTotal({ ready, toAnalyze }: { ready: number; toAnalyze: number }): number {
+  return ready + toAnalyze;
+}
+
 /** Both counts in words, for a tooltip or an accessible name: status never rests on colour alone. */
 export function waitingLabel({ ready, toAnalyze }: { ready: number; toAnalyze: number }): string {
   const one = (n: number, a: string, many: string) => `${n} ${n === 1 ? a : many}`;
