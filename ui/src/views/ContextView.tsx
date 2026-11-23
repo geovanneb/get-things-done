@@ -26,7 +26,7 @@ import ImportUpdateModal from '@/components/context-updates/ImportUpdateModal';
 import ShareNotes from '@/components/context/ShareNotes';
 import UpdatesList from '@/components/context-updates/UpdatesList';
 import UpdateDetail from '@/components/context-updates/UpdateDetail';
-import { filterUpdates, HISTORY_PAGE, waitingCounts, waitingLabel, type TypeFilter } from '@/utils/updateTypes';
+import { filterUpdates, HISTORY_PAGE, waitingCounts, waitingLabel, waitingOnUser, waitingTotal, type TypeFilter } from '@/utils/updateTypes';
 import type { ContextCategoryInfo, ContextNote, ContextUpdate, QueuedMeeting } from '@/types';
 import CategoryModal from '@/components/context/CategoryModal';
 import { BUILTIN_CATEGORIES, categoryLabel as labelOf } from '@/utils/contextCategories';
@@ -270,8 +270,8 @@ interface SidebarProps {
   onSelect: (cat: Category) => void;
   onAddCategory: () => void;
   updatesActive: boolean;
-  /** Updates ready for you (review or apply), and material waiting for an analysis. */
-  waiting: { ready: number; toAnalyze: number };
+  /** Updates ready for you (review or apply), and material waiting for an analysis, without analyses that are already the agent's move: what the sidebar's Context entry counts. */
+  onUser: { ready: number; toAnalyze: number };
   onSelectUpdates: () => void;
 }
 
@@ -299,7 +299,7 @@ function WaitingCounts({ waiting, onShow }: { waiting: { ready: number; toAnalyz
   );
 }
 
-function Sidebar({ notes, categories, activeCategory, onSelect, onAddCategory, updatesActive, waiting, onSelectUpdates }: SidebarProps) {
+function Sidebar({ notes, categories, activeCategory, onSelect, onAddCategory, updatesActive, onUser, onSelectUpdates }: SidebarProps) {
   const { t } = useLanguage();
   const counts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -340,10 +340,11 @@ function Sidebar({ notes, categories, activeCategory, onSelect, onAddCategory, u
         <div style={{ borderTop: '1px solid var(--color-border)', marginTop: 'var(--space-2)', paddingBottom: 'var(--space-4)' }}>
           <div className="gtd-subnav__label">{t('updates')}</div>
           <button type="button" onClick={onSelectUpdates} aria-current={updatesActive ? 'page' : undefined} className="gtd-subnav__item"
-            aria-label={waiting.ready + waiting.toAnalyze > 0 ? t('context.importAndReview', { waitingLabel: waitingLabel(waiting) }) : t('context.importAndReview2')}
-            title={waiting.ready + waiting.toAnalyze > 0 ? waitingLabel(waiting) : t('context.importMeetingsDecksOrPhotos')}>
+            aria-label={waitingTotal(onUser) > 0 ? t('context.importAndReview', { waitingLabel: waitingLabel(onUser) }) : t('context.importAndReview2')}
+            title={waitingTotal(onUser) > 0 ? waitingLabel(onUser) : t('context.importMeetingsDecksOrPhotos')}>
             <span>{t('context.importReview')}</span>
-            {waiting.ready > 0 && <CountBadge count={waiting.ready > 99 ? 99 : waiting.ready} tone="warning" />}
+            {/* The same number as the sidebar's Context entry, so its dot always leads somewhere that shows it. */}
+            {waitingTotal(onUser) > 0 && <CountBadge count={Math.min(waitingTotal(onUser), 99)} tone="warning" />}
           </button>
           <p style={{ margin: 'var(--space-1) var(--space-4) 0', fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', lineHeight: 'var(--leading-normal)' }}>
             {t('context.bringInMeetingsDecksAnd')}
@@ -370,6 +371,7 @@ export default function ContextView() {
   const updatesVersion = useDataVersion('context-updates');
   const { data: updates } = useApi<ContextUpdate[]>('/api/context-updates', [updatesVersion]);
   const waiting = waitingCounts(updates ?? []);
+  const onUser = waitingOnUser(updates ?? []);
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   // Kept here, not in the list, so opening an update and coming back keeps the filter and the page.
@@ -563,7 +565,7 @@ export default function ContextView() {
       <Sidebar notes={notes} categories={categories} activeCategory={showUpdates ? null : activeCategory}
         onAddCategory={() => setCategoryModal({ editing: null })}
         onSelect={(cat) => { setActiveCategory(cat); setSearch(''); if (showUpdates) navigate('/context'); }}
-        updatesActive={showUpdates} waiting={waiting} onSelectUpdates={() => navigate('/context/updates')} />
+        updatesActive={showUpdates} onUser={onUser} onSelectUpdates={() => navigate('/context/updates')} />
 
       <div className="gtd-split__main">
         <div className="gtd-split__header">

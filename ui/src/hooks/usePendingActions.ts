@@ -3,7 +3,7 @@ import { useLanguage } from '@/i18n/LanguageProvider';
 import { useAppState, useDataVersion } from '../store';
 import { useApi } from './useApi';
 import type { ContextUpdate, MeetingDigest, Routine, SystemCleanup, Task } from '../types';
-import { waitingLabel, waitingOnUser } from '../utils/updateTypes';
+import { waitingLabel, waitingOnUser, waitingTotal } from '../utils/updateTypes';
 import { meetingCounts } from '../utils/meetingHistory';
 import { RECORDING_REFRESH_MS, hasOpenRecording, recheckIn, recordingElsewhere } from '../utils/meetingQueue';
 import { useRecorder } from '../components/recording/RecordingProvider';
@@ -93,7 +93,7 @@ export function usePendingActions(): PendingAction[] {
 
   const all: PendingAction[] = [
     { navPath: '/board', to: '/board', count: toReview, tone: 'attention', label: t('usePendingActions.waitingForYourReview', { plural: t('common.taskCount', { count: toReview }) }) },
-    { navPath: '/context', to: '/context/updates', count: waiting.ready + waiting.toAnalyze, tone: 'attention', label: waitingLabel(waiting) },
+    { navPath: '/context', to: '/context/updates', count: waitingTotal(waiting), tone: 'attention', label: waitingLabel(waiting) },
     meetingAction,
     { navPath: '/routines', to: '/routines', count: routineProblems, tone: 'problem', label: t('usePendingActions.attention', { plural: plural(routineProblems, t('usePendingActions.routineNeeds'), t('usePendingActions.routinesNeed')) }) },
     { navPath: '/settings', to: '/settings', count: validationCount.errors, tone: 'problem', label: t('usePendingActions.toFix', { plural: plural(validationCount.errors, t('usePendingActions.workspaceValidationError'), t('usePendingActions.workspaceValidationErrors')) }) },

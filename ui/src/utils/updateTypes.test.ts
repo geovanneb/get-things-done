@@ -1,7 +1,7 @@
 /**
  * Unit tests for the context update types and filter. Run with `npm run test:update-types --workspace=ui`.
  */
-import { waitingCounts, waitingLabel, waitingOnUser, filterUpdates, typeCounts, updateType } from './updateTypes';
+import { waitingCounts, waitingLabel, waitingOnUser, waitingTotal, filterUpdates, typeCounts, updateType } from './updateTypes';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -53,6 +53,12 @@ check('nothing waiting on the agent: every update to analyze waits on the user',
 const agent = waitingOnUser(mixed.map((u) => (u.id === 'CU-2' ? { ...u, waits_on_agent: true as const } : u)));
 check('an update waiting on the agent is left out', agent.ready === 1 && agent.toAnalyze === 1);
 check('an update in review is counted whatever it says', waitingOnUser([{ status: 'in_review', waits_on_agent: true }]).ready === 1);
+
+// The sidebar's Context entry and Context's Import & review entry show this one number: a memory review waiting for
+// you to start its analysis counts in both, an analysis already queued or running for the agent in neither.
+check('a review to start counts', waitingTotal(waitingOnUser([{ status: 'ready' as const }])) === 1);
+check('ready plus to analyze', waitingTotal({ ready: 2, toAnalyze: 1 }) === 3);
+check("the agent's move does not count", waitingTotal(waitingOnUser([{ status: 'ready' as const, waits_on_agent: true }])) === 0);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
