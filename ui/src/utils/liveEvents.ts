@@ -19,3 +19,12 @@ export function streamTracker(): { failed: () => void; connected: () => boolean 
 
 /** How long to wait before opening a new stream once the browser has given up on the old one. */
 export const RECONNECT_DELAY_MS = 5000;
+
+/**
+ * How long until a change seen at `now` is passed on, when the last one was passed on at `last` (null: none yet) and
+ * at most one is passed on every `ms`: 0 means at once. A burst of changes becomes one at once and one at the end.
+ * Never more than `ms`, even when the clock was set back since `last`.
+ */
+export function throttleDelay(last: number | null, now: number, ms: number): number {
+  return last === null ? 0 : Math.min(ms, Math.max(0, last + ms - now));
+}

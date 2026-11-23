@@ -1,7 +1,7 @@
 /**
  * Unit tests for catching up after the live event stream was down (#201). Run with `npm run test:live-events --workspace=ui`.
  */
-import { streamTracker } from './liveEvents';
+import { streamTracker, throttleDelay } from './liveEvents';
 import { initialState, reducer } from '../store';
 import { scopeForPath } from '../hooks/useLiveEvents';
 
@@ -42,6 +42,12 @@ check('a file inside a version is not a meeting change', scopeForPath('/home/dem
 const deleted = reducer(initialState, { type: 'DATA_CHANGED', payload: 'context-updates' }).dataVersions;
 check('a context update change moves only its own slice',
   scopes.every((s) => deleted[s] === before[s] + (s === 'context-updates' ? 1 : 0)));
+
+// A running transcription announces itself about once a second; the sidebar follows it at most once per window.
+check('the first change passes at once', throttleDelay(null, 5_000, 10_000) === 0);
+check('a change inside the window waits for its end', throttleDelay(1_000, 4_000, 10_000) === 7_000);
+check('a change after the window passes at once', throttleDelay(1_000, 11_000, 10_000) === 0);
+check('a clock set back never waits longer than one window', throttleDelay(20_000, 15_000, 10_000) === 10_000);
 
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed`);
