@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
+import { createHash } from 'crypto';
 import { EventEmitter } from 'events';
 import { WorkspaceService, selectedWorkspacePath, withWorkspacePath } from './workspace';
 import { findCommand } from './aiToolDetection';
@@ -14,6 +15,7 @@ import { refuseWhileUpdating } from './appActivity';
 import { stepsFromMessage, type RunStep } from './runSteps';
 import { parseMarkdown } from '../utils/markdown';
 import { workspaceEntry, writeWorkspaceFile } from '../utils/files';
+import { CHOSEN_FOLDER_PROBLEM, accountKey, holdFolder, withChosenFolder } from './assistantAccountFolder';
 
 /**
  * Runs the workspace's own agent commands without a window, with the AI tool the user already has.
@@ -95,7 +97,7 @@ export interface AgentRun {
 
 export type { RunStep };
 
-export type ProblemCode = 'not_installed' | 'not_logged_in' | 'not_subscription' | 'auth_unknown' | 'not_trusted' | 'workspace_auth';
+export type ProblemCode = 'not_installed' | 'not_logged_in' | 'not_subscription' | 'auth_unknown' | 'not_trusted' | 'workspace_auth' | 'account_folder';
 
 export interface RunnerStatus {
   id: string;
@@ -108,12 +110,32 @@ export interface RunnerStatus {
   problems: { code: ProblemCode; message: string }[];
   /**
    * Which Claude account runs use, as `claude auth status` reports it: a computer can have more than one sign-in
-   * (another config folder), and the dashboard uses the one its own environment points to. Null when not signed in.
+   * (another config folder). Runs use the one chosen in Settings (#505), else the one the dashboard's own environment
+   * points to. Null when not signed in.
    */
   account?: RunnerAccount | null;
+  /** The config folder the check used (`CLAUDE_CONFIG_DIR`); null for the default. */
+  config_folder?: string | null;
+  /** accountFingerprint of this check: what a hands-off confirmation keeps and compares. */
+  account_fingerprint?: string;
+  /**
+   * Which account this check approved, as of now (folder and sign-in generation): a run is started only when the
+   * account it is started with is still this one.
+   */
+  launch_key?: string;
 }
 
 export interface RunnerAccount { email: string | null; organization: string | null; plan: string | null }
+
+/**
+ * The account a check found, as a fingerprint: who (email, else organization) and in which config folder, hashed so it
+ * can be kept in a workspace's settings without naming anyone. The confirmation for runs that start by themselves
+ * (hands-off analysis) keeps it, and such a run starts only with that same account.
+ */
+export function accountFingerprint(status: Pick<RunnerStatus, 'account' | 'config_folder'>): string {
+  const who = status.account?.email ?? status.account?.organization ?? '';
+  return createHash('sha256').update(`${who}\u0000${status.config_folder ?? ''}`).digest('hex');
+}
 
 /** A short single-line string from the tool's output, or null. Never more than `max` characters. */
 function shortText(value: unknown, max = 200): string | null {
@@ -122,7 +144,7 @@ function shortText(value: unknown, max = 200): string | null {
   return text ? (text.length > max ? `${text.slice(0, max - 1)}…` : text) : null;
 }
 
-function accountOf(auth: Record<string, unknown>): RunnerAccount | null {
+export function accountOf(auth: Record<string, unknown>): RunnerAccount | null {
   const account = { email: shortText(auth['email']), organization: shortText(auth['orgName']), plan: shortText(auth['subscriptionType'], 40) };
   return account.email || account.organization || account.plan ? account : null;
 }
@@ -153,9 +175,10 @@ export interface AgentRunnerAdapter {
   status(workspace: string): Promise<RunnerStatus>;
   /**
    * With `gate`, every permission prompt goes to the approval gate instead of being refused. `onStep` hears each tool
-   * call as the run makes it (#246), as a step with no contents.
+   * call as the run makes it (#246), as a step with no contents. `launchKey` is the `launch_key` of the check that
+   * approved this run: the start is refused when the account changed since.
    */
-  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate, onStep?: (step: RunStep) => void): RunHandle;
+  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate, onStep?: (step: RunStep) => void, launchKey?: string): RunHandle;
 }
 
 const MAX_TURNS = 80;
@@ -187,6 +210,15 @@ export function childEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
   const env = { ...base };
   for (const name of BILLING_OVERRIDES) delete env[name];
   return env;
+}
+
+/**
+ * The environment for every Claude Code process the dashboard starts (runner and chat): childEnv, with
+ * `CLAUDE_CONFIG_DIR` set to the account chosen in Settings → Assistant accounts (#505). Nothing chosen: exactly the inherited environment. A chosen folder
+ * that can no longer be used throws (409) rather than falling back to another account.
+ */
+export function runnerEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return withChosenFolder('claude-code', childEnv(base));
 }
 
 /** Claude Code's settings file for this environment: `$CLAUDE_CONFIG_DIR/.claude.json`, or `~/.claude.json`. */
@@ -361,40 +393,53 @@ export function stopTree(child: ChildProcess): Promise<void> {
   });
 }
 
+/**
+ * `claude auth status --json` with `env` (its CLAUDE_CONFIG_DIR says which sign-in), with a hard deadline. No model is
+ * called. Null when it could not be checked.
+ */
+export function probeAuthStatus(bin: string, env: NodeJS.ProcessEnv, timeoutMs = PROBE_TIMEOUT_MS): Promise<Record<string, unknown> | null> {
+  return new Promise<Record<string, unknown> | null>((resolve) => {
+    let out = '';
+    let settled = false;
+    // Set only once the probe has started: a launch that fails at once settles without it.
+    const deadline: { timer?: ReturnType<typeof setTimeout> } = {};
+    const settle = (value: Record<string, unknown> | null) => { if (!settled) { settled = true; if (deadline.timer) clearTimeout(deadline.timer); resolve(value); } };
+    let child: ChildProcess;
+    try { child = launch(bin, ['auth', 'status', '--json'], os.homedir(), env); } catch { settle(null); return; }
+    deadline.timer = setTimeout(() => { killTree(child, true); settle(null); }, timeoutMs);
+    child.stdout?.setEncoding('utf-8');
+    child.stdout?.on('data', (chunk: string) => { out = (out + chunk).slice(-65536); });
+    child.on('error', () => settle(null));
+    child.on('exit', () => {
+      let parsed: unknown = null;
+      try { parsed = JSON.parse(out); } catch { /* not JSON */ }
+      settle(isObject(parsed) ? parsed : null);
+    });
+  });
+}
+
 export class ClaudeCodeAdapter implements AgentRunnerAdapter {
   id = 'claude-code';
   label = 'Claude Code';
-  private probe: { at: number; result: Promise<Record<string, unknown> | null> } | null = null;
+  private probe: { at: number; key: string; result: Promise<Record<string, unknown> | null> } | null = null;
 
-  /** `binary`, `env` and `probeTimeoutMs` are for tests; by default the installed `claude` and this process's environment. */
+  /**
+   * `binary`, `env` and `probeTimeoutMs` are for tests; by default the installed `claude` and this process's environment
+   * with the account folder chosen in Settings (runnerEnv).
+   */
   constructor(
     private readonly binary: () => string | null = () => findCommand('claude'),
-    private readonly env: () => NodeJS.ProcessEnv = () => childEnv(),
+    private readonly env: () => NodeJS.ProcessEnv = () => runnerEnv(),
     private readonly probeTimeoutMs = PROBE_TIMEOUT_MS,
   ) {}
 
-  /** `claude auth status --json`, with a hard deadline. No model is called. Concurrent checks share one probe. */
-  private authStatus(bin: string): Promise<Record<string, unknown> | null> {
-    if (this.probe && Date.now() - this.probe.at < 5_000) return this.probe.result;
-    const result = new Promise<Record<string, unknown> | null>((resolve) => {
-      let out = '';
-      let settled = false;
-      // Set only once the probe has started: a launch that fails at once settles without it.
-      const deadline: { timer?: ReturnType<typeof setTimeout> } = {};
-      const settle = (value: Record<string, unknown> | null) => { if (!settled) { settled = true; if (deadline.timer) clearTimeout(deadline.timer); resolve(value); } };
-      let child: ChildProcess;
-      try { child = launch(bin, ['auth', 'status', '--json'], os.homedir(), this.env()); } catch { settle(null); return; }
-      deadline.timer = setTimeout(() => { killTree(child, true); settle(null); }, this.probeTimeoutMs);
-      child.stdout?.setEncoding('utf-8');
-      child.stdout?.on('data', (chunk: string) => { out = (out + chunk).slice(-65536); });
-      child.on('error', () => settle(null));
-      child.on('exit', () => {
-        let parsed: unknown = null;
-        try { parsed = JSON.parse(out); } catch { /* not JSON */ }
-        settle(isObject(parsed) ? parsed : null);
-      });
-    });
-    this.probe = { at: Date.now(), result };
+  /** `claude auth status --json` for the config folder `env` points to. Concurrent checks of one folder share a probe. */
+  private authStatus(bin: string, env: NodeJS.ProcessEnv): Promise<Record<string, unknown> | null> {
+    // A change of sign-in made from the dashboard is checked again at once, even for the same folder.
+    const key = accountKey('claude-code', env);
+    if (this.probe && this.probe.key === key && Date.now() - this.probe.at < 5_000) return this.probe.result;
+    const result = probeAuthStatus(bin, env, this.probeTimeoutMs);
+    this.probe = { at: Date.now(), key, result };
     return result;
   }
 
@@ -405,7 +450,15 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
       return { ...base, installed: false, logged_in: null, trusted: null, problems: [{ code: 'not_installed', message: 'Claude Code is not installed on this computer. Install it, sign in once, then try again.' }] };
     }
     const problems: RunnerStatus['problems'] = [];
-    const auth = await this.authStatus(bin);
+    // One environment for the whole check, so the sign-in and the trust come from the same config folder.
+    let env: NodeJS.ProcessEnv;
+    try { env = this.env(); } catch (err) {
+      const message = (err as { statusCode?: number }).statusCode === 409 ? CHOSEN_FOLDER_PROBLEM : 'Could not check whether Claude Code is signed in. Open a terminal, run claude to make sure it starts and is signed in, then try again.';
+      return { ...base, installed: true, logged_in: null, trusted: null, problems: [{ code: message === CHOSEN_FOLDER_PROBLEM ? 'account_folder' : 'auth_unknown', message }], account: null };
+    }
+    // Taken before the checks: a sign-in change while they run makes this check's approval stale.
+    const launchKey = accountKey('claude-code', env);
+    const auth = await this.authStatus(bin, env);
     const loggedIn = auth ? auth['loggedIn'] === true : null;
     if (auth === null) {
       problems.push({ code: 'auth_unknown', message: 'Could not check whether Claude Code is signed in. Open a terminal, run claude to make sure it starts and is signed in, then try again.' });
@@ -418,16 +471,16 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
     if (overrides.length) {
       problems.push({ code: 'workspace_auth', message: `This workspace's .claude/settings.json sets ${overrides.join(', ')}, which would bill an API account instead of your plan. Remove it to run from the dashboard.` });
     }
-    let env: NodeJS.ProcessEnv | null = null;
-    try { env = this.env(); } catch { /* reported by the sign-in check */ }
-    const trusted = env ? await workspaceTrusted(workspace, env) : null;
+    const trusted = await workspaceTrusted(workspace, env);
     if (trusted === false) {
       problems.push({ code: 'not_trusted', message: 'Claude Code has not trusted this workspace folder yet, so it would ignore the workspace\'s permission rules. Open a terminal in the workspace folder, run claude once and accept "trust this folder", then try again.' });
     }
-    return { ...base, installed: true, logged_in: loggedIn, trusted, problems, account: auth && loggedIn ? accountOf(auth) : null };
+    const account = auth && loggedIn ? accountOf(auth) : null;
+    const folder = env['CLAUDE_CONFIG_DIR'] ?? null;
+    return { ...base, installed: true, logged_in: loggedIn, trusted, problems, account, config_folder: folder, account_fingerprint: accountFingerprint({ account, config_folder: folder }), launch_key: launchKey };
   }
 
-  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate, onStep?: (step: RunStep) => void): RunHandle {
+  start(workspace: string, prompt: string, done: (outcome: RunOutcome) => void, gate?: ApprovalGate, onStep?: (step: RunStep) => void, launchKey?: string): RunHandle {
     const bin = this.binary();
     if (!bin) throw httpError(409, 'Claude Code is not installed on this computer.');
     // Without a gate every prompt is refused (dontAsk). With one, prompts go to it: the only MCP server loaded.
@@ -437,7 +490,14 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
     const args = ['-p', prompt, '--setting-sources', 'project', ...permissions,
       '--strict-mcp-config', '--settings', runnerSettingsFile(workspace),
       '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--max-turns', String(MAX_TURNS)];
-    const child = launch(bin, args, workspace, this.env());
+    const env = this.env();
+    // The account changed (another one chosen, or a sign-in or sign-out) since the check that approved this run.
+    if (launchKey !== undefined && launchKey !== accountKey('claude-code', env)) {
+      throw httpError(409, 'The Claude account for dashboard runs changed while this run was being checked. Start it again.');
+    }
+    const child = launch(bin, args, workspace, env);
+    // Nobody signs this account out from the dashboard while the run uses it.
+    const release = holdFolder('claude-code', env);
     let result: RunOutcome['result'] = null;
     let stderr = '';
     let pending = '';
@@ -494,6 +554,7 @@ export class ClaudeCodeAdapter implements AgentRunnerAdapter {
       if (pending) onLine(pending);
       // Whatever the run started goes with it, even when the main process ended on its own.
       killTree(child, true);
+      release();
       done({ exit_code: exit, result, stderr, stopped });
     };
     child.on('error', () => finish(null));
@@ -776,7 +837,7 @@ export class AgentRunnerService {
    * Starts `/gtd-context-analyze <id>` for an update that is ready. One run at a time: while another goes it waits in
    * line, unless `queue` is false (the meeting digest tries again on its next check instead).
    */
-  startAnalysis(id: string, options: { queue?: boolean } = {}): Promise<AgentRun> {
+  startAnalysis(id: string, options: { queue?: boolean; expect_account?: string } = {}): Promise<AgentRun> {
     return this.start(id, 'analyze', options);
   }
 
@@ -785,7 +846,7 @@ export class AgentRunnerService {
    * runs with the approval gate: it may write only the accepted files and the update's own folder. One run at a time:
    * an analysis asked for while another run goes is queued (status "queued"); an apply is refused.
    */
-  async start(id: string, command: RunCommand, options: { queue?: boolean } = {}): Promise<AgentRun> {
+  async start(id: string, command: RunCommand, options: { queue?: boolean; expect_account?: string } = {}): Promise<AgentRun> {
     if (command !== 'analyze' && command !== 'apply') throw httpError(400, 'Invalid command: use analyze or apply');
     refuseWhileUpdating();
     const uid = updateId(id);
@@ -797,7 +858,7 @@ export class AgentRunnerService {
       if (same || command === 'apply' || options.queue === false) throw httpError(409, `Another run is going (${active.run.update_id}). Wait for it, or stop it first.`);
       return this.enqueue(workspace, uid);
     }
-    return this.begin(workspace, uid, command);
+    return this.begin(workspace, uid, command, false, options.expect_account);
   }
 
   /**
@@ -850,7 +911,7 @@ export class AgentRunnerService {
   }
 
   /** Takes the one-run slot and starts the run, after checking the update and the runner. */
-  private async begin(workspace: string, uid: string, command: RunCommand, queued = false): Promise<AgentRun> {
+  private async begin(workspace: string, uid: string, command: RunCommand, queued = false, expect?: string): Promise<AgentRun> {
     // An apply that stopped half way (status "applying") can continue: the apply command resumes and skips what is done.
     const allowedStatus = command === 'analyze' ? ['ready'] : ['approved', 'applying'];
     if (active) throw httpError(409, `Another run is going (${active.run.update_id}). Wait for it, or stop it first.`);
@@ -889,6 +950,10 @@ export class AgentRunnerService {
       if (command === 'apply' && targets.length === 0) throw httpError(409, 'Nothing to apply: no accepted change writes a file');
       const check = await this.adapter.status(workspace);
       if (check.problems.length) throw httpError(409, check.problems[0]!.message);
+      // Started for an account the user confirmed (hands-off analysis): only with that same account, in that folder.
+      if (expect !== undefined && expect !== accountFingerprint(check)) {
+        throw Object.assign(httpError(409, 'Another account is signed in to the background runner now. Confirm the new account before analyses start by themselves again.'), { details: { code: 'runner_account_changed' } });
+      }
       // Checked again right before launch: the update may have changed during the checks.
       const now = await this.updateStatus(workspace, uid);
       if (now === null || !allowedStatus.includes(now)) throw httpError(409, now === null ? `Context update not found: ${uid}` : `Cannot ${command} while the update is "${now}"`);
@@ -908,7 +973,7 @@ export class AgentRunnerService {
         if (current.terminal) return;
         current.stepCount += 1;
         current.steps = [...current.steps.slice(1 - KEEP_STEPS), step];
-      });
+      }, check.launch_key);
       if (!current.terminal) {
         current.run = { ...current.run, pid: current.handle.pid };
         await this.record(current).catch(() => {});

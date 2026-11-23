@@ -18,6 +18,7 @@ import { refreshWorkspaceFiles } from './services/workspaceActivation';
 import { GitRuntime, useGitRuntime } from './services/gitService';
 import { FileWatchEvent } from './types';
 import { AgentRunnerService, runEvents, shownWorkspace, type RunFinished } from './services/agentRunner';
+import { stopSignIn } from './services/assistantAccounts';
 import { ChatService } from './services/chat/chatService';
 import { endChatStreams } from './routes/chat';
 import { transcriptionEvents } from './services/transcriptionModels';
@@ -151,13 +152,15 @@ export function startServer(options: StartServerOptions): Promise<RunningServer>
     // A transcription worker is ended too, so nothing keeps running (or holding gigabytes) after the dashboard.
     const transcriptionStopped = TranscriptionEngine.stopAll().catch(() => {});
     const inboxStopped = deviceInbox.stop().catch(() => {});
+    // A sign-in started from Settings waits for the browser: it ends with the dashboard.
+    const signInStopped = stopSignIn().catch(() => {});
 
     const serverClosed = new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
       // Idle keep-alive connections would otherwise hold close() open.
       server.closeIdleConnections();
     });
-    return Promise.all([runnerStopped, chatStopped, transcriptionStopped, inboxStopped, serverClosed]).then(() => undefined);
+    return Promise.all([runnerStopped, chatStopped, transcriptionStopped, inboxStopped, signInStopped, serverClosed]).then(() => undefined);
   };
 
   return new Promise((resolve, reject) => {

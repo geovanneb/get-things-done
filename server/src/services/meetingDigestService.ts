@@ -15,7 +15,7 @@ import { fileInside, safeFileName, topLevelName, workspaceEntry } from '../utils
 import { Schedule, ScheduleError, describeSchedule, localDate, nextOccurrences, occurrencesBetween, parseSchedule } from './routineSchedule';
 import { reserveIds, reservedSequence } from './idReservations';
 import { processAlive } from './runState';
-import { AgentRunnerService } from './agentRunner';
+import { AgentRunnerService, accountFingerprint, type RunnerStatus } from './agentRunner';
 import { readWavFormat, WavError } from './transcription/wav';
 import { knownLanguage, parseLanguageChanges, type LanguageChange } from './transcription/languages';
 import { MAX_SPEAKER_NAMES, parseSpeakerNames, parseSpeakerSuggestions, parseSpeakerVoices, SPEAKER_LABEL, type SpeakerName, type SpeakerNames, type SpeakerSuggestion, type SpeakerSuggestions, type SpeakerVoices } from './speakerData';
@@ -125,6 +125,12 @@ export interface DigestSettings {
   /** Also make a digest as soon as a meeting is queued and no digest waits for review, next to the schedule. Off by default. */
   after_each_meeting: boolean;
   updated_at: string | null;
+  /**
+   * The background runner's account the user confirmed when automatic analysis was turned on (#505): a fingerprint
+   * (accountFingerprint), never the account itself. Analyses start by themselves only with that account; after a
+   * switch they pause until the user confirms the new one. Absent while automatic analysis is off.
+   */
+  confirmed_account?: string;
 }
 
 export interface DigestState {
@@ -137,7 +143,7 @@ export interface DigestState {
   /** The queue as it was when a digest right after a meeting could not be made: not tried again until the queue changes. */
   after_meeting_skip?: string;
   /** The automatic analysis of the open digest: started, waiting for another run to end, or not started (and why). */
-  analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started'; message: string; at: string };
+  analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started' | 'account_changed'; message: string; at: string };
 }
 
 /** What the digest needs from the dashboard runner. */
@@ -428,7 +434,7 @@ export interface DigestRunResult {
    * What the automatic analysis did with the digest, when it tried: `paused_waiting` when another run was going and the
    * routine is paused, so it will not start by itself until the routine is resumed (a digest of one meeting, #487).
    */
-  analysis?: 'started' | 'waiting' | 'paused_waiting' | 'not_started';
+  analysis?: 'started' | 'waiting' | 'paused_waiting' | 'not_started' | 'account_changed';
 }
 
 export interface DigestView {
@@ -596,6 +602,9 @@ export function parseSettings(input: unknown, base: DigestSettings = defaultSett
     auto_analyze: o['auto_analyze'] === undefined ? base.auto_analyze : o['auto_analyze'] as boolean,
     after_each_meeting: o['after_each_meeting'] === undefined ? base.after_each_meeting : o['after_each_meeting'] as boolean,
     updated_at: typeof o['updated_at'] === 'string' ? o['updated_at'] : base.updated_at,
+    ...(typeof o['confirmed_account'] === 'string' && /^[0-9a-f]{64}$/.test(o['confirmed_account'])
+      ? { confirmed_account: o['confirmed_account'] }
+      : base.confirmed_account && o['confirmed_account'] === undefined ? { confirmed_account: base.confirmed_account } : {}),
   };
 }
 
@@ -1020,15 +1029,20 @@ export class MeetingDigestService {
     // Settings that cannot be read are never replaced by defaults: that would turn a refused save into a changed one.
     // A missing file reads as the defaults.
     const current = await this.readSettings();
-    const next = parseSettings(input, current);
+    const next = parseSettings({ ...o, confirmed_account: undefined }, current);
     next.updated_at = now.toISOString();
     // Switching automation on runs analyses with the background runner: only while it is ready, and, when the request
     // says which account it was confirmed for, only with that account still signed in. Turning off never checks.
-    if (next.auto_analyze && ((!current.auto_analyze) || (next.after_each_meeting && !current.after_each_meeting))) {
-      await this.runnerReady(o['account']);
-    }
+    // A request naming the account while automation stays on confirms that account again (after a switch, #505).
+    const turningOn = next.auto_analyze && ((!current.auto_analyze) || (next.after_each_meeting && !current.after_each_meeting));
+    const reconfirm = next.auto_analyze && current.auto_analyze && o['account'] !== undefined;
+    if (turningOn || reconfirm) next.confirmed_account = accountFingerprint(await this.runnerReady(o['account']));
+    if (!next.auto_analyze) delete next.confirmed_account;
+    // Any explicit confirmation counts, even of the same account as before (switched away and back).
+    const confirmedAgain = (turningOn || reconfirm) && next.auto_analyze;
     const scheduleChanged = JSON.stringify(next.schedule) !== JSON.stringify(current.schedule) || next.enabled !== current.enabled;
-    const analysisOn = next.auto_analyze && !current.auto_analyze;
+    // Confirmed for the account now signed in: a digest held back for the account change may start again.
+    const analysisOn = (next.auto_analyze && !current.auto_analyze) || (confirmedAgain && (await this.readState()).analysis?.status === 'account_changed');
     if (!scheduleChanged && !analysisOn) {
       await this.writeJson('meeting-digest.json', next);
       return this.view(now);
@@ -1051,7 +1065,7 @@ export class MeetingDigestService {
   }
 
   /** Refuses (409) unless the background runner can start an analysis now, signed in as `account` when one is given. */
-  private async runnerReady(account: unknown): Promise<void> {
+  private async runnerReady(account: unknown): Promise<RunnerStatus> {
     const status = await this.runner.status().catch(() => null);
     const problem = !status ? 'its status could not be checked.' : !status.installed || status.problems.length ? status.problems[0]?.message ?? 'it is not installed.' : null;
     if (problem) {
@@ -1061,6 +1075,7 @@ export class MeetingDigestService {
     if (account !== undefined && account !== signedIn) {
       throw Object.assign(httpError(409, 'The account signed in to the background runner changed since you reviewed it. Check it, then confirm again.'), { details: { code: 'runner_account_changed' } });
     }
+    return status!;
   }
 
   // ---- the queue ----------------------------------------------------------------
@@ -1498,21 +1513,32 @@ export class MeetingDigestService {
     const state = await this.readState();
     const before = state.analysis?.update_id === open.id ? state.analysis : null;
     if (!autoAnalysisDue(settings, state.analysis, open, (await this.runner.get(open.id)) !== null, manual)) return null;
+    // Started by itself only for the account the user confirmed. Settings saved before confirmations kept the account
+    // (#505) have none: nothing starts until the user confirms the account signed in now.
+    const expect = settings.confirmed_account;
     let analysis: NonNullable<DigestState['analysis']>;
+    if (!expect) {
+      analysis = { update_id: open.id, status: 'account_changed', message: `The analysis of ${open.id} did not start: confirm the account of the background runner on the Meetings page first, or start it from the digest's page.`, at: now.toISOString() };
+      await this.writeJson('meeting-digest-state.json', { ...await this.readState(), analysis });
+      return { status: 'error', message: analysis.message, context_update: open.id, did_something: true, analysis: analysis.status };
+    }
     try {
-      await this.runner.startAnalysis(open.id, { queue: false });
+      await this.runner.startAnalysis(open.id, { queue: false, expect_account: expect });
       analysis = { update_id: open.id, status: 'started', message: `Started the analysis of ${open.id}.`, at: now.toISOString() };
     } catch (err) {
       const reason = (err as Error).message;
       const busy = /Another run is going|may still be going/.test(reason);
-      analysis = busy
+      const changed = (err as { details?: { code?: string } }).details?.code === 'runner_account_changed';
+      analysis = changed
+        ? { update_id: open.id, status: 'account_changed', message: `The analysis of ${open.id} did not start: another account is signed in to the background runner. Confirm the new account on the Meetings page, or start it from the digest's page.`, at: now.toISOString() }
+        : busy
         ? { update_id: open.id, status: 'waiting', message: `The analysis of ${open.id} waits for another run to end.`, at: now.toISOString() }
         : { update_id: open.id, status: 'not_started', message: `The analysis of ${open.id} could not start: ${reason} Start it from the digest's page.`, at: now.toISOString() };
     }
     await this.writeJson('meeting-digest-state.json', { ...await this.readState(), analysis });
     // A scheduled check that is still waiting stays out of the history.
     if (analysis.status === 'waiting' && before?.status === 'waiting' && !manual) return null;
-    return { status: analysis.status === 'not_started' ? 'error' : 'ok', message: analysis.message, context_update: open.id, did_something: true, analysis: analysis.status };
+    return { status: analysis.status === 'not_started' || analysis.status === 'account_changed' ? 'error' : 'ok', message: analysis.message, context_update: open.id, did_something: true, analysis: analysis.status };
   }
 
   /**

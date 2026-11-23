@@ -8,6 +8,19 @@ minor versions may include breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Choose each assistant's account, and sign in from the app.** Settings → **Assistant accounts** asks, for
+  each assistant installed, "Which account does it use?", and names each account by who is signed in and the plan.
+  With more than one account, **Use this account** picks the one the dashboard uses from the next start: for Claude
+  Code the chat and the analyses it runs, for Codex the chat. **Sign in** says first that your browser opens, then
+  waits for you there (Claude Code: your Claude account, or your organization's single sign-on; Codex: single
+  sign-on is on its own sign-in page). **Use another account** adds a second account, and **Sign out** asks first.
+  The choice is kept on this computer, never in a workspace; a run or chat going keeps its account. GitHub Copilot
+  shows its account and says how to sign in from a terminal. The app never sees or stores a password or a token.
+  Automatic meeting analysis goes only to the account you confirmed: after a switch it pauses until you confirm the
+  new one. If automatic analysis was on before this update, confirm its account once on the Meetings page. (#505)
+
 ### Fixed
 
 - **Import & review shows the same count as the sidebar's Context entry.** A context update waiting for you to start

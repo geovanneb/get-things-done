@@ -6,6 +6,7 @@ import contextRouter from './context';
 import contextUpdatesRouter from './contextUpdates';
 import firstContextRouter from './firstContext';
 import runnerRouter from './runner';
+import assistantAccountsRouter from './assistantAccounts';
 import chatRouter from './chat';
 import outputsRouter from './outputs';
 import { agentsRouter, skillsRouter } from './agents';
@@ -56,6 +57,7 @@ export function registerRoutes(app: Express): void {
   app.use('/api/context-updates', contextUpdatesRouter);
   app.use('/api/first-context', firstContextRouter);
   app.use('/api/runner', runnerRouter);
+  app.use('/api/assistant-accounts', assistantAccountsRouter);
   app.use('/api/chat', chatRouter);
   app.use('/api/outputs', outputsRouter);
   app.use('/api/agents', agentsRouter);

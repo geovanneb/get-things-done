@@ -49,6 +49,11 @@ export interface ProviderStatus {
   limits: UsageWindow[] | null;
   /** Fixed notes the page shows next to the picker, by code. */
   notes: ('premium_requests' | 'no_usage_report')[];
+  /**
+   * Which account this check approved (its config folder and the dashboard's sign-in generation): a session opened for
+   * a message this check let through starts only with that same account (#505).
+   */
+  launch_key?: string;
 }
 
 export type TurnErrorCode =
@@ -82,6 +87,14 @@ export interface ChatOpenOptions {
   resume: string | null;
   /** What the chat tells the tool about itself (read-only, answer briefly). */
   instructions: string;
+  /** The `launch_key` of the check that approved this message: the session is refused when the account changed since. */
+  launch_key?: string;
+}
+
+/** Refused at open: another account was chosen, or a sign-in changed, after the check that approved the message. */
+export function accountChangedError(): Error {
+  const message = 'The account for this assistant changed while the message was being sent. Send it again.';
+  return Object.assign(new Error(message), { statusCode: 409, turnError: { code: 'provider', detail: message } });
 }
 
 /** One live conversation with a tool: one process, one turn at a time. */

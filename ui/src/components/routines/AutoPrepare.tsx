@@ -44,7 +44,7 @@ export function AutoPrepareSwitch({ job, onChanged }: { job: MeetingDigest; onCh
     return () => { generation.current++; };
   }, [checkRunner]);
 
-  const view = autoPrepareView(job.settings, runner);
+  const view = autoPrepareView(job.settings, runner, job.state.analysis?.status);
   const confirm = confirmation(fresh, { enabled: job.settings.enabled, open_digest: job.open_digest, analyze_open_digest: job.analyze_open_digest });
 
   const open = () => {
@@ -94,7 +94,9 @@ export function AutoPrepareSwitch({ job, onChanged }: { job: MeetingDigest; onCh
         <Notice key={issue.code} tone={issue.tone} title={issue.text}
           action={issue.code === 'only_digest' || issue.code === 'only_analysis'
             ? <Button size="sm" variant="ghost" disabled={saving} onClick={() => void save(false)}>{t('autoPrepare.turnBothOff')}</Button>
-            : undefined}>
+            : issue.code === 'account_changed'
+              ? <Button size="sm" disabled={saving} onClick={open}>{t('autoPrepare.checkAndConfirm')}</Button>
+              : undefined}>
           {issue.fix}
         </Notice>
       ))}

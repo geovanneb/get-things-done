@@ -614,6 +614,58 @@ export interface RunnerStatus {
   problems: { code: string; message: string }[];
   /** The Claude account runs use (the dashboard's own sign-in); null or missing when unknown. */
   account?: { email: string | null; organization: string | null; plan: string | null } | null;
+  /** A fingerprint of the account and folder this check found: compared with a hands-off confirmation (#505). */
+  account_fingerprint?: string;
+}
+
+/** One sign-in an assistant can use (GET /api/assistant-accounts, #505). */
+export interface AssistantAccount {
+  /** The config folder; null for the default. Shown under Details only. */
+  folder: string | null;
+  path_label: string;
+  /** What the user called this account, if anything. */
+  name: string | null;
+  kind: 'default' | 'found' | 'added';
+  chosen: boolean;
+  problem: string | null;
+  signed_in: boolean | null;
+  /** False for an API key or another provider, which the dashboard does not use. */
+  plan_ok: boolean | null;
+  account: { email: string | null; organization: string | null; plan: string | null } | null;
+  last_method: AssistantSignInMethod | null;
+  terminal_command: string;
+}
+
+export type AssistantSignInMethod = 'claudeai' | 'sso' | 'console' | 'browser';
+export type AssistantId = 'claude-code' | 'codex' | 'copilot';
+
+export interface AssistantAccountsView {
+  id: AssistantId;
+  label: string;
+  installed: boolean;
+  choosable: boolean;
+  methods: AssistantSignInMethod[];
+  sso: 'option' | 'on_page' | null;
+  can_sign_out: boolean;
+  chosen: string | null;
+  accounts: AssistantAccount[];
+}
+
+/** A sign-in started from Settings: the assistant's own sign-in, finished in the browser. */
+export interface AssistantSignIn {
+  assistant: AssistantId;
+  folder: string | null;
+  method: AssistantSignInMethod;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  url: string | null;
+  message: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface AssistantAccounts {
+  assistants: AssistantAccountsView[];
+  sign_in: AssistantSignIn | null;
 }
 
 /** A run of a workspace command (analyze or apply) started from the dashboard. */
@@ -967,6 +1019,8 @@ export interface MeetingDigestSettings {
   /** Also make a digest as soon as a meeting is queued and no digest waits for review. Off by default. */
   after_each_meeting: boolean;
   updated_at: string | null;
+  /** A fingerprint of the runner account confirmed for automatic analysis (#505); never the account itself. */
+  confirmed_account?: string;
 }
 
 export interface MeetingDigest {
@@ -978,7 +1032,7 @@ export interface MeetingDigest {
   next_run_at: string | null;
   state: {
     checked_at?: string; last_run_at?: string; last_status?: 'ok' | 'error'; last_message?: string; last_context_update?: string;
-    analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started'; message: string; at: string };
+    analysis?: { update_id: string; status: 'started' | 'waiting' | 'not_started' | 'account_changed'; message: string; at: string };
   };
   open_digest: string | null;
   /**

@@ -8,7 +8,7 @@ import type { RunnerStatus } from '@/types';
  * wording for every state can be tested without a page.
  */
 
-export interface AutoPrepareSettings { enabled: boolean; after_each_meeting: boolean; auto_analyze: boolean }
+export interface AutoPrepareSettings { enabled: boolean; after_each_meeting: boolean; auto_analyze: boolean; confirmed_account?: string }
 
 /** The runner status from GET /api/runner: undefined while it is being checked, null when it could not be checked. */
 export type RunnerCheck = RunnerStatus | null | undefined;
@@ -16,7 +16,7 @@ export type RunnerCheck = RunnerStatus | null | undefined;
 export type AutoPrepareMode = 'off' | 'on' | 'mixed';
 
 export interface AutoPrepareIssue {
-  code: 'only_digest' | 'only_analysis' | 'paused' | 'runner_unknown' | 'runner_not_ready';
+  code: 'only_digest' | 'only_analysis' | 'paused' | 'runner_unknown' | 'runner_not_ready' | 'account_changed';
   tone: 'warning' | 'critical';
   /** What is wrong, in plain words. */
   text: string;
@@ -51,7 +51,19 @@ export function runnerIssue(runner: RunnerCheck): AutoPrepareIssue | null {
 }
 
 /** The switch's state, a line on what it does now, and each thing that keeps it from working, with what to fix. */
-export function autoPrepareView(s: AutoPrepareSettings, runner: RunnerCheck): AutoPrepareView {
+/**
+ * Whether automatic analysis is held back because another account is signed in to the runner than the one confirmed
+ * (#505): the digest said so, or the runner's check now finds another account. Analyses do not start by themselves
+ * until the user confirms the new account.
+ */
+export function accountChanged(s: AutoPrepareSettings, runner: RunnerCheck, analysisStatus?: string): boolean {
+  if (!s.auto_analyze) return false;
+  // Saved before confirmations kept the account: confirmed once before anything starts by itself.
+  if (analysisStatus === 'account_changed' || !s.confirmed_account) return true;
+  return Boolean(runner && runner.account_fingerprint && s.confirmed_account && runner.account_fingerprint !== s.confirmed_account);
+}
+
+export function autoPrepareView(s: AutoPrepareSettings, runner: RunnerCheck, analysisStatus?: string): AutoPrepareView {
   const mode = autoPrepareMode(s);
   const issues: AutoPrepareIssue[] = [];
   if (mode === 'mixed') {
@@ -63,6 +75,7 @@ export function autoPrepareView(s: AutoPrepareSettings, runner: RunnerCheck): Au
   // Shown while automatic analysis is on, and while the switch is off: then it is why it cannot be turned on.
   const problem = s.auto_analyze || mode !== 'on' ? runnerIssue(runner) : null;
   if (problem) issues.push(problem);
+  else if (accountChanged(s, runner, analysisStatus)) issues.push({ code: 'account_changed', tone: 'warning', text: tr('autoPrepare.accountChangedPaused'), fix: tr('autoPrepare.accountChangedFix') });
   const summary = mode === 'on' ? tr('autoPrepare.onSummary') : mode === 'mixed' ? tr('autoPrepare.mixedSummary') : tr('autoPrepare.offSummary');
   return { mode, summary, issues, canTurnOn: runner !== undefined && !problem };
 }

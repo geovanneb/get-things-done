@@ -4,11 +4,12 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ChildProcess } from 'child_process';
 import { findCommand } from '../aiToolDetection';
-import { ClaudeCodeAdapter, RUNNER_SETTINGS, childEnv, killTree, launch, stopTree, writeRunnerSettings } from '../agentRunner';
+import { ClaudeCodeAdapter, RUNNER_SETTINGS, killTree, launch, runnerEnv, stopTree, writeRunnerSettings } from '../agentRunner';
+import { accountKey, holdFolder } from '../assistantAccountFolder';
 import { stepsFromMessage } from '../runSteps';
 import { writeWorkspaceFile } from '../../utils/files';
 import {
-  isObject, isoFromEpoch, lineReader, parseLine, shortDetail, turnError,
+  accountChangedError, isObject, isoFromEpoch, lineReader, parseLine, shortDetail, turnError,
   type ChatAdapter, type ChatEvent, type ChatModel, type ChatOpenOptions, type ChatProblem, type ChatSession, type ProviderStatus, type TurnOutcome, type UsageWindow,
 } from './types';
 
@@ -114,7 +115,7 @@ export class ClaudeChatAdapter implements ChatAdapter {
   /** `binary` and `env` are for tests; by default the installed `claude` and this process's environment. */
   constructor(
     private readonly binary: () => string | null = () => findCommand('claude'),
-    private readonly env: () => NodeJS.ProcessEnv = () => childEnv(),
+    private readonly env: () => NodeJS.ProcessEnv = () => runnerEnv(),
   ) {
     this.runner = new ClaudeCodeAdapter(binary, env);
   }
@@ -124,7 +125,7 @@ export class ClaudeChatAdapter implements ChatAdapter {
     const runner = await this.runner.status(workspace);
     // Trust only matters for the workspace's allow rules, which a read-only chat never needs: not a problem here.
     const problems: ChatProblem[] = runner.problems.filter((p) => p.code !== 'not_trusted').map((p) => ({
-      code: p.code === 'not_logged_in' ? 'not_signed_in' : p.code === 'auth_unknown' ? 'check_failed' : p.code,
+      code: p.code === 'not_logged_in' ? 'not_signed_in' : p.code === 'auth_unknown' || p.code === 'account_folder' ? 'check_failed' : p.code,
       message: p.message,
     }));
     const bin = this.binary();
@@ -139,6 +140,7 @@ export class ClaudeChatAdapter implements ChatAdapter {
       plan: runner.account?.plan ?? null,
       models,
       limits: lastLimits.get(this.id) ?? null,
+      ...(runner.launch_key !== undefined ? { launch_key: runner.launch_key } : {}),
     };
   }
 
@@ -194,7 +196,12 @@ export class ClaudeChatAdapter implements ChatAdapter {
     const instructions = await writeWorkspaceFile(options.workspace, chatInstructionsFile(options.workspace), options.instructions);
     const settings = await writeRunnerSettings(options.workspace);
     const args = conversationArgs(settings, instructions, options);
-    return new ClaudeSession(launch(bin, args, options.workspace, this.env(), 'pipe'), options, (w) => lastLimits.set(this.id, w));
+    const env = this.env();
+    if (options.launch_key !== undefined && options.launch_key !== accountKey('claude-code', env)) throw accountChangedError();
+    const child = launch(bin, args, options.workspace, env, 'pipe');
+    // Nobody signs this account out from the dashboard while the conversation's process lives.
+    child.on('exit', holdFolder('claude-code', env));
+    return new ClaudeSession(child, options, (w) => lastLimits.set(this.id, w));
   }
 }
 

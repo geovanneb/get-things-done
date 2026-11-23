@@ -26,6 +26,7 @@ import WorkspaceIconCrop from '@/components/layout/WorkspaceIconCrop';
 import UpdatesSettings from '@/components/settings/UpdatesSettings';
 import InstructionUpdates from '@/components/settings/InstructionUpdates';
 import RunNoticeSettings from '@/components/settings/RunNoticeSettings';
+import AssistantAccountsSettings from '@/components/settings/AssistantAccountsSettings';
 import TranscriptionSettings from '@/components/settings/TranscriptionSettings';
 import DeviceSettings from '@/components/settings/DeviceSettings';
 import SidebarSettings from '@/components/settings/SidebarSettings';
@@ -829,6 +830,10 @@ export default function SettingsView() {
       {/* Section 3: Appearance */}
       <Card title={t('cleanupRetention')}>
         <CleanupPointer />
+      </Card>
+
+      <Card title={t('assistantAccounts.title')}>
+        <AssistantAccountsSettings />
       </Card>
 
       <Card title={t('notifications')}>
