@@ -82,6 +82,12 @@ check('a template named in full is preselected, and the hint only asks for what 
   && !named.objective!.includes('output template') && named.objective!.includes('Tick who it is for'));
 check('the user as owner reads "me"', deliverableDraft([weekly], source(1)).objective!.includes('- Owner: me'));
 check('several meetings keep the combined draft, even with a record', deliverableDraft([weekly, weekly], source(0)).title === 'Deliverable from 2 meetings');
+// The title field drops line breaks: "deck\nto" would read "deckto". The action's text is one line in the title.
+const twoLines = deliverableDraft([weekly], source(0, { action_items: [{ description: 'Send the deck\n  to the board', owner: null, due_date: '', task_ref: null }] }));
+check('an action over two lines is a one-line title', twoLines.title === 'Send the deck to the board', twoLines.title);
+const long = deliverableDraft([weekly], source(0, { action_items: [{ description: `${'a'.repeat(196)}🎯🎯 rest`, owner: null, due_date: '', task_ref: null }] }));
+check('a long title is cut between characters, never inside an emoji', long.title === `${'a'.repeat(196)}🎯...`, long.title);
+check('a task from the action gets the same one-line title', meetingActionDraft({ id: 'CU-2026-0031' }, { ...record, action_items: [{ description: 'Send the deck\nto the board', owner: null, due_date: '', task_ref: null }] }, 0).title === 'Send the deck to the board');
 
 // ---- Audience ------------------------------------------------------------------------------------------------
 

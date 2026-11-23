@@ -1,6 +1,6 @@
 import type { HistoryMeeting, MeetingDetail, MeetingPerson, MeetingRecord, NewTaskDraft, OutputTemplate, Stakeholder } from '@/types';
 import type { MeetingRow } from './meetingHistory';
-import { namesMatch } from './meetingAction';
+import { actionTitle, namesMatch } from './meetingAction';
 
 /**
  * Whether a task can be made from a meeting now: one waiting in the queue, or one an update holds whose id is final.
@@ -177,9 +177,7 @@ function recordDraft(row: Pick<MeetingRow, 'id' | 'title' | 'date'>, { record, i
     '',
     `${left.charAt(0).toUpperCase()}${left.slice(1)}.`,
   ];
-  const title = action
-    ? (action.description.length > 200 ? `${action.description.slice(0, 197)}...` : action.description)
-    : `Deliverable from ${record.title || row.title}`;
+  const title = action ? actionTitle(action.description) : `Deliverable from ${record.title || row.title}`;
   return {
     title,
     objective: lines.join('\n'),

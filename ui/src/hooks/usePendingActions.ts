@@ -7,6 +7,10 @@ import { waitingLabel, waitingOnUser } from '../utils/updateTypes';
 import { meetingCounts } from '../utils/meetingHistory';
 import { RECORDING_REFRESH_MS, hasOpenRecording, recheckIn, recordingElsewhere } from '../utils/meetingQueue';
 import { useRecorder } from '../components/recording/RecordingProvider';
+import { useThrottledValue } from './useThrottledValue';
+
+/** At most this often the sidebar reads the meeting digest again because a transcription moved (see below). */
+export const SIDEBAR_TRANSCRIPTION_MS = 10_000;
 
 /**
  * Something that waits on the user and nobody else. `attention`: the user's move in a normal flow
@@ -49,7 +53,11 @@ export function usePendingActions(): PendingAction[] {
   const { data: routines } = useApi<Routine[]>('/api/routines', [routinesVersion]);
   const { data: cleanup, error: cleanupError } = useApi<SystemCleanup>('/api/routines/system-cleanup', [routinesVersion]);
   // The queue lives with the context updates, and model downloads are announced as transcription: as on the Meetings page.
-  const { data: digest, error: digestError, refetch: refetchDigest } = useApi<MeetingDigest>('/api/routines/meeting-digest', [routinesVersion, useDataVersion('context-updates'), useDataVersion('transcription')]);
+  // A running transcription also announces its progress about once a second, and this hook runs in the sidebar on every
+  // page. The sidebar needs those notices only for downloaded models (a recording's status changes its queue file, which
+  // counts at once), so it follows them at most every SIDEBAR_TRANSCRIPTION_MS.
+  const transcriptionVersion = useThrottledValue(useDataVersion('transcription'), SIDEBAR_TRANSCRIPTION_MS);
+  const { data: digest, error: digestError, refetch: refetchDigest } = useApi<MeetingDigest>('/api/routines/meeting-digest', [routinesVersion, useDataVersion('context-updates'), transcriptionVersion]);
 
   const toReview = (tasks ?? []).filter((t) => t.status === 'in_review').length;
   const waiting = waitingOnUser(updates ?? []);

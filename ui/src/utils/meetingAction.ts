@@ -24,6 +24,16 @@ export function namesMatch(written: string, stakeholderName: string): boolean {
   return forms.some((f) => sameText(written, f));
 }
 
+/**
+ * An action item's text as a task title: one line (the title field drops line breaks, which would run two words
+ * together) and at most 200 characters, cut between characters, never inside one.
+ */
+export function actionTitle(description: string): string {
+  const line = description.replace(/\s*\n\s*/g, ' ').trim();
+  const chars = Array.from(line);
+  return chars.length > 200 ? `${chars.slice(0, 197).join('')}...` : line;
+}
+
 export function meetingActionDraft(
   update: Pick<ContextUpdate, 'id'>,
   record: MeetingRecord,
@@ -47,7 +57,7 @@ export function meetingActionDraft(
     ...(mismatch ? ['', `Stakeholder not set: the record names "${action.owner!.name}" but links ${owner!.id}, which is ${owner!.name}. Choose the stakeholder yourself.`] : []),
   ];
   return {
-    title: action.description.length > 200 ? `${action.description.slice(0, 197)}...` : action.description,
+    title: actionTitle(action.description),
     objective: lines.join('\n'),
     stakeholders: owner && !mismatch ? [owner] : [],
     due_date: action.due_date || undefined,
